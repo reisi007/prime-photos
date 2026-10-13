@@ -1,6 +1,9 @@
 # Prime Photos
 
-Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Photos.
+Cross-platform Rust desktop app (egui) for uploading photos to Amazon Photos.
+Primärtarget ist **macOS (Apple Silicon)**; **Windows und Linux sind vollwertige Ziele**
+(User-Entscheidung 2026-10-13: „Jetzt voll cross-platform portieren" — Kehrtwende vom
+früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 
 ## Source of truth
 
@@ -48,6 +51,31 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 - Dedup (user decision 2026-10-13): a **persistent local MD5 index in SQLite** (like the original) decides skips (same path + same MD5 → skip; same path + different MD5 → re-upload; new file → upload). Server 409 is only a safety net, treated as "Ignored/Zuvor hochgeladen", not an error (mirrors the original's client-side `PreUploadCheck`).
 - Conflict handling (user decision 2026-10-13): all **four original options** per upload target (Nachfragen / Ignorieren / Als neue Datei speichern / Ersetzen), mapped to `conflictResolution` (`NONE`/`RENAME`/`OVERWRITE`). Replaces the current hard-coded `RENAME`.
 - Backup configuration window (user decision 2026-10-13): build the full "Datensicherungseinstellungen" window now (destination, content filter, interval, dedup, conflict handling, save/cancel), and **share the form logic** with the create-backup flow (same dialog for create and edit) instead of a separate row-menu. Fields whose backend does not exist yet (destination, content filter, interval) are shown **disabled** with a "Noch nicht verfügbar" hover (user decision 2026-10-13: "volle Anordnung, Rest ausgegraut"); functional now: source folder (read-only when editing), dedup, name-conflict policy.
+
+## Plattform / Portierung (User-Entscheidung 2026-10-13)
+
+- **Ziel: voll cross-platform.** macOS (Apple Silicon), Windows und Linux sind gleichwertige
+  Ziele. Kehrtwende vom früheren „Native macOS"-Ziel.
+- **Neue Features über cross-platform Crates** (nicht über macOS-APIs): Menüleiste/Tray →
+  `tray-icon`, Benachrichtigungen → `notify-rust`, Autostart → `auto-launch`. Alle drei
+  funktionieren auf macOS/Windows/Linux.
+- **Bewusst macOS-spezifisch bleiben** (mit `#[cfg(target_os = "macos")]` bzw. No-op-Fallback auf
+  anderen OS): das native App-Menü (`src/app_menu.rs`, damit ⌘X/⌘C/⌘V im WebView gehen — auf
+  Windows/Linux erledigt das die WebView selbst) und die Main-Queue-Scheduling der Cookie-Probe in
+  `src/login.rs` (der Run-Loop-Reentry ist ein macOS-Problem; andere OS proben direkt).
+- Das eingebettete Login-WebView bleibt ein **`wry`-Kind-View** — `wry` ist cross-platform
+  (macOS WKWebView / Windows WebView2 / Linux WebKitGTK) und wird über `raw-window-handle` an das
+  eframe-Fenster gehängt; keine Änderung an der Grundarchitektur nötig.
+- **Signierung ist nur auf macOS relevant.** Dort ist eine (selbstsignierte) Codesignatur nötig,
+  damit Benachrichtigungen/Bundle-Identifier sauber funktionieren; Windows/Linux brauchen keine.
+  Das macOS-`.app`-Bundling + Signatur wird als eigenes Paket geliefert.
+- **Verifikationsgrenze:** Auf diesem Rechner ist nur der **macOS-Build lauffähig und testbar**.
+  Windows/Linux werden durch `cfg`-Guards und cross-platform Crates abgedeckt und — soweit
+  toolchainseitig möglich — per Cross-Compile-Check (`cargo check --target …`) belegt, **nicht**
+  durch echte Läufe. Das ist eine bekannte, akzeptierte Einschränkung.
+- **Verworfen:** „selbstsigniertes `.app` nur für macOS, sonst nichts" als Antwort auf den
+  Benachrichtigungs-/Menüleisten-Wunsch (war die erste Teilantwort des Users, ersetzt durch
+  „voll cross-platform").
 
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 

@@ -136,29 +136,51 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   offen; bis dahin Avatar-Platzhalter. Original zeigt den Avatar (`avatar-placeholder34.png`) im
   Header und im Status-Popup (`docs/UI_FLOWS.md` §3.1 / §9.1).
 
+## Portierung auf Windows/Linux (User-Entscheidung 2026-10-13)
+
+**Ziel:** „jetzt voll cross-platform portieren" — macOS/Windows/Linux gleichwertig. Grundsatz und
+Verifikationsgrenze stehen in `AGENTS.md` („Plattform / Portierung"). Neue Features laufen über
+cross-platform Crates; macOS-Spezialisierungen (`app_menu`, Main-Queue-Cookie-Probe) bekommen
+`#[cfg]`-Guards. Getestet/gebaut wird hier nur der macOS-Pfad; Windows/Linux per Cross-Check.
+
+Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
+
+- [ ] **PORT-1 – Plattform-Firewall (Deps + cfg).** macOS-only Crates
+  (`objc2`, `objc2-app-kit`, `objc2-foundation`, `dispatch2`) unter
+  `[target.'cfg(target_os = "macos")'.dependencies]` verschieben; `login.rs`-Probe per `cfg`:
+  macOS = `DispatchQueue::main()` (wie bisher), sonst synchron. `app_menu`-No-op bleibt.
+  Erwartung: macOS-Build unverändert grün; keine macOS-Symbole mehr im Nicht-macOS-Pfad.
+- [ ] **PORT-2 – Cross-platform Benachrichtigungen** (`notify-rust`), Auslöser **Upload fertig** +
+  **Fehler**; Schalter in den Einstellungen (`config.toml`-Feld mit Default an). Ersetzt das
+  frühere „nur macOS/UNUserNotificationCenter"-Vorhaben.
+- [ ] **PORT-3 – Tray/Menüleisten-Icon** (`tray-icon`): Fenster anzeigen, Pause/Fortsetzen, Beenden;
+  „Fenster schließen = im Hintergrund weiterlaufen" (Tray-Menü beendet explizit).
+- [ ] **PORT-4 – Optionaler Autostart** (`auto-launch`), Schalter in den Einstellungen.
+- [ ] **PORT-5 – Hintergrund-Sync** (periodischer Re-Scan + Upload, solange im Hintergrund).
+- [ ] **PORT-6 – Paketierung.** macOS `.app`-Bundle + selbstsignierte Codesignatur (Skript),
+  Windows/Linux-Buildhinweise; `.app`-Backlog-Item geht hierin auf.
+- [ ] **PORT-7 – Shell-Aufrufe plattformneutral** (Befund aus PORT-1-Verify, nicht blockierend):
+  `main.rs` nutzt macOS-Kommandos ohne `cfg` — „Im Finder zeigen" (`open -R`, `main.rs:302`),
+  „im Browser öffnen" (`open <url>`, `main.rs:605`); auf Windows/Linux still wirkungslos. Soll:
+  je OS `open` / `explorer /select` / `xdg-open` (bzw. `opener`-Crate). `defaults read -g AppleLocale`
+  (`main.rs:1574`) hat bereits einen `LANG`-Fallback — ok.
+
+Verworfen (siehe `AGENTS.md`): Benachrichtigungen nur über macOS-`UNUserNotificationCenter` +
+selbstsigniertes `.app` (war die erste Teilantwort des Users).
+
 ## Offen (Backlog)
 
-- [ ] **Neu (User-Wunsch 2026-10-13) – Fortschrittsbalken mit Restmenge + Zeitschätzung.** Ein
-  Fortschrittsbalken über alle Dateien (`done/total`) mit Text „noch {n} Dateien · ca. {m:ss}"
-  auf Basis der bisherigen Rate (Bytes bzw. Dateien/s, gleitendes Mittel) — in der Kopf-/Statuszeile
-  und optional pro Ordnerzeile. Original-Anhaltspunkte: „{0} von {1} Elemente hochgeladen…"
-  (`…_schedules_item_tooltip_items_uploaded`), „Zuletzt aktualisiert: {0}".
-- [ ] **Neu (User-Wunsch 2026-10-13) – Hintergrund-Helfer + Desktop-Benachrichtigungen.**
-  Ziel: macOS-Benachrichtigung bei **Upload fertig** und bei **Fehler**; Menüleisten-Status-Item wie
-  im Original (`docs/UI_FLOWS.md` §9). **Spec-first:** erst Recon der Original-Mechanik
-  (Menüleisten-Helfer/Login-Item/LaunchAgent? Benachrichtigungs-API? Auslöser-Ereignisse?) →
-  Clean-room-Spec `docs/SPEC_NOTIFICATIONS.md`, dann Implementierung.
-  **Recon-Befund (2026-10-13, `docs/SPEC_NOTIFICATIONS.md`):** Original hat **keinen**
-  Hintergrund-Helfer/XPC/LoginItem-Bundle (`LSUIElement=true`, nur `MacOS`/`MonoBundle`/`Resources`);
-  ein LaunchAgent (`~/Library/Application Scripts/Amazon Cloud Drive/restart_app.plist`,
-  `KeepAlive=true`) dient nur dem Crash-Relaunch; Login-Item via `osascript` (Legacy). Menüleiste:
-  ein `NSStatusItem` (Icon je Zustand, Tooltip „Amazon Photos - {state}", Badge); Linksklick öffnet
-  ein Popover (`StatusPopupWindowService`); App bleibt ohne Fenster am Leben
-  (`ApplicationShouldTerminateAfterLastWindowClosed = false`), kein Dock-Icon. Benachrichtigungen:
-  nur das **deprecated `NSUserNotification`** (kein `UNUserNotificationCenter`); Toasts bei
-  Over-Quota/Update/Konflikt/Massen-Löschung/Import — **kein** Toast bei Upload-Fertig oder
-  Upload-Fehler. Für uns also ein **neues** Feature: moderner Kanal (z. B. `UNUserNotificationCenter`)
-  + Auslöser fertig/Fehler. Spec verifizieren.
+- [x] **Neu (User-Wunsch 2026-10-13) – Fortschrittsbalken mit Restmenge + Zeitschätzung.**
+  Erledigt (Paket E, Commit `0ca6dcf`): `egui::ProgressBar` (`done/total`) in der Kopfzeile mit Text
+  „{pct}% · noch {n} Dateien · ca. {m:ss}", ETA aus der Datei-Rate, plus dieselbe Angabe in der
+  Statuszeile; robuster Fallback „Schätzung läuft …". Verifiziert (Verifier: APPROVE).
+- [x] **Neu (User-Wunsch 2026-10-13) – Hintergrund-Helfer + Desktop-Benachrichtigungen.** Recon +
+  Clean-room-Spec `docs/SPEC_NOTIFICATIONS.md` (verifiziert) abgeschlossen. **Umsetzung geht in der
+  Cross-Platform-Portierung auf** (PORT-2/PORT-3/PORT-4/PORT-5) — nicht mehr macOS-nativ.
+  Recon-Befund: Original hat **keinen** Helfer/XPC/LoginItem-Bundle (`LSUIElement=true`); ein
+  LaunchAgent dient nur dem Crash-Relaunch; `NSStatusItem`-Menüleiste + Popover; App bleibt ohne
+  Fenster am Leben; Benachrichtigungen nur über das **deprecated `NSUserNotification`**, **kein**
+  Toast bei Upload-Fertig/Fehler → für uns ein **neues** Feature.
 - [ ] **Optional/Branding:** Account-Block zeigt unter „Angemeldet als:" noch die Zeile „Amazon Photos"
   (Label des angemeldeten Amazon-Kontos, kein Eigen-Branding). Falls keine Amazon-Wortmarke im eigenen
   Fenster gewünscht ist: durch die Domain (`amazon.<cc>`) ersetzen. Bewusst nicht im Rename-Lauf geändert.
