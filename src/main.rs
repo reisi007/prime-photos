@@ -6,6 +6,7 @@ mod folders;
 mod login;
 mod notify;
 mod theme;
+mod tray;
 
 use prime_photos::PrimePhotos;
 use config::Config;
@@ -144,6 +145,13 @@ struct PrimePhotoApp {
     was_active: bool,
     /// Open "Datensicherungseinstellungen" window (Create or Edit), if any.
     config_form: Option<BackupConfigForm>,
+    /// Tray / menu-bar icon (PORT-3); `None` if it could not be created.
+    tray: Option<tray::Tray>,
+    /// Set when the user really wants to quit (tray "Beenden" / ⌘Q), so the
+    /// close-to-tray intercept below lets the close through.
+    quitting: bool,
+    /// Last pause state pushed to the tray label, to update it only on change.
+    tray_paused: bool,
 }
 
 impl PrimePhotoApp {
@@ -189,6 +197,9 @@ impl PrimePhotoApp {
             zone_override: String::new(),
             was_active: false,
             config_form: None,
+            tray: tray::build(cc.egui_ctx.clone()),
+            quitting: false,
+            tray_paused: false,
         }
     }
 
@@ -1176,6 +1187,40 @@ fn upload_progress_text(done: usize, total: usize, started: Option<Instant>) -> 
 
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Tray / menu-bar events (PORT-3). Delivered through `tray`'s queue so
+        // the handler can also wake the on-demand UI; see `src/tray.rs`.
+        for ev in tray::drain_events() {
+            let Some(tray) = self.tray.as_ref() else {
+                break;
+            };
+            if ev.id == *tray.show_item.id() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            } else if ev.id == *tray.pause_item.id() {
+                self.paused.send_replace(!*self.paused.borrow());
+            } else if ev.id == *tray.quit_item.id() {
+                self.quitting = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+
+        // Keep the tray's pause label in sync with the actual pause state
+        // (covers both the tray item itself and the in-window pause button).
+        let paused_now = *self.paused.borrow();
+        if paused_now != self.tray_paused {
+            self.tray_paused = paused_now;
+            if let Some(tray) = self.tray.as_ref() {
+                tray.set_paused(paused_now);
+            }
+        }
+
+        // Close-to-tray: closing the window hides it and keeps the app running
+        // in the background. Only the tray's "Beenden" (or a real quit) exits.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+
         // Size the window to the screen once, on the first frame.
         if !self.sized {
             self.sized = true;
