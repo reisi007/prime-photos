@@ -241,6 +241,10 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
   Startpfad. Außerdem Maschinen-DNS prüfen (öffentliche Resolver 1.1.1.1/8.8.4.4/8.8.8.8 hinter dem
   10.x-LAN flackerten; ggf. Router-DNS statt Public-Resolvers).
 
+- [x] **Modellwechsel Implementierer/Verifier (User-Entscheidung 2026-10-13):** beide Rollen nutzen jetzt
+  `opencode-go/step-5-preview-free` (kein `#variant`). Ersetzt `opencode-go/deepseek-v4.1-flash#high`.
+  Der Twin `opencode/step-5-preview-free` bleibt bewusst ungenutzt (Namespace-Regel).
+
 ## Upload-Queue (User-Entscheidung 2026-10-13)
 
 - [x] **Slow-Mode (MVP):** Runtime-only `slow_mode` mit Checkbox in den Einstellungen und
