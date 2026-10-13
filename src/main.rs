@@ -4,6 +4,7 @@ mod config;
 mod dedup;
 mod folders;
 mod login;
+mod notify;
 mod theme;
 
 use prime_photos::PrimePhotos;
@@ -820,6 +821,10 @@ impl PrimePhotoApp {
             ui.label("Album (optional):");
             ui.text_edit_singleline(&mut self.album_name);
         });
+        ui.checkbox(
+            &mut self.config.notifications,
+            "Desktop-Benachrichtigungen (Upload fertig / Fehler)",
+        );
 
         ui.separator();
         ui.collapsing("Erweitert (Konto)", |ui| {
@@ -1243,6 +1248,13 @@ impl eframe::App for PrimePhotoApp {
                 ctx.request_repaint_after(Duration::from_millis(250));
                 if self.was_active && !active {
                     self.finalize_upload();
+                    let (done, failed, total) = {
+                        let s = self.upload.lock().unwrap();
+                        (s.done, s.failed, s.total)
+                    };
+                    if self.config.notifications {
+                        notify::run_finished(done, failed, total);
+                    }
                     self.was_active = false;
                 }
             }

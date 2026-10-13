@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, io, path::PathBuf};
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub country: String,
@@ -11,6 +15,10 @@ pub struct Config {
     pub cookie_at_acb: String,
     pub cookie_ubid_acb: String,
     pub cookie_x_amz_access_token: String,
+    /// Desktop notifications when an upload run finishes. Defaults to `true`
+    /// for existing `config.toml` files that predate this field.
+    #[serde(default = "default_true")]
+    pub notifications: bool,
 }
 
 impl Config {
@@ -72,6 +80,7 @@ impl Config {
             cookie_at_acb: "".to_string(),
             cookie_ubid_acb: "".to_string(),
             cookie_x_amz_access_token: "".to_string(),
+            notifications: true,
         }
     }
 }
