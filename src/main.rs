@@ -1,7 +1,7 @@
 mod amzn_photo;
 mod config;
 mod folders;
-mod login_helper;
+mod login;
 mod theme;
 
 use amzn_photo::AmznPhoto;
@@ -88,7 +88,7 @@ struct PrimePhotoApp {
     config: Config,
     config_path: String,
     config_error: Option<String>,
-    login: Arc<Mutex<login_helper::BrowserLogin>>,
+    login: Arc<Mutex<login::WebviewLogin>>,
     page: Page,
     settings_tab: SettingsTab,
     store: FolderStore,
@@ -127,7 +127,7 @@ impl PrimePhotoApp {
             config,
             config_path,
             config_error,
-            login: Arc::new(Mutex::new(login_helper::BrowserLogin::new())),
+            login: Arc::new(Mutex::new(login::WebviewLogin::new())),
             page: Page::Backup,
             settings_tab: SettingsTab::General,
             store: FolderStore::load(),
@@ -166,43 +166,24 @@ impl PrimePhotoApp {
     // -- login --------------------------------------------------------------
 
     fn start_login(&mut self) {
-        if self.login.lock().unwrap().running {
-            return;
-        }
-        let country = self.config.country.clone();
-        {
-            let mut l = self.login.lock().unwrap();
-            l.running = true;
-            l.message.clear();
-            l.outcome = None;
-            l.error = None;
-        }
-        let login = self.login.clone();
-        self.rt.spawn(async move {
-            login_helper::run_browser_login(country, login).await;
-        });
+        let url = login::login_url(&self.config.country);
+        self.login.lock().unwrap().start(url);
     }
 
     fn cancel_login(&mut self) {
-        let mut l = self.login.lock().unwrap();
-        if l.running {
-            l.running = false;
-            l.stop_browser();
-        }
+        self.login.lock().unwrap().cancel();
     }
 
     fn poll_login(&mut self) {
+        {
+            let mut l = self.login.lock().unwrap();
+            l.poll();
+        }
         let outcome = { self.login.lock().unwrap().outcome.take() };
-        if let Some(outcome) = outcome {
-            let cookie_string = outcome
-                .cookies
-                .iter()
-                .map(|(n, v)| format!("{}={}", n, v))
-                .collect::<Vec<_>>()
-                .join("; ");
+        if let Some(cookie_string) = outcome {
             self.apply_cookie_string(&cookie_string);
             match self.config.save() {
-                Ok(_) => self.log(format!("Login erfolgreich ({}).", outcome.browser_name)),
+                Ok(_) => self.log("Login erfolgreich – Cookies übernommen."),
                 Err(e) => self.config_error = Some(e.to_string()),
             }
         }
@@ -419,7 +400,7 @@ impl PrimePhotoApp {
             });
             ui.label(theme::muted(format!(
                 "Anmeldung öffnet {}.",
-                login_helper::login_url(&self.config.country)
+                login::login_url(&self.config.country)
             )));
             ui.add_space(14.0);
 
@@ -457,7 +438,7 @@ impl PrimePhotoApp {
 
             ui.add_space(16.0);
             if ui.link("Amazon Photos im Browser öffnen").clicked() {
-                let url = login_helper::login_url(&self.config.country);
+                let url = login::login_url(&self.config.country);
                 let _ = std::process::Command::new("open").arg(url).spawn();
             }
         });
