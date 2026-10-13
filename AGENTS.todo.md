@@ -15,6 +15,11 @@
 - [x] `.xmp` sidecars rejected; RAW formats supported (single source in `folders.rs`).
 - [x] OpenAPI spec (`docs/openapi.yaml`) + protocol notes (`docs/PROTOCOL.md`).
 - [x] `ilspycmd` installed for .NET decompilation; Screen-Recording grant works (self-screenshots).
+- [x] Identität/Name auf **„Prime Photos"** umgestellt (2026-10-13): Paket/Binary `prime-photos`,
+  Modul `src/prime_photos.rs` (`PrimePhotos`), Config-Ordner `prime_photos` (alter Ordner einmalig
+  von Hand migriert, kein Migrationscode), Fenster-/UI-Titel „Prime Photos", Verzeichnis `prime-photos`.
+  Funktional notwendige Amazon-Referenzen (Hosts/Header/Cookies/Login-Strings) bleiben bewusst.
+  Verifiziert (Verifier: PASS). Original-App-Recon-Docs unangetastet.
 
 ## MVP-Scope (User-Entscheidung 2026-10-13)
 
@@ -123,6 +128,9 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
 
 ## Offen (Backlog)
 
+- [ ] **Optional/Branding:** Account-Block zeigt unter „Angemeldet als:" noch die Zeile „Amazon Photos"
+  (Label des angemeldeten Amazon-Kontos, kein Eigen-Branding). Falls keine Amazon-Wortmarke im eigenen
+  Fenster gewünscht ist: durch die Domain (`amazon.<cc>`) ersetzen. Bewusst nicht im Rename-Lauf geändert.
 - [ ] „Details anzeigen"-Panel (verschachtelt/flach wie das Original, `docs/UI_FLOWS.md` §4.7).
 - [ ] Menüleisten-Status-Item (Status-Popup: Status, Benachrichtigungen, Speicher, §9).
 - [ ] Videos hochladen (bisher nur Fotos — `.mp4`/`.mov`/… werden wie alle Nicht-Bilder ignoriert).
