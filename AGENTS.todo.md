@@ -199,12 +199,12 @@ Ziel: öffentliches GitHub-Repo (`AGENTS.md` „CI/Release" — hebt „Kein Pus
 - [ ] **CI-1 – `.github/workflows/ci.yml`.** Trigger `push` (main) + `pull_request`: **nur Linux**;
   `cargo build` + `cargo test` (System-Deps: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
   `libayatana-appindicator3-dev`, `libssl-dev`, `pkg-config`, `build-essential`).
-- [ ] **CI-2 – `.github/workflows/release.yml` + `docs/RELEASE.md`.** Trigger Tag `v*`: Matrix
-  macOS(arm64)/Windows/Linux bauen (`needs:`-Kette → erst alle grün, dann Release); macOS über
-  `packaging/make-app.sh` (Signatur+Notarisierung nur wenn Secrets gesetzt, sonst unsigniert),
-  Windows `.zip`, Linux `.tar.gz`; GitHub Release mit Artefakten. `docs/RELEASE.md` beschreibt die
-  nötigen Secrets (Developer-ID-p12, Apple-ID/App-Passwort bzw. API-Key, Team-ID) und die
-  Developer-Program-Voraussetzung.
+- [ ] **CI-2 – `.github/workflows/release.yml` + `docs/RELEASE.md`.** Trigger Tag `v*`: CI-Matrix
+  **Windows + Linux** (`needs:`-Kette → erst alle grün, dann Release); Windows `.zip`, Linux `.tar.gz`;
+  GitHub Release mit den Artefakten. **macOS nur lokal** (`packaging/make-app.sh`, arm64) — bewusst
+  nicht im CI (User-Entscheidung 2026-10-13); `docs/RELEASE.md` beschreibt den lokalen macOS-Build,
+  den Gatekeeper-Workaround für unsignierte Downloads und — falls später gewünscht — die nötigen
+  Secrets/Voraussetzungen für Developer-ID + Notarisierung.
 
 Danach können **PORT-4/5/6/7** (und Folge-Features) auf getrennten Dateien laufen.
 Pakete, die `main.rs`/`Cargo.toml` anfassen, bleiben seriell.

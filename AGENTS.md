@@ -146,12 +146,16 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
   öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).
   - **Push/PR gegen `main`:** nur **Linux** — `cargo build` + `cargo test` als Pflicht-Gate; die
     anderen OS werden dort **nicht** gebaut.
-  - **Release:** **Git-Tag `v*`** → Matrix-Build **macOS/Windows/Linux**; **alle Beine müssen grün
-    sein**, sonst kein Release (`needs:`) → GitHub Release mit Artefakten. **macOS nur arm64.**
-  - **macOS-Signierung** erfordert eine **„Developer ID Application"**-Identität aus dem **Apple
-    Developer Program** (99 $/Jahr) + **Notarisierung** (`notarytool`) + Stapling. Nur das akzeptieren
-    fremde Macs; **selbstsigniert/ad-hoc sind nur lokal vertraut** (und in CI wertlos). Ohne hinterlegte
-    Secrets baut der macOS-Job **unsigniert** weiter und kennzeichnet das im Release.
+  - **Release:** **Git-Tag `v*`** → CI-Matrix-Build **Windows + Linux**; alle Beine müssen grün sein
+    (`needs:`), sonst kein Release → GitHub Release mit den Artefakten. **macOS wird NICHT im CI
+    gebaut** (User-Entscheidung 2026-10-13: „nur lokal macOS bauen ist ok") — lokal über
+    `packaging/make-app.sh` (arm64) und bei Bedarf manuell ans Release hängen.
+  - **macOS-Signierung:** lokal `packaging/make-app.sh` (ad-hoc per Default, `CODESIGN_IDENTITY`
+    für eine eigene Identität). Für ein Release an Dritte bräuchte es eine **„Developer ID
+    Application"**-Identität aus dem **Apple Developer Program** (99 $/Jahr) + **Notarisierung**
+    (`notarytool`) + Stapling — nur das akzeptieren fremde Macs. **Selbstsigniert/ad-hoc sind nur
+    lokal vertraut**; für heruntergeladene Builds gilt der dokumentierte Gatekeeper-Workaround
+    (Rechtsklick→Öffnen bzw. `xattr -dr com.apple.quarantine`, siehe `docs/RELEASE.md`).
   - Kein `codesign --deep` (von Apple veraltet/abgeraten). `packaging/make-app.sh` nimmt die Identität
     per `CODESIGN_IDENTITY`.
   - Secrets nur in `main`/Tag-Läufen (fork-PRs erhalten keine Secrets). Windows: Authenticode optional
