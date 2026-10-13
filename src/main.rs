@@ -380,6 +380,77 @@ impl PrimePhotoApp {
         });
     }
 
+    fn login_ui(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(70.0);
+            ui.label(RichText::new("amazon photos").size(30.0).strong());
+            ui.add_space(6.0);
+            ui.label(RichText::new("Prime Photo Uploader").size(16.0));
+            ui.add_space(26.0);
+            ui.label(
+                RichText::new(
+                    "Laden Sie Fotos und Videos von Ihrem Computer, Ihrer Kamera und Ihrer Speicherkarte hoch.",
+                )
+                .size(15.0),
+            );
+            ui.add_space(22.0);
+
+            let mut login_started = false;
+            let mut login_cancelled = false;
+            {
+                let l = self.login.lock().unwrap();
+                if ui
+                    .add_enabled(!l.running, theme::primary_button("Mit Browser anmelden"))
+                    .clicked()
+                {
+                    login_started = true;
+                }
+                if l.running {
+                    ui.add_space(10.0);
+                    ui.spinner();
+                    if !l.message.is_empty() {
+                        ui.label(&l.message);
+                    }
+                    ui.add_space(6.0);
+                    if ui.add(theme::secondary_button("Abbrechen")).clicked() {
+                        login_cancelled = true;
+                    }
+                }
+                if let Some(e) = &l.error {
+                    ui.add_space(6.0);
+                    ui.colored_label(theme::RED, e);
+                }
+            }
+            if login_started {
+                self.start_login();
+            }
+            if login_cancelled {
+                self.cancel_login();
+            }
+
+            ui.add_space(18.0);
+            ui.collapsing("Stattdessen Cookies manuell einfügen", |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.cookie_paste)
+                        .desired_rows(3)
+                        .desired_width(420.0),
+                );
+                if ui.button("Cookies übernehmen").clicked() {
+                    let c = self.cookie_paste.clone();
+                    self.apply_cookie_string(&c);
+                    let _ = self.config.save();
+                    self.log("Cookies übernommen.");
+                }
+            });
+            ui.add_space(8.0);
+            if ui.link("Amazon Photos im Browser öffnen").clicked() {
+                let _ = std::process::Command::new("open")
+                    .arg("https://www.amazon.com/photos")
+                    .spawn();
+            }
+        });
+    }
+
     fn backup_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui
@@ -709,6 +780,16 @@ fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_login();
+
+        // Onboarding: until the user is signed in, show the login flow only.
+        if !self.is_logged_in() {
+            egui::CentralPanel::default().show(ctx, |ui| self.login_ui(ui));
+            let running = self.login.lock().unwrap().running;
+            if running {
+                ctx.request_repaint_after(Duration::from_millis(250));
+            }
+            return;
+        }
 
         egui::SidePanel::left("nav")
             .exact_width(220.0)

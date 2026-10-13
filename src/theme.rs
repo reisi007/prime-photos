@@ -28,7 +28,6 @@ pub fn apply(ctx: &egui::Context) {
     v.window_fill = PANEL_BG;
     v.faint_bg_color = Color32::from_rgb(0xF7, 0xF8, 0xF8);
     v.extreme_bg_color = Color32::from_rgb(0xFF, 0xFF, 0xFF);
-    v.override_text_color = Some(INK);
     v.hyperlink_color = TEAL;
     v.selection.bg_fill = Color32::from_rgb(0xD6, 0xEC, 0xF0);
     v.selection.stroke = Stroke::new(1.0_f32, TEAL);

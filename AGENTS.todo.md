@@ -22,6 +22,7 @@
 - [ ] Auto-upload watcher ("Neue Dateien automatisch hochladen", FSEvents) + upload interval setting.
 - [ ] Videos upload (photos only so far).
 - [ ] Upload catalog (md5 dedup) so restarts don't re-upload.
+- [ ] **Abgleich eines bestehenden Ordners:** beim Hinzufügen/Scannen prüfen, welche Dateien schon (per md5) in Amazon Photos liegen, "X% hochgeladen" korrekt anzeigen und nur Fehlendes hochladen.
 - [ ] "Details anzeigen" panel (nested/flat like the original).
 - [ ] Login helper: currently CDP-based; verify against logged-in Chrome.
 - [ ] Auto-refresh cookies on 401.

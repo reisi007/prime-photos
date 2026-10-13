@@ -104,6 +104,7 @@ fn which(cmd: &str) -> std::io::Result<PathBuf> {
 /// Amazon Photos marketplace for a country code.
 fn amazon_domain(country: &str) -> String {
     match country {
+        "us" => "com".to_string(),
         "uk" | "gb" => "co.uk".to_string(),
         "jp" => "co.jp".to_string(),
         "mx" => "com.mx".to_string(),
