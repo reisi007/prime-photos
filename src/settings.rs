@@ -90,6 +90,8 @@ impl PrimePhotoApp {
             &mut self.config.notifications,
             tr("Desktop-Benachrichtigungen (Upload fertig / Fehler)"),
         );
+        ui.checkbox(&mut self.slow_mode, tr("Slow-Mode (1 Datei gleichzeitig)"));
+        ui.label(theme::muted(tr("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.")));
 
         ui.separator();
         ui.collapsing(tr("Erweitert (Konto)"), |ui| {

@@ -143,7 +143,10 @@ impl PrimePhotoApp {
         let cfg = self.config.clone();
         let shared = self.upload.clone();
         let paused = self.paused.clone();
-        let concurrency = self.concurrency;
+        let concurrency = if self.slow_mode { 1 } else { self.concurrency };
+        if self.slow_mode {
+            self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
+        }
         let limit = if self.limit_enabled {
             self.limit_kbps
         } else {
