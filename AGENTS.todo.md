@@ -165,6 +165,24 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   je OS `open` / `explorer /select` / `xdg-open` (bzw. `opener`-Crate). `defaults read -g AppleLocale`
   (`main.rs:1574`) hat bereits einen `LANG`-Fallback — ok.
 
+**Refactor-Vorlauf (User-Entscheidung 2026-10-13: `main.rs` splitten, damit parallel gearbeitet
+werden kann — Details/Zielstruktur in `AGENTS.md` „Modul-Struktur"):**
+
+- [ ] **REF-1 – Blatt-Module extrahieren.** `src/countries.rs` (`COUNTRIES`, `country_label`,
+  `system_country`, `ParsedCookies`, `parse_cookie_string`), `src/upload.rs` (`UploadShared` (+`log`),
+  `upload_worker`, `run_upload`, `status_text`, `eta_secs`, `format_eta`, `eta_suffix`,
+  `upload_progress_text`) und die Icons (`NavIcon`, `nav_icon`, `status_dot`, `draw_avatar`,
+  `upload_logo`). Reiner Move, `pub(crate)` wo nötig. (Läuft zunächst mit den Icons unter
+  `src/ui/icons.rs`; REF-2 zieht sie auf `src/icons.rs` um.)
+- [ ] **REF-2 – Feature-Module.** `src/app.rs` (`PrimePhotoApp` + `impl` + `impl eframe::App` +
+  Sidebar/Navigation), `login.rs` erweitern um die Login-Screens, `src/backup.rs` (Liste/`Row`/
+  Zeilen-Aktionen), `src/backup_config.rs` (Dialog „Datensicherungseinstellungen"),
+  `src/settings.rs` (Einstellungs-Seite + Konto). Felder/Methoden `pub(crate)`. Reiner Move.
+  `src/icons.rs` von `src/ui/` hochziehen und `src/ui/` entfernen.
+
+Danach können **PORT-4/5/6/7** (und Folge-Features) auf getrennten Dateien laufen.
+Pakete, die `main.rs`/`Cargo.toml` anfassen, bleiben seriell.
+
 Verworfen (siehe `AGENTS.md`): Benachrichtigungen nur über macOS-`UNUserNotificationCenter` +
 selbstsigniertes `.app` (war die erste Teilantwort des Users).
 
