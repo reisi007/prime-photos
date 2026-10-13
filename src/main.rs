@@ -46,6 +46,7 @@ struct PrimePhotoApp {
     config_error: Option<String>,
     album_name: String,
     zone_override: String,
+    cookie_paste: String,
     files: Vec<PathBuf>,
     progress: Arc<Mutex<UploadProgress>>,
     uploading: Arc<Mutex<bool>>,
@@ -62,6 +63,7 @@ impl PrimePhotoApp {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| e.to_string());
         let zone_override = String::new();
+        let cookie_paste = String::new();
         Self {
             rt,
             config,
@@ -69,6 +71,7 @@ impl PrimePhotoApp {
             config_error,
             album_name: String::new(),
             zone_override,
+            cookie_paste,
             files: Vec::new(),
             progress: Arc::new(Mutex::new(UploadProgress::new())),
             uploading: Arc::new(Mutex::new(false)),
@@ -270,6 +273,29 @@ impl eframe::App for PrimePhotoApp {
             }
 
             ui.separator();
+            ui.label("Login helper (paste whole browser cookie string):");
+            ui.add(egui::TextEdit::multiline(&mut self.cookie_paste).desired_rows(3));
+            ui.horizontal(|ui| {
+                if ui.button("Parse cookies").clicked() {
+                    let parsed = parse_cookie_string(&self.cookie_paste);
+                    self.config.session_id = parsed.session_id;
+                    if !parsed.country.is_empty() {
+                        self.config.country = parsed.country;
+                    }
+                    self.config.cookie_x_acb = parsed.cookie_x_acb;
+                    self.config.cookie_at_acb = parsed.cookie_at_acb;
+                    self.config.cookie_ubid_acb = parsed.cookie_ubid_acb;
+                    self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token;
+                    let mut p = self.progress.lock().unwrap();
+                    p.log("Cookies parsed into config fields. Press Save Config.".to_string());
+                }
+                if ui.button("Open Amazon Photos in browser").clicked() {
+                    let url = "https://www.amazon.com/photos".to_string();
+                    let _ = std::process::Command::new("open").arg(url).spawn();
+                }
+            });
+
+            ui.separator();
             ui.horizontal(|ui| {
                 if ui.button("Add Files").clicked() {
                     self.add_files();
@@ -349,6 +375,72 @@ fn is_supported_image(path: &std::path::Path) -> bool {
             | "cr2" | "cr3" | "arw" | "nef" | "dng" | "raf" | "rw2" | "orf" | "srw"
             | "pef" | "3fr" | "iiq" | "erf" | "mos" | "kdc" | "dcr" | "mrw" | "raw"
     )
+}
+
+struct ParsedCookies {
+    session_id: String,
+    country: String,
+    cookie_x_acb: String,
+    cookie_at_acb: String,
+    cookie_ubid_acb: String,
+    cookie_x_amz_access_token: String,
+}
+
+fn parse_cookie_string(input: &str) -> ParsedCookies {
+    let mut result = ParsedCookies {
+        session_id: String::new(),
+        country: String::new(),
+        cookie_x_acb: String::new(),
+        cookie_at_acb: String::new(),
+        cookie_ubid_acb: String::new(),
+        cookie_x_amz_access_token: String::new(),
+    };
+
+    let mut detected_country = String::new();
+    for part in input.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some((name, value)) = part.split_once('=') {
+            let name = name.trim();
+            let value = value.trim().trim_matches('"');
+            match name {
+                "session-id" => result.session_id = value.to_string(),
+                n if n.starts_with("x-acb") && n.len() > 5 => {
+                    let suffix = &n["x-acb".len()..];
+                    if result.cookie_x_acb.is_empty() {
+                        result.cookie_x_acb = value.to_string();
+                    }
+                    if detected_country.is_empty() && !suffix.is_empty() {
+                        detected_country = suffix.to_lowercase();
+                    }
+                }
+                n if n.starts_with("at-acb") => {
+                    if result.cookie_at_acb.is_empty() {
+                        result.cookie_at_acb = value.to_string();
+                    }
+                    let suffix = &n["at-acb".len()..];
+                    if detected_country.is_empty() && !suffix.is_empty() {
+                        detected_country = suffix.to_lowercase();
+                    }
+                }
+                n if n.starts_with("ubid-acb") => {
+                    if result.cookie_ubid_acb.is_empty() {
+                        result.cookie_ubid_acb = value.to_string();
+                    }
+                }
+                n if n.starts_with("sess-at-acb") => {
+                    if result.cookie_x_amz_access_token.is_empty() {
+                        result.cookie_x_amz_access_token = value.to_string();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    result.country = detected_country;
+    result
 }
 
 fn main() -> eframe::Result<()> {
