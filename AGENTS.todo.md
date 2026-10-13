@@ -98,13 +98,16 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   `.xmp`-Einträge prüfen (Log lebt nur in-memory im Panel) — bestätigt → Eintrittspfad suchen;
   nicht bestätigt → schließen.
 
-- [ ] **P2 – Login: Einfügen per ⌘V geht nicht.** Nacktes Binary ohne Hauptmenü → AppKit legt kein
+- [x] **P2 – Login: Einfügen per ⌘V.** Erledigt mit `src/app_menu.rs` (natives AppKit-Hauptmenü,
+  ⌘X/⌘C/⌘V/⌘A/Undo/Redo an den Fokusträger; Re-Entrancy-Guard in `16cfbe5`). Nacktes Binary ohne Hauptmenü → AppKit legt kein
   „Bearbeiten"-Menü an, `paste:` wird nicht geroutet (Passwort-Manager/Passwort einfügen unmöglich).
   Fix: `NSMenu` (App- + Bearbeiten-Menü: Ausschneiden/Kopieren/Einfügen/Alles auswählen) beim Start
   setzen, WebView als first responder. `objc2-app-kit 0.3.2` / `objc2-foundation 0.3.2` sind bereits
   im Abhängigkeitsbaum.
 
-- [ ] **P2 – Ordner-Backup nicht konfigurierbar wie im Original.** `BackupFolder` kennt nur
+- [x] **P2 – Ordner-Backup konfigurierbar.** Erledigt mit `src/backup_config.rs` (Paket B,
+  `68b6ad0`): Dialog „Datensicherungseinstellungen“ für Create und Edit; noch fehlende
+  Felder (Ziel, Content-Filter, Intervall) sind bewusst ausgegraut. `BackupFolder` kennt nur
   path/name/enabled/…; es fehlt das Fenster „Datensicherungseinstellungen"
   (`…_backupconfiguration_windowtitle`, `docs/UI_FLOWS.md` §4.5): Ziel, „Was soll gesichert werden"
   (Alles / Fotos und Videos / Fotos), „Änderungen hochladen" (Intervall inkl. „Sofort"),
@@ -125,7 +128,8 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   Cookie weiter); `config_error` nach fehlgeschlagenem `save()` wird auf dem Login-Screen nicht angezeigt.
   Soll: Login-/Upload-Status zurücksetzen, Fehler sichtbar machen.
 
-- [ ] **P2 – `app_menu` Härtung.** Kein Re-Entrancy-Guard (idempotent, aber defensiv `static Once` sinnvoll);
+- [x] **P2 – `app_menu` Härtung.** Erledigt, Commit `16cfbe5`: `static Once` + extrahierte
+  `build_main_menu()`. War vorher idempotent, jetzt explizit;
   ersetzt winit-Default-Menü (Window/Hide/About/Services fehlen). Beim `.app`-Bundle mitdenken (siehe Backlog).
 
 - [ ] **P2 – Nav-Accessibility.** Selbstgezeichnete `nav_item`-Zeilen (`allocate_exact_size`) haben keine
@@ -258,7 +262,8 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
   das die Anzahl der gleichzeitigen Uploads **für dieses Ziel** begrenzt (globaler Pool bleibt).
 - [ ] **Post-MVP – Netzwerkgesteuerte Drosselung:** automatische Reduktion/Pause anhand des
   OS-Netzwerkstatus (costed/metered) bzw. SSID/Name-basierter Regeln; nicht als MVP.
-- [ ] **Hintergrund-Sync (PORT-5)** vorbereitet durch `docs/SPEC_BACKGROUND_SYNC.md`; braucht
+- [x] **Hintergrund-Sync (PORT-5)** umgesetzt (Commit `8a461a6`, siehe Abschnitt
+  „Portierung“); `docs/SPEC_BACKGROUND_SYNC.md` war die Vorlage. Offen blieb bewusst:
   `notify`-Watcher + periodischen Timer + Start nach Login.
 
 ## Upload-Progress & Drag-and-Drop (Recon 2026-10-13)
