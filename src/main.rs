@@ -35,6 +35,9 @@ struct UploadShared {
     total: usize,
     done: usize,
     failed: usize,
+    /// Wall-clock start of the current run; `None` when idle or finished. Basis
+    /// for the ETA estimate (rate = done / elapsed).
+    started: Option<Instant>,
     current: String,
     log: Vec<String>,
     folder_total: HashMap<usize, usize>,
@@ -355,6 +358,7 @@ impl PrimePhotoApp {
         {
             let mut s = self.upload.lock().unwrap();
             s.active = true;
+            s.started = Some(Instant::now());
             s.done = 0;
             s.failed = 0;
             s.current.clear();
@@ -617,7 +621,10 @@ impl PrimePhotoApp {
             } else {
                 "Alle Sicherungsvorgänge anhalten"
             };
-            let running = self.upload.lock().unwrap().active;
+            let (running, done, total, started) = {
+                let s = self.upload.lock().unwrap();
+                (s.active, s.done, s.total, s.started)
+            };
             if ui
                 .add_enabled(
                     !self.store.folders.is_empty() && running,
@@ -629,6 +636,16 @@ impl PrimePhotoApp {
             }
             if running {
                 ui.spinner();
+                let frac = if total > 0 {
+                    (done as f32 / total as f32).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                ui.add(
+                    egui::ProgressBar::new(frac)
+                        .desired_width(240.0)
+                        .text(upload_progress_text(done, total, started)),
+                );
             }
         });
 
@@ -1088,6 +1105,70 @@ fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32
     }
 }
 
+/// ETA of the running upload in seconds, from the file-completion rate
+/// (`done / elapsed`). Returns `None` while the estimate is unreliable: no
+/// completed file yet, under a second elapsed, or a non-finite rate/result —
+/// so the UI never shows a bogus or NaN/inf figure.
+fn eta_secs(done: usize, total: usize, started: Option<Instant>) -> Option<f64> {
+    let started = started?;
+    if done == 0 {
+        return None;
+    }
+    let elapsed = started.elapsed().as_secs_f64();
+    if elapsed < 1.0 {
+        return None;
+    }
+    let rate = done as f64 / elapsed;
+    if !(rate > 0.0) || !rate.is_finite() {
+        return None;
+    }
+    let remaining = total.saturating_sub(done) as f64;
+    let eta = remaining / rate;
+    if !eta.is_finite() || eta < 0.0 {
+        return None;
+    }
+    Some(eta)
+}
+
+/// `M:SS`, or `H:MM:SS` from one hour up.
+fn format_eta(secs: f64) -> String {
+    let total = secs.round().max(0.0) as u64;
+    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// ETA fragment for the log summary, e.g. `"ca. 1:20"` — or `"Schätzung läuft …"`
+/// while the estimate is not yet reliable.
+fn eta_suffix(done: usize, total: usize, started: Option<Instant>) -> String {
+    match eta_secs(done, total, started) {
+        Some(eta) => format!("ca. {}", format_eta(eta)),
+        None => "Schätzung läuft …".to_string(),
+    }
+}
+
+/// Status text for the progress bar, e.g. `"42% · noch 7 Dateien · ca. 1:20"`.
+fn upload_progress_text(done: usize, total: usize, started: Option<Instant>) -> String {
+    let pct = if total > 0 {
+        (done as f32 / total as f32 * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    let remaining = total.saturating_sub(done);
+    let files = if remaining == 1 {
+        "1 Datei".to_string()
+    } else {
+        format!("{} Dateien", remaining)
+    };
+    format!(
+        "{pct:.0}% · noch {files} · {}",
+        eta_suffix(done, total, started)
+    )
+}
+
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Size the window to the screen once, on the first frame.
@@ -1130,7 +1211,13 @@ impl eframe::App for PrimePhotoApp {
             .show(ctx, |ui| {
                 let s = self.upload.lock().unwrap();
                 let summary = if s.active {
-                    format!("Upload läuft: {}/{} · {}", s.done, s.total, s.current)
+                    format!(
+                        "Upload läuft: {}/{} · {} · {}",
+                        s.done,
+                        s.total,
+                        s.current,
+                        eta_suffix(s.done, s.total, s.started)
+                    )
                 } else if s.total > 0 {
                     format!(
                         "Letzter Upload: {}/{} erfolgreich",
@@ -1376,6 +1463,7 @@ async fn run_upload(
     let (done, failed) = {
         let mut s = shared.lock().unwrap();
         s.active = false;
+        s.started = None;
         s.current.clear();
         (s.done, s.failed)
     };
