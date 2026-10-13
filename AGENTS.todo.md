@@ -157,8 +157,15 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   „Fenster schließen = im Hintergrund weiterlaufen" (Tray-Menü beendet explizit).
 - [ ] **PORT-4 – Optionaler Autostart** (`auto-launch`), Schalter in den Einstellungen.
 - [ ] **PORT-5 – Hintergrund-Sync** (periodischer Re-Scan + Upload, solange im Hintergrund).
-- [ ] **PORT-6 – Paketierung.** macOS `.app`-Bundle + selbstsignierte Codesignatur (Skript),
-  Windows/Linux-Buildhinweise; `.app`-Backlog-Item geht hierin auf.
+- [x] **PORT-6 – Paketierung (macOS-Teil).** Erledigt, Commit `7c0d10c`: `packaging/Info.plist`
+  (Bundle-ID `de.reisinger.prime-photos`, Executable `prime-photos`) + `packaging/make-app.sh`
+  (Release-Build → `target/dist/Prime Photos.app` → `codesign`, **Default ad-hoc**, optional
+  `CODESIGN_IDENTITY`) + README. Echter Lauf: `codesign --verify` = „valid on disk / satisfies its
+  Designated Requirement", `EXIT=0`; Ausgabe unter dem ignorierten `target/`. Verifiziert (PASS).
+  Erster Lauf fand zwei Bugs (BSD-`chmod` kennt kein `--`; Ausgabe nun `target/dist/`).
+  **Offen:** selbstsignierte Identität (wird erst auf Zuruf angelegt — Schlüsselbund!), ob
+  Benachrichtigungen im signierten Bundle erscheinen, ob `--options runtime` für ad-hoc nötig ist;
+  Windows/Linux nur als Hinweis (keine Installer), `.app`-Backlog-Item geht hierin auf.
 - [ ] **I18N-1 – Internationalisierung (de+en).** Nach REF-2 (siehe `AGENTS.md` „Internationalisierung"):
   `src/i18n.rs` mit `Lang`-Enum + zentraler String-Tabelle (de = Quelle, en daneben), `Config.language`
   (serde-Default aus OS-Locale) + Sprachwahl in den Einstellungen, alle UI-Strings der Feature-Module
