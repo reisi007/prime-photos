@@ -1,0 +1,53 @@
+name: CI
+
+# Nur Linux: günstigste Runner und das einzige OS, das als Pflicht-Gate dient
+# (AGENTS.md "CI/Release"). macOS/Windows werden erst im Release gebaut.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# Superseded Läufe desselben Branches/PRs abbrechen.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Linux build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # System-Abhängigkeiten (docs/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
+      # tray-icon (libayatana-appindicator3), native-tls (System-OpenSSL),
+      # pkg-config + C-Compiler (rusqlite "bundled" übersetzt SQLite aus C-Quellen).
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --locked
+        run: cargo build --locked
+
+      - name: cargo test --locked
+        run: cargo test --locked
+
+      # Hinweis: bewusst KEIN Gate auf Warnungen oder clippy. Der Crate-Stand
+      # hat bekannte Warnungen (siehe Auftrag); CI bleibt auf build+test begrenzt.

@@ -1,0 +1,125 @@
+name: Release
+
+# Release nur über einen Git-Tag v* (z. B. v0.1.0).
+on:
+  push:
+    tags:
+      - "v*"
+
+# Der Release-Job braucht Schreibrechte, um ein GitHub Release anzulegen.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Ein fehlgeschlagenes Bein darf die anderen nicht abbrechen; der Release-Job
+      # läuft trotzdem nur, wenn ALLE Beine erfolgreich sind (needs-Kette).
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows-x64
+            path: Prime-Photos-windows-x64.zip
+          - os: ubuntu-latest
+            artifact: linux-x64
+            path: Prime-Photos-linux-x64.tar.gz
+
+    # Optionale Signatur-Secrets als Job-Env verfügbar machen (der `secrets`-Kontext
+    # ist in job-level `if` nicht zuverlässig -> in Schritten über `env.X != ''`
+    # prüfen). Ohne diese Secrets baut und veröffentlicht das Release unsigniert.
+    # Namen sind in docs/RELEASE.md dokumentiert; siehe auch AGENTS.md "CI/Release".
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # System-Abhängigkeiten (docs/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
+      # tray-icon (libayatana-appindicator3), native-tls (System-OpenSSL),
+      # pkg-config + C-Compiler (rusqlite "bundled" übersetzt SQLite aus C-Quellen).
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libssl-dev \
+            pkg-config \
+            build-essential
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --release --locked
+        run: cargo build --release --locked
+
+      # --- Windows: optionale Authenticode-Signatur (nur wenn Secrets gesetzt) ---
+      - name: Prepare Windows code-signing certificate
+        if: matrix.os == 'windows-latest' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", $bytes)
+
+      - name: Sign Windows binary (Authenticode)
+        if: matrix.os == 'windows-latest' && env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          signtool sign /f "$env:RUNNER_TEMP\cert.pfx" `
+            /p "$env:WINDOWS_CERTIFICATE_PASSWORD" `
+            /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 `
+            target\release\prime-photos.exe
+
+      - name: Package Windows binary (.zip)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path target/release/prime-photos.exe `
+            -DestinationPath Prime-Photos-windows-x64.zip
+
+      - name: Package Linux binary (.tar.gz)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          tar -czf Prime-Photos-linux-x64.tar.gz -C target/release prime-photos
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    # Läuft nur, wenn ALLE Matrix-Beine erfolgreich waren (fail-fast: false
+    # in der Matrix, Standard-needs-Semantik hier).
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -laR artifacts
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false
