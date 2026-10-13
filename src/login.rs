@@ -18,6 +18,13 @@ use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{Rect, WebView, WebViewBuilder};
 
+use crate::app::{PrimePhotoApp, HEADER_H};
+use crate::countries::{country_label, parse_cookie_string, COUNTRIES};
+use crate::icons::upload_logo;
+use crate::login;
+use crate::theme;
+use eframe::egui::{self, RichText};
+
 thread_local! {
     /// The login webview lives on the main thread only (a WebKit requirement).
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
@@ -245,4 +252,159 @@ fn schedule_probe(probe: Arc<Mutex<Probe>>) {
 #[cfg(not(target_os = "macos"))]
 fn schedule_probe(probe: Arc<Mutex<Probe>>) {
     run_probe(&probe);
+}
+
+// -- login --------------------------------------------------------------
+
+impl PrimePhotoApp {
+    pub(crate) fn cancel_login(&mut self) {
+        self.login.cancel();
+    }
+
+    /// Sign out: drop the stored cookies and return to the login screen.
+    pub(crate) fn logout(&mut self) {
+        self.config_form = None;
+        self.config.session_id.clear();
+        self.config.cookie_x_acb.clear();
+        self.config.cookie_at_acb.clear();
+        self.config.cookie_ubid_acb.clear();
+        self.config.cookie_x_amz_access_token.clear();
+        match self.config.save() {
+            Ok(_) => self.log("Abgemeldet."),
+            Err(e) => self.config_error = Some(e.to_string()),
+        }
+    }
+
+    /// Create the login webview. Needs the frame for the window handle.
+    pub(crate) fn begin_login(&mut self, frame: &eframe::Frame, ctx: &egui::Context) {
+        if self.login.running {
+            return;
+        }
+        let url = login::login_url(&self.config.country);
+        let screen = ctx.screen_rect();
+        // Start just below an estimated header; the exact bounds are corrected
+        // on the next frame once the header has been measured.
+        let bounds = login::rect(0.0, HEADER_H, screen.width(), screen.height() - HEADER_H);
+        self.login.start(frame, &url, bounds);
+    }
+
+    pub(crate) fn poll_login(&mut self) {
+        self.login.poll();
+        let outcome = self.login.outcome.take();
+        if let Some(cookie_string) = outcome {
+            self.apply_cookie_string(&cookie_string);
+            match self.config.save() {
+                Ok(_) => self.log("Login erfolgreich – Cookies übernommen."),
+                Err(e) => self.config_error = Some(e.to_string()),
+            }
+        }
+    }
+
+    pub(crate) fn apply_cookie_string(&mut self, cookie_string: &str) {
+        let parsed = parse_cookie_string(cookie_string);
+        self.config.session_id = parsed.session_id;
+        if !parsed.country.is_empty() {
+            self.config.country = parsed.country;
+        }
+        self.config.cookie_x_acb = parsed.cookie_x_acb;
+        self.config.cookie_at_acb = parsed.cookie_at_acb;
+        self.config.cookie_ubid_acb = parsed.cookie_ubid_acb;
+        self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token;
+    }
+
+    /// Login phase (same window as the app, like the original).
+    ///
+    /// While Amazon's page is open we show a slim branded header and let the
+    /// webview fill the rest of the window; before that we show our own
+    /// sign-in screen with the marketplace picker.
+    pub(crate) fn login_ui(&mut self, ctx: &egui::Context) {
+        if self.login.running {
+            let mut cancel = false;
+            let header = egui::TopBottomPanel::top("login_header")
+                .exact_height(HEADER_H)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::SIDEBAR_BG)
+                        .inner_margin(egui::Margin::symmetric(16, 8)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        upload_logo(ui, 30.0);
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Prime Photos").strong().size(15.0));
+                            ui.label(theme::muted("Bei Amazon anmelden"));
+                        });
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui.add(theme::secondary_button("Abbrechen")).clicked() {
+                                    cancel = true;
+                                }
+                                if let Some(e) = &self.login.error {
+                                    ui.colored_label(theme::RED, e);
+                                } else {
+                                    ui.spinner();
+                                }
+                            },
+                        );
+                    });
+                });
+            let top_h = header.response.rect.height();
+            let screen = ctx.screen_rect();
+            self.login.set_bounds(login::rect(
+                0.0,
+                top_h,
+                screen.width(),
+                screen.height() - top_h,
+            ));
+            if cancel {
+                self.cancel_login();
+            }
+            return;
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| self.login_screen_ui(ui));
+    }
+
+    /// Our own sign-in screen, shown before the Amazon page is opened.
+    pub(crate) fn login_screen_ui(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(56.0);
+            upload_logo(ui, 84.0);
+            ui.add_space(12.0);
+            ui.label(RichText::new("Prime Photos").size(28.0).strong());
+            ui.add_space(4.0);
+            ui.label(theme::muted("Fotos & Videos zu Amazon Photos hochladen"));
+            ui.add_space(26.0);
+
+            // Marketplace selection before signing in.
+            ui.horizontal(|ui| {
+                ui.label("Land / Amazon-Marktplatz:");
+                let current = self.config.country.clone();
+                egui::ComboBox::from_id_salt("login-country")
+                    .selected_text(country_label(&current))
+                    .show_ui(ui, |ui| {
+                        for (code, label) in COUNTRIES {
+                            ui.selectable_value(&mut self.config.country, code.to_string(), *label);
+                        }
+                    });
+            });
+            ui.add_space(14.0);
+
+            if ui.add(theme::primary_button("Mit Amazon anmelden")).clicked() {
+                self.pending_login = true;
+            }
+            if let Some(e) = &self.login.error {
+                ui.add_space(6.0);
+                ui.colored_label(theme::RED, e);
+            }
+
+            ui.add_space(16.0);
+            if ui.link("Amazon Photos im Browser öffnen").clicked() {
+                let url = login::login_url(&self.config.country);
+                let _ = std::process::Command::new("open").arg(url).spawn();
+            }
+        });
+    }
 }
