@@ -9,16 +9,34 @@
 //! whatever is focused (the WKWebView), exactly like in a native app.
 
 #[cfg(target_os = "macos")]
+use std::sync::Once;
+
+#[cfg(target_os = "macos")]
 pub fn install() {
     use objc2::MainThreadMarker;
-    use objc2::sel;
-    use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
-    use objc2_foundation::NSString;
+    use objc2_app_kit::NSApplication;
+
+    // Defensive re-entrancy guard: installing the menu twice would leave AppKit
+    // with two main menus. `install()` is idempotent either way; the `Once`
+    // makes that explicit and keeps it a no-op even if a future call path
+    // forgets that.
+    static INSTALL_ONCE: Once = Once::new();
 
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
     let app = NSApplication::sharedApplication(mtm);
+
+    INSTALL_ONCE.call_once(|| {
+        build_main_menu(&app, mtm);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn build_main_menu(app: &objc2_app_kit::NSApplication, mtm: objc2::MainThreadMarker) {
+    use objc2::sel;
+    use objc2_app_kit::{NSMenu, NSMenuItem};
+    use objc2_foundation::NSString;
 
     let main_menu = NSMenu::new(mtm);
 
