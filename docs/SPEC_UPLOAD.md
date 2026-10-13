@@ -243,7 +243,8 @@ uploads report parent `NONE`).
   for an empty queue, which exits immediately on `pop_front() == None`).
 - Spawns `workers` tasks via `JoinSet`, each running `upload_worker`.
 - Each worker:
-  - polls `paused` in a 400 ms sleep loop **between** files only;
+  - parks while paused (400 ms `borrow_and_update` loop) and races each file's
+    upload future against `pause_rx.changed()` (biased `select!`);
   - `pop_front` one item; if `None`, break;
   - stat size, set `shared.current`;
   - times the upload from `Instant::now()`;
@@ -260,10 +261,15 @@ uploads report parent `NONE`).
 
 ### 3.5 Concurrency with paused flag
 
-`paused: Arc<AtomicBool>` is shared between the GUI toggle and workers. The toggle
-flips it (`paused.store(!all_paused)`). Workers only observe it at file boundaries
-and during the inter-file 400 ms sleep. **In-flight requests and the per-file
-rate-limit sleep are not cancelled** — open point O-2 / P1 in TODO.
+`paused` is a `tokio::sync::watch::Sender<bool>` shared between the GUI toggle and
+workers (commit `4a47795`). The toggle flips it (`send_replace(!all_paused)`).
+Each worker holds a `watch::Receiver` and races its per-file `upload_picture`
+future against `pause_rx.changed()` (biased `select!`): on pause the in-flight
+future is dropped (request cancelled) and the item is `push_front`-ed exactly once;
+the per-file rate-limit sleep is raced the same way. Parked workers keep
+`active == true`, so finalization still only runs once the queue drains.
+Residuals F-2 (pacing can skip across pause/resume) and F-3 (abort discards
+partial bytes; `RENAME` duplicate risk) are recorded in `AGENTS.todo.md`.
 
 ---
 
@@ -278,7 +284,7 @@ rate-limit sleep are not cancelled** — open point O-2 / P1 in TODO.
 | Duplicate detection (server 409) | `ResponseUploadFail.error_details.conflict_node_ids`, returns first id |
 | Album = visual collection | `kind: "VISUAL_COLLECTION"` node + `PATCH …/children` `op: add` |
 | Concurrent workers + bandwidth cap | `run_upload` / `upload_worker` |
-| Pause | `paused: Arc<AtomicBool>` polled between files |
+| Pause | `paused: watch::Sender<bool>`; in-flight future raced and dropped on pause (fixed `4a47795`) |
 
 ---
 
@@ -288,10 +294,9 @@ From `AGENTS.todo.md` (P1 upload items):
 
 - **O-1** Full reqwest error chain is dropped (`Err(e.to_string())`) — root
   cause (DNS / reset / body stream / timeout) lost; no `{e:?}` / `source()` logging.
-- **O-2** No pause during in-flight work: `upload_worker` checks `paused` only
-  before the next queue item; up to `concurrency` in-flight requests and the
-  rate-limit sleep run to completion. Desired: abort in-flight, hold queue,
-  resume.
+- **O-2** *(fixed in `4a47795`)* Pause now aborts in-flight work: workers race the
+  upload future against the watch channel, drop it and requeue the item. Remaining
+  residuals F-2/F-3 are tracked in `AGENTS.todo.md`.
 - **O-3** `conflictResolution=RENAME` creates a copy on conflict; the original
   uses `NONE` (avoid duplicates).
 - **O-4** Videos unsupported: only `is_supported_image` extensions pass; RAW list
