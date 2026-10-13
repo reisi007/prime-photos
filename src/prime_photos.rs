@@ -419,9 +419,10 @@ impl PrimePhotos {
         false
     }
 
-    /// Get an auth token valid across all Amazon boundaries - Used for content uploading
-    #[allow(dead_code)]
-    async fn renew_auth_token(&mut self) -> Result<&str, reqwest::Error> {
+    /// Get an auth token valid across all Amazon boundaries - Used for content
+    /// uploading. Called by the upload worker when a run hits a 401: the session
+    /// cookies are still valid, only this token went stale.
+    pub(crate) async fn renew_auth_token(&mut self) -> Result<&str, reqwest::Error> {
         let url = Url::parse(
             format!("https://www.amazon.{}/photos/auth/token", self.conf.country).as_str(),
         )

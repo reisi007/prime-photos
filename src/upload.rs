@@ -169,9 +169,30 @@ pub(crate) async fn upload_worker(
     folder_opts: Arc<HashMap<usize, (bool, ConflictResolution)>>,
 ) {
     let mut uploader = PrimePhotos::new(&cfg, false);
+    // A 401 mid-run means the session cookies expired, not that the file is
+    // broken: renew the token once, then retry the file. `renew_auth_token`
+    // needs `&mut uploader`, which is only free at the top of the loop (the
+    // pinned upload future below borrows it), so the renewal is deferred to the
+    // next iteration and the file is pushed back onto the queue.
+    let mut need_token_renew = false;
+    let mut token_renewed_once = false;
     loop {
         while *pause_rx.borrow_and_update() {
             tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        if need_token_renew {
+            need_token_renew = false;
+            token_renewed_once = true;
+            match uploader.renew_auth_token().await {
+                Ok(_) => {
+                    let mut s = shared.lock().unwrap();
+                    s.log(tr("Auth-Token wurde erneuert."));
+                }
+                Err(e) => {
+                    let mut s = shared.lock().unwrap();
+                    s.log(tr1("Auth-Token-Erneuerung fehlgeschlagen: {}", e));
+                }
+            }
         }
         let item = { queue.lock().unwrap().pop_front() };
         let Some((row, idx, path)) = item else { break };
@@ -264,13 +285,32 @@ pub(crate) async fn upload_worker(
                         s.log(format!("OK    {}", path.display()));
                     }
                     Err(e) => {
-                        let mut s = shared.lock().unwrap();
-                        s.failed += 1;
-                        *s.folder_failed.entry(idx).or_insert(0) += 1;
-                        if let Some(en) = s.queue.get_mut(row) {
-                            en.state = FileState::Failed;
+                        // Expired session: retry this one file once after the
+                        // token renewal (never counted as a failure). Only once
+                        // per run, so a persistently bad session cannot spin.
+                        if !token_renewed_once && e.contains("Authentication failed") {
+                            need_token_renew = true;
+                            queue.lock().unwrap().push_front((row, idx, path.clone()));
+                            {
+                                let mut s = shared.lock().unwrap();
+                                if let Some(en) = s.queue.get_mut(row) {
+                                    en.state = FileState::Waiting;
+                                }
+                                s.log(tr1(
+                                    "Anmeldung abgelaufen, {} wird erneut versucht.",
+                                    path.display(),
+                                ));
+                            }
+                            requeued = true;
+                        } else {
+                            let mut s = shared.lock().unwrap();
+                            s.failed += 1;
+                            *s.folder_failed.entry(idx).or_insert(0) += 1;
+                            if let Some(en) = s.queue.get_mut(row) {
+                                en.state = FileState::Failed;
+                            }
+                            s.log(tr2("FEHLER {}: {}", path.display(), e));
                         }
-                        s.log(tr2("FEHLER {}: {}", path.display(), e));
                     }
                 }
             }
