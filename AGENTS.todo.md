@@ -48,8 +48,9 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   Rate-Limit-Sleep gegen `pause_rx.changed()`, bricht die laufende Future ab und legt das Element per
   `push_front` genau einmal zurück. Verifiziert (Verifier: APPROVE, nur `src/main.rs`).
   **Residuen (nicht blockierend, offen):**
-  - [ ] **F-2:** Wenn Pause während des Pacing-Sleeps landet, kann der Throttle über die Pause/Resume-Grenze
-    übersprungen werden (effektives Rate-Limit kurzzeitig überschritten).
+  - [x] **F-2:** Pacing-Sleep über Pause/Resume behoben (Commit `029ff01`): der Throttle wird in
+    ≤200-ms-Slices geschlafen, pausiert wird geparkt und die Restzeit bleibt über die Pause erhalten
+    (Resume setzt den Throttle fort statt ihn zu überspringen). Verifiziert (Verifier: PASS).
   - [ ] **F-3:** Abbruch verwirft bereits gesendete Bytes (Datei startet bei 0) UND `conflictResolution=RENAME`
     erzeugt bei Abbruch nach Server-Anlage ein Duplikat statt 409-Dedupe — Widerspruch zum Ziel „keine
     Bandbreite verschwenden". Entscheidung nötig: „aktuelles Element fertig, dann ruhen" vs. sofortiger Abbruch; `RENAME` überdenken.
@@ -78,12 +79,15 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   Speichern/Abbrechen. Fenster öffnet aus „Datensicherung hinzufügen …" (Create) und dem neuen
   Zeilenmenü-Eintrag „Bearbeiten" (Edit).
 
-- [ ] **P1 – Upload-Fehler `error sending request for url (…)`** (Beispiel
-  `…/27_ÖFB-Reisinger_09.jpg`). `upload_picture` gibt `Err(e.to_string())` zurück → die
-  reqwest-Ursache (DNS / Connection-Reset / Body-Stream / Timeout) geht verloren. Soll: komplette
-  Fehlerkette loggen (`{e:?}` / `source()`), **Retry mit Backoff** für transiente Fehler
-  (Netzwerk, 5xx, 429, 408). Außerdem `conflictResolution=RENAME` hinterfragen — RENAME erzeugt
-  bei vorhandener Datei eine Kopie; das Original nutzt `NONE` (Duplikate vermeiden).
+- [x] **P1 – Upload-Fehler `error sending request for url (…)`** (Beispiel
+  `…/27_ÖFB-Reisinger_09.jpg`). Behoben (Paket C): `upload_picture` liefert jetzt die **volle
+  Fehlerkette** (`error_chain` über `source()`), **Retry mit Backoff** nur für transiente Fehler
+  (Netzwerk connect/timeout/request/body, 5xx, 429, 408; bounded 4 Versuche, exponentiell + Jitter,
+  `Retry-After` beachtet, Cap 8 s), 401/403 und 409 werden **nicht** wiederholt; `panic!()`-Stellen
+  im Upload-/Node-Pfad durch `Err` ersetzt (node fetch → `Result`). Verifiziert (Verifier: PASS).
+  **Residuum (offen):** weiter fragile Stellen außerhalb des Auftrags — `get_album` →
+  `list_albums().await.unwrap()` und `web_dir_node.as_ref().unwrap()` in `prime_photos.rs`
+  (Netzwerkfehler im Album-Schritt könnte den Koordinator-Task panicken lassen); als Folge-Ticket.
 
 - [ ] **.xmp-Befund klären (User-Meldung 2026-10-13).** Gemeldet: „.xmp wird als Bild erkannt — falsch".
   Code-Befund (nur gelesen): `is_supported_image` lehnt `xmp` explizit ab (`src/folders.rs:22`), der
@@ -143,7 +147,18 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   Ziel: macOS-Benachrichtigung bei **Upload fertig** und bei **Fehler**; Menüleisten-Status-Item wie
   im Original (`docs/UI_FLOWS.md` §9). **Spec-first:** erst Recon der Original-Mechanik
   (Menüleisten-Helfer/Login-Item/LaunchAgent? Benachrichtigungs-API? Auslöser-Ereignisse?) →
-  Clean-room-Spec `docs/SPEC_NOTIFICATIONS.md`, dann Implementierung. Recon läuft.
+  Clean-room-Spec `docs/SPEC_NOTIFICATIONS.md`, dann Implementierung.
+  **Recon-Befund (2026-10-13, `docs/SPEC_NOTIFICATIONS.md`):** Original hat **keinen**
+  Hintergrund-Helfer/XPC/LoginItem-Bundle (`LSUIElement=true`, nur `MacOS`/`MonoBundle`/`Resources`);
+  ein LaunchAgent (`~/Library/Application Scripts/Amazon Cloud Drive/restart_app.plist`,
+  `KeepAlive=true`) dient nur dem Crash-Relaunch; Login-Item via `osascript` (Legacy). Menüleiste:
+  ein `NSStatusItem` (Icon je Zustand, Tooltip „Amazon Photos - {state}", Badge); Linksklick öffnet
+  ein Popover (`StatusPopupWindowService`); App bleibt ohne Fenster am Leben
+  (`ApplicationShouldTerminateAfterLastWindowClosed = false`), kein Dock-Icon. Benachrichtigungen:
+  nur das **deprecated `NSUserNotification`** (kein `UNUserNotificationCenter`); Toasts bei
+  Over-Quota/Update/Konflikt/Massen-Löschung/Import — **kein** Toast bei Upload-Fertig oder
+  Upload-Fehler. Für uns also ein **neues** Feature: moderner Kanal (z. B. `UNUserNotificationCenter`)
+  + Auslöser fertig/Fehler. Spec verifizieren.
 - [ ] **Optional/Branding:** Account-Block zeigt unter „Angemeldet als:" noch die Zeile „Amazon Photos"
   (Label des angemeldeten Amazon-Kontos, kein Eigen-Branding). Falls keine Amazon-Wortmarke im eigenen
   Fenster gewünscht ist: durch die Domain (`amazon.<cc>`) ersetzen. Bewusst nicht im Rename-Lauf geändert.
