@@ -1,0 +1,568 @@
+openapi: 3.1.0
+info:
+  title: Amazon Photos — Desktop Client API (observed)
+  version: 0.1.0
+  description: |
+    Machine-readable documentation of the HTTP requests the Amazon Photos **desktop
+    client** (CloudDriveMac) performs, reconstructed from captured traffic of the
+    official client. This lets the Rust port follow the same protocol.
+
+    ## Provenance
+    All paths below were **observed** in mitmproxy captures. Values that could not be
+    verified are marked `(unverified)`. Token/id values in examples are redacted.
+
+    ## Authentication
+    The desktop client does not use a browser cookie for the API. It holds an OAuth
+    **refresh token** (`amzp-rt` in macOS Keychain, prefix `Atnr|`), exchanges it at
+    `POST /auth/token` for a short-lived **access token** (`Atna|`, ~3600s), and sends
+    that token in the `x-amz-access-token` header on every Cloud Drive call.
+
+    ## Identifiers
+    - `x-amz-clouddrive-appid` — base64 app id, constant for the desktop app.
+    - `x-amzn-clouddrive-source` — per-install source id, returned by
+      `POST /drive/v1/account/source` (`sourceId`).
+    - `x-amzn-RequestId` / `x-amzn-Trace-Id` — client-generated correlation ids.
+
+    ## Base URLs (region-dependent)
+    `GET https://drive.amazonaws.com/drive/v2/account/endpoint` returns the concrete
+    hosts for the customer's region. Examples below are the EU (`eu-west-1`) hosts.
+servers:
+  - url: https://api.amazon.com
+    description: Auth / user profile
+  - url: https://drive.amazonaws.com
+    description: Endpoint discovery
+  - url: https://cdws.eu-west-1.amazonaws.com
+    description: Metadata (region-specific, from `account/endpoint.metadataUrl`)
+  - url: https://upload-photos.amazon.de
+    description: Upload host (region-specific, from `account/endpoint.uploadServiceUrl`)
+
+tags:
+  - name: auth
+  - name: account
+  - name: nodes
+  - name: changes
+  - name: upload
+  - name: memories
+
+security:
+  - accessToken: []
+    appId: []
+
+paths:
+  /auth/token:
+    post:
+      tags: [auth]
+      summary: Exchange a refresh token for an access token
+      servers: [{ url: https://api.amazon.com }]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+            example:
+              source_token: "Atnr|..."
+              source_token_type: refresh_token
+              requested_token_type: access_token
+              app_name: Amazon Photos
+              app_version: 11.3.0.1d7941b5
+      responses:
+        '200':
+          description: New access token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid or expired refresh token
+
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register this device/install and obtain tokens
+      servers: [{ url: https://api.amazon.com }]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: Registration succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+
+  /auth/deregister:
+    post:
+      tags: [auth]
+      summary: Deregister this device/install
+      servers: [{ url: https://api.amazon.com }]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                request_metadata:
+                  type: object
+                  properties:
+                    app_name: { type: string }
+                    app_version: { type: string }
+      responses:
+        '200': { description: Deregistered (unverified) }
+        '403':
+          description: Not allowed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: object
+                  request_id: { type: string }
+
+  /user/profile:
+    get:
+      tags: [auth]
+      summary: Customer profile (name, account pool, region)
+      servers: [{ url: https://api.amazon.com }]
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /drive/v2/account/endpoint:
+    get:
+      tags: [account]
+      summary: Discover region-specific service URLs
+      servers: [{ url: https://drive.amazonaws.com }]
+      responses:
+        '200':
+          description: Endpoint map
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndpointResponse'
+
+  /drive/v2/account:
+    post:
+      tags: [account]
+      summary: Set account terms/status (activate)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                termsOfUse: { type: string, example: 1.0.0 }
+                status: { type: string, enum: [ACTIVE] }
+            example: { termsOfUse: 1.0.0, status: ACTIVE }
+      responses:
+        '200':
+          description: Accepted
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /drive/v1/account/source:
+    post:
+      tags: [account]
+      summary: Register a sync source (device) and obtain its sourceId
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRequest'
+      responses:
+        '201':
+          description: Source created/updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceResponse'
+
+  /drive/v2/account/quota:
+    get:
+      tags: [account]
+      summary: Storage quota (unverified shape)
+      responses:
+        '200':
+          description: Quota
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /drive/v1/account/usage:
+    get:
+      tags: [account]
+      summary: Storage usage (unverified shape)
+      responses:
+        '200':
+          description: Usage
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /drive/v1/account/preferences:
+    get:
+      tags: [account]
+      summary: Account preferences (unverified shape)
+      responses:
+        '200':
+          description: Preferences
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /drive/v1/nodes:
+    get:
+      tags: [nodes]
+      summary: List/query nodes
+      parameters:
+        - { name: resourceVersion, in: query, schema: { type: string, enum: [V2] } }
+        - { name: limit, in: query, schema: { type: integer, example: 1 } }
+        - { name: filters, in: query, schema: { type: string }, description: e.g. `kind:FILE` }
+      responses:
+        '200':
+          description: Node page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeList'
+    post:
+      tags: [nodes]
+      summary: Create a node (folder/file metadata)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNodeRequest'
+      responses:
+        '201':
+          description: Node created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+        '409':
+          description: Name already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: NAME_ALREADY_EXISTS }
+                  info:
+                    type: object
+                    properties:
+                      nodeId: { type: string }
+                  message: { type: string }
+
+  /drive/v1/nodes/{id}:
+    get:
+      tags: [nodes]
+      summary: Get a node by id
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Node
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+
+  /drive/v1/upload/node:
+    get:
+      tags: [upload]
+      summary: List nodes currently pending upload for this source
+      parameters:
+        - { name: resourceVersion, in: query, schema: { type: string, enum: [V2] } }
+        - { name: limit, in: query, schema: { type: integer, example: 200 } }
+      responses:
+        '200':
+          description: Pending uploads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeList'
+
+  /drive/v1/changes:
+    post:
+      tags: [changes]
+      summary: Long-poll / fetch node changes for this source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                includePurged: { type: string, enum: ['true', 'false'] }
+                limit: { type: string, example: '200' }
+                resourceVersion: { type: string, enum: [V2] }
+            example: { includePurged: 'true', limit: '200', resourceVersion: V2 }
+      responses:
+        '200':
+          description: Change set (unverified shape)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /v2/upload:
+    post:
+      tags: [upload]
+      summary: Upload raw file bytes and create the file node
+      servers: [{ url: https://upload-photos.amazon.de }]
+      parameters:
+        - { name: name, in: query, required: true, schema: { type: string }, description: File name (URL-encoded) }
+        - { name: fileSize, in: query, required: true, schema: { type: integer, format: int64 } }
+        - { name: conflictResolution, in: query, schema: { type: string, enum: [NONE, RENAME, OVERWRITE] } }
+        - { name: kind, in: query, schema: { type: string, enum: [FILE] } }
+        - { name: parentNodeId, in: query, schema: { type: string }, description: Target folder node id }
+        - { name: contentDate, in: query, schema: { type: string, format: date-time }, description: Optional; otherwise derived from EXIF/file time }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: File node created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+        '409':
+          description: Duplicate; conflicting node ids returned
+
+  /drive/v2/memories/v1/collage/narratives:
+    post:
+      tags: [memories]
+      summary: Fetch memories narrative metadata for nodes (used by the Memories UI)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nodeList:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: Narrative
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+components:
+  securitySchemes:
+    accessToken:
+      type: apiKey
+      in: header
+      name: x-amz-access-token
+      description: 'Bearer-like Cloud Drive token, prefix `Atna|`.'
+    appId:
+      type: apiKey
+      in: header
+      name: x-amz-clouddrive-appid
+    source:
+      type: apiKey
+      in: header
+      name: x-amzn-clouddrive-source
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session-id
+      description: |
+        Only used by the alternative (web/browser) upload path
+        `content-<zone>.drive.amazonaws.com`, not by the desktop client.
+
+  schemas:
+    TokenRequest:
+      type: object
+      required: [source_token, source_token_type, requested_token_type]
+      properties:
+        source_token: { type: string, description: 'Refresh token, prefix `Atnr|`' }
+        source_token_type: { type: string, enum: [refresh_token] }
+        requested_token_type: { type: string, enum: [access_token] }
+        app_name: { type: string }
+        app_version: { type: string }
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token: { type: string, description: 'Prefix `Atna|`' }
+        secureSessionToken: { type: string, description: 'Prefix `Sst1|`' }
+        token_type: { type: string, example: bearer }
+        expires_in: { type: integer, example: 3600 }
+        response:
+          type: object
+          properties:
+            token: { type: string }
+            token_type: { type: string }
+            token_expires_in: { type: string }
+
+    RegisterRequest:
+      type: object
+      properties:
+        registration_data:
+          type: object
+          properties:
+            app_name: { type: string }
+            app_version: { type: string }
+            device_model: { type: string }
+            device_name: { type: [string, 'null'] }
+            device_serial: { type: string }
+            device_type: { type: string }
+            domain: { type: string, example: Device }
+            os_version: { type: string }
+        auth_data:
+          type: object
+          properties:
+            use_global_authentication: { type: boolean }
+            authorization_code: { type: string }
+            code_verifier: { type: string }
+            code_algorithm: { type: string, example: SHA-256 }
+            client_id: { type: string }
+            client_domain: { type: string, example: DeviceLegacy }
+        requested_extensions:
+          type: array
+          items: { type: string }
+        requested_token_type:
+          type: array
+          items: { type: string }
+
+    RegisterResponse:
+      type: object
+      properties:
+        response:
+          type: object
+          properties:
+            success:
+              type: object
+              properties:
+                extensions: { type: object, additionalProperties: true }
+                age_classification: { type: string }
+                customer_info: { type: object, additionalProperties: true }
+                tokens:
+                  type: object
+                  properties:
+                    mac_dms:
+                      type: object
+                      additionalProperties: true
+
+    EndpointResponse:
+      type: object
+      properties:
+        customerExists: { type: boolean }
+        countryAtSignup: { type: string }
+        marketplaceAtSignup: { type: string }
+        region: { type: string }
+        contentUrl: { type: string }
+        metadataUrl: { type: string }
+        uploadServiceUrl: { type: string }
+        downloadServiceUrl: { type: string }
+        thumbnailServiceUrl: { type: string }
+        photosBFFUrl: { type: string }
+        retailUrl: { type: string }
+
+    SourceRequest:
+      type: object
+      properties:
+        deviceSerialNumber: { type: string }
+        deviceClass: { type: string }
+        devicePlatform: { type: string }
+        deviceFriendlyName: { type: string }
+        osVersion: { type: string }
+        sourceApplicationName: { type: string }
+        sourceVersion: { type: string }
+        customerId: { type: string }
+        resourceVersion: { type: string, enum: [V2] }
+
+    SourceResponse:
+      type: object
+      properties:
+        sourceId: { type: string }
+        device: { type: object, additionalProperties: true }
+        creationTime: { type: string, format: date-time }
+        lastModifiedTime: { type: string, format: date-time }
+
+    CreateNodeRequest:
+      type: object
+      required: [kind, name]
+      properties:
+        kind: { type: string, enum: [FILE, FOLDER, VISUAL_COLLECTION] }
+        name: { type: string }
+        parents: { type: array, items: { type: string } }
+        clientProperties: { type: object, additionalProperties: true }
+        resourceVersion: { type: string, enum: [V2] }
+
+    NodeList:
+      type: object
+      properties:
+        count: { type: integer }
+        nextToken: { type: string }
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Node' }
+
+    Node:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [FILE, FOLDER, ASSET, VISUAL_COLLECTION] }
+        version: { type: integer }
+        status: { type: string, example: AVAILABLE }
+        parents: { type: array, items: { type: string } }
+        parentMap: { type: object, additionalProperties: true }
+        ownerId: { type: string }
+        createdBy: { type: string }
+        createdDate: { type: string, format: date-time }
+        modifiedDate: { type: string, format: date-time }
+        restricted: { type: boolean }
+        protectedFolder: { type: boolean }
+        transforms: { type: array, items: { type: string } }
+        keywords: { type: array, items: { type: string } }
+        subKinds: { type: array, items: { type: string } }
+        contentProperties:
+          $ref: '#/components/schemas/ContentProperties'
+
+    ContentProperties:
+      type: object
+      properties:
+        size: { type: integer, format: int64 }
+        version: { type: integer }
+        contentType: { type: string, example: image/png }
+        extension: { type: string }
+        md5: { type: string }
+        contentDate: { type: string, format: date-time }
+        contentSignatures:
+          type: array
+          items: { type: object, additionalProperties: true }
+        image:
+          type: object
+          properties:
+            width: { type: integer }
+            height: { type: integer }
+            orientation: { type: string }
+            make: { type: string }
+            model: { type: string }
+            dateTimeOriginal: { type: string }
+          additionalProperties: true

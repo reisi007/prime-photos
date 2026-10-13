@@ -1,5 +1,7 @@
 mod amzn_photo;
 mod config;
+mod login_helper;
+mod theme;
 
 use amzn_photo::AmznPhoto;
 use config::Config;
@@ -50,10 +52,12 @@ struct PrimePhotoApp {
     files: Vec<PathBuf>,
     progress: Arc<Mutex<UploadProgress>>,
     uploading: Arc<Mutex<bool>>,
+    login: Arc<Mutex<login_helper::BrowserLogin>>,
 }
 
 impl PrimePhotoApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        theme::apply(&_cc.egui_ctx);
         let rt = std::sync::Arc::new(Runtime::new().expect("tokio runtime"));
         let (config, config_error) = match Config::load() {
             Ok(c) => (c, None),
@@ -75,6 +79,7 @@ impl PrimePhotoApp {
             files: Vec::new(),
             progress: Arc::new(Mutex::new(UploadProgress::new())),
             uploading: Arc::new(Mutex::new(false)),
+            login: Arc::new(Mutex::new(login_helper::BrowserLogin::new())),
         }
     }
 
@@ -92,6 +97,36 @@ impl PrimePhotoApp {
             Err(e) => {
                 self.config_error = Some(e.to_string());
             }
+        }
+    }
+
+    fn start_login(&mut self) {
+        {
+            let l = self.login.lock().unwrap();
+            if l.running {
+                return;
+            }
+        }
+        let country = self.config.country.clone();
+        {
+            let mut l = self.login.lock().unwrap();
+            l.running = true;
+            l.message.clear();
+            l.outcome = None;
+            l.error = None;
+        }
+        let login = self.login.clone();
+        let rt = self.rt.clone();
+        rt.spawn(async move {
+            login_helper::run_browser_login(country, login).await;
+        });
+    }
+
+    fn cancel_login(&mut self) {
+        let mut l = self.login.lock().unwrap();
+        if l.running {
+            l.running = false;
+            l.stop_browser();
         }
     }
 
@@ -273,7 +308,74 @@ impl eframe::App for PrimePhotoApp {
             }
 
             ui.separator();
-            ui.label("Login helper (paste whole browser cookie string):");
+            ui.label("Automatischer Browser-Login:");
+            let mut login_started = false;
+            let mut login_cancelled = false;
+            {
+                let l = self.login.lock().unwrap();
+                ui.horizontal(|ui| {
+                    let enabled = !l.running;
+                    if ui.add_enabled(enabled, egui::Button::new("Mit Browser anmelden")).clicked() {
+                        login_started = true;
+                    }
+                    if ui.add_enabled(l.running, egui::Button::new("Abbrechen")).clicked() {
+                        login_cancelled = true;
+                    }
+                    if l.running {
+                        ui.spinner();
+                    }
+                });
+                if !l.message.is_empty() {
+                    ui.label(&l.message);
+                }
+                if let Some(e) = &l.error {
+                    ui.colored_label(egui::Color32::RED, e);
+                }
+            }
+            if login_started {
+                self.start_login();
+            }
+            if login_cancelled {
+                self.cancel_login();
+            }
+
+            // Handle a completed browser login.
+            let outcome = {
+                let mut l = self.login.lock().unwrap();
+                l.outcome.take()
+            };
+            if let Some(outcome) = outcome {
+                let cookie_string = outcome
+                    .cookies
+                    .iter()
+                    .map(|(n, v)| format!("{}={}", n, v))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                let parsed = parse_cookie_string(&cookie_string);
+                self.config.session_id = parsed.session_id;
+                if !parsed.country.is_empty() {
+                    self.config.country = parsed.country;
+                }
+                self.config.cookie_x_acb = parsed.cookie_x_acb;
+                self.config.cookie_at_acb = parsed.cookie_at_acb;
+                self.config.cookie_ubid_acb = parsed.cookie_ubid_acb;
+                self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token;
+                match self.config.save() {
+                    Ok(_) => {
+                        let mut p = self.progress.lock().unwrap();
+                        p.log(format!(
+                            "Login erfolgreich ({}). Cookies übernommen und gespeichert.",
+                            outcome.browser_name
+                        ));
+                    }
+                    Err(e) => {
+                        self.config_error = Some(e.to_string());
+                    }
+                }
+            }
+
+            ui.separator();
+            ui.label("Manueller Login-Helper (Browser-Cookie-String einfügen):");
             ui.add(egui::TextEdit::multiline(&mut self.cookie_paste).desired_rows(3));
             ui.horizontal(|ui| {
                 if ui.button("Parse cookies").clicked() {
