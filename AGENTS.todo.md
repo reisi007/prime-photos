@@ -145,14 +145,14 @@ cross-platform Crates; macOS-Spezialisierungen (`app_menu`, Main-Queue-Cookie-Pr
 
 Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
 
-- [ ] **PORT-1 – Plattform-Firewall (Deps + cfg).** macOS-only Crates
+- [x] **PORT-1 – Plattform-Firewall (Deps + cfg).** Erledigt, Commit `1744e94`: macOS-only Crates
   (`objc2`, `objc2-app-kit`, `objc2-foundation`, `dispatch2`) unter
-  `[target.'cfg(target_os = "macos")'.dependencies]` verschieben; `login.rs`-Probe per `cfg`:
-  macOS = `DispatchQueue::main()` (wie bisher), sonst synchron. `app_menu`-No-op bleibt.
-  Erwartung: macOS-Build unverändert grün; keine macOS-Symbole mehr im Nicht-macOS-Pfad.
-- [ ] **PORT-2 – Cross-platform Benachrichtigungen** (`notify-rust`), Auslöser **Upload fertig** +
-  **Fehler**; Schalter in den Einstellungen (`config.toml`-Feld mit Default an). Ersetzt das
-  frühere „nur macOS/UNUserNotificationCenter"-Vorhaben.
+  `[target.'cfg(target_os = "macos")'.dependencies]`; `login.rs`-Probe: macOS =
+  `DispatchQueue::main()` (unverändert), sonst direkt; `app_menu`-No-op bleibt. Verifiziert (PASS).
+- [x] **PORT-2 – Cross-platform Benachrichtigungen** (`notify-rust` 4.18), Auslöser **Upload fertig** +
+  **Fehler** (eine Notifikation pro Lauf, synchron im Main-Thread), Schalter
+  „Desktop-Benachrichtigungen (Upload fertig / Fehler)" in Einstellungen; `config.notifications`
+  mit `serde(default = true)` (alte `config.toml` lädt weiter). Commit `0e96798`. Verifiziert (PASS).
 - [ ] **PORT-3 – Tray/Menüleisten-Icon** (`tray-icon`): Fenster anzeigen, Pause/Fortsetzen, Beenden;
   „Fenster schließen = im Hintergrund weiterlaufen" (Tray-Menü beendet explizit).
 - [ ] **PORT-4 – Optionaler Autostart** (`auto-launch`), Schalter in den Einstellungen.
