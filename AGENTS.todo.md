@@ -153,8 +153,10 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   **Fehler** (eine Notifikation pro Lauf, synchron im Main-Thread), Schalter
   „Desktop-Benachrichtigungen (Upload fertig / Fehler)" in Einstellungen; `config.notifications`
   mit `serde(default = true)` (alte `config.toml` lädt weiter). Commit `0e96798`. Verifiziert (PASS).
-- [ ] **PORT-3 – Tray/Menüleisten-Icon** (`tray-icon`): Fenster anzeigen, Pause/Fortsetzen, Beenden;
-  „Fenster schließen = im Hintergrund weiterlaufen" (Tray-Menü beendet explizit).
+- [x] **PORT-3 – Tray/Menüleisten-Icon** (`tray-icon`): Fenster anzeigen, Pause/Fortsetzen, Beenden;
+  „Fenster schließen = im Hintergrund weiterlaufen". Erledigt, Commit `b7fd1b2`. Verifiziert (PASS).
+  **Residuum (MINOR, Win/Linux):** ohne sichtbares Tray-Icon gäbe es dort keinen In-App-Ausweg
+  (macOS ist safe: ⌘Q terminiert). Fix wäre ein In-App-„Beenden" — offen.
 - [ ] **PORT-4 – Optionaler Autostart** (`auto-launch`), Schalter in den Einstellungen.
 - [ ] **PORT-5 – Hintergrund-Sync** (periodischer Re-Scan + Upload, solange im Hintergrund).
 - [x] **PORT-6 – Paketierung (macOS-Teil).** Erledigt, Commit `7c0d10c`: `packaging/Info.plist`
@@ -172,10 +174,11 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   (inkl. Marktplatz-Ländernamen in `countries.rs`, Fenstertitel, Log-/Statuszeilen) darüber führen.
   Kein hartkodierter UI-Text mehr außerhalb `i18n.rs`. Weitere lateinische Sprachen später additiv.
 - [ ] **PORT-7 – Shell-Aufrufe plattformneutral** (Befund aus PORT-1-Verify, nicht blockierend):
-  `main.rs` nutzt macOS-Kommandos ohne `cfg` — „Im Finder zeigen" (`open -R`, `main.rs:302`),
-  „im Browser öffnen" (`open <url>`, `main.rs:605`); auf Windows/Linux still wirkungslos. Soll:
-  je OS `open` / `explorer /select` / `xdg-open` (bzw. `opener`-Crate). `defaults read -g AppleLocale`
-  (`main.rs:1574`) hat bereits einen `LANG`-Fallback — ok.
+  nach dem Refactor liegen die Stellen in `src/backup.rs:63` („Im Ordner zeigen", `open -R`) und
+  `src/login.rs:406` („im Browser öffnen", `open <url>`); auf Windows/Linux still wirkungslos. Soll:
+  je OS `open`/`open -R` (macOS), `explorer`/`explorer /select,` (Windows), `xdg-open` (Linux) —
+  bevorzugt als kleines Modul `src/platform.rs` ohne neue Abhängigkeit. `defaults read -g AppleLocale`
+  (`src/countries.rs:99`) hat bereits einen `LANG`-Fallback — ok.
 
 **Refactor-Vorlauf (User-Entscheidung 2026-10-13: `main.rs` splitten, damit parallel gearbeitet
 werden kann — Details/Zielstruktur in `AGENTS.md` „Modul-Struktur"):**
@@ -196,10 +199,13 @@ werden kann — Details/Zielstruktur in `AGENTS.md` „Modul-Struktur"):**
 
 Ziel: öffentliches GitHub-Repo (`AGENTS.md` „CI/Release" — hebt „Kein Push, kein CI" auf).
 
-- [ ] **CI-1 – `.github/workflows/ci.yml`.** Trigger `push` (main) + `pull_request`: **nur Linux**;
-  `cargo build` + `cargo test` (System-Deps: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
-  `libayatana-appindicator3-dev`, `libssl-dev`, `pkg-config`, `build-essential`).
-- [ ] **CI-2 – `.github/workflows/release.yml` + `docs/RELEASE.md`.** Trigger Tag `v*`: CI-Matrix
+- [x] **CI-1 – `.github/workflows/ci.yml`.** Erledigt, Commit `badf043`: Trigger `push` (main) +
+  `pull_request`: **nur Linux**; `cargo build --locked` + `cargo test --locked` (System-Deps:
+  `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `libssl-dev`, `pkg-config`,
+  `build-essential`); `concurrency` mit Cancel. Verifiziert (PASS). **Noch nicht gelaufen** (kein
+  Remote) — die apt-Paketnamen zeigen sich erst im ersten echten CI-Lauf.
+- [x] **CI-2 – `.github/workflows/release.yml` + `docs/RELEASE.md`.** Erledigt, Commit `badf043`:
+  Trigger Tag `v*`: CI-Matrix
   **Windows + Linux** (`needs:`-Kette → erst alle grün, dann Release); Windows `.zip`, Linux `.tar.gz`;
   GitHub Release mit den Artefakten. **macOS nur lokal** (`packaging/make-app.sh`, arm64) — bewusst
   nicht im CI (User-Entscheidung 2026-10-13); `docs/RELEASE.md` beschreibt den lokalen macOS-Build,
