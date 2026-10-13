@@ -3,24 +3,32 @@
 ## Implemented
 
 - [x] Rust app boots natively on macOS ARM (egui GUI).
-- [x] Config load/save through GUI and cookie-based auth.
-- [x] Folder + file selection with extension allow-list.
-- [x] Reject `.xmp` files as images (sidecar filter).
-- [x] Upload selected images to Amazon Photos.
-- [x] Album creation/lookup and add-to-album after upload.
-- [x] Progress + log UI.
+- [x] Theme modeled on Amazon Photos (white content, grey sidebar, teal accent, dark primary button).
+- [x] Sidebar navigation: Datensicherung / Einstellungen.
+- [x] Persistent backup folders (`folders.toml`), survive restarts.
+- [x] Backup list with per-folder progress, status, ⋯ menu (jetzt scannen, Im Finder zeigen, Wiederholen, stoppen).
+- [x] "Alle Sicherungsvorgänge anhalten/fortsetzen" (global pause).
+- [x] Concurrent uploads (Workers + JoinSet), per-file rate limit (Bandbreite tab).
+- [x] Login: automatic browser-cookie capture (Chrome DevTools Protocol) + manual paste fallback.
+- [x] `.xmp` sidecars rejected; RAW formats supported (single source in `folders.rs`).
+- [x] OpenAPI spec (`docs/openapi.yaml`) + protocol notes (`docs/PROTOCOL.md`).
+- [x] `ilspycmd` installed for .NET decompilation; Screen-Recording grant works (self-screenshots).
 
 ## Open
 
-- [ ] Call `renew_auth_token` on 401 to auto-refresh expired `cookie_x_amz_access_token`.
-- [ ] Better error reporting for failed uploads (currently panics on unknown status).
-- [ ] Add cancellation for in-flight uploads.
-- [ ] Persist upload catalog (md5 dedup) like CLI.
-- [ ] Configure user agent/country via GUI validation.
-- [ ] Add HEIC EXIF orientation handling if needed.
-- [ ] Package .app bundle for end users.
+- [ ] Decompile `Amazon Photos.dll` and answer: quota/usage shape, exact extension filter, watcher interval, concurrency defaults, conflict handling, video support.
+- [ ] Real "Speichernutzung" bar (video usage / quota) instead of placeholder.
+- [ ] Menu-bar status item (like the original cloud dropdown: status, notifications, storage).
+- [ ] Auto-upload watcher ("Neue Dateien automatisch hochladen", FSEvents) + upload interval setting.
+- [ ] Videos upload (photos only so far).
+- [ ] Upload catalog (md5 dedup) so restarts don't re-upload.
+- [ ] "Details anzeigen" panel (nested/flat like the original).
+- [ ] Login helper: currently CDP-based; verify against logged-in Chrome.
+- [ ] Auto-refresh cookies on 401.
+- [ ] Package as .app bundle.
 
 ## Verworfen
 
-- mitmproxy live capture approach: unstable for uploads; Amazon Photos endpoints reverse-engineered via docs + existing Rust reference instead.
-- Device registration / OAuth from scratch: replaced by browser cookie auth.
+- mitmproxy live capture: kept only as a debugging tool; app uses the cookie upload path.
+- Device registration / OAuth from scratch: replaced by browser-cookie auth.
+- Standalone paste-only login: superseded by CDP browser login (paste stays as fallback).

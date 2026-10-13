@@ -1,64 +1,112 @@
 mod amzn_photo;
 mod config;
+mod folders;
 mod login_helper;
 mod theme;
 
 use amzn_photo::AmznPhoto;
 use config::Config;
-use eframe::egui;
+use eframe::egui::{self, Color32, RichText};
+use folders::{FolderStatus, FolderStore};
 use rfd::FileDialog;
 use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::SystemTime,
+    collections::{HashMap, VecDeque},
+    path::{PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
 };
 use tokio::runtime::Runtime;
+use tokio::task::JoinSet;
 
-#[derive(Clone)]
-struct UploadProgress {
+// ---------------------------------------------------------------------------
+// Shared upload state (written by the async workers, read by the UI)
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct UploadShared {
+    active: bool,
     total: usize,
     done: usize,
+    failed: usize,
     current: String,
-    finished: bool,
-    lines: Vec<String>,
+    log: Vec<String>,
+    folder_total: HashMap<usize, usize>,
+    folder_done: HashMap<usize, usize>,
+    folder_failed: HashMap<usize, usize>,
+    uploaded_ids: Vec<String>,
 }
 
-impl UploadProgress {
-    fn new() -> Self {
-        Self {
-            total: 0,
-            done: 0,
-            current: String::new(),
-            finished: false,
-            lines: Vec::new(),
+impl UploadShared {
+    fn log(&mut self, s: impl Into<String>) {
+        self.log.push(s.into());
+        if self.log.len() > 500 {
+            self.log.drain(0..100);
         }
     }
-    fn log(&mut self, msg: String) {
-        self.lines.push(msg);
-        if self.lines.len() > 200 {
-            self.lines.drain(0..1);
-        }
-    }
+}
+
+// ---------------------------------------------------------------------------
+// App state
+// ---------------------------------------------------------------------------
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum Page {
+    Backup,
+    Settings,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum SettingsTab {
+    General,
+    Bandwidth,
+}
+
+enum FolderAction {
+    Upload(usize),
+    Retry(usize),
+    Remove(usize),
+    OpenFinder(usize),
+    ToggleEnabled(usize),
+}
+
+struct Row {
+    idx: usize,
+    name: String,
+    path: PathBuf,
+    enabled: bool,
+    status: FolderStatus,
+    total: usize,
+    done: usize,
+    last_updated: String,
 }
 
 struct PrimePhotoApp {
-    rt: std::sync::Arc<Runtime>,
+    rt: Arc<Runtime>,
     config: Config,
     config_path: String,
     config_error: Option<String>,
+    login: Arc<Mutex<login_helper::BrowserLogin>>,
+    cookie_paste: String,
+    page: Page,
+    settings_tab: SettingsTab,
+    store: FolderStore,
+    upload: Arc<Mutex<UploadShared>>,
+    paused: Arc<AtomicBool>,
+    concurrency: usize,
+    limit_enabled: bool,
+    limit_kbps: u32,
     album_name: String,
     zone_override: String,
-    cookie_paste: String,
-    files: Vec<PathBuf>,
-    progress: Arc<Mutex<UploadProgress>>,
-    uploading: Arc<Mutex<bool>>,
-    login: Arc<Mutex<login_helper::BrowserLogin>>,
+    was_active: bool,
 }
 
 impl PrimePhotoApp {
-    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        theme::apply(&_cc.egui_ctx);
-        let rt = std::sync::Arc::new(Runtime::new().expect("tokio runtime"));
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        theme::apply(&cc.egui_ctx);
+        let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         let (config, config_error) = match Config::load() {
             Ok(c) => (c, None),
             Err(e) => (Config::default(), Some(e.to_string())),
@@ -66,46 +114,53 @@ impl PrimePhotoApp {
         let config_path = Config::get_config_path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| e.to_string());
-        let zone_override = String::new();
-        let cookie_paste = String::new();
         Self {
             rt,
             config,
             config_path,
             config_error,
-            album_name: String::new(),
-            zone_override,
-            cookie_paste,
-            files: Vec::new(),
-            progress: Arc::new(Mutex::new(UploadProgress::new())),
-            uploading: Arc::new(Mutex::new(false)),
             login: Arc::new(Mutex::new(login_helper::BrowserLogin::new())),
+            cookie_paste: String::new(),
+            page: Page::Backup,
+            settings_tab: SettingsTab::General,
+            store: FolderStore::load(),
+            upload: Arc::new(Mutex::new(UploadShared::default())),
+            paused: Arc::new(AtomicBool::new(false)),
+            concurrency: 3,
+            limit_enabled: false,
+            limit_kbps: 100,
+            album_name: String::new(),
+            zone_override: String::new(),
+            was_active: false,
         }
     }
 
+    fn log(&self, msg: impl Into<String>) {
+        self.upload.lock().unwrap().log(msg);
+    }
+
+    fn is_logged_in(&self) -> bool {
+        !self.config.session_id.is_empty() && !self.config.cookie_x_acb.is_empty()
+    }
+
     fn save_config(&mut self) {
-        // If user gave zone override, use it
         if !self.zone_override.trim().is_empty() {
             self.config.zone = self.zone_override.trim().to_string();
         }
         match self.config.save() {
             Ok(_) => {
                 self.config_error = None;
-                let mut p = self.progress.lock().unwrap();
-                p.log("Config saved.".to_string());
+                self.log("Einstellungen gespeichert.");
             }
-            Err(e) => {
-                self.config_error = Some(e.to_string());
-            }
+            Err(e) => self.config_error = Some(e.to_string()),
         }
     }
 
+    // -- login --------------------------------------------------------------
+
     fn start_login(&mut self) {
-        {
-            let l = self.login.lock().unwrap();
-            if l.running {
-                return;
-            }
+        if self.login.lock().unwrap().running {
+            return;
         }
         let country = self.config.country.clone();
         {
@@ -116,8 +171,7 @@ impl PrimePhotoApp {
             l.error = None;
         }
         let login = self.login.clone();
-        let rt = self.rt.clone();
-        rt.spawn(async move {
+        self.rt.spawn(async move {
             login_helper::run_browser_login(country, login).await;
         });
     }
@@ -130,354 +184,700 @@ impl PrimePhotoApp {
         }
     }
 
-    fn add_files(&mut self) {
-        if let Some(paths) = FileDialog::new()
-            .add_filter("Images", &["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff", "gif", "webp", "bmp", "cr2", "cr3", "arw", "nef", "dng", "raf", "rw2", "orf", "srw", "pef", "3fr", "iiq", "erf", "mos", "kdc", "dcr", "mrw"])
-            .pick_files()
-        {
-            for p in paths {
-                if is_supported_image(&p) && !self.files.contains(&p) {
-                    self.files.push(p);
-                }
+    fn poll_login(&mut self) {
+        let outcome = { self.login.lock().unwrap().outcome.take() };
+        if let Some(outcome) = outcome {
+            let cookie_string = outcome
+                .cookies
+                .iter()
+                .map(|(n, v)| format!("{}={}", n, v))
+                .collect::<Vec<_>>()
+                .join("; ");
+            self.apply_cookie_string(&cookie_string);
+            match self.config.save() {
+                Ok(_) => self.log(format!("Login erfolgreich ({}).", outcome.browser_name)),
+                Err(e) => self.config_error = Some(e.to_string()),
             }
         }
     }
 
-    fn add_folder(&mut self) {
+    fn apply_cookie_string(&mut self, cookie_string: &str) {
+        let parsed = parse_cookie_string(cookie_string);
+        self.config.session_id = parsed.session_id;
+        if !parsed.country.is_empty() {
+            self.config.country = parsed.country;
+        }
+        self.config.cookie_x_acb = parsed.cookie_x_acb;
+        self.config.cookie_at_acb = parsed.cookie_at_acb;
+        self.config.cookie_ubid_acb = parsed.cookie_ubid_acb;
+        self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token;
+    }
+
+    // -- folders ------------------------------------------------------------
+
+    fn add_backup_folder(&mut self) {
         if let Some(folder) = FileDialog::new().pick_folder() {
-            for entry in walkdir::WalkDir::new(folder)
-                .into_iter()
-                .filter_map(Result::ok)
-                .filter(|e| e.file_type().is_file())
-            {
-                let p = entry.path().to_path_buf();
-                if is_supported_image(&p) && !self.files.contains(&p) {
-                    self.files.push(p);
-                }
+            if self.store.add(folder.clone()) {
+                let idx = self.store.folders.len() - 1;
+                let _ = self.store.save();
+                self.log(format!("Ordner hinzugefügt: {}", folder.display()));
+                self.start_folder_upload(vec![idx]);
+            } else {
+                self.log("Ordner ist bereits in der Liste.");
             }
         }
     }
 
-    fn start_upload(&mut self) {
-        if *self.uploading.lock().unwrap() {
+    fn apply_action(&mut self, action: FolderAction) {
+        match action {
+            FolderAction::Upload(i) | FolderAction::Retry(i) => {
+                self.start_folder_upload(vec![i]);
+            }
+            FolderAction::Remove(i) => {
+                if i < self.store.folders.len() {
+                    let f = self.store.folders.remove(i);
+                    let _ = self.store.save();
+                    self.log(format!("Datensicherung gestoppt: {}", f.name));
+                }
+            }
+            FolderAction::OpenFinder(i) => {
+                if let Some(f) = self.store.folders.get(i) {
+                    let _ = std::process::Command::new("open")
+                        .arg("-R")
+                        .arg(&f.path)
+                        .spawn();
+                }
+            }
+            FolderAction::ToggleEnabled(i) => {
+                if let Some(f) = self.store.folders.get_mut(i) {
+                    f.enabled = !f.enabled;
+                }
+                let _ = self.store.save();
+            }
+        }
+    }
+
+    fn start_folder_upload(&mut self, indices: Vec<usize>) {
+        if self.upload.lock().unwrap().active {
+            self.log("Es läuft bereits ein Upload.");
             return;
         }
-        if self.files.is_empty() {
-            let mut p = self.progress.lock().unwrap();
-            p.log("No files selected.".to_string());
+        if !self.is_logged_in() {
+            self.log("Bitte zuerst anmelden (Einstellungen).");
+            self.page = Page::Settings;
             return;
         }
-        // reset progress
+
+        let mut items: Vec<(usize, PathBuf)> = Vec::new();
+        let mut per_folder: HashMap<usize, usize> = HashMap::new();
+        for &i in &indices {
+            if let Some(f) = self.store.folders.get(i) {
+                let imgs = folders::scan_images(&f.path);
+                per_folder.insert(i, imgs.len());
+                for p in imgs {
+                    items.push((i, p));
+                }
+            }
+        }
+        if items.is_empty() {
+            self.log("Keine Fotos oder Videos in diesem Ordner gefunden.");
+            return;
+        }
+
         {
-            let mut p = self.progress.lock().unwrap();
-            *p = UploadProgress::new();
-            p.total = self.files.len();
-            p.log(format!(
-                "Starting upload of {} file(s)...",
-                self.files.len()
+            let mut s = self.upload.lock().unwrap();
+            s.active = true;
+            s.done = 0;
+            s.failed = 0;
+            s.current.clear();
+            s.log.clear();
+            s.folder_total = per_folder.clone();
+            s.folder_done.clear();
+            s.folder_failed.clear();
+            s.uploaded_ids.clear();
+            s.total = items.len();
+            s.log(format!("{} Datei(en) werden hochgeladen …", items.len()));
+        }
+        self.paused.store(false, Ordering::Relaxed);
+        self.was_active = true;
+
+        for (&i, &count) in &per_folder {
+            if let Some(f) = self.store.folders.get_mut(i) {
+                f.status = FolderStatus::Uploading;
+                f.total_files = count;
+            }
+        }
+        let _ = self.store.save();
+
+        let cfg = self.config.clone();
+        let shared = self.upload.clone();
+        let paused = self.paused.clone();
+        let concurrency = self.concurrency;
+        let limit = if self.limit_enabled {
+            self.limit_kbps
+        } else {
+            0
+        };
+        let album = self.album_name.clone();
+        self.rt.spawn(async move {
+            run_upload(items, cfg, shared, paused, concurrency, limit, album).await;
+        });
+    }
+
+    fn finalize_upload(&mut self) {
+        let (folder_done, folder_failed) = {
+            let s = self.upload.lock().unwrap();
+            (s.folder_done.clone(), s.folder_failed.clone())
+        };
+        let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
+        for (i, f) in self.store.folders.iter_mut().enumerate() {
+            if let Some(&done) = folder_done.get(&i) {
+                f.uploaded_files = done;
+                f.last_updated = now.clone();
+                f.status = if folder_failed.get(&i).copied().unwrap_or(0) > 0 {
+                    FolderStatus::Error
+                } else {
+                    FolderStatus::Done
+                };
+            }
+        }
+        let _ = self.store.save();
+    }
+
+    // -- rendering ----------------------------------------------------------
+
+    fn nav_item(ui: &mut egui::Ui, current: &mut Page, value: Page, label: &str) {
+        let selected = *current == value;
+        let text = RichText::new(label).size(15.0);
+        let resp = ui.add_sized(
+            [ui.available_width(), 34.0],
+            egui::SelectableLabel::new(selected, text),
+        );
+        if resp.clicked() {
+            *current = value;
+        }
+    }
+
+    fn sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        ui.label(RichText::new("amazon photos").size(20.0).strong());
+        ui.add_space(16.0);
+        Self::nav_item(ui, &mut self.page, Page::Backup, "☁   Datensicherung");
+        Self::nav_item(ui, &mut self.page, Page::Settings, "⚙   Einstellungen");
+
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            ui.add_space(8.0);
+            let logged_in = self.is_logged_in();
+            let (txt, col) = if logged_in {
+                ("● Angemeldet", theme::GREEN)
+            } else {
+                ("● Nicht angemeldet", theme::RED)
+            };
+            ui.label(RichText::new(txt).color(col).size(12.0));
+            if let Some(e) = &self.config_error {
+                ui.label(RichText::new(e).color(theme::RED).size(11.0));
+            }
+        });
+    }
+
+    fn storage_bar(&self, ui: &mut egui::Ui) {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Speichernutzung").strong());
+            ui.label(theme::muted("Ihr Speicherplatz: Unbegrenzte Fotos"));
+        });
+        // Real quota is fetched later; show an indeterminate placeholder for now.
+        ui.add(egui::ProgressBar::new(0.02).desired_width(ui.available_width().min(520.0)));
+        ui.label(theme::muted("Speicherverbrauch wird nach dem ersten Abgleich geladen."));
+    }
+
+    fn backup_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui
+                .add(theme::primary_button("Datensicherung hinzufügen …"))
+                .clicked()
+            {
+                self.add_backup_folder();
+            }
+            let all_paused = self.paused.load(Ordering::Relaxed);
+            let label = if all_paused {
+                "Alle Sicherungsvorgänge fortsetzen"
+            } else {
+                "Alle Sicherungsvorgänge anhalten"
+            };
+            let running = self.upload.lock().unwrap().active;
+            if ui
+                .add_enabled(
+                    !self.store.folders.is_empty() && running,
+                    theme::secondary_button(label),
+                )
+                .clicked()
+            {
+                self.paused.store(!all_paused, Ordering::Relaxed);
+            }
+            if running {
+                ui.spinner();
+            }
+        });
+
+        ui.add_space(12.0);
+        ui.label(theme::muted("Automatisch gesicherte Ordner:"));
+
+        if self.store.folders.is_empty() {
+            ui.add_space(8.0);
+            ui.label("Wählen Sie einen Ordner aus, um die Sicherung zu starten.");
+            ui.add_space(6.0);
+            ui.label(theme::muted(
+                "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
             ));
         }
-        *self.uploading.lock().unwrap() = true;
 
-        let config = self.config.clone();
-        let files = self.files.clone();
-        let album_name = self.album_name.clone();
-        let progress = self.progress.clone();
-        let uploading = self.uploading.clone();
-        let rt = &self.rt;
-
-        rt.spawn(async move {
-            let mut uploader = AmznPhoto::new(&config, false);
-            let mut album_id = String::new();
-
-            let name = album_name.trim().to_string();
-            if !name.is_empty() {
-                {
-                    let mut p = progress.lock().unwrap();
-                    p.log(format!("Resolving album '{}'...", name));
-                }
-                match uploader.get_album(&name).await {
-                    Ok(c) => {
-                        album_id = c.id.clone();
-                        let mut p = progress.lock().unwrap();
-                        p.log(format!("Album ready: {} ({})", c.name, c.id));
+        // Snapshot rows for read-only rendering.
+        let rows: Vec<Row> = {
+            let s = self.upload.lock().unwrap();
+            self.store
+                .folders
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let total = s.folder_total.get(&i).copied().unwrap_or(f.total_files);
+                    let done = s.folder_done.get(&i).copied().unwrap_or(f.uploaded_files);
+                    Row {
+                        idx: i,
+                        name: f.name.clone(),
+                        path: f.path.clone(),
+                        enabled: f.enabled,
+                        status: f.status,
+                        total,
+                        done,
+                        last_updated: f.last_updated.clone(),
                     }
-                    Err(e) => {
-                        let mut p = progress.lock().unwrap();
-                        p.log(format!("Album error: {:?}", e));
-                        *uploading.lock().unwrap() = false;
-                        return;
-                    }
-                }
-            }
+                })
+                .collect()
+        };
 
-            let mut uploaded_ids: Vec<String> = Vec::new();
-            for (idx, path) in files.iter().enumerate() {
-                {
-                    let mut p = progress.lock().unwrap();
-                    p.current = path.display().to_string();
-                    p.log(format!(
-                        "[{}/{}] Uploading {}...",
-                        idx + 1,
-                        files.len(),
-                        path.display()
-                    ));
+        let mut actions: Vec<FolderAction> = Vec::new();
+        egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .show(ui, |ui| {
+                for r in &rows {
+                    let pct = if r.total > 0 {
+                        r.done as f32 / r.total as f32
+                    } else {
+                        0.0
+                    };
+                    let (status_txt, status_col) = status_text(r.status, pct, r.total);
+                    egui::Frame::new()
+                        .fill(theme::CARD_BG)
+                        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+                        .inner_margin(egui::Margin::symmetric(12, 10))
+                        .outer_margin(egui::Margin::symmetric(0, 4))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&r.name).strong().size(15.0));
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{:.0}% hochgeladen",
+                                            pct * 100.0
+                                        ))
+                                        .size(12.0),
+                                    );
+                                    if !r.last_updated.is_empty() {
+                                        ui.label(
+                                            theme::muted(format!(
+                                                "Zuletzt aktualisiert: {}",
+                                                r.last_updated
+                                            ))
+                                            .size(11.0),
+                                        );
+                                    } else {
+                                        ui.label(
+                                            theme::muted(&r.path.display().to_string()).size(11.0),
+                                        );
+                                    }
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.menu_button("⋯", |ui| {
+                                            if ui.button("Jetzt scannen und hochladen").clicked() {
+                                                actions.push(FolderAction::Upload(r.idx));
+                                                ui.close_menu();
+                                            }
+                                            if ui.button("Im Finder anzeigen").clicked() {
+                                                actions.push(FolderAction::OpenFinder(r.idx));
+                                                ui.close_menu();
+                                            }
+                                            if ui.button("Wiederholen").clicked() {
+                                                actions.push(FolderAction::Retry(r.idx));
+                                                ui.close_menu();
+                                            }
+                                            ui.separator();
+                                            if ui.button("Datensicherung stoppen").clicked() {
+                                                actions.push(FolderAction::Remove(r.idx));
+                                                ui.close_menu();
+                                            }
+                                        });
+                                        let running = self.upload.lock().unwrap().active;
+                                        if ui
+                                            .add_enabled(
+                                                running,
+                                                egui::Button::new(
+                                                    RichText::new(if r.enabled {
+                                                        "⏸"
+                                                    } else {
+                                                        "▶"
+                                                    })
+                                                    .size(16.0),
+                                                )
+                                                .frame(false),
+                                            )
+                                            .clicked()
+                                        {
+                                            actions.push(FolderAction::ToggleEnabled(r.idx));
+                                        }
+                                        ui.label(
+                                            RichText::new(status_txt).color(status_col).size(12.0),
+                                        );
+                                    },
+                                );
+                            });
+                        });
                 }
-                match uploader.upload_picture(path, None, None).await {
-                    Ok(id) => {
-                        uploaded_ids.push(id.clone());
-                        {
-                            let mut p = progress.lock().unwrap();
-                            p.done += 1;
-                            p.log(format!("OK -> {}", id));
-                        }
-                    }
-                    Err(e) => {
-                        let mut p = progress.lock().unwrap();
-                        p.log(format!("FAILED: {}", e));
-                    }
-                }
-            }
+            });
 
-            if !uploaded_ids.is_empty() && !album_id.is_empty() {
-                {
-                    let mut p = progress.lock().unwrap();
-                    p.log(format!("Adding {} file(s) to album...", uploaded_ids.len()));
-                }
-                let _ = uploader.add_to_album(album_id.clone(), &uploaded_ids).await;
-                // ignore error logging
-            }
+        ui.add_space(8.0);
+        self.storage_bar(ui);
 
-            {
-                let mut p = progress.lock().unwrap();
-                p.finished = true;
-                p.current.clear();
-                p.log("Done.".to_string());
-            }
-            *uploading.lock().unwrap() = false;
+        for a in actions {
+            self.apply_action(a);
+        }
+    }
+
+    fn settings_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut self.settings_tab,
+                SettingsTab::General,
+                "Allgemeines",
+            );
+            ui.selectable_value(
+                &mut self.settings_tab,
+                SettingsTab::Bandwidth,
+                "Bandbreite",
+            );
         });
+        ui.separator();
+
+        match self.settings_tab {
+            SettingsTab::General => self.general_settings(ui),
+            SettingsTab::Bandwidth => self.bandwidth_settings(ui),
+        }
+    }
+
+    fn general_settings(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Anmeldung");
+        ui.label(theme::muted(
+            "Melde dich bei Amazon Photos an. Die Cookies werden automatisch übernommen.",
+        ));
+        let mut login_started = false;
+        let mut login_cancelled = false;
+        {
+            let l = self.login.lock().unwrap();
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!l.running, theme::primary_button("Mit Browser anmelden"))
+                    .clicked()
+                {
+                    login_started = true;
+                }
+                if ui
+                    .add_enabled(l.running, theme::secondary_button("Abbrechen"))
+                    .clicked()
+                {
+                    login_cancelled = true;
+                }
+                if l.running {
+                    ui.spinner();
+                }
+            });
+            if !l.message.is_empty() {
+                ui.label(&l.message);
+            }
+            if let Some(e) = &l.error {
+                ui.colored_label(theme::RED, e);
+            }
+        }
+        if login_started {
+            self.start_login();
+        }
+        if login_cancelled {
+            self.cancel_login();
+        }
+
+        ui.add_space(6.0);
+        ui.collapsing("Cookies manuell einfügen", |ui| {
+            ui.add(egui::TextEdit::multiline(&mut self.cookie_paste).desired_rows(3));
+            if ui.button("Cookies übernehmen").clicked() {
+                let c = self.cookie_paste.clone();
+                self.apply_cookie_string(&c);
+                self.log("Cookies übernommen. Bitte speichern.");
+            }
+        });
+
+        ui.separator();
+        ui.heading("Upload");
+        ui.horizontal(|ui| {
+            ui.label("Album (optional):");
+            ui.text_edit_singleline(&mut self.album_name);
+        });
+
+        ui.separator();
+        ui.collapsing("Erweitert (Konto/Config)", |ui| {
+            ui.label(theme::muted(format!("Konfiguration: {}", self.config_path)));
+            egui::Grid::new("cfg").num_columns(2).show(ui, |ui| {
+                ui.label("Land");
+                ui.text_edit_singleline(&mut self.config.country);
+                ui.end_row();
+                ui.label("Zone");
+                ui.text_edit_singleline(&mut self.config.zone);
+                ui.end_row();
+                ui.label("User-Agent");
+                ui.text_edit_singleline(&mut self.config.user_agent);
+                ui.end_row();
+                ui.label("session-id");
+                ui.text_edit_singleline(&mut self.config.session_id);
+                ui.end_row();
+                ui.label("x-acb");
+                ui.text_edit_singleline(&mut self.config.cookie_x_acb);
+                ui.end_row();
+                ui.label("at-acb");
+                ui.text_edit_singleline(&mut self.config.cookie_at_acb);
+                ui.end_row();
+                ui.label("ubid-acb");
+                ui.text_edit_singleline(&mut self.config.cookie_ubid_acb);
+                ui.end_row();
+            });
+        });
+
+        ui.add_space(10.0);
+        if ui.add(theme::primary_button("Speichern")).clicked() {
+            self.save_config();
+        }
+    }
+
+    fn bandwidth_settings(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Uploads");
+        ui.add(
+            egui::Slider::new(&mut self.concurrency, 1..=8)
+                .text("Gleichzeitige Uploads")
+                .integer(),
+        );
+        ui.add_space(8.0);
+        ui.label("Upload-Rate pro Datei");
+        ui.radio_value(&mut self.limit_enabled, false, "Nicht begrenzen");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.limit_enabled, true, "Begrenzen auf");
+            ui.add_enabled(
+                self.limit_enabled,
+                egui::DragValue::new(&mut self.limit_kbps).speed(10.0),
+            );
+            ui.label("KB/Sekunde");
+        });
+        ui.add_space(6.0);
+        ui.label(theme::muted(
+            "Hinweis: Die Begrenzung wird pro Datei nach dem Upload angewendet.",
+        ));
+
+        ui.separator();
+        ui.heading("Downloads");
+        ui.label(theme::muted("Downloads sind in diesem Port noch nicht implementiert."));
+
+        ui.add_space(10.0);
+        if ui.add(theme::primary_button("Speichern")).clicked() {
+            self.save_config();
+        }
+    }
+}
+
+fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32) {
+    match status {
+        FolderStatus::Uploading => (format!("{:.0}% hochgeladen", pct * 100.0), theme::TEAL),
+        FolderStatus::Done => ("100% hochgeladen".to_string(), theme::GREEN),
+        FolderStatus::Paused => (format!("Angehalten ({:.0}%)", pct * 100.0), theme::AMBER),
+        FolderStatus::Error => ("Fehler".to_string(), theme::RED),
+        FolderStatus::Scanning => ("Wird vorbereitet …".to_string(), theme::MUTED),
+        FolderStatus::Idle => {
+            if total > 0 {
+                (format!("{:.0}% hochgeladen", pct * 100.0), theme::MUTED)
+            } else {
+                (String::new(), theme::MUTED)
+            }
+        }
     }
 }
 
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Prime Photo Uploader");
-            ui.label(format!("Config: {}", self.config_path));
-            if let Some(e) = &self.config_error {
-                ui.colored_label(egui::Color32::RED, format!("Config error: {}", e));
-            }
+        self.poll_login();
 
-            ui.separator();
-            ui.label("Album name (optional):");
-            ui.text_edit_singleline(&mut self.album_name);
+        egui::SidePanel::left("nav")
+            .exact_width(220.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::SIDEBAR_BG)
+                    .inner_margin(egui::Margin::symmetric(12, 16)),
+            )
+            .show(ctx, |ui| self.sidebar(ui));
 
-            ui.separator();
-            ui.label("Config fields (edit then Save):");
-            egui::Grid::new("cfg").num_columns(2).show(ui, |ui| {
-                ui.label("country");
-                ui.text_edit_singleline(&mut self.config.country);
-                ui.end_row();
-                ui.label("zone");
-                ui.text_edit_singleline(&mut self.config.zone);
-                ui.end_row();
-                ui.label("zone override");
-                ui.text_edit_singleline(&mut self.zone_override);
-                ui.end_row();
-                ui.label("user_agent");
-                ui.text_edit_singleline(&mut self.config.user_agent);
-                ui.end_row();
-                ui.label("session_id");
-                ui.text_edit_singleline(&mut self.config.session_id);
-                ui.end_row();
-                ui.label("cookie_x_acb");
-                ui.text_edit_singleline(&mut self.config.cookie_x_acb);
-                ui.end_row();
-                ui.label("cookie_at_acb");
-                ui.text_edit_singleline(&mut self.config.cookie_at_acb);
-                ui.end_row();
-                ui.label("cookie_ubid_acb");
-                ui.text_edit_singleline(&mut self.config.cookie_ubid_acb);
-                ui.end_row();
-                ui.label("cookie_x_amz_access_token");
-                ui.text_edit_singleline(&mut self.config.cookie_x_amz_access_token);
-                ui.end_row();
-            });
-            if ui.button("Save Config").clicked() {
-                self.save_config();
-            }
-
-            ui.separator();
-            ui.label("Automatischer Browser-Login:");
-            let mut login_started = false;
-            let mut login_cancelled = false;
-            {
-                let l = self.login.lock().unwrap();
-                ui.horizontal(|ui| {
-                    let enabled = !l.running;
-                    if ui.add_enabled(enabled, egui::Button::new("Mit Browser anmelden")).clicked() {
-                        login_started = true;
-                    }
-                    if ui.add_enabled(l.running, egui::Button::new("Abbrechen")).clicked() {
-                        login_cancelled = true;
-                    }
-                    if l.running {
-                        ui.spinner();
-                    }
-                });
-                if !l.message.is_empty() {
-                    ui.label(&l.message);
-                }
-                if let Some(e) = &l.error {
-                    ui.colored_label(egui::Color32::RED, e);
-                }
-            }
-            if login_started {
-                self.start_login();
-            }
-            if login_cancelled {
-                self.cancel_login();
-            }
-
-            // Handle a completed browser login.
-            let outcome = {
-                let mut l = self.login.lock().unwrap();
-                l.outcome.take()
-            };
-            if let Some(outcome) = outcome {
-                let cookie_string = outcome
-                    .cookies
-                    .iter()
-                    .map(|(n, v)| format!("{}={}", n, v))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                let parsed = parse_cookie_string(&cookie_string);
-                self.config.session_id = parsed.session_id;
-                if !parsed.country.is_empty() {
-                    self.config.country = parsed.country;
-                }
-                self.config.cookie_x_acb = parsed.cookie_x_acb;
-                self.config.cookie_at_acb = parsed.cookie_at_acb;
-                self.config.cookie_ubid_acb = parsed.cookie_ubid_acb;
-                self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token;
-                match self.config.save() {
-                    Ok(_) => {
-                        let mut p = self.progress.lock().unwrap();
-                        p.log(format!(
-                            "Login erfolgreich ({}). Cookies übernommen und gespeichert.",
-                            outcome.browser_name
-                        ));
-                    }
-                    Err(e) => {
-                        self.config_error = Some(e.to_string());
-                    }
-                }
-            }
-
-            ui.separator();
-            ui.label("Manueller Login-Helper (Browser-Cookie-String einfügen):");
-            ui.add(egui::TextEdit::multiline(&mut self.cookie_paste).desired_rows(3));
-            ui.horizontal(|ui| {
-                if ui.button("Parse cookies").clicked() {
-                    let parsed = parse_cookie_string(&self.cookie_paste);
-                    self.config.session_id = parsed.session_id;
-                    if !parsed.country.is_empty() {
-                        self.config.country = parsed.country;
-                    }
-                    self.config.cookie_x_acb = parsed.cookie_x_acb;
-                    self.config.cookie_at_acb = parsed.cookie_at_acb;
-                    self.config.cookie_ubid_acb = parsed.cookie_ubid_acb;
-                    self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token;
-                    let mut p = self.progress.lock().unwrap();
-                    p.log("Cookies parsed into config fields. Press Save Config.".to_string());
-                }
-                if ui.button("Open Amazon Photos in browser").clicked() {
-                    let url = "https://www.amazon.com/photos".to_string();
-                    let _ = std::process::Command::new("open").arg(url).spawn();
-                }
-            });
-
-            ui.separator();
-            ui.horizontal(|ui| {
-                if ui.button("Add Files").clicked() {
-                    self.add_files();
-                }
-                if ui.button("Add Folder").clicked() {
-                    self.add_folder();
-                }
-                if ui.button("Clear").clicked() {
-                    self.files.clear();
-                }
-            });
-            ui.label(format!("Selected files: {}", self.files.len()));
-            egui::ScrollArea::vertical()
-                .max_height(120.0)
-                .show(ui, |ui| {
-                    for f in &self.files {
-                        ui.label(f.display().to_string());
-                    }
-                });
-
-            let uploading = *self.uploading.lock().unwrap();
-            ui.separator();
-            ui.horizontal(|ui| {
-                let enabled = !uploading && !self.files.is_empty();
-                if ui
-                    .add_enabled(enabled, egui::Button::new("Upload"))
-                    .clicked()
-                {
-                    self.start_upload();
-                }
-                if uploading {
-                    ui.spinner();
-                }
-            });
-
-            // progress
-            let prog = self.progress.lock().unwrap();
-            let total = prog.total;
-            let done = prog.done;
-            let fraction = if total > 0 {
-                done as f32 / total as f32
-            } else {
-                0.0
-            };
-            ui.add(egui::ProgressBar::new(fraction).text(format!("{}/{}", done, total)));
-            if !prog.current.is_empty() {
-                ui.label(format!("Current: {}", prog.current));
-            }
-            ui.separator();
-            ui.label("Log:");
-            egui::ScrollArea::vertical()
-                .max_height(220.0)
-                .show(ui, |ui| {
-                    for line in &prog.lines {
-                        ui.label(line);
-                    }
-                });
+        egui::CentralPanel::default().show(ctx, |ui| match self.page {
+            Page::Backup => self.backup_ui(ui),
+            Page::Settings => self.settings_ui(ui),
         });
-        if *self.uploading.lock().unwrap() {
-            ctx.request_repaint();
+
+        // Bottom log panel (collapsible) for transparency.
+        egui::TopBottomPanel::bottom("log")
+            .resizable(true)
+            .default_height(24.0)
+            .min_height(24.0)
+            .show(ctx, |ui| {
+                let s = self.upload.lock().unwrap();
+                let summary = if s.active {
+                    format!(
+                        "Upload läuft: {}/{} · {}",
+                        s.done, s.total, s.current
+                    )
+                } else if s.total > 0 {
+                    format!("Letzter Upload: {}/{} erfolgreich", s.done, s.total - s.failed)
+                } else {
+                    "Bereit".to_string()
+                };
+                egui::CollapsingHeader::new(summary).show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(140.0)
+                        .show(ui, |ui| {
+                            for line in &s.log {
+                                ui.label(line);
+                            }
+                        });
+                });
+            });
+
+        let active = self.upload.lock().unwrap().active;
+        if active || self.was_active {
+            ctx.request_repaint_after(Duration::from_millis(250));
+            if self.was_active && !active {
+                self.finalize_upload();
+                self.was_active = false;
+            }
         }
     }
 }
 
-fn is_supported_image(path: &std::path::Path) -> bool {
-    let ext = match path.extension().and_then(|e| e.to_str()) {
-        Some(e) => e.to_lowercase(),
-        None => return false,
-    };
-    // Explicitly never treat XMP sidecars (or other non-image assets) as images.
-    if ext == "xmp" {
-        return false;
+// ---------------------------------------------------------------------------
+// Async upload machinery
+// ---------------------------------------------------------------------------
+
+async fn upload_worker(
+    queue: Arc<Mutex<VecDeque<(usize, PathBuf)>>>,
+    shared: Arc<Mutex<UploadShared>>,
+    cfg: Config,
+    paused: Arc<AtomicBool>,
+    limit_kbps: u32,
+) {
+    let mut uploader = AmznPhoto::new(&cfg, false);
+    loop {
+        while paused.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        let item = { queue.lock().unwrap().pop_front() };
+        let Some((idx, path)) = item else { break };
+
+        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        {
+            let mut s = shared.lock().unwrap();
+            s.current = path.display().to_string();
+        }
+        let started = Instant::now();
+        match uploader.upload_picture(&path, None, None).await {
+            Ok(id) => {
+                let mut s = shared.lock().unwrap();
+                s.done += 1;
+                *s.folder_done.entry(idx).or_insert(0) += 1;
+                s.uploaded_ids.push(id);
+                s.log(format!("OK    {}", path.display()));
+            }
+            Err(e) => {
+                let mut s = shared.lock().unwrap();
+                s.failed += 1;
+                *s.folder_failed.entry(idx).or_insert(0) += 1;
+                s.log(format!("FEHLER {}: {}", path.display(), e));
+            }
+        }
+
+        if limit_kbps > 0 && size > 0 {
+            let target = Duration::from_secs_f64(size as f64 / (limit_kbps as f64 * 1024.0));
+            let elapsed = started.elapsed();
+            if target > elapsed {
+                tokio::time::sleep(target - elapsed).await;
+            }
+        }
     }
-    matches!(
-        ext.as_str(),
-        "jpg" | "jpeg" | "png" | "heic" | "heif" | "tif" | "tiff" | "gif" | "webp" | "bmp"
-            | "cr2" | "cr3" | "arw" | "nef" | "dng" | "raf" | "rw2" | "orf" | "srw"
-            | "pef" | "3fr" | "iiq" | "erf" | "mos" | "kdc" | "dcr" | "mrw" | "raw"
-    )
 }
+
+async fn run_upload(
+    items: Vec<(usize, PathBuf)>,
+    cfg: Config,
+    shared: Arc<Mutex<UploadShared>>,
+    paused: Arc<AtomicBool>,
+    concurrency: usize,
+    limit_kbps: u32,
+    album: String,
+) {
+    let count = items.len();
+    let queue = Arc::new(Mutex::new(VecDeque::from(items)));
+    let workers = concurrency.max(1).min(count.max(1));
+
+    let mut set = JoinSet::new();
+    for _ in 0..workers {
+        let q = queue.clone();
+        let s = shared.clone();
+        let c = cfg.clone();
+        let p = paused.clone();
+        set.spawn(async move {
+            upload_worker(q, s, c, p, limit_kbps).await;
+        });
+    }
+    while set.join_next().await.is_some() {}
+
+    let name = album.trim().to_string();
+    if !name.is_empty() {
+        let ids = { shared.lock().unwrap().uploaded_ids.clone() };
+        if !ids.is_empty() {
+            let mut up = AmznPhoto::new(&cfg, false);
+            if let Ok(c) = up.get_album(&name).await {
+                let _ = up.add_to_album(c.id, &ids).await;
+            }
+        }
+    }
+
+    let (done, failed) = {
+        let mut s = shared.lock().unwrap();
+        s.active = false;
+        s.current.clear();
+        (s.done, s.failed)
+    };
+    shared.lock().unwrap().log(format!(
+        "Fertig: {} erfolgreich, {} fehlgeschlagen.",
+        done, failed
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Cookie parsing (manual fallback)
+// ---------------------------------------------------------------------------
 
 struct ParsedCookies {
     session_id: String,
@@ -497,7 +897,6 @@ fn parse_cookie_string(input: &str) -> ParsedCookies {
         cookie_ubid_acb: String::new(),
         cookie_x_amz_access_token: String::new(),
     };
-
     let mut detected_country = String::new();
     for part in input.split(';') {
         let part = part.trim();
@@ -510,21 +909,19 @@ fn parse_cookie_string(input: &str) -> ParsedCookies {
             match name {
                 "session-id" => result.session_id = value.to_string(),
                 n if n.starts_with("x-acb") && n.len() > 5 => {
-                    let suffix = &n["x-acb".len()..];
                     if result.cookie_x_acb.is_empty() {
                         result.cookie_x_acb = value.to_string();
                     }
-                    if detected_country.is_empty() && !suffix.is_empty() {
-                        detected_country = suffix.to_lowercase();
+                    if detected_country.is_empty() {
+                        detected_country = n["x-acb".len()..].to_lowercase();
                     }
                 }
                 n if n.starts_with("at-acb") => {
                     if result.cookie_at_acb.is_empty() {
                         result.cookie_at_acb = value.to_string();
                     }
-                    let suffix = &n["at-acb".len()..];
-                    if detected_country.is_empty() && !suffix.is_empty() {
-                        detected_country = suffix.to_lowercase();
+                    if detected_country.is_empty() {
+                        detected_country = n["at-acb".len()..].to_lowercase();
                     }
                 }
                 n if n.starts_with("ubid-acb") => {
@@ -546,17 +943,15 @@ fn parse_cookie_string(input: &str) -> ParsedCookies {
 }
 
 fn main() -> eframe::Result<()> {
-    // Build a multi-threaded tokio runtime held by the app
-    let _rt = Runtime::new().expect("failed to build tokio runtime");
-
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([980.0, 680.0])
+            .with_min_inner_size([760.0, 520.0]),
+        ..Default::default()
+    };
     eframe::run_native(
         "Prime Photo Uploader",
         options,
         Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
     )
 }
-
-// helper to avoid unused
-#[allow(dead_code)]
-fn _use_systemtime(_t: SystemTime) {}
