@@ -159,6 +159,11 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
 - [ ] **PORT-5 – Hintergrund-Sync** (periodischer Re-Scan + Upload, solange im Hintergrund).
 - [ ] **PORT-6 – Paketierung.** macOS `.app`-Bundle + selbstsignierte Codesignatur (Skript),
   Windows/Linux-Buildhinweise; `.app`-Backlog-Item geht hierin auf.
+- [ ] **I18N-1 – Internationalisierung (de+en).** Nach REF-2 (siehe `AGENTS.md` „Internationalisierung"):
+  `src/i18n.rs` mit `Lang`-Enum + zentraler String-Tabelle (de = Quelle, en daneben), `Config.language`
+  (serde-Default aus OS-Locale) + Sprachwahl in den Einstellungen, alle UI-Strings der Feature-Module
+  (inkl. Marktplatz-Ländernamen in `countries.rs`, Fenstertitel, Log-/Statuszeilen) darüber führen.
+  Kein hartkodierter UI-Text mehr außerhalb `i18n.rs`. Weitere lateinische Sprachen später additiv.
 - [ ] **PORT-7 – Shell-Aufrufe plattformneutral** (Befund aus PORT-1-Verify, nicht blockierend):
   `main.rs` nutzt macOS-Kommandos ohne `cfg` — „Im Finder zeigen" (`open -R`, `main.rs:302`),
   „im Browser öffnen" (`open <url>`, `main.rs:605`); auf Windows/Linux still wirkungslos. Soll:
@@ -168,17 +173,16 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
 **Refactor-Vorlauf (User-Entscheidung 2026-10-13: `main.rs` splitten, damit parallel gearbeitet
 werden kann — Details/Zielstruktur in `AGENTS.md` „Modul-Struktur"):**
 
-- [ ] **REF-1 – Blatt-Module extrahieren.** `src/countries.rs` (`COUNTRIES`, `country_label`,
-  `system_country`, `ParsedCookies`, `parse_cookie_string`), `src/upload.rs` (`UploadShared` (+`log`),
-  `upload_worker`, `run_upload`, `status_text`, `eta_secs`, `format_eta`, `eta_suffix`,
-  `upload_progress_text`) und die Icons (`NavIcon`, `nav_icon`, `status_dot`, `draw_avatar`,
-  `upload_logo`). Reiner Move, `pub(crate)` wo nötig. (Läuft zunächst mit den Icons unter
-  `src/ui/icons.rs`; REF-2 zieht sie auf `src/icons.rs` um.)
+- [x] **REF-1 – Blatt-Module extrahieren.** Erledigt (nicht committet→siehe Commit-Log): `src/countries.rs`
+  (`COUNTRIES`, `country_label`, `system_country`, `ParsedCookies`, `parse_cookie_string`),
+  `src/upload.rs` (`UploadShared` (+`log`), `upload_worker`, `run_upload`, `status_text`, `eta_secs`,
+  `format_eta`, `eta_suffix`, `upload_progress_text`), `src/icons.rs` (`NavIcon`, `nav_icon`,
+  `status_dot`, `draw_avatar`, `upload_logo`). Reiner Move, nur `pub(crate)` + 2 Import-Pfade.
+  Verifiziert (Verifier: PASS, 497/497 Zeilen byte-identisch). `main.rs` 1780 → ~1260 Zeilen.
 - [ ] **REF-2 – Feature-Module.** `src/app.rs` (`PrimePhotoApp` + `impl` + `impl eframe::App` +
   Sidebar/Navigation), `login.rs` erweitern um die Login-Screens, `src/backup.rs` (Liste/`Row`/
   Zeilen-Aktionen), `src/backup_config.rs` (Dialog „Datensicherungseinstellungen"),
   `src/settings.rs` (Einstellungs-Seite + Konto). Felder/Methoden `pub(crate)`. Reiner Move.
-  `src/icons.rs` von `src/ui/` hochziehen und `src/ui/` entfernen.
 
 Danach können **PORT-4/5/6/7** (und Folge-Features) auf getrennten Dateien laufen.
 Pakete, die `main.rs`/`Cargo.toml` anfassen, bleiben seriell.

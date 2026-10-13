@@ -115,6 +115,24 @@ nicht `Config` in die UI-Datei.)
 Regel: **kein Verhaltens- oder UI-Änderung** in den Refactor-Paketen — verschobener Code bleibt
 byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit ändern sich.
 
+## Internationalisierung (i18n) — User-Entscheidung 2026-10-13
+
+- **Jetzt einführen, minimal:** direkt **nach REF-2** (dann sind die UI-Strings frisch pro Feature-Modul
+  sortiert) eine zentrale String-Schicht `src/i18n.rs` mit `Lang`-Enum und einer Tabelle. Zuerst
+  **de + en** vollständig; jede weitere Sprache ist danach **additiv** (kein Umbau).
+- **Sprachwahl:** Default = OS-Locale, **Override in den Einstellungen**; im `Config` persistiert
+  (`language`, serde-Default aus der OS-Locale, damit alte `config.toml` weiter lädt).
+- **Umfang mittelfristig: lateinische Sprachen** (de, en, fr, it, es, pt). **Kein CJK** (egui's
+  Default-Font ist Latin-only → bräuchte einen Noto-CJK-Font, gebündelt ~16 MB oder pro OS geladen)
+  und **kein RTL** (egui hat kein Bidi-Layout; Arabisch/Hebräisch nur in der Webview, nicht in
+  unserem Chrome).
+- **Webview-Sprache:** **Marktplatz-Default belassen** — Amazon entscheidet die Seitensprache aus
+  TLD + Cookies/`Accept-Language`. Wir erzwingen **nichts** (`lc-`-Cookie/`language`-Parameter wären
+  unbelegt und könnten die Login-Seite verändern). Folge: deutsches UI + `amazon.com` ⇒ Loginseite
+  englisch — bewusst akzeptiert.
+- **Regel:** Kein hartkodierter UI-Text außerhalb von `src/i18n.rs`. Neue Strings kommen direkt
+  zweisprachig dazu. Die Marktplatz-Ländernamen in `countries.rs` sind ebenfalls UI-Text (→ i18n).
+
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
