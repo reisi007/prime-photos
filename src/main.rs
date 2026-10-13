@@ -1304,14 +1304,25 @@ async fn upload_worker(
             let target = Duration::from_secs_f64(size as f64 / (limit_kbps as f64 * 1024.0));
             let elapsed = started.elapsed();
             if target > elapsed {
-                let remaining = target - elapsed;
-                tokio::select! {
-                    biased;
-                    changed = pause_rx.changed() => {
-                        let _ = changed;
-                        let _ = pause_rx.borrow_and_update();
+                // F-2 fix (AGENTS.todo.md, P1 residue): enforce the per-file
+                // pacing *across* a pause/resume boundary. Previously this was
+                // one big sleep raced against pause_rx.changed(), so a pause
+                // dropped the outstanding throttle and the next file uploaded
+                // immediately (effective limit exceeded). Instead sleep in
+                // short slices: park while paused, otherwise consume each
+                // slice's actually-elapsed time from the remaining budget, and
+                // stop only once it is fully spent — so resuming continues the
+                // throttle rather than skipping it.
+                let slice = Duration::from_millis(200);
+                let mut remaining = target - elapsed;
+                while remaining > Duration::ZERO {
+                    while *pause_rx.borrow_and_update() {
+                        tokio::time::sleep(slice).await;
                     }
-                    _ = tokio::time::sleep(remaining) => {}
+                    let step = remaining.min(slice);
+                    let before = Instant::now();
+                    tokio::time::sleep(step).await;
+                    remaining = remaining.saturating_sub(before.elapsed());
                 }
             }
         }
