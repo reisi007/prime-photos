@@ -53,6 +53,36 @@ pub enum FolderStatus {
     Error,
 }
 
+/// How a name conflict in the destination folder is resolved on upload.
+///
+/// Mirrors the original client's four options ("Umgang mit Dateinamenkonflikten",
+/// `docs/SPEC_DEDUP.md` §4.1) and maps onto the wire parameter `conflictResolution`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ConflictResolution {
+    /// "Jedes Mal nachfragen" — no server-side policy yet; behaves like `Ignore`.
+    Ask,
+    /// "Ignorieren" — the dedup-friendly default (`conflictResolution=NONE`).
+    #[default]
+    Ignore,
+    /// "Als neue Dateien speichern" (`conflictResolution=RENAME`).
+    SaveAsNew,
+    /// "Ersetzen" (`conflictResolution=OVERWRITE`).
+    Replace,
+}
+
+impl ConflictResolution {
+    /// Wire value for the `conflictResolution` upload parameter.
+    /// `Ask` falls back to `NONE` until an interactive prompt exists (Paket B).
+    pub fn wire_value(self) -> &'static str {
+        match self {
+            ConflictResolution::Ask | ConflictResolution::Ignore => "NONE",
+            ConflictResolution::SaveAsNew => "RENAME",
+            ConflictResolution::Replace => "OVERWRITE",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BackupFolder {
     pub path: PathBuf,
@@ -60,6 +90,13 @@ pub struct BackupFolder {
     pub name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// "Duplikate vermeiden": when true, files already in the local MD5 index are
+    /// skipped (path + md5). Off ⇒ every scanned file is uploaded.
+    #[serde(default = "default_true")]
+    pub dedup: bool,
+    /// Name-conflict policy for this upload target.
+    #[serde(default)]
+    pub conflict_resolution: ConflictResolution,
     #[serde(default)]
     pub total_files: usize,
     #[serde(default)]
@@ -84,6 +121,8 @@ impl BackupFolder {
             path,
             name,
             enabled: true,
+            dedup: true,
+            conflict_resolution: ConflictResolution::default(),
             total_files: 0,
             uploaded_files: 0,
             last_updated: String::new(),

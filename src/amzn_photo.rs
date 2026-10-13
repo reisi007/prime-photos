@@ -12,6 +12,7 @@ use reqwest::{Client, Url, header::HeaderMap};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
+use crate::folders::ConflictResolution;
 
 #[derive(Debug, Serialize)]
 struct QueryNodeCreateNode {
@@ -638,6 +639,7 @@ impl AmznPhoto {
         pic_path: &Path,
         contents: Option<&[u8]>,
         md5sum: Option<&str>,
+        conflict: ConflictResolution,
     ) -> Result<String, String> {
         if self.web_dir_node.is_none() && !self.dry_run {
             self.update_web_pictures_dir_node().await;
@@ -765,8 +767,9 @@ impl AmznPhoto {
 
         let url = Url::parse(
             format!(
-                "https://content-{}.drive.amazonaws.com/v2/upload?conflictResolution=RENAME&fileSize={}&name={}&parentNodeId={}&contentDate={}",
+                "https://content-{}.drive.amazonaws.com/v2/upload?conflictResolution={}&fileSize={}&name={}&parentNodeId={}&contentDate={}",
                 self.conf.zone,
+                conflict.wire_value(),
                 file_size,
                 pic_path.file_name().unwrap().to_str().unwrap(),
                 parent_node,

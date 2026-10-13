@@ -11,6 +11,21 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 - Config: `src/config.rs`, stored at `~/Library/Application Support/amzn_photos_uploader/config.toml`
 - Protocol notes: `docs/PROTOCOL.md`
 
+## Projektregeln
+
+- **Name & Branding (Projektregel, 2026-10-13):** Projekt und git-Repo heißen **„Prime Photos"**.
+  Nichts im Projekt darf den Eindruck erwecken, es sei eine offizielle App von Amazon: kein
+  „Amazon Photos" als *unsere* App-/Produkt-/Bundle-/Wortmarken-Identität, keine Amazon-Logos oder
+  Markenauftritte in der Chrome/UI des eigenen Fensters. **Zulässig bleibt alles funktional
+  Notwendige:** echte Hosts/URLs (`amazon.de`, `www.amazon.de`, `amazonaws.com`, `upload-photos…`),
+  Header-/Cookie-Namen (`x-amzn-*`), und Hinweise wie „Bei Amazon anmelden"/„Mit Amazon anmelden"
+  (dort wird tatsächlich angemeldet). In Docs, die die Original-App beschreiben, bleibt die
+  faktische Nennung des Referenz-Produkts erlaubt (das ist Recon eines echten Produkts); nur
+  **unser** Projekt/Code/UI darf sich nirgends als offizielle Amazon-App darstellen.
+- **Subagenten führen nichts Neues ein (Projektregel, 2026-10-13):** Jeder Auftrag ist strikt auf die
+  beauftragte Änderung begrenzt — keine zusätzlichen Features, Dateien, Abhängigkeiten, Refactorings
+  oder „Verbesserungen" auf Verdacht. Unklarheiten werden zurückgemeldet, nicht eigenmächtig gelöst.
+
 ## Decisions
 
 - GUI framework: egui/eframe (native ARM, single binary).
@@ -29,6 +44,9 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 - "Speichernutzung"/storage bar is intentionally omitted for now: it only applies to Prime members and needs a real quota fetch; no placeholder is shown.
 - Account/avatar block in the sidebar: when signed in, show the Amazon profile picture (no API identified yet — placeholder until then) plus "Angemeldet als:" and "Abmelden"; when **not** signed in, an icon replaces the picture. The green/red status color coding is kept deliberately (user likes it).
 - MVP scope (user decision 2026-10-13): login, upload-target creation ("Upload-Ziel erstellen": backup configuration with destination, content filter, interval, dedup, conflict handling), upload flow, settings dialog. The download flow is relevant but explicitly NOT part of the MVP.
+- Dedup (user decision 2026-10-13): a **persistent local MD5 index in SQLite** (like the original) decides skips (same path + same MD5 → skip; same path + different MD5 → re-upload; new file → upload). Server 409 is only a safety net, treated as "Ignored/Zuvor hochgeladen", not an error (mirrors the original's client-side `PreUploadCheck`).
+- Conflict handling (user decision 2026-10-13): all **four original options** per upload target (Nachfragen / Ignorieren / Als neue Datei speichern / Ersetzen), mapped to `conflictResolution` (`NONE`/`RENAME`/`OVERWRITE`). Replaces the current hard-coded `RENAME`.
+- Backup configuration window (user decision 2026-10-13): build the full "Datensicherungseinstellungen" window now (destination, content filter, interval, dedup, conflict handling, save/cancel), and **share the form logic** with the create-backup flow (same dialog for create and edit) instead of a separate row-menu.
 
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 

@@ -1,14 +1,16 @@
 mod amzn_photo;
 mod app_menu;
 mod config;
+mod dedup;
 mod folders;
 mod login;
 mod theme;
 
 use amzn_photo::AmznPhoto;
 use config::Config;
+use dedup::DedupIndex;
 use eframe::egui::{self, Color32, RichText};
-use folders::{FolderStatus, FolderStore};
+use folders::{ConflictResolution, FolderStatus, FolderStore};
 use rfd::FileDialog;
 use std::{
     collections::{HashMap, VecDeque},
@@ -290,10 +292,12 @@ impl PrimePhotoApp {
 
         let mut items: Vec<(usize, PathBuf)> = Vec::new();
         let mut per_folder: HashMap<usize, usize> = HashMap::new();
+        let mut folder_opts: HashMap<usize, (bool, ConflictResolution)> = HashMap::new();
         for &i in &indices {
             if let Some(f) = self.store.folders.get(i) {
                 let imgs = folders::scan_images(&f.path);
                 per_folder.insert(i, imgs.len());
+                folder_opts.insert(i, (f.dedup, f.conflict_resolution));
                 for p in imgs {
                     items.push((i, p));
                 }
@@ -340,7 +344,7 @@ impl PrimePhotoApp {
         };
         let album = self.album_name.clone();
         self.rt.spawn(async move {
-            run_upload(items, cfg, shared, paused, concurrency, limit, album).await;
+            run_upload(items, cfg, shared, paused, concurrency, limit, album, folder_opts).await;
         });
     }
 
@@ -940,6 +944,8 @@ async fn upload_worker(
     cfg: Config,
     mut pause_rx: watch::Receiver<bool>,
     limit_kbps: u32,
+    dedup: Arc<Mutex<DedupIndex>>,
+    folder_opts: Arc<HashMap<usize, (bool, ConflictResolution)>>,
 ) {
     let mut uploader = AmznPhoto::new(&cfg, false);
     loop {
@@ -949,14 +955,51 @@ async fn upload_worker(
         let item = { queue.lock().unwrap().pop_front() };
         let Some((idx, path)) = item else { break };
 
-        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let (dedup_on, conflict) = folder_opts
+            .get(&idx)
+            .copied()
+            .unwrap_or((true, ConflictResolution::Ignore));
+
+        // Read the file once and compute the MD5 up front: the MD5 is the
+        // duplicate identity (docs/SPEC_DEDUP.md §1) and the bytes are handed to
+        // upload_picture so the file is never read twice.
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                let mut s = shared.lock().unwrap();
+                s.failed += 1;
+                *s.folder_failed.entry(idx).or_insert(0) += 1;
+                s.log(format!("FEHLER {}: {}", path.display(), e));
+                continue;
+            }
+        };
+        let md5sum = format!("{:x}", md5::compute(&bytes));
+        let size = bytes.len() as u64;
+        let mtime = std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
         {
             let mut s = shared.lock().unwrap();
             s.current = path.display().to_string();
         }
+
+        // Local pre-upload check (path + md5). A skip is a finished item: it is
+        // counted as done for this folder and consumes no network and no throttle.
+        if dedup_on && dedup.lock().unwrap().should_skip(&path, &md5sum, size, mtime) {
+            let mut s = shared.lock().unwrap();
+            s.done += 1;
+            *s.folder_done.entry(idx).or_insert(0) += 1;
+            s.log(format!("UEBERSPRUNGEN {}: bereits hochgeladen", path.display()));
+            continue;
+        }
+
         let started = Instant::now();
 
-        let upload_fut = uploader.upload_picture(&path, None, None);
+        let upload_fut = uploader.upload_picture(&path, Some(&bytes), Some(&md5sum), conflict);
         tokio::pin!(upload_fut);
         let mut requeued = false;
         tokio::select! {
@@ -969,6 +1012,9 @@ async fn upload_worker(
             res = &mut upload_fut => {
                 match res {
                     Ok(id) => {
+                        // Remember the upload (also for the server-side 409 case,
+                        // which upload_picture returns as Ok) so the next scan skips it.
+                        dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
                         let mut s = shared.lock().unwrap();
                         s.done += 1;
                         *s.folder_done.entry(idx).or_insert(0) += 1;
@@ -1014,10 +1060,16 @@ async fn run_upload(
     concurrency: usize,
     limit_kbps: u32,
     album: String,
+    folder_opts: HashMap<usize, (bool, ConflictResolution)>,
 ) {
     let count = items.len();
     let queue = Arc::new(Mutex::new(VecDeque::from(items)));
     let workers = concurrency.max(1).min(count.max(1));
+
+    // One shared persistent MD5 index for the whole run (opened here, lives in
+    // ~/Library/Application Support/amzn_photos_uploader/dedup.sqlite3).
+    let dedup = Arc::new(Mutex::new(DedupIndex::open()));
+    let folder_opts = Arc::new(folder_opts);
 
     let mut set = JoinSet::new();
     for _ in 0..workers {
@@ -1025,8 +1077,10 @@ async fn run_upload(
         let s = shared.clone();
         let c = cfg.clone();
         let p = paused.subscribe();
+        let d = dedup.clone();
+        let o = folder_opts.clone();
         set.spawn(async move {
-            upload_worker(q, s, c, p, limit_kbps).await;
+            upload_worker(q, s, c, p, limit_kbps, d, o).await;
         });
     }
     while set.join_next().await.is_some() {}

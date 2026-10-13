@@ -55,8 +55,17 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   sichern, die sich bereits in meinem Konto befinden" (`…_scheduleconfiguration_dedupeoption`),
   „Dateien, die sich bereits in meinem Konto befinden, nicht sichern"
   (`…_upload_settings_skip_duplicates_option_subtitle`).
-  Vorgehen spec-first: erst `docs/SPEC_DEDUP.md` aus Binary-Recon (DedupeId-Berechnung,
-  ContentFilter-Extensions je Gruppe, Conflict-Pfade) — Spec-Task läuft —, dann Implementierung.
+  Spec liegt vor: `docs/SPEC_DEDUP.md` (verifiziert). **Entscheidungen (User, 2026-10-13):**
+  (a) **persistenter MD5-Index in SQLite** (wie Original; überlebt Neustart; gleicher Pfad + gleiche
+  MD5 ⇒ skip, gleicher Pfad + andere MD5 ⇒ neu hochladen, neue Datei ⇒ hochladen);
+  (b) **alle 4 Konfliktoptionen**, einstellbar im **vollen Konfigfenster** (siehe P2-Item; geteilte
+  Formularlogik mit dem Erstellen-Flow), gemappt auf `conflictResolution`
+  (`NONE`/`RENAME`/`OVERWRITE`); 409 bleibt nur Sicherheitsnetz (wird wie im Original als
+  „Ignored/Zuvor hochgeladen" behandelt, kein Fehler).
+  Original-Mechanik: client-seitige `PreUploadCheck` gegen MD5-Index, Gating über
+  Dedup-Toggle; Namenskonflikt separat über `ConflictResolution`. Siehe `docs/SPEC_DEDUP.md`.
+  **Umsetzung in zwei Paketen:** (A) Datenmodell + SQLite-Dedup-Index + Upload-Verdrahtung;
+  (B) Konfigfenster (Create+Edit geteilt) auf das Modell.
 
 - [ ] **P1 – Upload-Fehler `error sending request for url (…)`** (Beispiel
   `…/27_ÖFB-Reisinger_09.jpg`). `upload_picture` gibt `Err(e.to_string())` zurück → die
