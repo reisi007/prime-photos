@@ -5,23 +5,35 @@ desktop client for macOS (`Amazon Photos.app`, bundle `com.amazon.clouddrive.mac
 version `11.3.0` / build `36`, `LSUIElement = true`).
 
 This document describes **what the app does and shows**, not how it is coded. Everything
-here was reconstructed from three sources:
+here was reconstructed from four sources:
 
 | Source | What it gives |
 |---|---|
-| `Contents/MonoBundle/Amazon Photos.dll` (decompiled) | view-models, state machines, navigation intents, control wiring |
+| `Contents/MonoBundle/Amazon Photos.dll` (decompiled) | view-models, state machines, navigation intents, control wiring, programmatic window frames |
 | `Contents/Resources/de.lproj/Localizable.strings` (986 entries) | the exact **German labels**; every label below cites its key |
+| `Contents/Resources/*.nib` + `*.storyboardc` (interface files) | real window/view frames, control sizes, class names, base (English) strings |
 | `~/Library/Application Support/Amazon Cloud Drive/*.db` + `*.json` | the persisted fields that back each state |
 
-> **Confidence convention.** Statements marked **observed** follow directly from the two
-> primary sources. Statements marked *inferred* are read off pixel-geometry code in the
-> decompiled views and were **not** confirmed against a running UI. The compiled `.nib`
-> / `.storyboardc` files could not be opened: `ibtool` requires a full Xcode install and
-> only the Command Line Tools are present on this machine, so nib-only details (exact
-> pixel positions, autoresizing rules) are *inferred* from the corresponding view code.
+> **Confidence convention.** Statements marked **observed** come directly from the sources
+> above (interface-file frames or programmatic frames in the shipped binary). Statements
+> marked *inferred* are reasoned rather than read off a source. Where a value could not be
+> determined at all it is called out under "Open questions".
+>
+> **How the interface files were read.** `ibtool` (Xcode 27) **refuses compiled nibs**
+> (`Interface Builder cannot open compiled nibs`) and `--convert` is a *class-rename* flag,
+> not a format converter, so it cannot decompile them. The two on-disk formats were handled
+> directly instead:
+> - **flat `NIBArchive`** files (`DriveThemedWindow.nib`, `SelectiveSyncView.nib`,
+>   `UpsellView.nib`, all three `Diagnostics.storyboardc/*.nib`) — parsed with the
+>   open-source `nibarchive` parser (`MAGIC "NIBArchive"`, header
+>   `formatVersion=1, coderVersion=10`, then object/key/value/class-name tables).
+> - **`NSKeyedArchiver` plists** inside the `Onboarding.storyboardc/*.nib` directories —
+>   read with `plutil`/`Property List` (they store frames as plain strings such as
+>   `{{1800, -26.5}, {880, 550}}`).
 >
 > **Redaction.** Account identifiers, user names, device serial numbers and absolute
 > file paths are shown as placeholders (`<account-id>`, `<user-name>`, `<path>`).
+> None of the interface files contain personal data.
 
 ---
 
@@ -85,37 +97,85 @@ call-to-action can be *start backup* or *retry errored transfers*. *observed*
 
 Screens 12–24 are auxiliary; the four "main" surfaces are #2, #3, #4 and #7.
 
+### 2.1 Observed window dimensions
+
+Every window frame below is read either from a shipped interface file or from the
+window-construction site in the binary. All values are in points (width × height).
+*observed*
+
+| Window | Size | Where the value comes from |
+|---|---|---|
+| **Main window** (`DriveWindow`) | **1130 × 770** | programmatic `WindowFrame`; `StyleMask = Titled│Closable│Miniaturizable│Resizable` |
+| Login / auth portal | 880 × 530 | programmatic (`AuthPortalWindowSize`); inner container 380 × 528 at (500, 0) |
+| **Onboarding** (storyboard window) | **880 × 550** | `Onboarding.storyboardc/NSWindowController-…nib` → `NSWindowRect = {{1800, -26.5}, {880, 550}}` |
+| **Diagnostics** (storyboard window) | **800 × 600** | `Diagnostics.storyboardc/NSWindowController-…nib` (window and its view nib are both 800 × 600) |
+| Preferences | 700 × 600 | programmatic; `StyleMask = Titled│Closable` |
+| FTUE | 1000 × 700 (service default) → **650 × 502** on the Upsell page | programmatic (`FtueWindowWidth/Height`, then a resize) |
+| Error window | 600 × 400 | programmatic `WindowFrame` |
+| Upsell modal | 650 × 433 | programmatic, borderless `NSPanel`, corner radius 10 |
+| Activity | 550 × 391 | programmatic `WindowFrame` |
+| AutoConnect | 540 × 360 | programmatic `WindowFrame` |
+| Campaign / notification | 850 × 595 | programmatic |
+| About | 504 × 410 | programmatic |
+| Startup / splash | 640 × 360 | programmatic |
+| Release Notes | 370 × 382 | programmatic |
+| Selective Sync | view **660 × 396**; code sets an initial 600 × 300 | see `UI_STATES.md` §5.6 |
+| "New cloud folder" dialog | 540 × 240 | programmatic |
+| Main-window *theme* nib | **0 × 0** | `DriveThemedWindow.nib` `NSWindowRect = {{640, 389}, {0, 0}}` — the nib defines only an empty themed shell; the real size is applied at runtime |
+
+Main-window chrome constants (programmatic): header **64 pt** tall, growing to **104 pt**
+while a large-scale-event banner is shown (banner itself 40 pt); footer **60 pt**; outer
+margin **8 pt**; window corner radius **16 pt**. The left navigation menu spans from the
+header's bottom edge to the footer's top edge. *observed*
+
+**Selective Sync — nib vs. window mismatch.** `SelectiveSyncView.nib` lays the view out at
+**660 × 396 pt** (content `{{0, 55}, {660, 278}}`, outline/table `{{1, 1}, {658, 276}}`,
+bottom bar `{{1, 433}, {658, 16}}`), while the window service first sets a
+**600 × 300 pt** frame. Both numbers are *observed*; which one wins (assigning the content
+view can resize the window to fit, which would make the effective size 660 × 396) is
+*inferred* and not resolved here.
+
+**Diagnostics.** Both the window nib (800 × 600) and its view nib contain the same
+**800 × 600** frame; the table has the columns **Timestamp, Name, Value, ReceivedEvents**,
+bound to `self.viewModel.eventsArray`. *observed*
+
 ---
 
 ## 3. Main window (`DriveWindow`)
 
-### 3.1 Layout (top → bottom) — *inferred geometry, observed labels*
+### 3.1 Layout (top → bottom) — geometry *observed*, labels *observed*
 
-1. **Header bar** (`HeaderView`)
-   - Amazon Photos logo (left).
-   - Primary nav buttons (centre-left): **"Hochladen"** (`clouddrive_desktop_clouddrivepicker_uploadbutton`) → Backup tab; **"Herunterladen"** (`clouddrive_desktop_contextmenu_opendownloadstab`) → Download tab; **"Synchronisieren"** (`clouddrive_desktop_contextmenu_opensynctab`) → Sync tab, **hidden unless sync is enabled**.
-   - **"Fotos im Web öffnen"** (`clouddrive_desktop_menu_open_photos_on_web_button`) and an account/avatar button on the right.
-   - A 4 px accent-coloured bar marks the active header button.
-2. **Left navigation menu** (`MenuViewModel`, collapsible)
+The main window is **1130 × 770 pt**. Its `DriveThemedWindow.nib` contains **no geometry at
+all** (window rect `{{640, 389}, {0, 0}}`), so the shell — header, nav menu, content, footer
+— is laid out programmatically. Measured constants from that code:
+
+1. **Header bar** (`HeaderView`, **64 pt** tall; **104 pt** while a banner is shown)
+   - Amazon Photos logo (left, **60 × 32 pt**).
+   - Primary nav buttons (centre-left), each **144 pt** wide, 15 pt label, 2 pt apart,
+     40 pt after the logo: **"Hochladen"** (`clouddrive_desktop_clouddrivepicker_uploadbutton`) → Backup tab; **"Herunterladen"** (`clouddrive_desktop_contextmenu_opendownloadstab`) → Download tab; **"Synchronisieren"** (`clouddrive_desktop_contextmenu_opensynctab`) → Sync tab, **hidden unless sync is enabled**.
+   - **"Fotos im Web öffnen"** (`clouddrive_desktop_menu_open_photos_on_web_button`), then a 1 × 16 pt divider (16 pt gap) and the account/avatar button on the right (16 pt margins).
+   - A **4 pt** accent-coloured bar marks the active header button.
+2. **Left navigation menu** (`MenuViewModel`, collapsible) — spans from the header's bottom
+   edge to the footer's top edge, left-aligned to the window.
    - Items: **"Datensicherung"** (`clouddrive_desktop_navigationMenu_backup`), **"Herunterladen"** (`clouddrive_desktop_navigationMenu_download`), **"Einstellungen"** (`clouddrive_desktop_navigationMenu_setttings`), plus **"Synchronisieren"** (`clouddrive_desktop_navigationMenu_sync`) inserted only when sync is enabled.
-   - The menu can be collapsed/expanded; the collapsed state is persisted per user
-     (`ShouldCollapseNavigationMenu`). *observed*
+   - The menu can be collapsed/expanded (collapsed = icon-only, ≥ a minimum width); the
+     collapsed state is persisted per user (`ShouldCollapseNavigationMenu`). *observed*
    - The strings file also contains **"Startseite"** (`clouddrive_desktop_navigationMenu_home`)
      and **"Intelligenter Scan"** (`clouddrive_desktop_navigationMenu_smartscan`); no menu
      item is constructed from them in this build → *inferred legacy / unused*.
 3. **Content area** — the active tab's view.
-4. **Optional banners** stacked above content: Large-Scale-Event outage banner
-   (`clouddrive_desktop_outage_banner_text`), Sync-deprecation banner
+4. **Optional banners** stacked above content, each **40 pt** tall: Large-Scale-Event outage
+   banner (`clouddrive_desktop_outage_banner_text`), Sync-deprecation banner
    (`clouddrive_desktop_syncdeprecationbanner_header` / `…_description`), Sync→Backup
    migration banner (`clouddrive_desktop_sync_to_backup_migration_banner_*`). *observed*
-5. **Footer** (`FooterView`)
-   - **Storage usage** block (left): "Ihr Speicherplatz" (`…_youraccount_yourstoragetitle`),
+5. **Footer** (`FooterView`, **60 pt** tall)
+   - **Storage usage** block (left, **337 × 60 pt**): "Ihr Speicherplatz" (`…_youraccount_yourstoragetitle`),
      value "{1} von {2} belegt" (`…_youraccount_usageformat`), and an **"Upgrade jetzt vornehmen"**
      hyperlink (`…_youraccount_upgradenow_buttontitle`) → opens storage management in the browser. *observed*
-   - **Remaining-files + time-remaining** text (`UploadsView`, e.g. `…_backup_remainingcount`
+   - **Remaining-files + time-remaining** text (`UploadsView`, **78 pt** tall, ≥ 150 pt wide, e.g. `…_backup_remainingcount`
      "Elemente werden gesichert, ({0:n0} verbleibend)" and `…_backup_remainingtimeandbytes`). *observed*
-   - **Global "Alle Sicherungsvorgänge anhalten" / "… fortsetzen" button**
-     (`clouddrive_desktop_backupscreen_pauseallbackups` / `…_resumeallbackups`) — the
+   - **Global "Alle Sicherungsvorgänge anhalten" / "… fortsetzen" button** (**40 pt** tall,
+     15 pt label), 15 pt left of the uploads text — the
      global backup pause toggle. **Hidden when there are no scheduled backups with items.** *observed*
 
 ### 3.2 Tab semantics
@@ -405,6 +465,29 @@ There are **two independent first-run systems** in this build. *observed*
 
 States: **Education → SetupSync → SetupComplete → Completed**. *observed*
 
+**Geometry (observed from `Onboarding.storyboardc`).** The storyboard's window controller
+sets `NSWindowRect = {{1800, -26.5}, {880, 550}}` → the Onboarding window is
+**880 × 550 pt** (design-time screen `{{1280, -280}, {1920, 1057}}`). The scenes are
+`SetupSync` and `SetupComplete`; the content view controller is
+`OnboardingSetUpSyncViewController`; the storyboard carries outlets `window`, `delegate`
+and `contentViewController`. The window title is **empty in the storyboard** and is set at
+runtime (`clouddrive_desktop_onboarding_setupcomplete_title`). The two view nibs:
+
+- SetupSync view (`JUH-K4-qEi-view-0UK-Yj-1Em`), classes `NSView` / `NSTextField` /
+  `NSButton` (`OnboardingButton` extends `DriveButton`). Sub-controls at
+  `{{122, 450}, {637, 36}}`, `{{366, 504}, {148, 21}}`, `{{263, 225}, {355, 100}}`,
+  `{{172, 57}, {220, 23}}`, `{{53, 25}, {111, 16}}`, `{{26, 60}, {138, 16}}`,
+  `{{169, 19}, {157, 25}}`, `{{418, 30}, {44, 35}}`.
+- SetupComplete view (`t2L-1P-099-view-Cbs-jj-AZK`), root **880 × 550**, classes `NSView` /
+  `NSTextField` / `NSButton` / `NSImageView`. A **panel `{{90, 161}, {700, 228}}`** and a
+  **two-column list of four 249 × 17 pt rows** each, at x = 396 (`y = 42, 77, 135, 187`) and
+  x = 475 (`y = 11, 71, 129, 187`) — i.e. the "what to do next" list is rendered as two
+  columns of four rows. A `{{0, -34}, {382, 274}}` element sits above.
+
+The storyboard stores **English base strings** (e.g. "Open your sync folder", "Preferences
+and other options", "Open your Amazon Drive online", "Backup settings", "Backup and sync
+settings"), which are replaced at runtime from `Localizable.strings`. *observed*
+
 - **Education** — "Zwei Möglichkeiten zur Nutzung von Amazon Photos"
   (`clouddrive_desktop_onboarding_education_title`) explaining **"Datensicherungen planen"**
   (`…_education_schedules_title`; "Beim Löschen von Inhalten in der Cloud werden diese NICHT
@@ -528,11 +611,13 @@ aktivieren/deaktivieren..."** (`…_enablesync` / `…_disablesync`) and
 Triggered by storage pressure (`UpsellType`): **OversaturatedUploadQueue, NearQuota,
 OverQuotaUpload, HomeTab**. *observed*
 
-- **Modal** (borderless panel, ~650×433 pt): title
+- **Modal** (borderless `NSPanel`, **650 × 433 pt**, corner radius 10): title
   "Dir geht der Speicherplatz aus" (`clouddrive_desktop_upsell_modal_title`), body
   "Dateien, die dein Speicherkontingent überschreiten, werden nicht hochgeladen."
   (`…_upsell_modal_description`), buttons **"Mehr Speicherplatz kaufen"**
   (`…_upsell_buy_button`) and **"Nicht jetzt"** (`…_upsell_cancel_button`). *observed*
+  `UpsellView.nib` itself carries **no controls** — just one `UpsellView` instance with a
+  placeholder size of 438 × 255; the modal geometry is set programmatically. *observed*
 - **Inline/FTUE variant**: "Schalte mehr Speicherplatz frei!"
   (`clouddrive_desktop_upsell_title`) with "Du kannst deinen Videospeicher mit unseren
   Tarifen ab 1,99 $/Monat aufrüsten." (`…_upsell_description`). *observed*
@@ -652,12 +737,17 @@ Most dialogs carry a **"Diese Nachricht nicht erneut anzeigen"** /
 
 ## 13. Open questions / not determined
 
-- **Exact .nib layout.** `ibtool` is unavailable (Command Line Tools only, no full Xcode).
-  All geometry, z-order and autoresizing statements are *inferred* from the corresponding
-  Myriad/AppKit view-construction code; the compiled `DriveThemedWindow.nib`,
-  `SelectiveSyncView.nib`, `UpsellView.nib` and `Onboarding.storyboardc` were read only as
-  opaque binaries (a few class names and the string `These are your current folders in
-  Amazon Drive…` were recoverable via `strings`).
+- **`ibtool` cannot decompile compiled nibs.** Xcode 27's `ibtool` answers
+  `Interface Builder cannot open compiled nibs` for every file here, and its `--convert`
+  flag renames *classes* (not formats). The interface files were therefore read with the
+  `nibarchive` parser (flat `NIBArchive`) and `plutil` (`NSKeyedArchiver` plists inside
+  `Onboarding.storyboardc`); the concrete frames are in §2.1, §3.1, §8.1 and §10 so they
+  are *observed*, not inferred.
+- **Autoresizing / Auto Layout rules.** The nibs are pre-Auto-Layout documents (they store
+  `NSFrame`/`NSvFlags`, not constraints), so the tables above give *design-time* frames.
+  How each frame responds to a window resize is *not determined*.
+- **Selective Sync 660 × 396 vs 600 × 300.** See §2.1 — both values are observed, the
+  resolution is *inferred*.
 - **Which onboarding system runs for which user.** Both `OnboardingWindow` (workflow) and
   `FtueWindow` exist. The switching logic (`OnboardingVersion` / `FtueVersion` /
   `IsOnboardingComplete`) was only partially reconstructed → *not determined*.
@@ -669,7 +759,12 @@ Most dialogs carry a **"Diese Nachricht nicht erneut anzeigen"** /
   determined*.
 - **Notifications content.** The full catalogue of notification types (this-day, story,
   campaign, quota, update, mass-delete) exists, but their individual screen layouts were
-  not reconstructed in detail.
+  not reconstructed in detail — none of them live in the shipped nibs.
+- **Most screens have no nib at all.** Only the main-window *shell*, Selective Sync, Upsell,
+  Onboarding and Diagnostics have interface files; the Backup/Download/Sync tabs, the
+  status popup, the preferences panes and the backup-configuration window are built purely
+  in code. Their geometry is taken from the construction constants (observed) but the
+  resulting layout is otherwise *inferred*.
 - **Menu-bar item click behaviour** (does a left-click open the popup directly, or only the
   status window?) was not fully traced.
 - **Localised locale coverage.** Only `de.lproj` was inspected; other languages were not

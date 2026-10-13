@@ -4,14 +4,17 @@ Companion to [`UI_FLOWS.md`](./UI_FLOWS.md). This file describes **what is shown
 each screen, the enumerations that drive the UI, the exact display strings, and the
 persisted fields (local SQLite tables / JSON settings) that back each state.
 
-Same conventions as `UI_FLOWS.md`: **observed** = from the decompiled assembly + the German
-`Localizable.strings`; *inferred* = read off view-construction code and not confirmed at
-runtime; all examples use placeholders (`<account-id>`, `<user-name>`, `<path>`).
+Same conventions as `UI_FLOWS.md`: **observed** = from the decompiled assembly, the German
+`Localizable.strings`, or the shipped interface files; *inferred* = reasoned and not read
+off a source; all examples use placeholders (`<account-id>`, `<user-name>`, `<path>`).
 
 Sources:
 
-- `Amazon Photos.dll` (decompiled) — enums, view-models, formatters.
+- `Amazon Photos.dll` (decompiled) — enums, view-models, formatters, programmatic frames.
 - `de.lproj/Localizable.strings` — the German display strings.
+- `Contents/Resources/*.nib` + `*.storyboardc` — real frames, control sizes, class names,
+  base (English) strings (read with the `nibarchive` parser and `plutil`; `ibtool` refuses
+  compiled nibs).
 - `~/Library/Application Support/Amazon Cloud Drive/` — the persisted state.
 
 ---
@@ -397,7 +400,31 @@ mode of the backup-configuration window. *observed*
 
 ### 5.6 Selective Sync window
 
-Title "Selektive Synchronisierung" (`clouddrive_desktop_selectivesyncwindow_title`), header
+**Geometry (observed from `SelectiveSyncView.nib`).** The nib lays the view out at
+**660 × 396 pt**; the window service sets an initial **600 × 300 pt** frame.
+
+| Region | Frame |
+|---|---|
+| Content container | `{{0, 55}, {660, 278}}` |
+| Outline/table (in scroll view) | `{{1, 1}, {658, 276}}` (scroll bar `{{1, 1}, {655, 17}}`) |
+| Bottom action bar | `{{1, 433}, {658, 16}}` |
+| "Alle auswählen" (Select All) | `{{96, 340}, {82, 19}}` |
+| "Gesamte Auswahl aufheben" (Deselect All) | `{{20, 340}, {68, 19}}` |
+| "Synchronisieren" (Sync) | `{{509, 10}, {76, 33}}` |
+| "Abbrechen" (Cancel) | `{{583, 10}, {64, 33}}` |
+| Header label | `{{18, 14}, {492, 28}}` |
+| Info label | `{{106, 365}, {448, 15}}` |
+| Empty-state image | `{{280, 146}, {100, 100}}` / `{{314, 178}, {32, 32}}` |
+
+Nib classes: `SelectiveSyncViewController`, `SelectiveSyncTableCellView`,
+`SelectiveSyncCheckBoxCell`, `NSTableCellView`, `DriveButton`, `NSButton`, `NSSwitch`,
+`NSOutlineView`; cell/wait identifiers `Folder`, `FolderCell`, `Spinner`, `Header`.
+Base (English) strings in the nib: header "These are your current folders in Amazon Drive.
+Check the folders you'd like to sync." and info "Any files that aren't in a folder will sync
+automatically. This info text could get very long depending on the locale and will wrap
+automatically" — both replaced at runtime from `Localizable.strings`. *observed*
+
+Runtime content: title "Selektive Synchronisierung" (`clouddrive_desktop_selectivesyncwindow_title`), header
 "Wählen Sie die Ordner, die Sie synchronisieren möchten."
 (`…_selectivesyncwindow_header`), info "Alle Dateien, die sich nicht in einem Ordner
 befinden, werden synchronisiert." (`…_selectivesyncwindow_info`), actions "Alle auswählen"
@@ -405,6 +432,9 @@ befinden, werden synchronisiert." (`…_selectivesyncwindow_info`), actions "All
 (`…_selectivesyncwindow_sync`), context menu "Ordner öffnen" / "Anzeigen auf Amazon..."
 (`…_contextmenuviewlocally` / `_viewonweb`). Opened from Onboarding or Preferences
 (`SelectiveSyncWindowSource`). *observed*
+
+Whether the effective window ends up 600 × 300 or 660 × 396 (assigning the nib's content
+view can resize the window to fit) is *inferred* and not resolved.
 
 ### 5.7 Error window
 
@@ -517,8 +547,12 @@ ConfigureAnyFolders, `Upsell` → start at Upsell}. *observed*
   is also enforced as a floor was not traced.
 - **Notification list rendering.** The per-notification cell layout and ordering key
   (`INotification.Type`) values were not enumerated.
-- **Exact `.nib` geometry.** As in `UI_FLOWS.md` §13 — all pixel/form-factor statements are
-  *inferred*; `ibtool` was unavailable.
+- **Exact `.nib` geometry.** Now *observed* for the five screens that ship interface files
+  (main-window shell, Selective Sync, Upsell, Onboarding, Diagnostics) — see `UI_FLOWS.md`
+  §2.1, §3.1, §8.1, §10 and this file's §5.6. The remaining screens have **no nib** and are
+  built in code; their dimensions are taken from the construction constants (observed) but
+  the resulting layout is otherwise *inferred*. `ibtool` cannot decompile compiled nibs, so
+  frames were read with the `nibarchive` parser and `plutil`.
 - **Storage-usage entitlement mapping.** Which of `limited_withplan`,
   `unlimitedphotos_withoutplan`, `unlimitedeverything` applies to a given account was not
   fully traced; note this repo deliberately omits a storage bar in its own app.
