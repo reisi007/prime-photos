@@ -94,7 +94,7 @@ impl PrimePhotoApp {
 
     fn add_files(&mut self) {
         if let Some(paths) = FileDialog::new()
-            .add_filter("Images", &["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff", "gif", "webp", "bmp"])
+            .add_filter("Images", &["jpg", "jpeg", "png", "heic", "heif", "tif", "tiff", "gif", "webp", "bmp", "cr2", "cr3", "arw", "nef", "dng", "raf", "rw2", "orf", "srw", "pef", "3fr", "iiq", "erf", "mos", "kdc", "dcr", "mrw"])
             .pick_files()
         {
             for p in paths {
@@ -346,6 +346,8 @@ fn is_supported_image(path: &std::path::Path) -> bool {
     matches!(
         ext.as_str(),
         "jpg" | "jpeg" | "png" | "heic" | "heif" | "tif" | "tiff" | "gif" | "webp" | "bmp"
+            | "cr2" | "cr3" | "arw" | "nef" | "dng" | "raf" | "rw2" | "orf" | "srw"
+            | "pef" | "3fr" | "iiq" | "erf" | "mos" | "kdc" | "dcr" | "mrw" | "raw"
     )
 }
 
