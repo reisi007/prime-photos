@@ -314,6 +314,30 @@ Belege: `Localizable.strings` (Keys) + `Amazon Photos.dll` (Symbole), `docs/*`.
 - **UNKNOWN:** eine inhaltliche Begründung der 8 gibt es im Code nicht — nur den gesetzten Wert.
   Unser Slider `1..=8` trifft die Obergrenze; unser Default 3 weicht vom Original-Default ab.
 
+## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
+
+Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
+
+1. **Konflikt-Dialog „Nachfragen" (größte offene MVP-Lücke).** `ConflictResolution::Ask` ist heute
+   ein No-Op (mappt wie `Ignore` auf `conflictResolution=NONE`). Für einen echten Dialog braucht es
+   die Nutzerentscheidung: pro **Datei** oder pro **Lauf** fragen? Welche Optionen anbieten (Original:
+   Ignorieren / Als neue Datei speichern / Ersetzen + „Nicht noch einmal fragen")? Und was passiert
+   während der Frage mit dem Upload-Lauf (Pause, Rest zurückstellen, Retry als neuer Job)?
+2. **Autostart-Default.** PORT-4 liefert den Schalter; ob er bei Installation **an** oder **aus**
+   sein soll, ist eine Produktentscheidung (Default bisher: aus).
+3. **Hintergrund-Sync-Takt (PORT-5-Detail).** Event-driven ist spezifiziert (deutig aus dem User-
+   Entscheidungssatz); ein **Mindestabstand** zwischen automatischen Läufen (z. B. 15/60 min)
+   und ob ein Lauf nur bei bestehendem WLAN startet, ist nicht festgelegt.
+4. **Pro-Ziel-Limit / netzwerkgesteuerte Drosselung** (bereits als Post-MVP markiert).
+5. **macOS-Signatur:** selbstsignierte Identität (Keychain-Zugriff), ob Benachrichtigungen im
+   signierten Bundle erscheinen, ob `--options runtime` für ad-hoc nötig ist.
+6. **Öffentliches Remote/Push** (Repo ist public-zielend, aber noch kein Remote konfiguriert).
+7. **Nav-Accessibility + Icon-Ausrichtung** (`nav_item`, Status-/Upload-Icons): brauchen die
+   Doku-Maßwerte/Design-Abmachung, kein Rate-Wert.
+8. **Echtes Profilbild** im Account-Block: keine API identifiziert.
+9. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung) — folgt
+   aus Punkt 1/3.
+
 ## Offen (Backlog)
 
 - [x] **Neu (User-Wunsch 2026-10-13) – Fortschrittsbalken mit Restmenge + Zeitschätzung.**
