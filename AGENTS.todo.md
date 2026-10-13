@@ -364,7 +364,9 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
   Video-Extensions das Original akzeptiert; ob sich Upload-Parameter für Video unterscheiden;
   Quota-Frage (Prime: Fotos unbegrenzt, Videos begrenzt? — `…_notification_overquota_unlimitedphotos_*`,
   Videospeicher-Upsell-String).
-- [ ] Auto-Refresh der Cookies bei 401.
+- [x] Auto-Refresh der Auth-Daten bei 401. Erledigt, Commit `fff2dc7`: der Upload-Worker erkennt
+  „Authentication failed“, erneuert den Token und versucht die Datei einmal erneut (nur ein
+  Renew pro Lauf, Wiederholung zaehlt nicht als Fehler).
 - [ ] „Startseite"/Übersichtsseite? (Strings vorhanden, im Build ungenutzt.)
 - [ ] Als `.app`-Bundle paketieren (Info.plist, Icon) — saubere Menüleiste/Doppelklick (.app und Menü hängen zusammen, siehe ⌘V).
 - [ ] Rest aus `Amazon Photos.dll`: Quota-Form, exakter Extension-Filter, Watcher-Intervall, Concurrency-Defaults, Konfliktbehandlung, Video-Support.
