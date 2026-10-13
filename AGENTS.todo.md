@@ -9,7 +9,8 @@
 - [x] Backup list with per-folder progress, status, ⋯ menu (jetzt scannen, Im Finder zeigen, Wiederholen, stoppen).
 - [x] "Alle Sicherungsvorgänge anhalten/fortsetzen" (global pause).
 - [x] Concurrent uploads (Workers + JoinSet), per-file rate limit (Bandbreite tab).
-- [x] Login: automatic browser-cookie capture (Chrome DevTools Protocol) + manual paste fallback.
+- [x] Login: automatic browser-cookie capture (Chrome DevTools Protocol); manual cookie entry removed for end users.
+- [x] Country / marketplace selector before login (default from system locale on first run).
 - [x] `.xmp` sidecars rejected; RAW formats supported (single source in `folders.rs`).
 - [x] OpenAPI spec (`docs/openapi.yaml`) + protocol notes (`docs/PROTOCOL.md`).
 - [x] `ilspycmd` installed for .NET decompilation; Screen-Recording grant works (self-screenshots).

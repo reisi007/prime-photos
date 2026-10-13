@@ -1,11 +1,7 @@
-use std::{
-    path::PathBuf,
-    process::Child,
-    time::Duration,
-};
+use std::{path::PathBuf, process::Child, time::Duration};
 
 use futures::{SinkExt, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 /// Base port for the Chrome DevTools Protocol listener.
@@ -57,11 +53,26 @@ fn browser_candidates() -> Vec<(String, PathBuf)> {
     let mut out: Vec<(String, PathBuf)> = Vec::new();
 
     let mac_candidates = [
-        ("Google Chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-        ("Chromium", "/Applications/Chromium.app/Contents/MacOS/Chromium"),
-        ("Microsoft Edge", "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-        ("Brave Browser", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
-        ("Vivaldi", "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"),
+        (
+            "Google Chrome",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ),
+        (
+            "Chromium",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ),
+        (
+            "Microsoft Edge",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ),
+        (
+            "Brave Browser",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ),
+        (
+            "Vivaldi",
+            "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+        ),
         ("Arc", "/Applications/Arc.app/Contents/MacOS/Arc"),
     ];
     for (name, path) in mac_candidates {
@@ -101,11 +112,12 @@ fn which(cmd: &str) -> std::io::Result<PathBuf> {
     ))
 }
 
-/// Amazon Photos marketplace for a country code.
-fn amazon_domain(country: &str) -> String {
+/// Amazon marketplace for a country code.
+pub fn amazon_domain(country: &str) -> String {
     match country {
         "us" => "com".to_string(),
         "uk" | "gb" => "co.uk".to_string(),
+        "at" | "ch" => "de".to_string(),
         "jp" => "co.jp".to_string(),
         "mx" => "com.mx".to_string(),
         "br" => "com.br".to_string(),
@@ -116,7 +128,8 @@ fn amazon_domain(country: &str) -> String {
     }
 }
 
-fn login_url(country: &str) -> String {
+/// The Amazon Photos login URL for a marketplace.
+pub fn login_url(country: &str) -> String {
     format!("https://www.amazon.{}/photos", amazon_domain(country))
 }
 
@@ -180,9 +193,7 @@ fn pick_page_ws(targets: &Value) -> Option<String> {
     }
     // Fallback: first page target of any kind.
     arr.iter()
-        .find(|t| {
-            t.get("type").and_then(|v| v.as_str()) == Some("page")
-        })
+        .find(|t| t.get("type").and_then(|v| v.as_str()) == Some("page"))
         .and_then(|t| t.get("webSocketDebuggerUrl").and_then(|v| v.as_str()))
         .map(|s| s.to_string())
 }
@@ -228,8 +239,7 @@ async fn fetch_cookies_via_cdp(ws_url: &str) -> Option<Vec<(String, String)>> {
                     // Newer browsers sometimes only implement Storage.getCookies.
                     let storage_enable = json!({"id": 3, "method": "Storage.enable"});
                     let _ = ws.send(Message::Text(storage_enable.to_string())).await;
-                    let storage_get =
-                        json!({"id": 4, "method": "Storage.getCookies"});
+                    let storage_get = json!({"id": 4, "method": "Storage.getCookies"});
                     let _ = ws.send(Message::Text(storage_get.to_string())).await;
                 } else if value.get("id").and_then(|v| v.as_u64()) == Some(4) {
                     let cookies = cookies_from_result(&value);
@@ -246,14 +256,17 @@ async fn fetch_cookies_via_cdp(ws_url: &str) -> Option<Vec<(String, String)>> {
 /// True when we have the minimum cookie set to talk to the Photos API.
 fn has_login_cookies(cookies: &[(String, String)]) -> bool {
     let has_session = cookies.iter().any(|(n, _)| n == "session-id");
-    let has_acb = cookies
-        .iter()
-        .any(|(n, _)| n.starts_with("x-acb") || n.starts_with("at-acb") || n.starts_with("ubid-acb"));
+    let has_acb = cookies.iter().any(|(n, _)| {
+        n.starts_with("x-acb") || n.starts_with("at-acb") || n.starts_with("ubid-acb")
+    });
     has_session && has_acb
 }
 
 /// Run the whole automatic browser login flow.
-pub async fn run_browser_login(country: String, login: std::sync::Arc<std::sync::Mutex<BrowserLogin>>) {
+pub async fn run_browser_login(
+    country: String,
+    login: std::sync::Arc<std::sync::Mutex<BrowserLogin>>,
+) {
     let browsers = browser_candidates();
     if browsers.is_empty() {
         let mut l = login.lock().unwrap();
@@ -293,7 +306,9 @@ pub async fn run_browser_login(country: String, login: std::sync::Arc<std::sync:
         if start.elapsed() > Duration::from_secs(BROWSER_START_TIMEOUT_SECS) {
             let mut l = login.lock().unwrap();
             l.running = false;
-            l.error = Some("DevTools-Schnittstelle des Browsers wurde nicht rechtzeitig gefunden.".to_string());
+            l.error = Some(
+                "DevTools-Schnittstelle des Browsers wurde nicht rechtzeitig gefunden.".to_string(),
+            );
             l.stop_browser();
             return;
         }

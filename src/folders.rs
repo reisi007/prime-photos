@@ -27,11 +27,7 @@ pub fn is_supported_image(path: &Path) -> bool {
 
 /// Extensions for use in native file dialogs.
 pub fn supported_extensions() -> Vec<&'static str> {
-    STANDARD_EXT
-        .iter()
-        .chain(RAW_EXT.iter())
-        .copied()
-        .collect()
+    STANDARD_EXT.iter().chain(RAW_EXT.iter()).copied().collect()
 }
 
 /// Recursively collect supported image files below `dir`.

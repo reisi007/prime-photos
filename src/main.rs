@@ -11,10 +11,10 @@ use folders::{FolderStatus, FolderStore};
 use rfd::FileDialog;
 use std::{
     collections::{HashMap, VecDeque},
-    path::{PathBuf},
+    path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -89,7 +89,6 @@ struct PrimePhotoApp {
     config_path: String,
     config_error: Option<String>,
     login: Arc<Mutex<login_helper::BrowserLogin>>,
-    cookie_paste: String,
     page: Page,
     settings_tab: SettingsTab,
     store: FolderStore,
@@ -107,10 +106,19 @@ impl PrimePhotoApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::apply(&cc.egui_ctx);
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
-        let (config, config_error) = match Config::load() {
+        let (mut config, config_error) = match Config::load() {
             Ok(c) => (c, None),
             Err(e) => (Config::default(), Some(e.to_string())),
         };
+        // On first run, preselect the marketplace from the system language.
+        let first_run = Config::get_config_path()
+            .map(|p| !p.exists())
+            .unwrap_or(true);
+        if first_run {
+            if let Some(c) = system_country() {
+                config.country = c;
+            }
+        }
         let config_path = Config::get_config_path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| e.to_string());
@@ -120,7 +128,6 @@ impl PrimePhotoApp {
             config_path,
             config_error,
             login: Arc::new(Mutex::new(login_helper::BrowserLogin::new())),
-            cookie_paste: String::new(),
             page: Page::Backup,
             settings_tab: SettingsTab::General,
             store: FolderStore::load(),
@@ -397,6 +404,25 @@ impl PrimePhotoApp {
 
             let mut login_started = false;
             let mut login_cancelled = false;
+
+            // Marketplace selection before signing in.
+            ui.horizontal(|ui| {
+                ui.label("Land / Amazon-Marktplatz:");
+                let current = self.config.country.clone();
+                egui::ComboBox::from_id_salt("login-country")
+                    .selected_text(country_label(&current))
+                    .show_ui(ui, |ui| {
+                        for (code, label) in COUNTRIES {
+                            ui.selectable_value(&mut self.config.country, code.to_string(), *label);
+                        }
+                    });
+            });
+            ui.label(theme::muted(format!(
+                "Anmeldung öffnet {}.",
+                login_helper::login_url(&self.config.country)
+            )));
+            ui.add_space(14.0);
+
             {
                 let l = self.login.lock().unwrap();
                 if ui
@@ -422,31 +448,17 @@ impl PrimePhotoApp {
                 }
             }
             if login_started {
+                let _ = self.config.save();
                 self.start_login();
             }
             if login_cancelled {
                 self.cancel_login();
             }
 
-            ui.add_space(18.0);
-            ui.collapsing("Stattdessen Cookies manuell einfügen", |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.cookie_paste)
-                        .desired_rows(3)
-                        .desired_width(420.0),
-                );
-                if ui.button("Cookies übernehmen").clicked() {
-                    let c = self.cookie_paste.clone();
-                    self.apply_cookie_string(&c);
-                    let _ = self.config.save();
-                    self.log("Cookies übernommen.");
-                }
-            });
-            ui.add_space(8.0);
+            ui.add_space(16.0);
             if ui.link("Amazon Photos im Browser öffnen").clicked() {
-                let _ = std::process::Command::new("open")
-                    .arg("https://www.amazon.com/photos")
-                    .spawn();
+                let url = login_helper::login_url(&self.config.country);
+                let _ = std::process::Command::new("open").arg(url).spawn();
             }
         });
     }
@@ -537,11 +549,8 @@ impl PrimePhotoApp {
                                 ui.vertical(|ui| {
                                     ui.label(RichText::new(&r.name).strong().size(15.0));
                                     ui.label(
-                                        RichText::new(format!(
-                                            "{:.0}% hochgeladen",
-                                            pct * 100.0
-                                        ))
-                                        .size(12.0),
+                                        RichText::new(format!("{:.0}% hochgeladen", pct * 100.0))
+                                            .size(12.0),
                                     );
                                     if !r.last_updated.is_empty() {
                                         ui.label(
@@ -616,16 +625,8 @@ impl PrimePhotoApp {
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut self.settings_tab,
-                SettingsTab::General,
-                "Allgemeines",
-            );
-            ui.selectable_value(
-                &mut self.settings_tab,
-                SettingsTab::Bandwidth,
-                "Bandbreite",
-            );
+            ui.selectable_value(&mut self.settings_tab, SettingsTab::General, "Allgemeines");
+            ui.selectable_value(&mut self.settings_tab, SettingsTab::Bandwidth, "Bandbreite");
         });
         ui.separator();
 
@@ -675,16 +676,6 @@ impl PrimePhotoApp {
             self.cancel_login();
         }
 
-        ui.add_space(6.0);
-        ui.collapsing("Cookies manuell einfügen", |ui| {
-            ui.add(egui::TextEdit::multiline(&mut self.cookie_paste).desired_rows(3));
-            if ui.button("Cookies übernehmen").clicked() {
-                let c = self.cookie_paste.clone();
-                self.apply_cookie_string(&c);
-                self.log("Cookies übernommen. Bitte speichern.");
-            }
-        });
-
         ui.separator();
         ui.heading("Upload");
         ui.horizontal(|ui| {
@@ -693,29 +684,24 @@ impl PrimePhotoApp {
         });
 
         ui.separator();
-        ui.collapsing("Erweitert (Konto/Config)", |ui| {
+        ui.collapsing("Erweitert (Konto)", |ui| {
             ui.label(theme::muted(format!("Konfiguration: {}", self.config_path)));
             egui::Grid::new("cfg").num_columns(2).show(ui, |ui| {
-                ui.label("Land");
-                ui.text_edit_singleline(&mut self.config.country);
+                ui.label("Amazon-Marktplatz");
+                let current = self.config.country.clone();
+                egui::ComboBox::from_id_salt("settings-country")
+                    .selected_text(country_label(&current))
+                    .show_ui(ui, |ui| {
+                        for (code, label) in COUNTRIES {
+                            ui.selectable_value(&mut self.config.country, code.to_string(), *label);
+                        }
+                    });
                 ui.end_row();
                 ui.label("Zone");
                 ui.text_edit_singleline(&mut self.config.zone);
                 ui.end_row();
                 ui.label("User-Agent");
                 ui.text_edit_singleline(&mut self.config.user_agent);
-                ui.end_row();
-                ui.label("session-id");
-                ui.text_edit_singleline(&mut self.config.session_id);
-                ui.end_row();
-                ui.label("x-acb");
-                ui.text_edit_singleline(&mut self.config.cookie_x_acb);
-                ui.end_row();
-                ui.label("at-acb");
-                ui.text_edit_singleline(&mut self.config.cookie_at_acb);
-                ui.end_row();
-                ui.label("ubid-acb");
-                ui.text_edit_singleline(&mut self.config.cookie_ubid_acb);
                 ui.end_row();
             });
         });
@@ -751,7 +737,9 @@ impl PrimePhotoApp {
 
         ui.separator();
         ui.heading("Downloads");
-        ui.label(theme::muted("Downloads sind in diesem Port noch nicht implementiert."));
+        ui.label(theme::muted(
+            "Downloads sind in diesem Port noch nicht implementiert.",
+        ));
 
         ui.add_space(10.0);
         if ui.add(theme::primary_button("Speichern")).clicked() {
@@ -814,12 +802,13 @@ impl eframe::App for PrimePhotoApp {
             .show(ctx, |ui| {
                 let s = self.upload.lock().unwrap();
                 let summary = if s.active {
-                    format!(
-                        "Upload läuft: {}/{} · {}",
-                        s.done, s.total, s.current
-                    )
+                    format!("Upload läuft: {}/{} · {}", s.done, s.total, s.current)
                 } else if s.total > 0 {
-                    format!("Letzter Upload: {}/{} erfolgreich", s.done, s.total - s.failed)
+                    format!(
+                        "Letzter Upload: {}/{} erfolgreich",
+                        s.done,
+                        s.total - s.failed
+                    )
                 } else {
                     "Bereit".to_string()
                 };
@@ -1009,6 +998,62 @@ fn parse_cookie_string(input: &str) -> ParsedCookies {
     }
     result.country = detected_country;
     result
+}
+
+// ---------------------------------------------------------------------------
+// Country / marketplace selection
+// ---------------------------------------------------------------------------
+
+const COUNTRIES: &[(&str, &str)] = &[
+    ("de", "Deutschland · amazon.de"),
+    ("at", "Österreich · amazon.de"),
+    ("ch", "Schweiz · amazon.de"),
+    ("us", "USA · amazon.com"),
+    ("uk", "Vereinigtes Königreich · amazon.co.uk"),
+    ("fr", "Frankreich · amazon.fr"),
+    ("it", "Italien · amazon.it"),
+    ("es", "Spanien · amazon.es"),
+    ("ca", "Kanada · amazon.ca"),
+    ("jp", "Japan · amazon.co.jp"),
+    ("in", "Indien · amazon.in"),
+    ("au", "Australien · amazon.com.au"),
+    ("br", "Brasilien · amazon.com.br"),
+    ("mx", "Mexiko · amazon.com.mx"),
+];
+
+fn country_label(code: &str) -> String {
+    COUNTRIES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, l)| l.to_string())
+        .unwrap_or_else(|| code.to_string())
+}
+
+/// Best-effort country from the system locale (macOS `AppleLocale`, then `LANG`).
+fn system_country() -> Option<String> {
+    if let Ok(out) = std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleLocale"])
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Some(region) = s.split(['_', '-']).nth(1) {
+                let code = region.to_lowercase();
+                if COUNTRIES.iter().any(|(c, _)| *c == code) {
+                    return Some(code);
+                }
+            }
+        }
+    }
+    if let Ok(lang) = std::env::var("LANG") {
+        if let Some(region) = lang.split(['_', '.', '-']).nth(1) {
+            let code = region.to_lowercase();
+            if COUNTRIES.iter().any(|(c, _)| *c == code) {
+                return Some(code);
+            }
+        }
+    }
+    None
 }
 
 fn main() -> eframe::Result<()> {

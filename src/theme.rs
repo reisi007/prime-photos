@@ -60,11 +60,23 @@ pub fn apply(ctx: &egui::Context) {
 
     // --- Type scale ----------------------------------------------------
     style.text_styles = [
-        (TextStyle::Heading, FontId::new(24.0, FontFamily::Proportional)),
+        (
+            TextStyle::Heading,
+            FontId::new(24.0, FontFamily::Proportional),
+        ),
         (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
-        (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
-        (TextStyle::Small, FontId::new(12.0, FontFamily::Proportional)),
-        (TextStyle::Monospace, FontId::new(12.0, FontFamily::Monospace)),
+        (
+            TextStyle::Button,
+            FontId::new(14.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Small,
+            FontId::new(12.0, FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Monospace,
+            FontId::new(12.0, FontFamily::Monospace),
+        ),
     ]
     .into();
 
@@ -73,12 +85,7 @@ pub fn apply(ctx: &egui::Context) {
 
 /// A prominent dark, pill-shaped primary button (like "Datensicherung hinzufügen …").
 pub fn primary_button(text: &str) -> egui::Button<'static> {
-    egui::Button::new(
-        egui::RichText::new(text)
-            .color(Color32::WHITE)
-            .size(14.0),
-    )
-    .fill(INK)
+    egui::Button::new(egui::RichText::new(text).color(Color32::WHITE).size(14.0)).fill(INK)
 }
 
 /// Secondary, bordered button.
