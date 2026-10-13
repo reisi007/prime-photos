@@ -142,7 +142,20 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
   vollständige Spezifikation, frische Session pro Task.
 - **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash#high`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
-- **Kein Push, kein CI:** Das Repo hat kein Remote; Verifikation erfolgt manuell pro Auftrag, nicht per Test-Suite.
+- **CI/Release (User-Entscheidung 2026-10-13, hebt „Kein Push, kein CI" auf):** Ziel ist ein
+  öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).
+  - **Push/PR gegen `main`:** nur **Linux** — `cargo build` + `cargo test` als Pflicht-Gate; die
+    anderen OS werden dort **nicht** gebaut.
+  - **Release:** **Git-Tag `v*`** → Matrix-Build **macOS/Windows/Linux**; **alle Beine müssen grün
+    sein**, sonst kein Release (`needs:`) → GitHub Release mit Artefakten. **macOS nur arm64.**
+  - **macOS-Signierung** erfordert eine **„Developer ID Application"**-Identität aus dem **Apple
+    Developer Program** (99 $/Jahr) + **Notarisierung** (`notarytool`) + Stapling. Nur das akzeptieren
+    fremde Macs; **selbstsigniert/ad-hoc sind nur lokal vertraut** (und in CI wertlos). Ohne hinterlegte
+    Secrets baut der macOS-Job **unsigniert** weiter und kennzeichnet das im Release.
+  - Kein `codesign --deep` (von Apple veraltet/abgeraten). `packaging/make-app.sh` nimmt die Identität
+    per `CODESIGN_IDENTITY`.
+  - Secrets nur in `main`/Tag-Läufen (fork-PRs erhalten keine Secrets). Windows: Authenticode optional
+    (sonst SmartScreen-Hinweis); Linux: keine Signatur. Details: `docs/RELEASE.md`.
 - **Spec-first pro Feature (User-Entscheidung 2026-10-13):** Vor jeder Implementierung wird das
   Original-Binary (`/Applications/Amazon Photos.app`: .NET-DLL + Ressourcen, nur lesend) zum
   jeweiligen Feature untersucht; das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten

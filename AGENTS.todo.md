@@ -186,10 +186,25 @@ werden kann — Details/Zielstruktur in `AGENTS.md` „Modul-Struktur"):**
   `format_eta`, `eta_suffix`, `upload_progress_text`), `src/icons.rs` (`NavIcon`, `nav_icon`,
   `status_dot`, `draw_avatar`, `upload_logo`). Reiner Move, nur `pub(crate)` + 2 Import-Pfade.
   Verifiziert (Verifier: PASS, 497/497 Zeilen byte-identisch). `main.rs` 1780 → ~1260 Zeilen.
-- [ ] **REF-2 – Feature-Module.** `src/app.rs` (`PrimePhotoApp` + `impl` + `impl eframe::App` +
-  Sidebar/Navigation), `login.rs` erweitern um die Login-Screens, `src/backup.rs` (Liste/`Row`/
-  Zeilen-Aktionen), `src/backup_config.rs` (Dialog „Datensicherungseinstellungen"),
-  `src/settings.rs` (Einstellungs-Seite + Konto). Felder/Methoden `pub(crate)`. Reiner Move.
+- [x] **REF-2 – Feature-Module.** Erledigt, Commit `71de242`: `src/app.rs` (State + `impl eframe::App`
+  + Sidebar/Navigation), `login.rs` + Login-Screens, `src/backup.rs` (Liste/`Row`/Aktionen),
+  `src/backup_config.rs` (Dialog „Datensicherungseinstellungen"), `src/settings.rs`
+  (Einstellungen + Konto). Reiner Move; `update` byte-identisch, nur `pub(crate)`.
+  Verifiziert (PASS). `src/main.rs` = 33 Zeilen.
+
+## CI / Release (User-Entscheidung 2026-10-13)
+
+Ziel: öffentliches GitHub-Repo (`AGENTS.md` „CI/Release" — hebt „Kein Push, kein CI" auf).
+
+- [ ] **CI-1 – `.github/workflows/ci.yml`.** Trigger `push` (main) + `pull_request`: **nur Linux**;
+  `cargo build` + `cargo test` (System-Deps: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`,
+  `libayatana-appindicator3-dev`, `libssl-dev`, `pkg-config`, `build-essential`).
+- [ ] **CI-2 – `.github/workflows/release.yml` + `docs/RELEASE.md`.** Trigger Tag `v*`: Matrix
+  macOS(arm64)/Windows/Linux bauen (`needs:`-Kette → erst alle grün, dann Release); macOS über
+  `packaging/make-app.sh` (Signatur+Notarisierung nur wenn Secrets gesetzt, sonst unsigniert),
+  Windows `.zip`, Linux `.tar.gz`; GitHub Release mit Artefakten. `docs/RELEASE.md` beschreibt die
+  nötigen Secrets (Developer-ID-p12, Apple-ID/App-Passwort bzw. API-Key, Team-ID) und die
+  Developer-Program-Voraussetzung.
 
 Danach können **PORT-4/5/6/7** (und Folge-Features) auf getrennten Dateien laufen.
 Pakete, die `main.rs`/`Cargo.toml` anfassen, bleiben seriell.
