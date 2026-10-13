@@ -2,15 +2,17 @@
 //! **child view of the main application window** — no extra window, no external
 //! browser, no Chrome DevTools Protocol.
 //!
-//! Cookies are read asynchronously on the main dispatch queue: wry's
-//! `WebView::cookies` is synchronous and spins the macOS run loop, which would
-//! re-enter winit's event handler (and panic) if called directly from egui's
-//! `update`.
+//! Cookies are read asynchronously. On macOS the probe is scheduled on the main
+//! dispatch queue, because wry's `WebView::cookies` is synchronous and spins the
+//! macOS run loop, which would re-enter winit's event handler (and panic) if
+//! called directly from egui's `update`. That run-loop re-entrancy is a
+//! macOS-specific problem: off macOS the probe runs directly.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "macos")]
 use dispatch2::DispatchQueue;
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
@@ -208,27 +210,39 @@ impl WebviewLogin {
     }
 }
 
-/// Read the webview's cookie store from the main dispatch queue, i.e. outside
-/// winit's event handler. `in_flight` is cleared when the probe finishes.
-fn schedule_probe(probe: Arc<Mutex<Probe>>) {
-    DispatchQueue::main().exec_async(move || {
-        WEBVIEW.with(|slot| {
-            if let Some(wv) = slot.borrow().as_ref() {
-                match wv.cookies() {
-                    Ok(cookies) => {
-                        if has_login(&cookies) {
-                            probe.lock().unwrap().outcome = Some(cookie_string(&cookies));
-                        }
+/// Read the webview's cookie store and record the outcome in `probe`. Shared by
+/// both targets; `in_flight` is cleared when the probe finishes.
+fn run_probe(probe: &Arc<Mutex<Probe>>) {
+    WEBVIEW.with(|slot| {
+        if let Some(wv) = slot.borrow().as_ref() {
+            match wv.cookies() {
+                Ok(cookies) => {
+                    if has_login(&cookies) {
+                        probe.lock().unwrap().outcome = Some(cookie_string(&cookies));
                     }
-                    Err(e) => {
-                        let mut p = probe.lock().unwrap();
-                        if p.error.is_none() {
-                            p.error = Some(format!("Cookies konnten nicht gelesen werden: {e}"));
-                        }
+                }
+                Err(e) => {
+                    let mut p = probe.lock().unwrap();
+                    if p.error.is_none() {
+                        p.error = Some(format!("Cookies konnten nicht gelesen werden: {e}"));
                     }
                 }
             }
-        });
-        probe.lock().unwrap().in_flight = false;
+        }
     });
+    probe.lock().unwrap().in_flight = false;
+}
+
+/// macOS: schedule the probe on the main dispatch queue, i.e. outside winit's
+/// event handler (avoids the run-loop re-entrancy described above).
+#[cfg(target_os = "macos")]
+fn schedule_probe(probe: Arc<Mutex<Probe>>) {
+    DispatchQueue::main().exec_async(move || run_probe(&probe));
+}
+
+/// Non-macOS: there is no run-loop re-entrancy problem, so run the probe
+/// directly/synchronously on the calling (UI) thread.
+#[cfg(not(target_os = "macos"))]
+fn schedule_probe(probe: Arc<Mutex<Probe>>) {
+    run_probe(&probe);
 }
