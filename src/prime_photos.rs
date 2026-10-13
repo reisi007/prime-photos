@@ -533,7 +533,7 @@ impl PrimePhotos {
 
     /// Get a reference to an album by name, create it if needed
     pub async fn get_album(&self, name: &str) -> Result<ResponseSearchData, reqwest::Error> {
-        let existing_albums = self.list_albums().await.unwrap();
+        let existing_albums = self.list_albums().await?;
         debug!("Got {} existing albums:", existing_albums.count);
         for album in existing_albums.data {
             debug!("\t{}", album.name);
@@ -840,7 +840,12 @@ impl PrimePhotos {
                 self.conf.zone,
                 conflict.wire_value(),
                 file_size,
-                pic_path.file_name().unwrap().to_str().unwrap(),
+                // A file name is always the last path component; fall back to a
+                // lossy rendering instead of panicking on non-UTF-8 names.
+                pic_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
                 parent_node,
                 &capture_date_str
             )
