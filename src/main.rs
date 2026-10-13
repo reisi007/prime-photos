@@ -1,4 +1,5 @@
 mod amzn_photo;
+mod app_menu;
 mod config;
 mod folders;
 mod login;
@@ -113,6 +114,8 @@ struct PrimePhotoApp {
 impl PrimePhotoApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::apply(&cc.egui_ctx);
+        // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
+        app_menu::install();
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         let (mut config, config_error) = match Config::load() {
             Ok(c) => (c, None),
@@ -178,6 +181,19 @@ impl PrimePhotoApp {
 
     fn cancel_login(&mut self) {
         self.login.cancel();
+    }
+
+    /// Sign out: drop the stored cookies and return to the login screen.
+    fn logout(&mut self) {
+        self.config.session_id.clear();
+        self.config.cookie_x_acb.clear();
+        self.config.cookie_at_acb.clear();
+        self.config.cookie_ubid_acb.clear();
+        self.config.cookie_x_amz_access_token.clear();
+        match self.config.save() {
+            Ok(_) => self.log("Abgemeldet."),
+            Err(e) => self.config_error = Some(e.to_string()),
+        }
     }
 
     /// Create the login webview. Needs the frame for the window handle.
@@ -350,14 +366,36 @@ impl PrimePhotoApp {
 
     // -- rendering ----------------------------------------------------------
 
-    fn nav_item(ui: &mut egui::Ui, current: &mut Page, value: Page, label: &str) {
+    fn nav_item(ui: &mut egui::Ui, current: &mut Page, value: Page, label: &str, icon: NavIcon) {
         let selected = *current == value;
-        let text = RichText::new(label).size(15.0);
-        let resp = ui.add_sized(
-            [ui.available_width(), 34.0],
-            egui::SelectableLabel::new(selected, text),
+        let (rect, resp) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
+        let hovered = resp.hovered();
+        let color = if selected || hovered {
+            theme::TEAL
+        } else {
+            theme::MUTED
+        };
+        let painter = ui.painter();
+        if selected {
+            painter.rect_filled(rect, 6.0, Color32::from_rgb(0xD6, 0xEC, 0xF0));
+        } else if hovered {
+            painter.rect_filled(rect, 6.0, Color32::from_rgb(0xEF, 0xF3, 0xF3));
+        }
+        // Fixed icon column so every label starts at the same x.
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 17.0, rect.center().y),
+            egui::vec2(18.0, 18.0),
         );
-        if resp.clicked() {
+        nav_icon(painter, icon, icon_rect, color);
+        painter.text(
+            egui::pos2(rect.left() + 38.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(15.0),
+            theme::INK,
+        );
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             *current = value;
         }
     }
@@ -366,21 +404,58 @@ impl PrimePhotoApp {
         ui.add_space(4.0);
         ui.label(RichText::new("amazon photos").size(20.0).strong());
         ui.add_space(16.0);
-        Self::nav_item(ui, &mut self.page, Page::Backup, "☁   Datensicherung");
-        Self::nav_item(ui, &mut self.page, Page::Settings, "⚙   Einstellungen");
+        Self::nav_item(
+            ui,
+            &mut self.page,
+            Page::Backup,
+            "Datensicherung",
+            NavIcon::Backup,
+        );
+        Self::nav_item(
+            ui,
+            &mut self.page,
+            Page::Settings,
+            "Einstellungen",
+            NavIcon::Settings,
+        );
 
+        // Account block pinned to the bottom of the sidebar.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            ui.add_space(8.0);
-            let logged_in = self.is_logged_in();
-            let (txt, col) = if logged_in {
-                ("● Angemeldet", theme::GREEN)
-            } else {
-                ("● Nicht angemeldet", theme::RED)
-            };
-            ui.label(RichText::new(txt).color(col).size(12.0));
+            ui.add_space(10.0);
             if let Some(e) = &self.config_error {
                 ui.label(RichText::new(e).color(theme::RED).size(11.0));
             }
+            let logged_in = self.is_logged_in();
+            if logged_in && ui.add(theme::secondary_button("Abmelden")).clicked() {
+                self.logout();
+            }
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                status_dot(ui, if logged_in { theme::GREEN } else { theme::RED });
+                ui.label(
+                    RichText::new(if logged_in {
+                        "Angemeldet"
+                    } else {
+                        "Nicht angemeldet"
+                    })
+                    .size(12.0)
+                    .color(if logged_in { theme::GREEN } else { theme::RED }),
+                );
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                draw_avatar(ui, 30.0, theme::TEAL);
+                ui.add_space(8.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("Angemeldet als:").size(11.0).color(theme::MUTED));
+                    ui.label(RichText::new("Amazon Photos").size(13.0).strong());
+                    ui.label(theme::muted(format!(
+                        "amazon.{}",
+                        login::amazon_domain(&self.config.country)
+                    )));
+                });
+            });
+            ui.add_space(8.0);
         });
     }
 
@@ -1114,6 +1189,77 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
     )
+}
+
+/// Small line icons for the sidebar navigation.
+#[derive(Clone, Copy)]
+enum NavIcon {
+    Backup,
+    Settings,
+}
+
+/// Draws a small, crisp line icon that aligns to the fixed icon column.
+fn nav_icon(painter: &egui::Painter, kind: NavIcon, rect: egui::Rect, color: Color32) {
+    let s = rect.width().min(rect.height());
+    let c = rect.center();
+    let stroke = egui::Stroke::new(1.6, color);
+    match kind {
+        NavIcon::Backup => {
+            // Upload arrow into a tray.
+            let top = c.y - s * 0.30;
+            let mid = c.y + s * 0.02;
+            painter.line_segment([egui::pos2(c.x, mid), egui::pos2(c.x, top)], stroke);
+            painter.line_segment(
+                [egui::pos2(c.x, top), egui::pos2(c.x - s * 0.17, top + s * 0.17)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::pos2(c.x, top), egui::pos2(c.x + s * 0.17, top + s * 0.17)],
+                stroke,
+            );
+            let ty = c.y + s * 0.34;
+            painter.line_segment(
+                [egui::pos2(c.x - s * 0.32, ty - s * 0.14), egui::pos2(c.x - s * 0.32, ty)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::pos2(c.x + s * 0.32, ty - s * 0.14), egui::pos2(c.x + s * 0.32, ty)],
+                stroke,
+            );
+            painter.line_segment(
+                [egui::pos2(c.x - s * 0.32, ty), egui::pos2(c.x + s * 0.32, ty)],
+                stroke,
+            );
+        }
+        NavIcon::Settings => {
+            // Three sliders.
+            for (i, kx) in [-0.18f32, 0.12, -0.06].iter().enumerate() {
+                let y = c.y + (i as f32 - 1.0) * s * 0.30;
+                painter.line_segment(
+                    [egui::pos2(c.x - s * 0.34, y), egui::pos2(c.x + s * 0.34, y)],
+                    stroke,
+                );
+                painter.circle_filled(egui::pos2(c.x + kx * s, y), s * 0.10, color);
+            }
+        }
+    }
+}
+
+/// A filled status dot (replaces the "●" glyph, which rendered as a tofu box).
+fn status_dot(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.5, color);
+}
+
+/// A simple avatar placeholder (head + shoulders inside a filled circle).
+fn draw_avatar(ui: &mut egui::Ui, diameter: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(diameter, diameter), egui::Sense::hover());
+    let painter = ui.painter().with_clip_rect(rect);
+    let c = rect.center();
+    painter.circle_filled(c, diameter / 2.0, color);
+    let white = Color32::WHITE;
+    painter.circle_filled(egui::pos2(c.x, c.y - diameter * 0.14), diameter * 0.16, white);
+    painter.circle_filled(egui::pos2(c.x, c.y + diameter * 0.32), diameter * 0.28, white);
 }
 
 /// Our own upload logo: a teal circle with a white upload arrow and tray.

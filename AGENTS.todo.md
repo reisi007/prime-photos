@@ -89,9 +89,21 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
 - [ ] **P2 – Icons nicht sauber ausgerichtet.** Nav-/Sidebar-Icons an die Doku-Werte ausrichten
   (Header 64 pt bzw. 104 pt mit Banner, 4 pt Akzentleiste, Nav-Spalte — `docs/UI_FLOWS.md` §3.1).
 
-- [ ] **P2 – An-/Abmelden-Icon kaputt.** Konto-Bereich wie Original: Avatar-Button im Header,
-  „Angemeldet als:", „Abmelden" (`…_preferences_account_title` / `…_preferences_signout`,
-  `docs/UI_FLOWS.md` §3.1 / §7).
+- [~] **P2 – An-/Abmelden-Bereich.** Working Tree (uncommitted) liefert Sidebar-Account-Block mit
+  „Angemeldet als:", „Abmelden" (`…_preferences_account_title` / `…_preferences_signout`, `docs/UI_FLOWS.md`
+  §3.1 / §7) und grün/roter Status-Farbe (Text + Punkt). **Offen:** Avatar-Button im Header,
+  echte Farb-/Layout-Parität zum Original (siehe Profilbild-Item).
+
+- [ ] **P2 – Logout-Residuen.** `logout()` löscht die 5 Auth-Felder, stoppt aber weder eine laufende
+  Login-WebView noch einen laufenden Upload (Worker hält eigenen `cfg`-Klon und arbeitet mit dem alten
+  Cookie weiter); `config_error` nach fehlgeschlagenem `save()` wird auf dem Login-Screen nicht angezeigt.
+  Soll: Login-/Upload-Status zurücksetzen, Fehler sichtbar machen.
+
+- [ ] **P2 – `app_menu` Härtung.** Kein Re-Entrancy-Guard (idempotent, aber defensiv `static Once` sinnvoll);
+  ersetzt winit-Default-Menü (Window/Hide/About/Services fehlen). Beim `.app`-Bundle mitdenken (siehe Backlog).
+
+- [ ] **P2 – Nav-Accessibility.** Selbstgezeichnete `nav_item`-Zeilen (`allocate_exact_size`) haben keine
+  Keyboard-Fokus-/Accessibility-Semantik; optional `Sense`-Widget/`widget_info` ergänzen.
 
 - [ ] **P2 – Profilbild fehlt.** Wenn **angemeldet**: das **echte Amazon-Profilbild** im Account-Block
   der Sidebar anzeigen. Wenn **nicht angemeldet**: ein Icon (Personen-Symbol) stattdessen. Die
