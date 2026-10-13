@@ -234,39 +234,79 @@ impl PrimePhotoApp {
             }
         });
 
-        // Live per-file queue (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). Take one
-        // snapshot under the upload lock so no lock is held across `.show`.
-        // `FileState::Waiting`/`Uploading` need `FileState: Copy` + `Eq` and are
-        // matched by value below.
-        let queue_snapshot: Vec<(String, FileState)> = {
+        // Live per-file queue, grouped by backup folder
+        // (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). One snapshot under the upload
+        // lock; no lock is held across `.show`.
+        let queue_groups: Vec<(String, Vec<(String, FileState)>)> = {
             let s = self.upload.lock().unwrap();
-            s.queue
-                .iter()
-                .map(|e| (e.name.clone(), e.state))
-                .collect()
+            let mut groups: Vec<(String, Vec<(String, FileState)>)> = Vec::new();
+            // Folder index -> position in `groups` (keeps first-seen order).
+            let mut slot: HashMap<usize, usize> = HashMap::new();
+            for e in &s.queue {
+                let folder = self
+                    .store
+                    .folders
+                    .get(e.folder)
+                    .map(|f| f.name.clone())
+                    .unwrap_or_default();
+                let idx = match slot.get(&e.folder).copied() {
+                    Some(i) => i,
+                    None => {
+                        groups.push((folder, Vec::new()));
+                        slot.insert(e.folder, groups.len() - 1);
+                        groups.len() - 1
+                    }
+                };
+                groups[idx].1.push((e.name.clone(), e.state));
+            }
+            groups
         };
-        if !queue_snapshot.is_empty() {
-            let remaining = queue_snapshot
+        if !queue_groups.is_empty() {
+            let remaining: usize = queue_groups
                 .iter()
-                .filter(|(_, st)| matches!(st, FileState::Waiting | FileState::Uploading))
-                .count();
+                .map(|(_, files)| {
+                    files
+                        .iter()
+                        .filter(|(_, st)| matches!(st, FileState::Waiting | FileState::Uploading))
+                        .count()
+                })
+                .sum();
             egui::CollapsingHeader::new(tr1("Warteschlange ({})", remaining)).show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(220.0)
                     .show(ui, |ui| {
                         // Cap the rendered rows so a very large run stays cheap.
-                        for (name, state) in queue_snapshot.iter().take(300) {
-                            let (txt, col) = match state {
-                                FileState::Waiting => (tr("Warten"), theme::MUTED),
-                                FileState::Uploading => (tr("In Bearbeitung"), theme::TEAL),
-                                FileState::Done => (tr("Abgeschlossen"), theme::GREEN),
-                                FileState::Failed => (tr("Fehlgeschlagen"), theme::RED),
-                                FileState::Skipped => (tr("Übersprungen"), theme::MUTED),
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(txt).color(col).size(12.0));
-                                ui.label(RichText::new(name).size(12.0));
-                            });
+                        let mut shown = 0usize;
+                        for (folder, files) in &queue_groups {
+                            if shown >= 300 {
+                                break;
+                            }
+                            if !folder.is_empty() {
+                                let open = files
+                                    .iter()
+                                    .filter(|(_, st)| {
+                                        matches!(st, FileState::Waiting | FileState::Uploading)
+                                    })
+                                    .count();
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(folder.as_str()).strong().size(12.0));
+                                    ui.label(theme::muted(tr1("{} offen", open)).size(11.0));
+                                });
+                            }
+                            for (name, state) in files.iter().take(300 - shown) {
+                                shown += 1;
+                                let (txt, col) = match state {
+                                    FileState::Waiting => (tr("Warten"), theme::MUTED),
+                                    FileState::Uploading => (tr("In Bearbeitung"), theme::TEAL),
+                                    FileState::Done => (tr("Abgeschlossen"), theme::GREEN),
+                                    FileState::Failed => (tr("Fehlgeschlagen"), theme::RED),
+                                    FileState::Skipped => (tr("Übersprungen"), theme::MUTED),
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(txt).color(col).size(12.0));
+                                    ui.label(RichText::new(name).size(12.0));
+                                });
+                            }
                         }
                     });
             });

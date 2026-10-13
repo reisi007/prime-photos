@@ -285,6 +285,7 @@ const EN: &[(&str, &str)] = &[
     ("1 Datei", "1 file"),
     ("100% hochgeladen", "100% uploaded"),
     ("Abgeschlossen", "Completed"),
+    ("{} offen", "{} open"),
     ("Angehalten ({}%)", "Paused ({}%)"),
     ("FEHLER {}: {}", "ERROR {}: {}"),
     ("Fehlgeschlagen", "Failed"),

@@ -32,8 +32,7 @@ pub(crate) enum FileState {
 /// One entry of the live per-file queue rendered on the Backup page.
 pub(crate) struct QueueEntry {
     /// Backup-folder index this file belongs to (the tuple's folder element).
-    /// Kept for later per-folder grouping; not read by the current panel.
-    #[allow(dead_code)]
+    /// Used by the Backup page to group the queue per folder.
     pub(crate) folder: usize,
     pub(crate) name: String,
     pub(crate) state: FileState,
