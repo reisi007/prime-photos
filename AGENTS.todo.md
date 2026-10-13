@@ -159,8 +159,8 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   „Fenster schließen = im Hintergrund weiterlaufen". Erledigt, Commit `b7fd1b2`. Verifiziert (PASS).
   **Residuum (MINOR, Win/Linux):** ohne sichtbares Tray-Icon gäbe es dort keinen In-App-Ausweg
   (macOS ist safe: ⌘Q terminiert). Fix wäre ein In-App-„Beenden" — offen.
-- [ ] **PORT-4 – Optionaler Autostart** (`auto-launch`), Schalter in den Einstellungen.
-- [ ] **PORT-5 – Hintergrund-Sync** (periodischer Re-Scan + Upload, solange im Hintergrund).
+- [x] **PORT-4 – Optionaler Autostart** (`auto-launch`). Erledigt, Commit `c8e1448`: Schalter „Nach dem Anmelden starten“ in den Einstellungen, cfg-freier `Autostart`-Wrapper (nicht unterstützte Plattform = dauerhaft aus, keine Panics), Wunsch wird sofort wirksam. **Runtime-only**, nicht in `Config` persistiert — der Login-Item-Zustand des Betriebssystems ist die Quelle der Wahrheit. Verify: Build grün, 7 Warnungen, keine Clippy-Neuzugänge.
+- [x] **PORT-5 – Hintergrund-Sync**. Erledigt, Commit `8a461a6`: ein Supervisor-Task (erster Tick nach 15 min, dann alle 90 min — beides bewusst hart-kodiert; der Takt ist „Zurückgestellt“ #3), pro Tick neues Config/Store-Lesen und alle Guards (Schalter an, angemeldet, nicht pausiert, nicht bereits aktiv); ein manueller Upload resettet den Intervall. Gemeinsamer Startpfad für manuell/Hintergrund (`UploadPlan::build` + `publish_state`/`publish_plan`). Schalter „Hintergrund-Synchronisierung“ in den Einstellungen (persistiert via `background_sync`, serde-default true, lädt also eine alte `config.toml`). `was_active` wird jetzt auch für Hintergrund-Läufe gelatcht ⇒ die Abschluss-Benachrichtigung greift dort ebenfalls. Verify: Build grün, 7 Warnungen, `cargo test` 2/2.
 - [x] **PORT-6 – Paketierung (macOS-Teil).** Erledigt, Commit `7c0d10c`: `packaging/Info.plist`
   (Bundle-ID `de.reisinger.prime-photos`, Executable `prime-photos`) + `packaging/make-app.sh`
   (Release-Build → `target/dist/Prime Photos.app` → `codesign`, **Default ad-hoc**, optional
@@ -263,9 +263,9 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
 
 ## Upload-Progress & Drag-and-Drop (Recon 2026-10-13)
 
-- [ ] **Upload-Progress (Spec `docs/SPEC_UPLOAD_PROGRESS.md`).** Globale Leiste um "N Artikel ... Noch etwa M Minuten" plus Per-Datei-Status (`Warten`, `Upload-Vorgang läuft (n)`, Warnzustand) und pro-Datei-Name/Zeit/Prozent ergänzen. Derzeit nur globale ETA + Ordnerzellen.
-- [ ] **Drag & Drop One-Time-Upload (Spec `docs/SPEC_ONE_TIME_UPLOAD.md`).** Full-Window-Drop-Zone, Scanning-Overlay, Ad-hoc-Queue-Zeile "Einmalige Sicherung", Cloud-Zielpfad (Default /All/{0}) und Upload-Lauf ohne persistiertes Backup-Ziel. Nutzt eframe/egui DroppedFiles + `folders::scan_images`.
-- [ ] **Per-Datei-Warteschlange** (mit oder ohne byte-progress; je nachdem, ob der Cookie-Upload feingranulare Fortschritts-Events bietet).
+- [x] **Upload-Progress, Slice 1+2 (Spec `docs/SPEC_UPLOAD_PROGRESS.md`).** Commits `7572e22` (Live-Warteschlange pro Datei: `FileState`/`QueueEntry`, Zustandsübergänge im Worker, Panel „Warteschlange (n)“) und `9a11e45` (Gruppierung je Backup-Ordner, „N offen“ je Gruppe; das `folder`-Feld wird gelesen, `#[allow(dead_code)]` entfällt). Byte-Level-Fortschritt ist UNKNOWN für uns (der Cookie-Pfad liest die Datei als Ganzes), daher nur grobe Zustände pro Datei. Verify: Build grün, 7 Warnungen. Globale Leiste um "N Artikel ... Noch etwa M Minuten" plus Per-Datei-Status (`Warten`, `Upload-Vorgang läuft (n)`, Warnzustand) und pro-Datei-Name/Zeit/Prozent ergänzen. Derzeit nur globale ETA + Ordnerzellen.
+- [x] **Drag & Drop One-Time-Upload (Spec `docs/SPEC_ONE_TIME_UPLOAD.md`).** Commit `51a5acc`: Drop-Overlay, transientes Ziel „Einmalige Sicherung“ (nie persistiert), rekursiver Verzeichnis-Drop, gemeinsamer Upload-Pfad, eigene Zeile in der Liste ohne Menü/Pause. Verify: Build grün, 7 Warnungen, `cargo test` 2/2. Full-Window-Drop-Zone, Scanning-Overlay, Ad-hoc-Queue-Zeile "Einmalige Sicherung", Cloud-Zielpfad (Default /All/{0}) und Upload-Lauf ohne persistiertes Backup-Ziel. Nutzt eframe/egui DroppedFiles + `folders::scan_images`.
+- [x] **Per-Datei-Warteschlange** (mit oder ohne byte-progress; je nachdem, ob der Cookie-Upload feingranulare Fortschritts-Events bietet).
 
 ## Scope-Inventar: vergessene Features & bewusste In/Out-Grenzen (User-Wunsch 2026-10-13)
 
@@ -335,7 +335,8 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
 7. **Nav-Accessibility + Icon-Ausrichtung** (`nav_item`, Status-/Upload-Icons): brauchen die
    Doku-Maßwerte/Design-Abmachung, kein Rate-Wert.
 8. **Echtes Profilbild** im Account-Block: keine API identifiziert.
-9. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung) — folgt
+9. **Logout während laufendem Upload:** `logout()` löscht die Auth-Cookies, stoppt aber den laufenden Lauf nicht. Soll der Upload stoppen/pausieren oder weiterlaufen und mit 401 scheitern? (Eine saubere Antwort bräuchte einen Abbruch-Kanal in der Upload-Pipeline.)
+10. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung) — folgt
    aus Punkt 1/3.
 
 ## Offen (Backlog)
