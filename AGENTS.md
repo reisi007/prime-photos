@@ -22,6 +22,7 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 - File picker filters and folder scans both enforce `is_supported_image` (single source in `folders.rs`).
 - Uses reference implementation from entourloop/amazon-photo-uploader (MIT) for API details.
 - GUI language: German (matches the original Amazon Photos UI).
+- "Speichernutzung"/storage bar is intentionally omitted for now: it only applies to Prime members and needs a real quota fetch; no placeholder is shown.
 
 ## Repo
 

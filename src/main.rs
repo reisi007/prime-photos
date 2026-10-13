@@ -380,17 +380,6 @@ impl PrimePhotoApp {
         });
     }
 
-    fn storage_bar(&self, ui: &mut egui::Ui) {
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Speichernutzung").strong());
-            ui.label(theme::muted("Ihr Speicherplatz: Unbegrenzte Fotos"));
-        });
-        // Real quota is fetched later; show an indeterminate placeholder for now.
-        ui.add(egui::ProgressBar::new(0.02).desired_width(ui.available_width().min(520.0)));
-        ui.label(theme::muted("Speicherverbrauch wird nach dem ersten Abgleich geladen."));
-    }
-
     fn backup_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui
@@ -548,7 +537,6 @@ impl PrimePhotoApp {
             });
 
         ui.add_space(8.0);
-        self.storage_bar(ui);
 
         for a in actions {
             self.apply_action(a);

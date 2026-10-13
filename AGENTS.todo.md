@@ -17,7 +17,7 @@
 ## Open
 
 - [ ] Decompile `Amazon Photos.dll` and answer: quota/usage shape, exact extension filter, watcher interval, concurrency defaults, conflict handling, video support.
-- [ ] Real "Speichernutzung" bar (video usage / quota) instead of placeholder.
+- [ ] Real "Speichernutzung" bar — only relevant for Prime members; show nothing until we can detect the plan and fetch real quota (no placeholder).
 - [ ] Menu-bar status item (like the original cloud dropdown: status, notifications, storage).
 - [ ] Auto-upload watcher ("Neue Dateien automatisch hochladen", FSEvents) + upload interval setting.
 - [ ] Videos upload (photos only so far).
