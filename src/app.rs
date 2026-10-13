@@ -3,6 +3,7 @@ use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
 use crate::folders::FolderStore;
+use crate::i18n::{self, tr, tr1, tr3};
 use crate::icons::{draw_avatar, nav_icon, status_dot, NavIcon};
 use crate::login;
 use crate::notify;
@@ -79,6 +80,14 @@ impl PrimePhotoApp {
             Ok(c) => (c, None),
             Err(e) => (Config::default(), Some(e.to_string())),
         };
+        // Set the UI language before anything renders (or builds the tray).
+        // `None` means "automatic": follow the system locale.
+        let lang = config
+            .language
+            .as_deref()
+            .and_then(i18n::Lang::from_code)
+            .unwrap_or_else(i18n::system_lang);
+        i18n::set_lang(lang);
         // On first run, preselect the marketplace from the system language.
         let first_run = Config::get_config_path()
             .map(|p| !p.exists())
@@ -133,9 +142,17 @@ impl PrimePhotoApp {
         match self.config.save() {
             Ok(_) => {
                 self.config_error = None;
-                self.log("Einstellungen gespeichert.");
+                self.log(tr("Einstellungen gespeichert."));
             }
             Err(e) => self.config_error = Some(e.to_string()),
+        }
+    }
+
+    /// Re-apply the tray menu labels in the current language (called after a
+    /// language change so the menu bar does not stay in the old language).
+    pub(crate) fn apply_tray_labels(&self) {
+        if let Some(tray) = self.tray.as_ref() {
+            tray.set_labels(*self.paused.borrow());
         }
     }
 
@@ -177,20 +194,20 @@ impl PrimePhotoApp {
 
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        ui.label(RichText::new("Prime Photos").size(20.0).strong());
+        ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
         ui.add_space(16.0);
         Self::nav_item(
             ui,
             &mut self.page,
             Page::Backup,
-            "Datensicherung",
+            tr("Datensicherung"),
             NavIcon::Backup,
         );
         Self::nav_item(
             ui,
             &mut self.page,
             Page::Settings,
-            "Einstellungen",
+            tr("Einstellungen"),
             NavIcon::Settings,
         );
 
@@ -201,7 +218,7 @@ impl PrimePhotoApp {
                 ui.label(RichText::new(e).color(theme::RED).size(11.0));
             }
             let logged_in = self.is_logged_in();
-            if logged_in && ui.add(theme::secondary_button("Abmelden")).clicked() {
+            if logged_in && ui.add(theme::secondary_button(tr("Abmelden"))).clicked() {
                 self.logout();
             }
             ui.add_space(4.0);
@@ -209,9 +226,9 @@ impl PrimePhotoApp {
                 status_dot(ui, if logged_in { theme::GREEN } else { theme::RED });
                 ui.label(
                     RichText::new(if logged_in {
-                        "Angemeldet"
+                        tr("Angemeldet")
                     } else {
-                        "Nicht angemeldet"
+                        tr("Nicht angemeldet")
                     })
                     .size(12.0)
                     .color(if logged_in { theme::GREEN } else { theme::RED }),
@@ -222,8 +239,12 @@ impl PrimePhotoApp {
                 draw_avatar(ui, 30.0, theme::TEAL);
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("Angemeldet als:").size(11.0).color(theme::MUTED));
-                    ui.label(RichText::new("Amazon Photos").size(13.0).strong());
+                    ui.label(
+                        RichText::new(tr("Angemeldet als:"))
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    );
+                    ui.label(RichText::new(tr("Amazon Photos")).size(13.0).strong());
                     ui.label(theme::muted(format!(
                         "amazon.{}",
                         login::amazon_domain(&self.config.country)
@@ -311,21 +332,19 @@ impl eframe::App for PrimePhotoApp {
             .show(ctx, |ui| {
                 let s = self.upload.lock().unwrap();
                 let summary = if s.active {
-                    format!(
-                        "Upload läuft: {}/{} · {} · {}",
-                        s.done,
-                        s.total,
-                        s.current,
-                        eta_suffix(s.done, s.total, s.started)
+                    tr3(
+                        "Upload läuft: {} · {} · {}",
+                        format!("{}/{}", s.done, s.total),
+                        &s.current,
+                        eta_suffix(s.done, s.total, s.started),
                     )
                 } else if s.total > 0 {
-                    format!(
-                        "Letzter Upload: {}/{} erfolgreich",
-                        s.done,
-                        s.total - s.failed
+                    tr1(
+                        "Letzter Upload: {} erfolgreich",
+                        format!("{}/{}", s.done, s.total - s.failed),
                     )
                 } else {
-                    "Bereit".to_string()
+                    tr("Bereit").to_string()
                 };
                 egui::CollapsingHeader::new(summary).show(ui, |ui| {
                     egui::ScrollArea::vertical()
@@ -358,7 +377,7 @@ impl eframe::App for PrimePhotoApp {
             let mut form_action: Option<ConfigFormAction> = None;
             if let Some(form) = self.config_form.as_mut() {
                 let editing = matches!(form.mode, ConfigFormMode::Edit(_));
-                egui::Window::new("Datensicherungseinstellungen")
+                egui::Window::new(tr("Datensicherungseinstellungen"))
                     .collapsible(false)
                     .resizable(false)
                     .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -383,9 +402,9 @@ impl eframe::App for PrimePhotoApp {
 
         // Keep the window title clear about what this window is.
         let title = if self.login.running || !self.is_logged_in() {
-            "Login – Prime Photos"
+            tr("Login – Prime Photos")
         } else {
-            "Prime Photos"
+            tr("Prime Photos")
         };
         if self.window_title.as_deref() != Some(title) {
             self.window_title = Some(title.to_owned());

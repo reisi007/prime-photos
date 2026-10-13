@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::dedup::DedupIndex;
 use crate::folders::{ConflictResolution, FolderStatus};
+use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
 use crate::prime_photos::PrimePhotos;
 use crate::theme;
 use eframe::egui::Color32;
@@ -45,14 +46,23 @@ impl UploadShared {
 
 pub(crate) fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32) {
     match status {
-        FolderStatus::Uploading => (format!("{:.0}% hochgeladen", pct * 100.0), theme::TEAL),
-        FolderStatus::Done => ("100% hochgeladen".to_string(), theme::GREEN),
-        FolderStatus::Paused => (format!("Angehalten ({:.0}%)", pct * 100.0), theme::AMBER),
-        FolderStatus::Error => ("Fehler".to_string(), theme::RED),
-        FolderStatus::Scanning => ("Wird vorbereitet …".to_string(), theme::MUTED),
+        FolderStatus::Uploading => (
+            tr1("{}% hochgeladen", format!("{:.0}", pct * 100.0)),
+            theme::TEAL,
+        ),
+        FolderStatus::Done => (tr("100% hochgeladen").to_string(), theme::GREEN),
+        FolderStatus::Paused => (
+            tr1("Angehalten ({}%)", format!("{:.0}", pct * 100.0)),
+            theme::AMBER,
+        ),
+        FolderStatus::Error => (tr("Fehler").to_string(), theme::RED),
+        FolderStatus::Scanning => (tr("Wird vorbereitet …").to_string(), theme::MUTED),
         FolderStatus::Idle => {
             if total > 0 {
-                (format!("{:.0}% hochgeladen", pct * 100.0), theme::MUTED)
+                (
+                    tr1("{}% hochgeladen", format!("{:.0}", pct * 100.0)),
+                    theme::MUTED,
+                )
             } else {
                 (String::new(), theme::MUTED)
             }
@@ -100,8 +110,8 @@ pub(crate) fn format_eta(secs: f64) -> String {
 /// while the estimate is not yet reliable.
 pub(crate) fn eta_suffix(done: usize, total: usize, started: Option<Instant>) -> String {
     match eta_secs(done, total, started) {
-        Some(eta) => format!("ca. {}", format_eta(eta)),
-        None => "Schätzung läuft …".to_string(),
+        Some(eta) => tr1("ca. {}", format_eta(eta)),
+        None => tr("Schätzung läuft …").to_string(),
     }
 }
 
@@ -113,14 +123,12 @@ pub(crate) fn upload_progress_text(done: usize, total: usize, started: Option<In
         0.0
     };
     let remaining = total.saturating_sub(done);
-    let files = if remaining == 1 {
-        "1 Datei".to_string()
-    } else {
-        format!("{} Dateien", remaining)
-    };
-    format!(
-        "{pct:.0}% · noch {files} · {}",
-        eta_suffix(done, total, started)
+    let files = tr_n(remaining, "1 Datei", "{n} Dateien");
+    tr3(
+        "{}% · noch {} · {}",
+        format!("{pct:.0}"),
+        files,
+        eta_suffix(done, total, started),
     )
 }
 
@@ -159,7 +167,7 @@ pub(crate) async fn upload_worker(
                 let mut s = shared.lock().unwrap();
                 s.failed += 1;
                 *s.folder_failed.entry(idx).or_insert(0) += 1;
-                s.log(format!("FEHLER {}: {}", path.display(), e));
+                s.log(tr2("FEHLER {}: {}", path.display(), e));
                 continue;
             }
         };
@@ -183,7 +191,10 @@ pub(crate) async fn upload_worker(
             let mut s = shared.lock().unwrap();
             s.done += 1;
             *s.folder_done.entry(idx).or_insert(0) += 1;
-            s.log(format!("UEBERSPRUNGEN {}: bereits hochgeladen", path.display()));
+            s.log(tr1(
+                "UEBERSPRUNGEN {}: bereits hochgeladen",
+                path.display(),
+            ));
             continue;
         }
 
@@ -215,7 +226,7 @@ pub(crate) async fn upload_worker(
                         let mut s = shared.lock().unwrap();
                         s.failed += 1;
                         *s.folder_failed.entry(idx).or_insert(0) += 1;
-                        s.log(format!("FEHLER {}: {}", path.display(), e));
+                        s.log(tr2("FEHLER {}: {}", path.display(), e));
                     }
                 }
             }
@@ -304,8 +315,8 @@ pub(crate) async fn run_upload(
         s.current.clear();
         (s.done, s.failed)
     };
-    shared.lock().unwrap().log(format!(
-        "Fertig: {} erfolgreich, {} fehlgeschlagen.",
-        done, failed
-    ));
+    shared
+        .lock()
+        .unwrap()
+        .log(tr2("Fertig: {} erfolgreich, {} fehlgeschlagen.", done, failed));
 }

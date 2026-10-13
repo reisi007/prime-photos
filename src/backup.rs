@@ -1,6 +1,7 @@
 use crate::app::{Page, PrimePhotoApp};
 use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::folders::{self, ConflictResolution, FolderStatus};
+use crate::i18n::{tr, tr1};
 use crate::theme;
 use crate::upload::{run_upload, status_text, upload_progress_text};
 use eframe::egui::{self, RichText};
@@ -55,7 +56,7 @@ impl PrimePhotoApp {
                 if i < self.store.folders.len() {
                     let f = self.store.folders.remove(i);
                     let _ = self.store.save();
-                    self.log(format!("Datensicherung gestoppt: {}", f.name));
+                    self.log(tr1("Datensicherung gestoppt: {}", &f.name));
                 }
             }
             FolderAction::OpenFinder(i) => {
@@ -89,11 +90,11 @@ impl PrimePhotoApp {
 
     pub(crate) fn start_folder_upload(&mut self, indices: Vec<usize>) {
         if self.upload.lock().unwrap().active {
-            self.log("Es läuft bereits ein Upload.");
+            self.log(tr("Es läuft bereits ein Upload."));
             return;
         }
         if !self.is_logged_in() {
-            self.log("Bitte zuerst anmelden (Einstellungen).");
+            self.log(tr("Bitte zuerst anmelden (Einstellungen)."));
             self.page = Page::Settings;
             return;
         }
@@ -112,7 +113,7 @@ impl PrimePhotoApp {
             }
         }
         if items.is_empty() {
-            self.log("Keine Fotos oder Videos in diesem Ordner gefunden.");
+            self.log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
             return;
         }
 
@@ -129,7 +130,7 @@ impl PrimePhotoApp {
             s.folder_failed.clear();
             s.uploaded_ids.clear();
             s.total = items.len();
-            s.log(format!("{} Datei(en) werden hochgeladen …", items.len()));
+            s.log(tr1("{} Datei(en) werden hochgeladen …", items.len()));
         }
         self.paused.send_replace(false);
         self.was_active = true;
@@ -180,16 +181,16 @@ impl PrimePhotoApp {
     pub(crate) fn backup_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui
-                .add(theme::primary_button("Datensicherung hinzufügen …"))
+                .add(theme::primary_button(tr("Datensicherung hinzufügen …")))
                 .clicked()
             {
                 self.add_backup_folder();
             }
             let all_paused = *self.paused.borrow();
             let label = if all_paused {
-                "Alle Sicherungsvorgänge fortsetzen"
+                tr("Alle Sicherungsvorgänge fortsetzen")
             } else {
-                "Alle Sicherungsvorgänge anhalten"
+                tr("Alle Sicherungsvorgänge anhalten")
             };
             let (running, done, total, started) = {
                 let s = self.upload.lock().unwrap();
@@ -220,15 +221,15 @@ impl PrimePhotoApp {
         });
 
         ui.add_space(12.0);
-        ui.label(theme::muted("Automatisch gesicherte Ordner:"));
+        ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")));
 
         if self.store.folders.is_empty() {
             ui.add_space(8.0);
-            ui.label("Wählen Sie einen Ordner aus, um die Sicherung zu starten.");
+            ui.label(tr("Wählen Sie einen Ordner aus, um die Sicherung zu starten."));
             ui.add_space(6.0);
-            ui.label(theme::muted(
+            ui.label(theme::muted(tr(
                 "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
-            ));
+            )));
         }
 
         // Snapshot rows for read-only rendering.
@@ -276,14 +277,17 @@ impl PrimePhotoApp {
                                 ui.vertical(|ui| {
                                     ui.label(RichText::new(&r.name).strong().size(15.0));
                                     ui.label(
-                                        RichText::new(format!("{:.0}% hochgeladen", pct * 100.0))
-                                            .size(12.0),
+                                        RichText::new(tr1(
+                                            "{}% hochgeladen",
+                                            format!("{:.0}", pct * 100.0),
+                                        ))
+                                        .size(12.0),
                                     );
                                     if !r.last_updated.is_empty() {
                                         ui.label(
-                                            theme::muted(format!(
+                                            theme::muted(tr1(
                                                 "Zuletzt aktualisiert: {}",
-                                                r.last_updated
+                                                &r.last_updated,
                                             ))
                                             .size(11.0),
                                         );
@@ -297,24 +301,24 @@ impl PrimePhotoApp {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         ui.menu_button("⋯", |ui| {
-                                            if ui.button("Jetzt scannen und hochladen").clicked() {
+                                            if ui.button(tr("Jetzt scannen und hochladen")).clicked() {
                                                 actions.push(FolderAction::Upload(r.idx));
                                                 ui.close_menu();
                                             }
-                                            if ui.button("Im Finder anzeigen").clicked() {
+                                            if ui.button(tr("Im Finder anzeigen")).clicked() {
                                                 actions.push(FolderAction::OpenFinder(r.idx));
                                                 ui.close_menu();
                                             }
-                                            if ui.button("Wiederholen").clicked() {
+                                            if ui.button(tr("Wiederholen")).clicked() {
                                                 actions.push(FolderAction::Retry(r.idx));
                                                 ui.close_menu();
                                             }
-                                            if ui.button("Bearbeiten").clicked() {
+                                            if ui.button(tr("Bearbeiten")).clicked() {
                                                 actions.push(FolderAction::Edit(r.idx));
                                                 ui.close_menu();
                                             }
                                             ui.separator();
-                                            if ui.button("Datensicherung stoppen").clicked() {
+                                            if ui.button(tr("Datensicherung stoppen")).clicked() {
                                                 actions.push(FolderAction::Remove(r.idx));
                                                 ui.close_menu();
                                             }

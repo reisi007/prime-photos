@@ -25,6 +25,7 @@
 
 use std::sync::Mutex;
 
+use crate::i18n::tr;
 use eframe::egui;
 
 /// Menu events captured by the global [`MenuEvent`] handler, drained by the UI.
@@ -52,9 +53,9 @@ const ICON_SIZE: u32 = 32;
 /// close-to-quit window.
 pub fn build(ctx: egui::Context) -> Option<Tray> {
     let menu = tray_icon::menu::Menu::new();
-    let show_item = tray_icon::menu::MenuItem::new("Fenster anzeigen", true, None);
-    let pause_item = tray_icon::menu::MenuItem::new("Anhalten", true, None);
-    let quit_item = tray_icon::menu::MenuItem::new("Beenden", true, None);
+    let show_item = tray_icon::menu::MenuItem::new(tr("Fenster anzeigen"), true, None);
+    let pause_item = tray_icon::menu::MenuItem::new(tr("Anhalten"), true, None);
+    let quit_item = tray_icon::menu::MenuItem::new(tr("Beenden"), true, None);
     let separator = tray_icon::menu::PredefinedMenuItem::separator();
     if let Err(e) = menu.append_items(&[&show_item, &pause_item, &separator, &quit_item]) {
         log::error!("tray: Menü konnte nicht aufgebaut werden: {e}");
@@ -71,7 +72,7 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
 
     let builder = tray_icon::TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip("Prime Photos");
+        .with_tooltip(tr("Prime Photos"));
     // `with_icon_templated` is the non-deprecated replacement for
     // `with_icon_as_template(true)`. It takes the icon itself and exists on
     // macOS only, so the icon is set per-platform here.
@@ -115,7 +116,15 @@ impl Tray {
     /// "Fortsetzen" while paused, "Anhalten" otherwise.
     pub fn set_paused(&self, paused: bool) {
         self.pause_item
-            .set_text(if paused { "Fortsetzen" } else { "Anhalten" });
+            .set_text(if paused { tr("Fortsetzen") } else { tr("Anhalten") });
+    }
+
+    /// Re-apply every menu label in the current language (called after a
+    /// language change). The tooltip is the brand name and never changes.
+    pub fn set_labels(&self, paused: bool) {
+        self.show_item.set_text(tr("Fenster anzeigen"));
+        self.set_paused(paused);
+        self.quit_item.set_text(tr("Beenden"));
     }
 }
 

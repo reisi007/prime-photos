@@ -5,6 +5,7 @@
 //! shown synchronously on the calling thread: `update` runs on the main thread,
 //! which is what macOS' backend requires.
 
+use crate::i18n::{tr, tr1, tr2};
 use log::warn;
 
 /// Show one desktop notification for a finished upload run.
@@ -12,15 +13,19 @@ use log::warn;
 /// `done` / `failed` / `total` are the counters of the run that just ended.
 /// Never panics: a failed notification is only logged.
 pub fn run_finished(done: usize, failed: usize, total: usize) {
-    let summary = "Prime Photos";
+    let summary = tr("Prime Photos");
     let body = if failed > 0 {
-        format!("Upload mit Fehlern beendet: {failed} von {total} Datei(en) fehlgeschlagen.")
+        tr2(
+            "Upload mit Fehlern beendet: {} von {} Datei(en) fehlgeschlagen.",
+            failed,
+            total,
+        )
     } else {
-        format!("Upload abgeschlossen: {done} Datei(en).")
+        tr1("Upload abgeschlossen: {} Datei(en).", done)
     };
 
     if let Err(e) = notify_rust::Notification::new()
-        .appname("Prime Photos")
+        .appname(tr("Prime Photos"))
         .summary(summary)
         .body(&body)
         .show()

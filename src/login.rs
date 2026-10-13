@@ -20,6 +20,7 @@ use wry::{Rect, WebView, WebViewBuilder};
 
 use crate::app::{PrimePhotoApp, HEADER_H};
 use crate::countries::{country_label, parse_cookie_string, COUNTRIES};
+use crate::i18n::{tr, tr1};
 use crate::icons::upload_logo;
 use crate::login;
 use crate::theme;
@@ -153,7 +154,7 @@ impl WebviewLogin {
                 self.error = None;
             }
             Err(e) => {
-                self.error = Some(format!("Anmeldeseite konnte nicht geöffnet werden: {e}"));
+                self.error = Some(tr1("Anmeldeseite konnte nicht geöffnet werden: {}", e));
             }
         }
     }
@@ -231,7 +232,7 @@ fn run_probe(probe: &Arc<Mutex<Probe>>) {
                 Err(e) => {
                     let mut p = probe.lock().unwrap();
                     if p.error.is_none() {
-                        p.error = Some(format!("Cookies konnten nicht gelesen werden: {e}"));
+                        p.error = Some(tr1("Cookies konnten nicht gelesen werden: {}", e));
                     }
                 }
             }
@@ -270,7 +271,7 @@ impl PrimePhotoApp {
         self.config.cookie_ubid_acb.clear();
         self.config.cookie_x_amz_access_token.clear();
         match self.config.save() {
-            Ok(_) => self.log("Abgemeldet."),
+            Ok(_) => self.log(tr("Abgemeldet.")),
             Err(e) => self.config_error = Some(e.to_string()),
         }
     }
@@ -294,7 +295,7 @@ impl PrimePhotoApp {
         if let Some(cookie_string) = outcome {
             self.apply_cookie_string(&cookie_string);
             match self.config.save() {
-                Ok(_) => self.log("Login erfolgreich – Cookies übernommen."),
+                Ok(_) => self.log(tr("Login erfolgreich – Cookies übernommen.")),
                 Err(e) => self.config_error = Some(e.to_string()),
             }
         }
@@ -332,13 +333,13 @@ impl PrimePhotoApp {
                         upload_logo(ui, 30.0);
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("Prime Photos").strong().size(15.0));
-                            ui.label(theme::muted("Bei Amazon anmelden"));
+                            ui.label(RichText::new(tr("Prime Photos")).strong().size(15.0));
+                            ui.label(theme::muted(tr("Bei Amazon anmelden")));
                         });
                         ui.with_layout(
                             egui::Layout::right_to_left(egui::Align::Center),
                             |ui| {
-                                if ui.add(theme::secondary_button("Abbrechen")).clicked() {
+                                if ui.add(theme::secondary_button(tr("Abbrechen"))).clicked() {
                                     cancel = true;
                                 }
                                 if let Some(e) = &self.login.error {
@@ -373,26 +374,30 @@ impl PrimePhotoApp {
             ui.add_space(56.0);
             upload_logo(ui, 84.0);
             ui.add_space(12.0);
-            ui.label(RichText::new("Prime Photos").size(28.0).strong());
+            ui.label(RichText::new(tr("Prime Photos")).size(28.0).strong());
             ui.add_space(4.0);
-            ui.label(theme::muted("Fotos & Videos zu Amazon Photos hochladen"));
+            ui.label(theme::muted(tr("Fotos & Videos zu Amazon Photos hochladen")));
             ui.add_space(26.0);
 
             // Marketplace selection before signing in.
             ui.horizontal(|ui| {
-                ui.label("Land / Amazon-Marktplatz:");
+                ui.label(tr("Land / Amazon-Marktplatz:"));
                 let current = self.config.country.clone();
                 egui::ComboBox::from_id_salt("login-country")
                     .selected_text(country_label(&current))
                     .show_ui(ui, |ui| {
-                        for (code, label) in COUNTRIES {
-                            ui.selectable_value(&mut self.config.country, code.to_string(), *label);
+                        for &(code, _, _) in COUNTRIES {
+                            ui.selectable_value(
+                                &mut self.config.country,
+                                code.to_string(),
+                                country_label(code),
+                            );
                         }
                     });
             });
             ui.add_space(14.0);
 
-            if ui.add(theme::primary_button("Mit Amazon anmelden")).clicked() {
+            if ui.add(theme::primary_button(tr("Mit Amazon anmelden"))).clicked() {
                 self.pending_login = true;
             }
             if let Some(e) = &self.login.error {
@@ -401,7 +406,7 @@ impl PrimePhotoApp {
             }
 
             ui.add_space(16.0);
-            if ui.link("Amazon Photos im Browser öffnen").clicked() {
+            if ui.link(tr("Amazon Photos im Browser öffnen")).clicked() {
                 let url = login::login_url(&self.config.country);
                 let _ = std::process::Command::new("open").arg(url).spawn();
             }

@@ -4,6 +4,7 @@ mod config;
 mod countries;
 mod dedup;
 mod folders;
+mod i18n;
 mod icons;
 mod login;
 mod notify;

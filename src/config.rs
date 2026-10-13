@@ -19,6 +19,11 @@ pub struct Config {
     /// for existing `config.toml` files that predate this field.
     #[serde(default = "default_true")]
     pub notifications: bool,
+    /// UI language override (`"de"`/`"en"`); `None` = follow the system locale.
+    /// `#[serde(default)]` so an existing `config.toml` without this key still
+    /// loads (and a `None` is omitted again on save).
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 impl Config {
@@ -81,6 +86,7 @@ impl Config {
             cookie_ubid_acb: "".to_string(),
             cookie_x_amz_access_token: "".to_string(),
             notifications: true,
+            language: None,
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::app::PrimePhotoApp;
 use crate::folders::ConflictResolution;
+use crate::i18n::{tr, tr1};
 use crate::theme;
 use eframe::egui::{self, RichText};
 use rfd::FileDialog;
@@ -42,18 +43,18 @@ impl PrimePhotoApp {
         form: &mut BackupConfigForm,
         editing: bool,
     ) -> Option<ConfigFormAction> {
-        const UNAVAILABLE: &str = "Noch nicht verfügbar";
+        let unavailable = tr("Noch nicht verfügbar");
         let mut action = None;
 
-        ui.label(RichText::new("Datensicherung").size(16.0).strong());
+        ui.label(RichText::new(tr("Datensicherung")).size(16.0).strong());
         ui.add_space(10.0);
 
         // Source folder. Read-only when editing an existing backup
         // (original `CanChangeSource`); "Ändern …" only in Create mode.
-        ui.label("Gesicherter Ordner:");
+        ui.label(tr("Gesicherter Ordner:"));
         ui.horizontal(|ui| {
             ui.label(theme::muted(form.path.display().to_string()));
-            let change = ui.add_enabled(!editing, theme::secondary_button("Ändern …"));
+            let change = ui.add_enabled(!editing, theme::secondary_button(tr("Ändern …")));
             if change.clicked() {
                 if let Some(p) = FileDialog::new().pick_folder() {
                     form.path = p;
@@ -64,35 +65,35 @@ impl PrimePhotoApp {
         ui.add_space(10.0);
 
         // Destination (not implemented yet).
-        ui.label("Ziel für Datensicherung:");
+        ui.label(tr("Ziel für Datensicherung:"));
         ui.horizontal(|ui| {
-            ui.add_enabled(false, theme::secondary_button("Ändern …"))
-                .on_disabled_hover_text(UNAVAILABLE);
+            ui.add_enabled(false, theme::secondary_button(tr("Ändern …")))
+                .on_disabled_hover_text(unavailable);
         });
         ui.add_space(10.0);
 
         // Content filter (not implemented yet).
-        ui.label("Was soll gesichert werden:");
+        ui.label(tr("Was soll gesichert werden:"));
         ui.horizontal(|ui| {
             for (i, label) in ["Alles", "Fotos und Videos", "Fotos"].iter().enumerate() {
-                ui.add_enabled(false, egui::Button::new(*label).selected(i == 0))
-                    .on_disabled_hover_text(UNAVAILABLE);
+                ui.add_enabled(false, egui::Button::new(tr(label)).selected(i == 0))
+                    .on_disabled_hover_text(unavailable);
             }
         });
         ui.add_space(10.0);
 
         // Upload interval (not implemented yet).
-        ui.label("Änderungen hochladen:");
+        ui.label(tr("Änderungen hochladen:"));
         ui.horizontal(|ui| {
             ui.add_enabled_ui(false, |ui| {
                 egui::ComboBox::from_id_salt("backup-config-interval")
-                    .selected_text("Sofort")
+                    .selected_text(tr("Sofort"))
                     .show_ui(ui, |ui| {
-                        ui.label("Sofort");
+                        ui.label(tr("Sofort"));
                     });
             })
             .response
-            .on_disabled_hover_text(UNAVAILABLE);
+            .on_disabled_hover_text(unavailable);
         });
         ui.add_space(10.0);
 
@@ -102,46 +103,46 @@ impl PrimePhotoApp {
             let mut time = "14:00".to_string();
             ui.add_enabled(
                 false,
-                egui::Checkbox::new(&mut weekly, "Wöchentlich aktiviert"),
+                egui::Checkbox::new(&mut weekly, tr("Wöchentlich aktiviert")),
             )
-            .on_disabled_hover_text(UNAVAILABLE);
-            ui.label("um");
+            .on_disabled_hover_text(unavailable);
+            ui.label(tr("um"));
             ui.add_enabled(
                 false,
                 egui::TextEdit::singleline(&mut time).desired_width(64.0),
             )
-            .on_disabled_hover_text(UNAVAILABLE);
+            .on_disabled_hover_text(unavailable);
         });
         ui.add_space(10.0);
 
         // Functional: dedup.
         ui.checkbox(
             &mut form.dedup,
-            "Duplikate vermeiden: Keine Fotos und Videos sichern, die sich bereits in meinem Konto befinden",
+            tr("Duplikate vermeiden: Keine Fotos und Videos sichern, die sich bereits in meinem Konto befinden"),
         );
         ui.add_space(10.0);
 
         // Functional: name-conflict policy.
-        ui.label("Umgang mit Dateinamenkonflikten:");
+        ui.label(tr("Umgang mit Dateinamenkonflikten:"));
         ui.radio_value(
             &mut form.conflict_resolution,
             ConflictResolution::Ask,
-            "Jedes Mal nachfragen",
+            tr("Jedes Mal nachfragen"),
         );
         ui.radio_value(
             &mut form.conflict_resolution,
             ConflictResolution::Ignore,
-            "Ignorieren",
+            tr("Ignorieren"),
         );
         ui.radio_value(
             &mut form.conflict_resolution,
             ConflictResolution::SaveAsNew,
-            "Als neue Dateien speichern",
+            tr("Als neue Dateien speichern"),
         );
         ui.radio_value(
             &mut form.conflict_resolution,
             ConflictResolution::Replace,
-            "Ersetzen",
+            tr("Ersetzen"),
         );
 
         if let Some(err) = &form.error {
@@ -152,10 +153,10 @@ impl PrimePhotoApp {
         ui.add_space(12.0);
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.add(theme::primary_button("Speichern")).clicked() {
+            if ui.add(theme::primary_button(tr("Speichern"))).clicked() {
                 action = Some(ConfigFormAction::Save);
             }
-            if ui.add(theme::secondary_button("Abbrechen")).clicked() {
+            if ui.add(theme::secondary_button(tr("Abbrechen"))).clicked() {
                 action = Some(ConfigFormAction::Cancel);
             }
         });
@@ -179,7 +180,7 @@ impl PrimePhotoApp {
 
                 if !path.exists() {
                     if let Some(f) = self.config_form.as_mut() {
-                        f.error = Some("Lokaler Pfad ist nicht verfügbar".to_string());
+                        f.error = Some(tr("Lokaler Pfad ist nicht verfügbar").to_string());
                     }
                     return;
                 }
@@ -189,7 +190,7 @@ impl PrimePhotoApp {
                         if self.store.folders.iter().any(|f| f.path == path) {
                             if let Some(f) = self.config_form.as_mut() {
                                 f.error = Some(
-                                    "Datensicherung für lokalen Pfad existiert bereits"
+                                    tr("Datensicherung für lokalen Pfad existiert bereits")
                                         .to_string(),
                                 );
                             }
@@ -202,7 +203,7 @@ impl PrimePhotoApp {
                             f.conflict_resolution = conflict;
                         }
                         let _ = self.store.save();
-                        self.log(format!("Ordner hinzugefügt: {}", path.display()));
+                        self.log(tr1("Ordner hinzugefügt: {}", path.display()));
                         self.config_form = None;
                         self.start_folder_upload(vec![idx]);
                     }
@@ -224,7 +225,7 @@ impl PrimePhotoApp {
                             None => {
                                 if let Some(f) = self.config_form.as_mut() {
                                     f.error =
-                                        Some("Ordner ist nicht mehr vorhanden".to_string());
+                                        Some(tr("Ordner ist nicht mehr vorhanden").to_string());
                                 }
                             }
                         }
