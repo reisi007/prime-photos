@@ -90,6 +90,14 @@ impl PrimePhotoApp {
             &mut self.config.notifications,
             tr("Desktop-Benachrichtigungen (Upload fertig / Fehler)"),
         );
+        let autostart_resp =
+            ui.checkbox(&mut self.autostart_enabled, tr("Nach dem Anmelden starten"));
+        if autostart_resp.changed() {
+            self.set_autostart(self.autostart_enabled);
+        }
+        ui.label(theme::muted(tr(
+            "Startet Prime Photos automatisch, wenn du dich am System anmeldest.",
+        )));
         ui.checkbox(&mut self.slow_mode, tr("Slow-Mode (1 Datei gleichzeitig)"));
         ui.label(theme::muted(tr("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.")));
 

@@ -35,6 +35,69 @@ pub(crate) enum SettingsTab {
     Bandwidth,
 }
 
+// ---------------------------------------------------------------------------
+// Autostart (login item)
+// ---------------------------------------------------------------------------
+
+/// App name used for the auto-launch (login item) registration.
+const AUTOSTART_APP_NAME: &str = "Prime Photos";
+
+/// Build the `auto-launch` registration for the current executable.
+///
+/// `None` means "autostart is unavailable here": the platform is not supported
+/// or the executable path could not be determined. The app keeps running and
+/// the toggle simply stays off.
+///
+/// The builder is used instead of the platform-specific `AutoLaunch::new`
+/// constructors so this helper stays `#[cfg]`-free. `MacOSLaunchMode::LaunchAgent`
+/// is also the crate default; it is spelled out because that is the mode we
+/// want on macOS (a plist in `~/Library/LaunchAgents`, no AppleScript).
+fn build_autostart() -> Option<auto_launch::AutoLaunch> {
+    let exe = std::env::current_exe().ok()?;
+    auto_launch::AutoLaunchBuilder::new()
+        .set_app_name(AUTOSTART_APP_NAME)
+        .set_app_path(&exe.display().to_string())
+        .set_macos_launch_mode(auto_launch::MacOSLaunchMode::LaunchAgent)
+        .build()
+        .ok()
+}
+
+/// Runtime-only autostart (login item) state.
+///
+/// `inner` is `None` when the platform is unsupported or the registration could
+/// not be built. Every operation then answers "unsupported"/"disabled" rather
+/// than panicking, so the settings toggle is safe on every platform.
+pub(crate) struct Autostart {
+    inner: Option<auto_launch::AutoLaunch>,
+}
+
+impl Autostart {
+    pub(crate) fn new() -> Self {
+        Self {
+            inner: build_autostart(),
+        }
+    }
+
+    pub(crate) fn enable(&self) -> auto_launch::Result<()> {
+        match self.inner.as_ref() {
+            Some(inner) => inner.enable(),
+            None => Err(auto_launch::Error::UnsupportedOS),
+        }
+    }
+
+    pub(crate) fn disable(&self) -> auto_launch::Result<()> {
+        match self.inner.as_ref() {
+            Some(inner) => inner.disable(),
+            None => Err(auto_launch::Error::UnsupportedOS),
+        }
+    }
+
+    /// Current OS state; `None` when unsupported or unreadable (treated as off).
+    pub(crate) fn is_enabled(&self) -> Option<bool> {
+        self.inner.as_ref().and_then(|inner| inner.is_enabled().ok())
+    }
+}
+
 pub(crate) struct PrimePhotoApp {
     pub(crate) rt: Arc<Runtime>,
     pub(crate) config: Config,
@@ -69,6 +132,12 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) quitting: bool,
     /// Last pause state pushed to the tray label, to update it only on change.
     pub(crate) tray_paused: bool,
+    /// Auto-launch (login item) registration; `inner` is `None` when the
+    /// platform does not support it.
+    pub(crate) autostart: Autostart,
+    /// UI state of the autostart checkbox, kept in sync with the OS state.
+    /// Runtime-only: not persisted in `Config` (see `set_autostart`).
+    pub(crate) autostart_enabled: bool,
 }
 
 impl PrimePhotoApp {
@@ -101,6 +170,10 @@ impl PrimePhotoApp {
         let config_path = Config::get_config_path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| e.to_string());
+        let autostart = Autostart::new();
+        // Seed the checkbox from the OS state (is the login item already
+        // registered?); `false` when unsupported or the state is unreadable.
+        let autostart_enabled = autostart.is_enabled().unwrap_or(false);
         Self {
             rt,
             config,
@@ -126,6 +199,8 @@ impl PrimePhotoApp {
             tray: tray::build(cc.egui_ctx.clone()),
             quitting: false,
             tray_paused: false,
+            autostart,
+            autostart_enabled,
         }
     }
 
@@ -155,6 +230,31 @@ impl PrimePhotoApp {
     pub(crate) fn apply_tray_labels(&self) {
         if let Some(tray) = self.tray.as_ref() {
             tray.set_labels(*self.paused.borrow());
+        }
+    }
+
+    /// Turn the auto-launch (login item) registration on or off and re-sync the
+    /// UI flag from the OS state.
+    ///
+    /// **Runtime-only / not persisted:** the flag lives in `PrimePhotoApp`, not
+    /// in `Config` — this package may not touch `config.rs` (another agent owns
+    /// it), so there is no serialized field to write. On startup the checkbox is
+    /// therefore seeded from the OS state, and a manual change survives until
+    /// the registration itself is changed (e.g. from the OS or another tool).
+    ///
+    /// Never panics: on an unsupported platform (or a failing registration) the
+    /// failure is reported on the `log` facade and the flag snaps back to `false`.
+    pub(crate) fn set_autostart(&mut self, enabled: bool) {
+        let result = if enabled {
+            self.autostart.enable()
+        } else {
+            self.autostart.disable()
+        };
+        // Report the real state, not the intent: a failed enable/disable must
+        // not leave the checkbox claiming something the OS does not do.
+        self.autostart_enabled = self.autostart.is_enabled().unwrap_or(false);
+        if let Err(e) = result {
+            log::warn!("Autostart (Login-Item) konnte nicht geändert werden: {e}");
         }
     }
 
