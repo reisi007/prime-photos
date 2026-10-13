@@ -12,13 +12,11 @@ use rfd::FileDialog;
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tokio::runtime::Runtime;
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 /// Height of the slim branded header shown above the Amazon sign-in webview.
@@ -103,7 +101,7 @@ struct PrimePhotoApp {
     settings_tab: SettingsTab,
     store: FolderStore,
     upload: Arc<Mutex<UploadShared>>,
-    paused: Arc<AtomicBool>,
+    paused: watch::Sender<bool>,
     concurrency: usize,
     limit_enabled: bool,
     limit_kbps: u32,
@@ -145,7 +143,7 @@ impl PrimePhotoApp {
             settings_tab: SettingsTab::General,
             store: FolderStore::load(),
             upload: Arc::new(Mutex::new(UploadShared::default())),
-            paused: Arc::new(AtomicBool::new(false)),
+            paused: watch::Sender::new(false),
             concurrency: 3,
             limit_enabled: false,
             limit_kbps: 100,
@@ -304,7 +302,7 @@ impl PrimePhotoApp {
             s.total = items.len();
             s.log(format!("{} Datei(en) werden hochgeladen …", items.len()));
         }
-        self.paused.store(false, Ordering::Relaxed);
+        self.paused.send_replace(false);
         self.was_active = true;
 
         for (&i, &count) in &per_folder {
@@ -490,7 +488,7 @@ impl PrimePhotoApp {
             {
                 self.add_backup_folder();
             }
-            let all_paused = self.paused.load(Ordering::Relaxed);
+            let all_paused = *self.paused.borrow();
             let label = if all_paused {
                 "Alle Sicherungsvorgänge fortsetzen"
             } else {
@@ -504,7 +502,7 @@ impl PrimePhotoApp {
                 )
                 .clicked()
             {
-                self.paused.store(!all_paused, Ordering::Relaxed);
+                self.paused.send_replace(!all_paused);
             }
             if running {
                 ui.spinner();
@@ -865,12 +863,12 @@ async fn upload_worker(
     queue: Arc<Mutex<VecDeque<(usize, PathBuf)>>>,
     shared: Arc<Mutex<UploadShared>>,
     cfg: Config,
-    paused: Arc<AtomicBool>,
+    mut pause_rx: watch::Receiver<bool>,
     limit_kbps: u32,
 ) {
     let mut uploader = AmznPhoto::new(&cfg, false);
     loop {
-        while paused.load(Ordering::Relaxed) {
+        while *pause_rx.borrow_and_update() {
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
         let item = { queue.lock().unwrap().pop_front() };
@@ -882,27 +880,52 @@ async fn upload_worker(
             s.current = path.display().to_string();
         }
         let started = Instant::now();
-        match uploader.upload_picture(&path, None, None).await {
-            Ok(id) => {
-                let mut s = shared.lock().unwrap();
-                s.done += 1;
-                *s.folder_done.entry(idx).or_insert(0) += 1;
-                s.uploaded_ids.push(id);
-                s.log(format!("OK    {}", path.display()));
+
+        let upload_fut = uploader.upload_picture(&path, None, None);
+        tokio::pin!(upload_fut);
+        let mut requeued = false;
+        tokio::select! {
+            biased;
+            changed = pause_rx.changed() => {
+                let _ = changed;
+                queue.lock().unwrap().push_front((idx, path.clone()));
+                requeued = true;
             }
-            Err(e) => {
-                let mut s = shared.lock().unwrap();
-                s.failed += 1;
-                *s.folder_failed.entry(idx).or_insert(0) += 1;
-                s.log(format!("FEHLER {}: {}", path.display(), e));
+            res = &mut upload_fut => {
+                match res {
+                    Ok(id) => {
+                        let mut s = shared.lock().unwrap();
+                        s.done += 1;
+                        *s.folder_done.entry(idx).or_insert(0) += 1;
+                        s.uploaded_ids.push(id);
+                        s.log(format!("OK    {}", path.display()));
+                    }
+                    Err(e) => {
+                        let mut s = shared.lock().unwrap();
+                        s.failed += 1;
+                        *s.folder_failed.entry(idx).or_insert(0) += 1;
+                        s.log(format!("FEHLER {}: {}", path.display(), e));
+                    }
+                }
             }
+        }
+        if requeued {
+            continue;
         }
 
         if limit_kbps > 0 && size > 0 {
             let target = Duration::from_secs_f64(size as f64 / (limit_kbps as f64 * 1024.0));
             let elapsed = started.elapsed();
             if target > elapsed {
-                tokio::time::sleep(target - elapsed).await;
+                let remaining = target - elapsed;
+                tokio::select! {
+                    biased;
+                    changed = pause_rx.changed() => {
+                        let _ = changed;
+                        let _ = pause_rx.borrow_and_update();
+                    }
+                    _ = tokio::time::sleep(remaining) => {}
+                }
             }
         }
     }
@@ -912,7 +935,7 @@ async fn run_upload(
     items: Vec<(usize, PathBuf)>,
     cfg: Config,
     shared: Arc<Mutex<UploadShared>>,
-    paused: Arc<AtomicBool>,
+    paused: watch::Sender<bool>,
     concurrency: usize,
     limit_kbps: u32,
     album: String,
@@ -926,7 +949,7 @@ async fn run_upload(
         let q = queue.clone();
         let s = shared.clone();
         let c = cfg.clone();
-        let p = paused.clone();
+        let p = paused.subscribe();
         set.spawn(async move {
             upload_worker(q, s, c, p, limit_kbps).await;
         });
