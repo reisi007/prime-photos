@@ -18,6 +18,27 @@ use tokio::task::JoinSet;
 // Shared upload state (written by the async workers, read by the UI)
 // ---------------------------------------------------------------------------
 
+/// Coarse per-file state of a queue entry. The cookie upload path reads the
+/// file as a whole, so there is no byte-level progress (docs/SPEC_UPLOAD_PROGRESS.md §4.2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileState {
+    Waiting,
+    Uploading,
+    Done,
+    Failed,
+    Skipped,
+}
+
+/// One entry of the live per-file queue rendered on the Backup page.
+pub(crate) struct QueueEntry {
+    /// Backup-folder index this file belongs to (the tuple's folder element).
+    /// Kept for later per-folder grouping; not read by the current panel.
+    #[allow(dead_code)]
+    pub(crate) folder: usize,
+    pub(crate) name: String,
+    pub(crate) state: FileState,
+}
+
 #[derive(Default)]
 pub(crate) struct UploadShared {
     pub(crate) active: bool,
@@ -33,6 +54,9 @@ pub(crate) struct UploadShared {
     pub(crate) folder_done: HashMap<usize, usize>,
     pub(crate) folder_failed: HashMap<usize, usize>,
     pub(crate) uploaded_ids: Vec<String>,
+    /// Live per-file queue for the current run, in `items` order. `QueueEntry.folder`
+    /// is the folder index, the vector position is the row handed to the worker.
+    pub(crate) queue: Vec<QueueEntry>,
 }
 
 impl UploadShared {
@@ -137,7 +161,7 @@ pub(crate) fn upload_progress_text(done: usize, total: usize, started: Option<In
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn upload_worker(
-    queue: Arc<Mutex<VecDeque<(usize, PathBuf)>>>,
+    queue: Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>,
     shared: Arc<Mutex<UploadShared>>,
     cfg: Config,
     mut pause_rx: watch::Receiver<bool>,
@@ -151,7 +175,13 @@ pub(crate) async fn upload_worker(
             tokio::time::sleep(Duration::from_millis(400)).await;
         }
         let item = { queue.lock().unwrap().pop_front() };
-        let Some((idx, path)) = item else { break };
+        let Some((row, idx, path)) = item else { break };
+
+        // Mark the file as being worked on (guarded so an out-of-range row can
+        // never panic; the queue is only mutated while `shared` is held).
+        if let Some(e) = shared.lock().unwrap().queue.get_mut(row) {
+            e.state = FileState::Uploading;
+        }
 
         let (dedup_on, conflict) = folder_opts
             .get(&idx)
@@ -167,6 +197,9 @@ pub(crate) async fn upload_worker(
                 let mut s = shared.lock().unwrap();
                 s.failed += 1;
                 *s.folder_failed.entry(idx).or_insert(0) += 1;
+                if let Some(en) = s.queue.get_mut(row) {
+                    en.state = FileState::Failed;
+                }
                 s.log(tr2("FEHLER {}: {}", path.display(), e));
                 continue;
             }
@@ -191,6 +224,9 @@ pub(crate) async fn upload_worker(
             let mut s = shared.lock().unwrap();
             s.done += 1;
             *s.folder_done.entry(idx).or_insert(0) += 1;
+            if let Some(en) = s.queue.get_mut(row) {
+                en.state = FileState::Skipped;
+            }
             s.log(tr1(
                 "UEBERSPRUNGEN {}: bereits hochgeladen",
                 path.display(),
@@ -207,7 +243,10 @@ pub(crate) async fn upload_worker(
             biased;
             changed = pause_rx.changed() => {
                 let _ = changed;
-                queue.lock().unwrap().push_front((idx, path.clone()));
+                queue.lock().unwrap().push_front((row, idx, path.clone()));
+                if let Some(e) = shared.lock().unwrap().queue.get_mut(row) {
+                    e.state = FileState::Waiting;
+                }
                 requeued = true;
             }
             res = &mut upload_fut => {
@@ -220,12 +259,18 @@ pub(crate) async fn upload_worker(
                         s.done += 1;
                         *s.folder_done.entry(idx).or_insert(0) += 1;
                         s.uploaded_ids.push(id);
+                        if let Some(en) = s.queue.get_mut(row) {
+                            en.state = FileState::Done;
+                        }
                         s.log(format!("OK    {}", path.display()));
                     }
                     Err(e) => {
                         let mut s = shared.lock().unwrap();
                         s.failed += 1;
                         *s.folder_failed.entry(idx).or_insert(0) += 1;
+                        if let Some(en) = s.queue.get_mut(row) {
+                            en.state = FileState::Failed;
+                        }
                         s.log(tr2("FEHLER {}: {}", path.display(), e));
                     }
                 }
@@ -265,7 +310,7 @@ pub(crate) async fn upload_worker(
 }
 
 pub(crate) async fn run_upload(
-    items: Vec<(usize, PathBuf)>,
+    items: Vec<(usize, usize, PathBuf)>,
     cfg: Config,
     shared: Arc<Mutex<UploadShared>>,
     paused: watch::Sender<bool>,

@@ -3,7 +3,7 @@ use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::folders::{self, ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1};
 use crate::theme;
-use crate::upload::{run_upload, status_text, upload_progress_text};
+use crate::upload::{run_upload, status_text, upload_progress_text, FileState, QueueEntry};
 use eframe::egui::{self, RichText};
 use rfd::FileDialog;
 use std::collections::HashMap;
@@ -96,7 +96,8 @@ impl PrimePhotoApp {
             return;
         }
 
-        let mut items: Vec<(usize, PathBuf)> = Vec::new();
+        let mut items: Vec<(usize, usize, PathBuf)> = Vec::new();
+        let mut queue: Vec<QueueEntry> = Vec::new();
         let mut per_folder: HashMap<usize, usize> = HashMap::new();
         let mut folder_opts: HashMap<usize, (bool, ConflictResolution)> = HashMap::new();
         for &i in &indices {
@@ -105,7 +106,19 @@ impl PrimePhotoApp {
                 per_folder.insert(i, imgs.len());
                 folder_opts.insert(i, (f.dedup, f.conflict_resolution));
                 for p in imgs {
-                    items.push((i, p));
+                    // Same order as `items`: the row is this entry's position in
+                    // the queue, the folder is the backup-folder index `i`.
+                    let row = items.len();
+                    let name = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    queue.push(QueueEntry {
+                        folder: i,
+                        name,
+                        state: FileState::Waiting,
+                    });
+                    items.push((row, i, p));
                 }
             }
         }
@@ -127,6 +140,7 @@ impl PrimePhotoApp {
             s.folder_failed.clear();
             s.uploaded_ids.clear();
             s.total = items.len();
+            s.queue = queue;
             s.log(tr1("{} Datei(en) werden hochgeladen …", items.len()));
         }
         self.paused.send_replace(false);
@@ -219,6 +233,45 @@ impl PrimePhotoApp {
                 );
             }
         });
+
+        // Live per-file queue (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). Take one
+        // snapshot under the upload lock so no lock is held across `.show`.
+        // `FileState::Waiting`/`Uploading` need `FileState: Copy` + `Eq` and are
+        // matched by value below.
+        let queue_snapshot: Vec<(String, FileState)> = {
+            let s = self.upload.lock().unwrap();
+            s.queue
+                .iter()
+                .map(|e| (e.name.clone(), e.state))
+                .collect()
+        };
+        if !queue_snapshot.is_empty() {
+            let remaining = queue_snapshot
+                .iter()
+                .filter(|(_, st)| matches!(st, FileState::Waiting | FileState::Uploading))
+                .count();
+            egui::CollapsingHeader::new(tr1("Warteschlange ({})", remaining)).show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        // Cap the rendered rows so a very large run stays cheap.
+                        for (name, state) in queue_snapshot.iter().take(300) {
+                            let (txt, col) = match state {
+                                FileState::Waiting => (tr("Warten"), theme::MUTED),
+                                FileState::Uploading => (tr("In Bearbeitung"), theme::TEAL),
+                                FileState::Done => (tr("Abgeschlossen"), theme::GREEN),
+                                FileState::Failed => (tr("Fehlgeschlagen"), theme::RED),
+                                FileState::Skipped => (tr("Übersprungen"), theme::MUTED),
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(txt).color(col).size(12.0));
+                                ui.label(RichText::new(name).size(12.0));
+                            });
+                        }
+                    });
+            });
+            ui.add_space(8.0);
+        }
 
         ui.add_space(12.0);
         ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")));
