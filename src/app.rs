@@ -460,6 +460,13 @@ impl eframe::App for PrimePhotoApp {
             });
 
             let active = self.upload.lock().unwrap().active;
+            // Also latch background runs (PORT-5): the tick starts them without
+            // `start_scheduled_upload`, so `was_active` would never become true
+            // and their completion would stay silent (no notification, no
+            // `finalize_upload`). Latching here makes both paths identical.
+            if active {
+                self.was_active = true;
+            }
             if active || self.was_active {
                 ctx.request_repaint_after(Duration::from_millis(250));
                 if self.was_active && !active {

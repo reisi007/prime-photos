@@ -172,6 +172,20 @@ impl FolderStore {
         true
     }
 
+    /// Indices of the folders currently flagged `enabled`, in store order.
+    ///
+    /// The background sync (PORT-5) only picks those up; a disabled folder
+    /// keeps its manual "Jetzt scannen und hochladen" (that path takes the
+    /// index from the UI, not from here).
+    pub(crate) fn enabled_indices(&self) -> Vec<usize> {
+        self.folders
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.enabled)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     pub fn remove(&mut self, path: &Path) -> bool {
         let before = self.folders.len();
         self.folders.retain(|f| f.path != path);

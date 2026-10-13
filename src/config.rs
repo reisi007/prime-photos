@@ -5,6 +5,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_background_sync() -> bool {
+    true
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub country: String,
@@ -24,6 +28,12 @@ pub struct Config {
     /// loads (and a `None` is omitted again on save).
     #[serde(default)]
     pub language: Option<String>,
+    /// Periodic background sync (PORT-5): while the app runs, the enabled
+    /// backup folders are re-scanned and newly found files are uploaded.
+    /// `#[serde(default = "default_background_sync")]` (true) so an existing
+    /// `config.toml` without this key still loads — with the feature active.
+    #[serde(default = "default_background_sync")]
+    pub background_sync: bool,
 }
 
 impl Config {
@@ -87,6 +97,7 @@ impl Config {
             cookie_x_amz_access_token: "".to_string(),
             notifications: true,
             language: None,
+            background_sync: true,
         }
     }
 }

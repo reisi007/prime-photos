@@ -90,6 +90,13 @@ impl PrimePhotoApp {
             &mut self.config.notifications,
             tr("Desktop-Benachrichtigungen (Upload fertig / Fehler)"),
         );
+        ui.checkbox(
+            &mut self.config.background_sync,
+            tr("Hintergrund-Synchronisierung"),
+        );
+        ui.label(theme::muted(tr(
+            "Sucht automatisch nach neuen Dateien in den aktiven Sicherungszielen. Läuft nur, solange Prime Photos geöffnet ist.",
+        )));
         let autostart_resp =
             ui.checkbox(&mut self.autostart_enabled, tr("Nach dem Anmelden starten"));
         if autostart_resp.changed() {
