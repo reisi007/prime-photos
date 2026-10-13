@@ -7,7 +7,8 @@
 - [x] Sidebar navigation: Datensicherung / Einstellungen.
 - [x] Persistent backup folders (`folders.toml`), survive restarts.
 - [x] Backup list with per-folder progress, status, ⋯ menu (jetzt scannen, Im Finder zeigen, Wiederholen, stoppen).
-- [x] "Alle Sicherungsvorgänge anhalten/fortsetzen" (global pause).
+- [x] "Alle Sicherungsvorgänge anhalten/fortsetzen" (global pause; seit 2026-10-13 stoppt sie auch
+  laufende Übertragungen sofort — `watch`-Kanal, Commit `4a47795`).
 - [x] Concurrent uploads (Workers + JoinSet), per-file rate limit (Bandbreite tab).
 - [x] Login: embedded WKWebView **in the main window** (wry child view of the egui window); cookies captured via an async main-queue probe; manual cookie entry removed. Window title "Login – Prime Photo Uploader", slim branded header above the page (documented deviation from the original).
 - [x] Country / marketplace selector before login (default from system locale on first run).
@@ -15,16 +16,38 @@
 - [x] OpenAPI spec (`docs/openapi.yaml`) + protocol notes (`docs/PROTOCOL.md`).
 - [x] `ilspycmd` installed for .NET decompilation; Screen-Recording grant works (self-screenshots).
 
+## MVP-Scope (User-Entscheidung 2026-10-13)
+
+Im MVP: **Login**, **Upload-Ziel erstellen** (Backup-Konfiguration: Ziel, Inhaltsfilter,
+Intervall, Dedup, Dateinamenkonflikte), **Upload-Vorgang** (inkl. Pause/Dedup/Retry),
+**Einstellungsdialog**. Aktuelle Abdeckung: Login ✅ (eingebettet, siehe oben),
+Upload-Vorgang 🔧 (P1-Items unten), Upload-Ziel/Einstellungen 🔧 (P2-Items unten).
+Nicht im MVP, aber relevant: **Download-Vorgang** (Herunterladen-Tab des Originals) → Backlog.
+
+## Spec-Backfill (läuft, 2026-10-13)
+
+Clean-room-Specs nachholen für bereits Implementiertes (Umsetzer-Modell seit 2026-10-13
+`opencode-go/deepseek-v4.1-flash#high` — ersetzt `opencode/cat-jam-free`, das „rate limit exceeded"
+lieferte; Mapping auf git-HEAD, nicht Working-Tree):
+- [x] `docs/SPEC_LOGIN.md` (ap/signin-URL + assoc-Handles je Marketplace, Cookie-Satz, async Probe, Länderwahl). Verifiziert (Verifier: PASS mit Minors, angewendet).
+- [x] `docs/SPEC_UPLOAD.md` (Web-Upload-Endpoint, Parameter/Header, EXIF-Datums-Kette, 409-Verhalten, Album). Verifiziert (Verifier: PASS mit Minors, angewendet).
+- [x] `docs/SPEC_DEDUP.md` (Duplikat-Identität, ContentFilter-Extension-Taxonomie, Conflict-Pfade). Verifiziert (Verifier-Lauf läuft/gelaufen).
+- [ ] `docs/SPEC_FOLDERS.md` (Scan/Filter-Semantik, xmp-Ausschluss, folders.toml, Fortschritts-States; Extension-Taxonomie → SPEC_DEDUP). Neu gestartet auf deepseek (voriger Lauf: rate limit exceeded).
+
 ## Gemeldete Bugs & Wünsche (priorisiert, 2026-10-13)
 
 Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.**
 
-- [ ] **P1 – Pause hält den Upload nicht auf.** Trotz „Alle Sicherungsvorgänge anhalten" wurden
-  Fotos weiter hochgeladen. Ursache in `src/main.rs`: `upload_worker` prüft `paused` nur *vor* dem
-  nächsten Queue-Element; die bis zu `concurrency` bereits laufenden Requests und der
-  Rate-Limit-Sleep laufen zu Ende. Soll: Pause stoppt sofort (laufende Übertragungen abbrechen),
-  Queue ruht, Resume setzt fort. (Original: `…_backupscreen_pauseallbackups`,
-  `…_scheduletab_pauseschedule` / `…_resumeschedule`.)
+- [x] **P1 – Pause hält den Upload nicht auf.** Behoben (Commit `4a47795`): `paused` ist jetzt ein
+  `tokio::sync::watch`-Kanal; `upload_worker` racet jede Datei-Übertragung (`biased select!`) und den
+  Rate-Limit-Sleep gegen `pause_rx.changed()`, bricht die laufende Future ab und legt das Element per
+  `push_front` genau einmal zurück. Verifiziert (Verifier: APPROVE, nur `src/main.rs`).
+  **Residuen (nicht blockierend, offen):**
+  - [ ] **F-2:** Wenn Pause während des Pacing-Sleeps landet, kann der Throttle über die Pause/Resume-Grenze
+    übersprungen werden (effektives Rate-Limit kurzzeitig überschritten).
+  - [ ] **F-3:** Abbruch verwirft bereits gesendete Bytes (Datei startet bei 0) UND `conflictResolution=RENAME`
+    erzeugt bei Abbruch nach Server-Anlage ein Duplikat statt 409-Dedupe — Widerspruch zum Ziel „keine
+    Bandbreite verschwenden". Entscheidung nötig: „aktuelles Element fertig, dann ruhen" vs. sofortiger Abbruch; `RENAME` überdenken.
 
 - [ ] **P1 – Nur neue Dateien hochladen (Dedup).** Vor dem Upload prüfen, ob dieselbe Datei (md5)
   bereits im Konto bzw. im lokalen Index liegt → überspringen. Persistenter md5-Index, damit
@@ -32,6 +55,8 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   sichern, die sich bereits in meinem Konto befinden" (`…_scheduleconfiguration_dedupeoption`),
   „Dateien, die sich bereits in meinem Konto befinden, nicht sichern"
   (`…_upload_settings_skip_duplicates_option_subtitle`).
+  Vorgehen spec-first: erst `docs/SPEC_DEDUP.md` aus Binary-Recon (DedupeId-Berechnung,
+  ContentFilter-Extensions je Gruppe, Conflict-Pfade) — Spec-Task läuft —, dann Implementierung.
 
 - [ ] **P1 – Upload-Fehler `error sending request for url (…)`** (Beispiel
   `…/27_ÖFB-Reisinger_09.jpg`). `upload_picture` gibt `Err(e.to_string())` zurück → die
@@ -39,6 +64,13 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   Fehlerkette loggen (`{e:?}` / `source()`), **Retry mit Backoff** für transiente Fehler
   (Netzwerk, 5xx, 429, 408). Außerdem `conflictResolution=RENAME` hinterfragen — RENAME erzeugt
   bei vorhandener Datei eine Kopie; das Original nutzt `NONE` (Duplikate vermeiden).
+
+- [ ] **.xmp-Befund klären (User-Meldung 2026-10-13).** Gemeldet: „.xmp wird als Bild erkannt — falsch".
+  Code-Befund (nur gelesen): `is_supported_image` lehnt `xmp` explizit ab (`src/folders.rs:22`), der
+  einzige Sammelpfad `scan_images` filtert damit (`src/folders.rs:40`, Aufruf aus `start_upload` in
+  `src/main.rs`), der Dialog wählt nur Ordner (`FileDialog::pick_folder`). Offen: Upload-Log auf
+  `.xmp`-Einträge prüfen (Log lebt nur in-memory im Panel) — bestätigt → Eintrittspfad suchen;
+  nicht bestätigt → schließen.
 
 - [ ] **P2 – Login: Einfügen per ⌘V geht nicht.** Nacktes Binary ohne Hauptmenü → AppKit legt kein
   „Bearbeiten"-Menü an, `paste:` wird nicht geroutet (Passwort-Manager/Passwort einfügen unmöglich).
@@ -72,12 +104,19 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
 
 - [ ] „Details anzeigen"-Panel (verschachtelt/flach wie das Original, `docs/UI_FLOWS.md` §4.7).
 - [ ] Menüleisten-Status-Item (Status-Popup: Status, Benachrichtigungen, Speicher, §9).
-- [ ] Videos hochladen (bisher nur Fotos).
+- [ ] Videos hochladen (bisher nur Fotos — `.mp4`/`.mov`/… werden wie alle Nicht-Bilder ignoriert).
+  Original-Befund (`docs/`, nur gelesen): gleicher Upload-Endpoint (`kind=FILE`, nur `FILE` beobachtet),
+  Modus nur über `content_filter`-Bitmaske (`None=0, Photos=2, Videos=4, Other=8, PhotosAndVideo=6,
+  Everything=14`; dazu `DeduplicateOptions`, `docs/UI_STATES.md`-Tabellen). Unknown: welche
+  Video-Extensions das Original akzeptiert; ob sich Upload-Parameter für Video unterscheiden;
+  Quota-Frage (Prime: Fotos unbegrenzt, Videos begrenzt? — `…_notification_overquota_unlimitedphotos_*`,
+  Videospeicher-Upsell-String).
 - [ ] Auto-Refresh der Cookies bei 401.
 - [ ] „Startseite"/Übersichtsseite? (Strings vorhanden, im Build ungenutzt.)
 - [ ] Als `.app`-Bundle paketieren (Info.plist, Icon) — saubere Menüleiste/Doppelklick (.app und Menü hängen zusammen, siehe ⌘V).
 - [ ] Rest aus `Amazon Photos.dll`: Quota-Form, exakter Extension-Filter, Watcher-Intervall, Concurrency-Defaults, Konfliktbehandlung, Video-Support.
 - [ ] Echte „Speichernutzung"-Anzeige (nur Prime; bis dahin bewusst nichts anzeigen).
+- [ ] Download-Vorgang (Herunterladen-Tab des Originals) — relevant, aber explizit **nicht** Teil des MVP (siehe MVP-Scope oben).
 
 ## Verworfen
 

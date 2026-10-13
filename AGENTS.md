@@ -28,14 +28,25 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 - GUI language: German (matches the original Amazon Photos UI).
 - "Speichernutzung"/storage bar is intentionally omitted for now: it only applies to Prime members and needs a real quota fetch; no placeholder is shown.
 - Account/avatar block in the sidebar: when signed in, show the Amazon profile picture (no API identified yet — placeholder until then) plus "Angemeldet als:" and "Abmelden"; when **not** signed in, an icon replaces the picture. The green/red status color coding is kept deliberately (user likes it).
+- MVP scope (user decision 2026-10-13): login, upload-target creation ("Upload-Ziel erstellen": backup configuration with destination, content filter, interval, dedup, conflict handling), upload flow, settings dialog. The download flow is relevant but explicitly NOT part of the MVP.
 
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
-- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/step-5-preview-free` — bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
+- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash#high` (User-Entscheidung
+  2026-10-13, ersetzt `opencode/cat-jam-free` — cat-jam-free lieferte „rate limit exceeded", außerdem
+  fehlt für Modellwechsel in laufende Sessions die Reasoning-History) — bekommt Ziel-Dateien und die
+  vollständige Spezifikation, frische Session pro Task.
 - **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash#high`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
 - **Kein Push, kein CI:** Das Repo hat kein Remote; Verifikation erfolgt manuell pro Auftrag, nicht per Test-Suite.
+- **Spec-first pro Feature (User-Entscheidung 2026-10-13):** Vor jeder Implementierung wird das
+  Original-Binary (`/Applications/Amazon Photos.app`: .NET-DLL + Ressourcen, nur lesend) zum
+  jeweiligen Feature untersucht; das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten
+  (beobachtetes Verhalten in eigenen Worten/Tabellen, keine verbatimen Code-Auszüge, keine
+  Personendaten) — analog zu `docs/UI_FLOWS.md` / `docs/UI_STATES.md`. Erst danach Umsetzer-Briefing.
+- **Build-Verify ist nur grobe Basis:** Bauen → prüfen → committen gilt; Förmlichkeit
+  (Runden-Protokoll, Footer-Schreibweise) nach Augenmaß, kein Selbstzweck.
 
 ## Repo
 
