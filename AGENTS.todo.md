@@ -69,8 +69,14 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   „Ignored/Zuvor hochgeladen" behandelt, kein Fehler).
   Original-Mechanik: client-seitige `PreUploadCheck` gegen MD5-Index, Gating über
   Dedup-Toggle; Namenskonflikt separat über `ConflictResolution`. Siehe `docs/SPEC_DEDUP.md`.
-  **Umsetzung in zwei Paketen:** (A) Datenmodell + SQLite-Dedup-Index + Upload-Verdrahtung;
-  (B) Konfigfenster (Create+Edit geteilt) auf das Modell.
+  **Umsetzung in zwei Paketen:** (A) Datenmodell + SQLite-Dedup-Index + Upload-Verdrahtung —
+  ✅ erledigt, verifiziert (Verifier: APPROVE), Commit `b47bf9b`;
+  (B) Konfigfenster (Create+Edit geteilt) auf das Modell — 🔧 läuft.
+  **Paket B (User-Entscheidung 2026-10-13):** volle Original-Anordnung, aber Felder ohne Backend
+  (**Ziel**, **Inhaltsfilter**, **Intervall**) ausgegraut mit Hover „Noch nicht verfügbar";
+  funktionsfähig: Quelle (bei Bearbeiten read-only), „Duplikate vermeiden", Dateinamenkonflikte,
+  Speichern/Abbrechen. Fenster öffnet aus „Datensicherung hinzufügen …" (Create) und dem neuen
+  Zeilenmenü-Eintrag „Bearbeiten" (Edit).
 
 - [ ] **P1 – Upload-Fehler `error sending request for url (…)`** (Beispiel
   `…/27_ÖFB-Reisinger_09.jpg`). `upload_picture` gibt `Err(e.to_string())` zurück → die
@@ -128,6 +134,16 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
 
 ## Offen (Backlog)
 
+- [ ] **Neu (User-Wunsch 2026-10-13) – Fortschrittsbalken mit Restmenge + Zeitschätzung.** Ein
+  Fortschrittsbalken über alle Dateien (`done/total`) mit Text „noch {n} Dateien · ca. {m:ss}"
+  auf Basis der bisherigen Rate (Bytes bzw. Dateien/s, gleitendes Mittel) — in der Kopf-/Statuszeile
+  und optional pro Ordnerzeile. Original-Anhaltspunkte: „{0} von {1} Elemente hochgeladen…"
+  (`…_schedules_item_tooltip_items_uploaded`), „Zuletzt aktualisiert: {0}".
+- [ ] **Neu (User-Wunsch 2026-10-13) – Hintergrund-Helfer + Desktop-Benachrichtigungen.**
+  Ziel: macOS-Benachrichtigung bei **Upload fertig** und bei **Fehler**; Menüleisten-Status-Item wie
+  im Original (`docs/UI_FLOWS.md` §9). **Spec-first:** erst Recon der Original-Mechanik
+  (Menüleisten-Helfer/Login-Item/LaunchAgent? Benachrichtigungs-API? Auslöser-Ereignisse?) →
+  Clean-room-Spec `docs/SPEC_NOTIFICATIONS.md`, dann Implementierung. Recon läuft.
 - [ ] **Optional/Branding:** Account-Block zeigt unter „Angemeldet als:" noch die Zeile „Amazon Photos"
   (Label des angemeldeten Amazon-Kontos, kein Eigen-Branding). Falls keine Amazon-Wortmarke im eigenen
   Fenster gewünscht ist: durch die Domain (`amazon.<cc>`) ersetzen. Bewusst nicht im Rename-Lauf geändert.

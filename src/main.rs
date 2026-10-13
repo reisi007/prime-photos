@@ -74,6 +74,33 @@ enum FolderAction {
     Remove(usize),
     OpenFinder(usize),
     ToggleEnabled(usize),
+    Edit(usize),
+}
+
+/// Whether the "Datensicherungseinstellungen" window is configuring a new
+/// backup or one that already exists. Edit mode stores the folder **path** (not
+/// a row index) so a folder removed while the window is open cannot make Save
+/// write to the wrong backup.
+#[derive(Clone, PartialEq, Eq)]
+enum ConfigFormMode {
+    Create,
+    Edit(PathBuf),
+}
+
+/// Result of one rendered frame of the shared backup-configuration form body.
+enum ConfigFormAction {
+    Save,
+    Cancel,
+}
+
+/// State of the "Datensicherungseinstellungen" window, shared by Create and Edit.
+struct BackupConfigForm {
+    path: PathBuf,
+    dedup: bool,
+    conflict_resolution: ConflictResolution,
+    mode: ConfigFormMode,
+    /// Inline validation message; keeps the window open after an invalid Save.
+    error: Option<String>,
 }
 
 struct Row {
@@ -111,6 +138,8 @@ struct PrimePhotoApp {
     album_name: String,
     zone_override: String,
     was_active: bool,
+    /// Open "Datensicherungseinstellungen" window (Create or Edit), if any.
+    config_form: Option<BackupConfigForm>,
 }
 
 impl PrimePhotoApp {
@@ -155,6 +184,7 @@ impl PrimePhotoApp {
             album_name: String::new(),
             zone_override: String::new(),
             was_active: false,
+            config_form: None,
         }
     }
 
@@ -187,6 +217,7 @@ impl PrimePhotoApp {
 
     /// Sign out: drop the stored cookies and return to the login screen.
     fn logout(&mut self) {
+        self.config_form = None;
         self.config.session_id.clear();
         self.config.cookie_x_acb.clear();
         self.config.cookie_at_acb.clear();
@@ -239,14 +270,15 @@ impl PrimePhotoApp {
 
     fn add_backup_folder(&mut self) {
         if let Some(folder) = FileDialog::new().pick_folder() {
-            if self.store.add(folder.clone()) {
-                let idx = self.store.folders.len() - 1;
-                let _ = self.store.save();
-                self.log(format!("Ordner hinzugefügt: {}", folder.display()));
-                self.start_folder_upload(vec![idx]);
-            } else {
-                self.log("Ordner ist bereits in der Liste.");
-            }
+            // Open the shared "Datensicherungseinstellungen" window in Create
+            // mode instead of adding + uploading right away.
+            self.config_form = Some(BackupConfigForm {
+                path: folder,
+                dedup: true,
+                conflict_resolution: ConflictResolution::Ignore,
+                mode: ConfigFormMode::Create,
+                error: None,
+            });
         }
     }
 
@@ -275,6 +307,18 @@ impl PrimePhotoApp {
                     f.enabled = !f.enabled;
                 }
                 let _ = self.store.save();
+            }
+            FolderAction::Edit(i) => {
+                if let Some(f) = self.store.folders.get(i) {
+                    let form = BackupConfigForm {
+                        path: f.path.clone(),
+                        dedup: f.dedup,
+                        conflict_resolution: f.conflict_resolution,
+                        mode: ConfigFormMode::Edit(f.path.clone()),
+                        error: None,
+                    };
+                    self.config_form = Some(form);
+                }
             }
         }
     }
@@ -678,6 +722,10 @@ impl PrimePhotoApp {
                                                 actions.push(FolderAction::Retry(r.idx));
                                                 ui.close_menu();
                                             }
+                                            if ui.button("Bearbeiten").clicked() {
+                                                actions.push(FolderAction::Edit(r.idx));
+                                                ui.close_menu();
+                                            }
                                             ui.separator();
                                             if ui.button("Datensicherung stoppen").clicked() {
                                                 actions.push(FolderAction::Remove(r.idx));
@@ -819,6 +867,208 @@ impl PrimePhotoApp {
             self.save_config();
         }
     }
+
+    /// The single shared form body for the "Datensicherungseinstellungen"
+    /// window. Drawn once for both Create and Edit; returns the user's action.
+    /// Functional fields: source folder (read-only when `editing`), dedup and the
+    /// name-conflict policy. Destination, content filter and upload interval have
+    /// no backend yet, so they are shown disabled with a hover hint.
+    fn render_backup_config(
+        ui: &mut egui::Ui,
+        form: &mut BackupConfigForm,
+        editing: bool,
+    ) -> Option<ConfigFormAction> {
+        const UNAVAILABLE: &str = "Noch nicht verfügbar";
+        let mut action = None;
+
+        ui.label(RichText::new("Datensicherung").size(16.0).strong());
+        ui.add_space(10.0);
+
+        // Source folder. Read-only when editing an existing backup
+        // (original `CanChangeSource`); "Ändern …" only in Create mode.
+        ui.label("Gesicherter Ordner:");
+        ui.horizontal(|ui| {
+            ui.label(theme::muted(form.path.display().to_string()));
+            let change = ui.add_enabled(!editing, theme::secondary_button("Ändern …"));
+            if change.clicked() {
+                if let Some(p) = FileDialog::new().pick_folder() {
+                    form.path = p;
+                    form.error = None;
+                }
+            }
+        });
+        ui.add_space(10.0);
+
+        // Destination (not implemented yet).
+        ui.label("Ziel für Datensicherung:");
+        ui.horizontal(|ui| {
+            ui.add_enabled(false, theme::secondary_button("Ändern …"))
+                .on_disabled_hover_text(UNAVAILABLE);
+        });
+        ui.add_space(10.0);
+
+        // Content filter (not implemented yet).
+        ui.label("Was soll gesichert werden:");
+        ui.horizontal(|ui| {
+            for (i, label) in ["Alles", "Fotos und Videos", "Fotos"].iter().enumerate() {
+                ui.add_enabled(false, egui::Button::new(*label).selected(i == 0))
+                    .on_disabled_hover_text(UNAVAILABLE);
+            }
+        });
+        ui.add_space(10.0);
+
+        // Upload interval (not implemented yet).
+        ui.label("Änderungen hochladen:");
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(false, |ui| {
+                egui::ComboBox::from_id_salt("backup-config-interval")
+                    .selected_text("Sofort")
+                    .show_ui(ui, |ui| {
+                        ui.label("Sofort");
+                    });
+            })
+            .response
+            .on_disabled_hover_text(UNAVAILABLE);
+        });
+        ui.add_space(10.0);
+
+        // Weekly schedule (inert; no backend yet) — §4.5 "… aktiviert" + "um".
+        ui.horizontal(|ui| {
+            let mut weekly = true;
+            let mut time = "14:00".to_string();
+            ui.add_enabled(
+                false,
+                egui::Checkbox::new(&mut weekly, "Wöchentlich aktiviert"),
+            )
+            .on_disabled_hover_text(UNAVAILABLE);
+            ui.label("um");
+            ui.add_enabled(
+                false,
+                egui::TextEdit::singleline(&mut time).desired_width(64.0),
+            )
+            .on_disabled_hover_text(UNAVAILABLE);
+        });
+        ui.add_space(10.0);
+
+        // Functional: dedup.
+        ui.checkbox(
+            &mut form.dedup,
+            "Duplikate vermeiden: Keine Fotos und Videos sichern, die sich bereits in meinem Konto befinden",
+        );
+        ui.add_space(10.0);
+
+        // Functional: name-conflict policy.
+        ui.label("Umgang mit Dateinamenkonflikten:");
+        ui.radio_value(
+            &mut form.conflict_resolution,
+            ConflictResolution::Ask,
+            "Jedes Mal nachfragen",
+        );
+        ui.radio_value(
+            &mut form.conflict_resolution,
+            ConflictResolution::Ignore,
+            "Ignorieren",
+        );
+        ui.radio_value(
+            &mut form.conflict_resolution,
+            ConflictResolution::SaveAsNew,
+            "Als neue Dateien speichern",
+        );
+        ui.radio_value(
+            &mut form.conflict_resolution,
+            ConflictResolution::Replace,
+            "Ersetzen",
+        );
+
+        if let Some(err) = &form.error {
+            ui.add_space(6.0);
+            ui.colored_label(theme::RED, err);
+        }
+
+        ui.add_space(12.0);
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.add(theme::primary_button("Speichern")).clicked() {
+                action = Some(ConfigFormAction::Save);
+            }
+            if ui.add(theme::secondary_button("Abbrechen")).clicked() {
+                action = Some(ConfigFormAction::Cancel);
+            }
+        });
+
+        action
+    }
+
+    /// Applies a Save/Cancel from the configuration window. Validation failures
+    /// keep the window open with an inline error; a valid Save closes it.
+    fn handle_config_form_action(&mut self, action: ConfigFormAction) {
+        match action {
+            ConfigFormAction::Cancel => self.config_form = None,
+            ConfigFormAction::Save => {
+                let Some((mode, path, dedup, conflict)) =
+                    self.config_form.as_ref().map(|f| {
+                        (f.mode.clone(), f.path.clone(), f.dedup, f.conflict_resolution)
+                    })
+                else {
+                    return;
+                };
+
+                if !path.exists() {
+                    if let Some(f) = self.config_form.as_mut() {
+                        f.error = Some("Lokaler Pfad ist nicht verfügbar".to_string());
+                    }
+                    return;
+                }
+
+                match mode {
+                    ConfigFormMode::Create => {
+                        if self.store.folders.iter().any(|f| f.path == path) {
+                            if let Some(f) = self.config_form.as_mut() {
+                                f.error = Some(
+                                    "Datensicherung für lokalen Pfad existiert bereits"
+                                        .to_string(),
+                                );
+                            }
+                            return;
+                        }
+                        self.store.add(path.clone());
+                        let idx = self.store.folders.len() - 1;
+                        if let Some(f) = self.store.folders.get_mut(idx) {
+                            f.dedup = dedup;
+                            f.conflict_resolution = conflict;
+                        }
+                        let _ = self.store.save();
+                        self.log(format!("Ordner hinzugefügt: {}", path.display()));
+                        self.config_form = None;
+                        self.start_folder_upload(vec![idx]);
+                    }
+                    ConfigFormMode::Edit(edit_path) => {
+                        match self
+                            .store
+                            .folders
+                            .iter()
+                            .position(|f| f.path == edit_path)
+                        {
+                            Some(idx) => {
+                                if let Some(f) = self.store.folders.get_mut(idx) {
+                                    f.dedup = dedup;
+                                    f.conflict_resolution = conflict;
+                                }
+                                let _ = self.store.save();
+                                self.config_form = None;
+                            }
+                            None => {
+                                if let Some(f) = self.config_form.as_mut() {
+                                    f.error =
+                                        Some("Ordner ist nicht mehr vorhanden".to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32) {
@@ -908,6 +1158,22 @@ impl eframe::App for PrimePhotoApp {
                     self.finalize_upload();
                     self.was_active = false;
                 }
+            }
+
+            // Shared "Datensicherungseinstellungen" window (Create/Edit).
+            let mut form_action: Option<ConfigFormAction> = None;
+            if let Some(form) = self.config_form.as_mut() {
+                let editing = matches!(form.mode, ConfigFormMode::Edit(_));
+                egui::Window::new("Datensicherungseinstellungen")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                    .show(ctx, |ui| {
+                        form_action = Self::render_backup_config(ui, form, editing);
+                    });
+            }
+            if let Some(action) = form_action {
+                self.handle_config_form_action(action);
             }
         }
 
