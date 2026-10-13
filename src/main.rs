@@ -21,6 +21,9 @@ use std::{
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 
+/// Height of the slim branded header shown above the Amazon sign-in webview.
+const HEADER_H: f32 = 60.0;
+
 // ---------------------------------------------------------------------------
 // Shared upload state (written by the async workers, read by the UI)
 // ---------------------------------------------------------------------------
@@ -88,7 +91,14 @@ struct PrimePhotoApp {
     config: Config,
     config_path: String,
     config_error: Option<String>,
-    login: Arc<Mutex<login::WebviewLogin>>,
+    login: login::WebviewLogin,
+    /// Set by the UI when the user asks to sign in; handled in `update` because
+    /// creating the webview needs the frame (window handle).
+    pending_login: bool,
+    /// Last window title we pushed, so we only update it on change.
+    window_title: Option<String>,
+    /// The window is resized to the screen once, on the first frame.
+    sized: bool,
     page: Page,
     settings_tab: SettingsTab,
     store: FolderStore,
@@ -127,7 +137,10 @@ impl PrimePhotoApp {
             config,
             config_path,
             config_error,
-            login: Arc::new(Mutex::new(login::WebviewLogin::new())),
+            login: login::WebviewLogin::new(),
+            pending_login: false,
+            window_title: None,
+            sized: false,
             page: Page::Backup,
             settings_tab: SettingsTab::General,
             store: FolderStore::load(),
@@ -165,21 +178,26 @@ impl PrimePhotoApp {
 
     // -- login --------------------------------------------------------------
 
-    fn start_login(&mut self) {
-        let url = login::login_url(&self.config.country);
-        self.login.lock().unwrap().start(url);
+    fn cancel_login(&mut self) {
+        self.login.cancel();
     }
 
-    fn cancel_login(&mut self) {
-        self.login.lock().unwrap().cancel();
+    /// Create the login webview. Needs the frame for the window handle.
+    fn begin_login(&mut self, frame: &eframe::Frame, ctx: &egui::Context) {
+        if self.login.running {
+            return;
+        }
+        let url = login::login_url(&self.config.country);
+        let screen = ctx.screen_rect();
+        // Start just below an estimated header; the exact bounds are corrected
+        // on the next frame once the header has been measured.
+        let bounds = login::rect(0.0, HEADER_H, screen.width(), screen.height() - HEADER_H);
+        self.login.start(frame, &url, bounds);
     }
 
     fn poll_login(&mut self) {
-        {
-            let mut l = self.login.lock().unwrap();
-            l.poll();
-        }
-        let outcome = { self.login.lock().unwrap().outcome.take() };
+        self.login.poll();
+        let outcome = self.login.outcome.take();
         if let Some(cookie_string) = outcome {
             self.apply_cookie_string(&cookie_string);
             match self.config.save() {
@@ -368,23 +386,71 @@ impl PrimePhotoApp {
         });
     }
 
-    fn login_ui(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(70.0);
-            ui.label(RichText::new("amazon photos").size(30.0).strong());
-            ui.add_space(6.0);
-            ui.label(RichText::new("Prime Photo Uploader").size(16.0));
-            ui.add_space(26.0);
-            ui.label(
-                RichText::new(
-                    "Laden Sie Fotos und Videos von Ihrem Computer, Ihrer Kamera und Ihrer Speicherkarte hoch.",
+    /// Login phase (same window as the app, like the original).
+    ///
+    /// While Amazon's page is open we show a slim branded header and let the
+    /// webview fill the rest of the window; before that we show our own
+    /// sign-in screen with the marketplace picker.
+    fn login_ui(&mut self, ctx: &egui::Context) {
+        if self.login.running {
+            let mut cancel = false;
+            let header = egui::TopBottomPanel::top("login_header")
+                .exact_height(HEADER_H)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::SIDEBAR_BG)
+                        .inner_margin(egui::Margin::symmetric(16, 8)),
                 )
-                .size(15.0),
-            );
-            ui.add_space(22.0);
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        upload_logo(ui, 30.0);
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Prime Photo Uploader").strong().size(15.0));
+                            ui.label(theme::muted("Bei Amazon anmelden"));
+                        });
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui.add(theme::secondary_button("Abbrechen")).clicked() {
+                                    cancel = true;
+                                }
+                                if let Some(e) = &self.login.error {
+                                    ui.colored_label(theme::RED, e);
+                                } else {
+                                    ui.spinner();
+                                }
+                            },
+                        );
+                    });
+                });
+            let top_h = header.response.rect.height();
+            let screen = ctx.screen_rect();
+            self.login.set_bounds(login::rect(
+                0.0,
+                top_h,
+                screen.width(),
+                screen.height() - top_h,
+            ));
+            if cancel {
+                self.cancel_login();
+            }
+            return;
+        }
 
-            let mut login_started = false;
-            let mut login_cancelled = false;
+        egui::CentralPanel::default().show(ctx, |ui| self.login_screen_ui(ui));
+    }
+
+    /// Our own sign-in screen, shown before the Amazon page is opened.
+    fn login_screen_ui(&mut self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(56.0);
+            upload_logo(ui, 84.0);
+            ui.add_space(12.0);
+            ui.label(RichText::new("Prime Photo Uploader").size(28.0).strong());
+            ui.add_space(4.0);
+            ui.label(theme::muted("Fotos & Videos zu Amazon Photos hochladen"));
+            ui.add_space(26.0);
 
             // Marketplace selection before signing in.
             ui.horizontal(|ui| {
@@ -398,42 +464,14 @@ impl PrimePhotoApp {
                         }
                     });
             });
-            ui.label(theme::muted(format!(
-                "Anmeldung öffnet {}.",
-                login::login_url(&self.config.country)
-            )));
             ui.add_space(14.0);
 
-            {
-                let l = self.login.lock().unwrap();
-                if ui
-                    .add_enabled(!l.running, theme::primary_button("Mit Browser anmelden"))
-                    .clicked()
-                {
-                    login_started = true;
-                }
-                if l.running {
-                    ui.add_space(10.0);
-                    ui.spinner();
-                    if !l.message.is_empty() {
-                        ui.label(&l.message);
-                    }
-                    ui.add_space(6.0);
-                    if ui.add(theme::secondary_button("Abbrechen")).clicked() {
-                        login_cancelled = true;
-                    }
-                }
-                if let Some(e) = &l.error {
-                    ui.add_space(6.0);
-                    ui.colored_label(theme::RED, e);
-                }
+            if ui.add(theme::primary_button("Mit Amazon anmelden")).clicked() {
+                self.pending_login = true;
             }
-            if login_started {
-                let _ = self.config.save();
-                self.start_login();
-            }
-            if login_cancelled {
-                self.cancel_login();
+            if let Some(e) = &self.login.error {
+                ui.add_space(6.0);
+                ui.colored_label(theme::RED, e);
             }
 
             ui.add_space(16.0);
@@ -622,39 +660,16 @@ impl PrimePhotoApp {
         ui.label(theme::muted(
             "Melde dich bei Amazon Photos an. Die Cookies werden automatisch übernommen.",
         ));
-        let mut login_started = false;
-        let mut login_cancelled = false;
-        {
-            let l = self.login.lock().unwrap();
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(!l.running, theme::primary_button("Mit Browser anmelden"))
-                    .clicked()
-                {
-                    login_started = true;
-                }
-                if ui
-                    .add_enabled(l.running, theme::secondary_button("Abbrechen"))
-                    .clicked()
-                {
-                    login_cancelled = true;
-                }
-                if l.running {
-                    ui.spinner();
-                }
-            });
-            if !l.message.is_empty() {
-                ui.label(&l.message);
+        ui.horizontal(|ui| {
+            if ui.add(theme::primary_button("Mit Amazon anmelden")).clicked() {
+                self.pending_login = true;
             }
-            if let Some(e) = &l.error {
-                ui.colored_label(theme::RED, e);
+            if self.login.running {
+                ui.spinner();
             }
-        }
-        if login_started {
-            self.start_login();
-        }
-        if login_cancelled {
-            self.cancel_login();
+        });
+        if let Some(e) = &self.login.error {
+            ui.colored_label(theme::RED, e);
         }
 
         ui.separator();
@@ -747,36 +762,41 @@ fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32
 }
 
 impl eframe::App for PrimePhotoApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_login();
-
-        // Onboarding: until the user is signed in, show the login flow only.
-        if !self.is_logged_in() {
-            egui::CentralPanel::default().show(ctx, |ui| self.login_ui(ui));
-            let running = self.login.lock().unwrap().running;
-            if running {
-                ctx.request_repaint_after(Duration::from_millis(250));
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Size the window to the screen once, on the first frame.
+        if !self.sized {
+            self.sized = true;
+            if let Some(ms) = ctx.input(|i| i.viewport().monitor_size) {
+                let w = (ms.x * 0.82).clamp(900.0, 1500.0);
+                let h = (ms.y * 0.85).clamp(600.0, 1000.0);
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
             }
-            return;
         }
 
-        egui::SidePanel::left("nav")
-            .exact_width(220.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::SIDEBAR_BG)
-                    .inner_margin(egui::Margin::symmetric(12, 16)),
-            )
-            .show(ctx, |ui| self.sidebar(ui));
+        self.poll_login();
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.page {
-            Page::Backup => self.backup_ui(ui),
-            Page::Settings => self.settings_ui(ui),
-        });
+        // Onboarding: until the user is signed in (or while the sign-in page is
+        // open) show the login flow in this same window.
+        if self.login.running || !self.is_logged_in() {
+            self.login_ui(ctx);
+        } else {
+            egui::SidePanel::left("nav")
+                .exact_width(220.0)
+                .resizable(false)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::SIDEBAR_BG)
+                        .inner_margin(egui::Margin::symmetric(12, 16)),
+                )
+                .show(ctx, |ui| self.sidebar(ui));
 
-        // Bottom log panel (collapsible) for transparency.
-        egui::TopBottomPanel::bottom("log")
+            egui::CentralPanel::default().show(ctx, |ui| match self.page {
+                Page::Backup => self.backup_ui(ui),
+                Page::Settings => self.settings_ui(ui),
+            });
+
+            // Bottom log panel (collapsible) for transparency.
+            egui::TopBottomPanel::bottom("log")
             .resizable(true)
             .default_height(24.0)
             .min_height(24.0)
@@ -804,13 +824,35 @@ impl eframe::App for PrimePhotoApp {
                 });
             });
 
-        let active = self.upload.lock().unwrap().active;
-        if active || self.was_active {
-            ctx.request_repaint_after(Duration::from_millis(250));
-            if self.was_active && !active {
-                self.finalize_upload();
-                self.was_active = false;
+            let active = self.upload.lock().unwrap().active;
+            if active || self.was_active {
+                ctx.request_repaint_after(Duration::from_millis(250));
+                if self.was_active && !active {
+                    self.finalize_upload();
+                    self.was_active = false;
+                }
             }
+        }
+
+        // Deferred login start: creating the webview needs the window handle.
+        if self.pending_login {
+            self.pending_login = false;
+            let _ = self.config.save();
+            self.begin_login(frame, ctx);
+        }
+        if self.login.running {
+            ctx.request_repaint_after(Duration::from_millis(200));
+        }
+
+        // Keep the window title clear about what this window is.
+        let title = if self.login.running || !self.is_logged_in() {
+            "Login – Prime Photo Uploader"
+        } else {
+            "Prime Photo Uploader"
+        };
+        if self.window_title.as_deref() != Some(title) {
+            self.window_title = Some(title.to_owned());
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
         }
     }
 }
@@ -1040,7 +1082,7 @@ fn system_country() -> Option<String> {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 680.0])
+            .with_inner_size([1000.0, 700.0])
             .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
     };
@@ -1049,4 +1091,44 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
     )
+}
+
+/// Our own upload logo: a teal circle with a white upload arrow and tray.
+fn upload_logo(ui: &mut egui::Ui, diameter: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(diameter, diameter), egui::Sense::hover());
+    let painter = ui.painter();
+    let c = rect.center();
+    painter.circle_filled(c, diameter / 2.0, theme::TEAL);
+    let white = Color32::WHITE;
+    // Geometry scaled from the 84 pt reference size.
+    let s = diameter / 84.0;
+    let w = 4.0 * s;
+    let cx = c.x;
+    let arrow_top = c.y - 16.0 * s;
+    let arrow_bottom = c.y + 6.0 * s;
+    painter.line_segment(
+        [egui::pos2(cx, arrow_bottom), egui::pos2(cx, arrow_top)],
+        egui::Stroke::new(w, white),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(cx, arrow_top),
+            egui::pos2(cx - 11.0 * s, arrow_top + 11.0 * s),
+        ],
+        egui::Stroke::new(w, white),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(cx, arrow_top),
+            egui::pos2(cx + 11.0 * s, arrow_top + 11.0 * s),
+        ],
+        egui::Stroke::new(w, white),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(cx - 18.0 * s, c.y + 19.0 * s),
+            egui::pos2(cx + 18.0 * s, c.y + 19.0 * s),
+        ],
+        egui::Stroke::new(w, white),
+    );
 }
