@@ -2,12 +2,12 @@ use std::{
     fs::{self, File},
     io::Read,
     path::Path,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
 use exif::{Tag, Value};
-use log::{debug, error};
+use log::{debug, error, warn};
 use reqwest::{Client, Url, header::HeaderMap};
 use serde::{Deserialize, Serialize};
 
@@ -264,6 +264,76 @@ pub struct ResponseUploadFail {
 pub struct ResponseUploadFailDetails {
     #[serde(rename(deserialize = "conflictNodeIds"))]
     conflict_node_ids: Vec<String>,
+}
+
+/// Bounded retry policy for the upload POST (transient failures only):
+/// 1 initial attempt + 3 retries.
+const UPLOAD_MAX_ATTEMPTS: u32 = 4;
+/// First backoff step (doubles per attempt, plus jitter).
+const UPLOAD_BACKOFF_BASE_MS: u64 = 500;
+/// Upper bound for any single backoff / `Retry-After` sleep.
+const UPLOAD_BACKOFF_MAX_MS: u64 = 8_000;
+
+/// Flatten an error together with its whole `source()` chain into one line, so
+/// the underlying cause (DNS failure, connection reset, body stream, timeout)
+/// is not swallowed behind reqwest's generic "error sending request for url".
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut parts = vec![e.to_string()];
+    let mut source = e.source();
+    while let Some(inner) = source {
+        parts.push(inner.to_string());
+        source = inner.source();
+    }
+    parts.join(": ")
+}
+
+/// Transient reqwest failures worth a retry: connect/timeout/request/body.
+/// (Retry on a response status is decided separately from the response itself.)
+fn is_transient_reqwest_error(e: &reqwest::Error) -> bool {
+    e.is_connect() || e.is_timeout() || e.is_request() || e.is_body()
+}
+
+/// Small pseudo-random jitter in `0..max_ms`, derived from the wall clock, so no
+/// extra dependency (rand et al.) is needed.
+fn jitter_millis(max_ms: u64) -> u64 {
+    if max_ms == 0 {
+        return 0;
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64 % max_ms)
+        .unwrap_or(0)
+}
+
+/// `Retry-After` (delta-seconds form, as sent on 429/503) capped like the
+/// backoff so a huge value cannot stall an upload. Absent values and the
+/// HTTP-date form fall back to the exponential backoff.
+fn retry_after_delay(headers: &HeaderMap) -> Option<Duration> {
+    let seconds: u64 = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some(Duration::from_millis(
+        seconds.saturating_mul(1000).clamp(1, UPLOAD_BACKOFF_MAX_MS),
+    ))
+}
+
+/// Backoff before the retry that follows `attempt` (1-based): exponential
+/// (base ~500 ms, ×2) with small jitter, capped at ~8 s. A `Retry-After` header
+/// takes precedence when present.
+fn upload_retry_delay(attempt: u32, headers: Option<&HeaderMap>) -> Duration {
+    if let Some(delay) = headers.and_then(retry_after_delay) {
+        return delay;
+    }
+    let shift = attempt.saturating_sub(1).min(10);
+    let base_ms = UPLOAD_BACKOFF_BASE_MS
+        .saturating_mul(1u64 << shift)
+        .min(UPLOAD_BACKOFF_MAX_MS);
+    let jittered = (base_ms + jitter_millis(base_ms / 4 + 1)).min(UPLOAD_BACKOFF_MAX_MS);
+    Duration::from_millis(jittered)
 }
 
 #[derive(Debug)]
@@ -526,47 +596,46 @@ impl PrimePhotos {
         }
     }
 
-    async fn find_root_node(&self) -> ResponseSearchData {
-        match self.find_nodes("isRoot:true").await {
-            Ok(n) => {
-                if n.data.len() < 1 {
-                    error!("No nodes!");
-                    return ResponseSearchData::empty();
-                }
-                n.data.first().unwrap().clone()
-            }
-            Err(e) => {
-                error!("Error {:?}", e);
-                panic!("{:?}", e);
-            }
+    async fn find_root_node(&self) -> Result<ResponseSearchData, String> {
+        let nodes = self
+            .find_nodes("isRoot:true")
+            .await
+            .map_err(|e| error_chain(&e))?;
+        if nodes.data.is_empty() {
+            error!("No root node found (empty response)");
+            return Err("No root node found (empty response)".to_string());
         }
+        Ok(nodes.data.first().unwrap().clone())
     }
 
-    async fn update_web_pictures_dir_node(&mut self) -> ResponseSearchData {
+    async fn update_web_pictures_dir_node(&mut self) -> Result<ResponseSearchData, String> {
         // Note: These operations must be sequential because each depends on the previous result
         // The Pictures directory is needed to find its children (Web directory)
-        let root_node = self.find_root_node().await;
+        let root_node = self.find_root_node().await?;
         let pictures_dir_searchdata = self
             .find_children_nodes(
                 "kind:FOLDER+AND+status:(AVAILABLE*)+AND+name:\"Pictures\"",
                 &root_node.id,
             )
             .await
-            .unwrap();
-        let pictures_dir = pictures_dir_searchdata.data.get(0).unwrap();
+            .map_err(|e| error_chain(&e))?;
+        let pictures_dir = pictures_dir_searchdata
+            .data
+            .first()
+            .ok_or_else(|| "Pictures folder not found".to_string())?;
         let web_dir_node = self
             .find_children_nodes(
                 "kind:FOLDER+AND+status:(AVAILABLE*)+AND+name:\"Web\"",
                 &pictures_dir.id,
             )
             .await
-            .unwrap()
+            .map_err(|e| error_chain(&e))?
             .data
-            .get(0)
-            .unwrap()
-            .clone();
+            .first()
+            .cloned()
+            .ok_or_else(|| "Web folder not found".to_string())?;
         self.web_dir_node = Some(web_dir_node.clone());
-        web_dir_node
+        Ok(web_dir_node)
     }
 
     async fn find_children_nodes(
@@ -642,7 +711,7 @@ impl PrimePhotos {
         conflict: ConflictResolution,
     ) -> Result<String, String> {
         if self.web_dir_node.is_none() && !self.dry_run {
-            self.update_web_pictures_dir_node().await;
+            self.update_web_pictures_dir_node().await?;
         }
 
         // Read file contents if not provided
@@ -652,9 +721,9 @@ impl PrimePhotos {
                 (data.to_vec(), hash.to_string(), data.len())
             } else {
                 // Read file and compute hash
-                let attr = fs::metadata(pic_path).unwrap();
+                let attr = fs::metadata(pic_path).map_err(|e| e.to_string())?;
                 let mut contents_vec: Vec<u8> = Vec::with_capacity(attr.len() as usize);
-                let mut file = File::open(pic_path).unwrap();
+                let mut file = File::open(pic_path).map_err(|e| e.to_string())?;
                 let _ = file.read_to_end(&mut contents_vec);
                 let computed_md5 = md5::compute(&contents_vec);
                 (
@@ -795,17 +864,73 @@ impl PrimePhotos {
             return Ok("".to_string());
         }
 
-        // Submit the POST request
-        let response = match self
-            .client
-            .post(url)
-            .headers(headers)
-            .body(contents_vec)
-            .send()
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => return Err(e.to_string()),
+        // Submit the POST request, retrying transient failures with backoff.
+        // `contents_vec`/`headers` are reused for every attempt, hence the clones.
+        let mut attempt: u32 = 0;
+        let response = loop {
+            attempt += 1;
+            match self
+                .client
+                .post(url.clone())
+                .headers(headers.clone())
+                .body(contents_vec.clone())
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status_code = resp.status().as_u16();
+                    let transient_status =
+                        status_code == 408 || status_code == 429 || resp.status().is_server_error();
+                    if transient_status && attempt < UPLOAD_MAX_ATTEMPTS {
+                        let delay = upload_retry_delay(attempt, Some(resp.headers()));
+                        warn!(
+                            "Upload attempt {}/{} for {} failed with HTTP {} - retrying in {:?}",
+                            attempt,
+                            UPLOAD_MAX_ATTEMPTS,
+                            pic_path.display(),
+                            status_code,
+                            delay
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    if transient_status {
+                        error!(
+                            "Upload for {} failed with HTTP {} - giving up after {} attempts",
+                            pic_path.display(),
+                            status_code,
+                            attempt
+                        );
+                    }
+                    break resp;
+                }
+                Err(e) => {
+                    let chain = error_chain(&e);
+                    let transient = is_transient_reqwest_error(&e);
+                    if transient && attempt < UPLOAD_MAX_ATTEMPTS {
+                        let delay = upload_retry_delay(attempt, None);
+                        warn!(
+                            "Upload attempt {}/{} for {} failed ({}) - retrying in {:?}",
+                            attempt,
+                            UPLOAD_MAX_ATTEMPTS,
+                            pic_path.display(),
+                            chain,
+                            delay
+                        );
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    if transient {
+                        error!(
+                            "Upload for {} failed ({}) - giving up after {} attempts",
+                            pic_path.display(),
+                            chain,
+                            attempt
+                        );
+                    }
+                    return Err(chain);
+                }
+            }
         };
 
         // Check the HTTP status
@@ -813,7 +938,7 @@ impl PrimePhotos {
             // Clone response to read body twice if needed
             let response_text = match response.text().await {
                 Ok(t) => t,
-                Err(e) => return Err(format!("Failed to read response body: {}", e)),
+                Err(e) => return Err(format!("Failed to read response body: {}", error_chain(&e))),
             };
 
             debug!(
@@ -837,19 +962,16 @@ impl PrimePhotos {
             match status_code {
                 // Ignore double-uploads
                 409 => {
-                    // let body = response.text().await?;
-                    // debug!("{:?}", body);
-                    // panic!();
                     let body = match response.json::<ResponseUploadFail>().await {
                         Ok(v) => v,
-                        Err(e) => return Err(e.to_string()),
+                        Err(e) => return Err(error_chain(&e)),
                     };
                     Ok(body
                         .error_details
                         .conflict_node_ids
                         .first()
-                        .unwrap()
-                        .to_string())
+                        .cloned()
+                        .unwrap_or_default())
                 }
                 _ => {
                     // Check for authentication errors
@@ -858,12 +980,21 @@ impl PrimePhotos {
                     }
                     let body = match response.text().await {
                         Ok(v) => v,
-                        Err(e) => return Err(e.to_string()),
+                        Err(e) => {
+                            return Err(format!(
+                                "Failed to read error response body: {}",
+                                error_chain(&e)
+                            ));
+                        }
                     };
-                    debug!("{:?}", body);
-                    panic!();
-                    // debug!("Request failed with status: {}", status_code);
-                    // Err(response.error_for_status().err().unwrap())
+                    let snippet: String = body.chars().take(300).collect();
+                    error!(
+                        "Upload failed for {} with HTTP {}: {}",
+                        pic_path.display(),
+                        status_code,
+                        snippet
+                    );
+                    Err(format!("HTTP {}: {}", status_code, snippet))
                 }
             }
         }
