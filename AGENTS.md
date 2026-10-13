@@ -27,6 +27,15 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 - Uses reference implementation from entourloop/amazon-photo-uploader (MIT) for API details.
 - GUI language: German (matches the original Amazon Photos UI).
 - "Speichernutzung"/storage bar is intentionally omitted for now: it only applies to Prime members and needs a real quota fetch; no placeholder is shown.
+- Account/avatar block in the sidebar: when signed in, show the Amazon profile picture (no API identified yet — placeholder until then) plus "Angemeldet als:" and "Abmelden"; when **not** signed in, an icon replaces the picture. The green/red status color coding is kept deliberately (user likes it).
+
+## Arbeitsablauf (Build-Verify, seit 2026-10-13)
+
+- Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
+- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/step-5-preview-free` — bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
+- **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash#high`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
+- Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
+- **Kein Push, kein CI:** Das Repo hat kein Remote; Verifikation erfolgt manuell pro Auftrag, nicht per Test-Suite.
 
 ## Repo
 
