@@ -55,7 +55,8 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
     erzeugt bei Abbruch nach Server-Anlage ein Duplikat statt 409-Dedupe — Widerspruch zum Ziel „keine
     Bandbreite verschwenden". Entscheidung nötig: „aktuelles Element fertig, dann ruhen" vs. sofortiger Abbruch; `RENAME` überdenken.
 
-- [ ] **P1 – Nur neue Dateien hochladen (Dedup).** Vor dem Upload prüfen, ob dieselbe Datei (md5)
+- [x] **P1 – Nur neue Dateien hochladen (Dedup).** Erledigt, Commit `b47bf9b` (persistenter
+  SQLite-MD5-Index); Server-409 als Sicherheitsnetz) Vor dem Upload prüfen, ob dieselbe Datei (md5)
   bereits im Konto bzw. im lokalen Index liegt → überspringen. Persistenter md5-Index, damit
   Neustarts nichts erneut laden. Original-Strings: „Duplikate vermeiden: Keine Fotos und Videos
   sichern, die sich bereits in meinem Konto befinden" (`…_scheduleconfiguration_dedupeoption`),
@@ -89,7 +90,8 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   `list_albums().await.unwrap()` und `web_dir_node.as_ref().unwrap()` in `prime_photos.rs`
   (Netzwerkfehler im Album-Schritt könnte den Koordinator-Task panicken lassen); als Folge-Ticket.
 
-- [ ] **.xmp-Befund klären (User-Meldung 2026-10-13).** Gemeldet: „.xmp wird als Bild erkannt — falsch".
+- [x] **.xmp-Befund geklärt (User-Meldung 2026-10-13).** Belegt in `src/folders.rs`: `.xmp` wird
+  explizit nie als Bild behandelt Gemeldet: „.xmp wird als Bild erkannt — falsch".
   Code-Befund (nur gelesen): `is_supported_image` lehnt `xmp` explizit ab (`src/folders.rs:22`), der
   einzige Sammelpfad `scan_images` filtert damit (`src/folders.rs:40`, Aufruf aus `start_upload` in
   `src/main.rs`), der Dialog wählt nur Ordner (`FileDialog::pick_folder`). Offen: Upload-Log auf
@@ -168,7 +170,10 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   **Offen:** selbstsignierte Identität (wird erst auf Zuruf angelegt — Schlüsselbund!), ob
   Benachrichtigungen im signierten Bundle erscheinen, ob `--options runtime` für ad-hoc nötig ist;
   Windows/Linux nur als Hinweis (keine Installer), `.app`-Backlog-Item geht hierin auf.
-- [ ] **I18N-1 – Internationalisierung (de+en).** Nach REF-2 (siehe `AGENTS.md` „Internationalisierung"):
+- [x] **I18N-1 – Internationalisierung (de+en).** Erledigt, Commit `45b654d`: `src/i18n.rs` (Lang,
+  tr/tr1/tr2/tr3/tr_n, de = Quelle), `Config.language` (Option, Auto/Deutsch/English), alle
+  UI-Strings der Feature-Module inkl. Fenstertitel, Tray-Labels, Benachrichtigungen, Log/Statuszeilen;
+  `docs/I18N.md`. Verifiziert (PASS). Nach REF-2 (siehe `AGENTS.md` „Internationalisierung"):
   `src/i18n.rs` mit `Lang`-Enum + zentraler String-Tabelle (de = Quelle, en daneben), `Config.language`
   (serde-Default aus OS-Locale) + Sprachwahl in den Einstellungen, alle UI-Strings der Feature-Module
   (inkl. Marktplatz-Ländernamen in `countries.rs`, Fenstertitel, Log-/Statuszeilen) darüber führen.
