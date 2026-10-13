@@ -52,6 +52,37 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - Conflict handling (user decision 2026-10-13): all **four original options** per upload target (Nachfragen / Ignorieren / Als neue Datei speichern / Ersetzen), mapped to `conflictResolution` (`NONE`/`RENAME`/`OVERWRITE`). Replaces the current hard-coded `RENAME`.
 - Backup configuration window (user decision 2026-10-13): build the full "Datensicherungseinstellungen" window now (destination, content filter, interval, dedup, conflict handling, save/cancel), and **share the form logic** with the create-backup flow (same dialog for create and edit) instead of a separate row-menu. Fields whose backend does not exist yet (destination, content filter, interval) are shown **disabled** with a "Noch nicht verfügbar" hover (user decision 2026-10-13: "volle Anordnung, Rest ausgegraut"); functional now: source folder (read-only when editing), dedup, name-conflict policy.
 
+## Upload-Queue & Concurrency (User-Entscheidung 2026-10-13)
+
+- **Globaler Pool bleibt** (status quo): alle in einem Lauf ausgewählten Sicherungsziele werden zu
+  **einer** gemeinsamen Warteschlange, die sich maximal `concurrency` (1..8, Einstellung) Arbeiter
+  teilt; mehr als 8 **gesamt** macht keinen Sinn.
+- **Pro-Ziel-Limit ist nur „nicht mehr als global"** und erst **Post-MVP**: ein optionaler,
+  persistent gespeicherter Wert (0/None = globaler Default; nicht größer als global) wie bereits
+  bei Dedup/Conflict vorbereitet. Im MVP bewusst **nicht** umgesetzt.
+- **Netzwerkabhängigkeit (MVP):** „Slow-Mode" als temporäre, **nicht** persistierte
+  Run-Zeit-Einstellung (`PrimePhotoApp.slow_mode`, Checkbox in Einstellungen → Upload), die
+  für den aktuellen Lauf `concurrency = 1` erzwingt; bei App-Neustart zurückgesetzt. Automatische
+  Drosselung anhand des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs, Post-MVP).
+
+## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
+
+Bewusste, absichtliche Abgrenzung. Die vollständige Feature-für-Feature-Liste mit Beleg-Keys/-Symbolen
+steht im Ledger (`AGENTS.todo.md` → „Scope-Inventar: vergessene Features & bewusste In/Out-Grenzen").
+
+- **Out (bewusst, nicht MVP):** bidirektionale Synchronisation, Downloads/Restore, Datei-Management
+  (Albums/Favoriten/Papierkorb/Teilen), Apple-Photos-/iPhoto-/Aperture-Import, Autoplay/Media-Player,
+  Upsell-/Trial-/Overquota-/Outage-Banner, Auto-Update, Proxy- und „ausgeblendete Dateien"-Einstellungen,
+  Crash-Relaunch-LaunchAgent, iOS-Dedupe-Prompt.
+- **Offene MVP-Lücke:** interaktiver Dateinamens-Konflikt-Dialog — die bereits vorhandene Option
+  „Nachfragen" ist ohne ihn wirkungslos.
+- **Für ein öffentliches Release relevant:** About / Third-Party-Lizenzen (Hinweispflicht).
+- **Concurrency-Cap „8":** kein technisches Limit, sondern die Obergrenze der kunden-/server-gelieferten
+  Einstellung (`CustomerSettingsMaxSupportedUploadQueues = 8`); der **Geräte-Default** ist kleiner
+  (`UploadMaxQueues = 4`, `MaxNumberOfQueuesPerProcessorCore = 1.0` ⇒ praktisch `min(4, Cores)`).
+  Eine sachliche Begründung der 8 ist im Original **nicht** belegt.
+- „Nicht umsetzen" heißt hier: dokumentiert und bewusst draußen — nicht „später automatisch".
+
 ## Plattform / Portierung (User-Entscheidung 2026-10-13)
 
 - **Ziel: voll cross-platform.** macOS (Apple Silicon), Windows und Linux sind gleichwertige
@@ -167,6 +198,27 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
   Personendaten) — analog zu `docs/UI_FLOWS.md` / `docs/UI_STATES.md`. Erst danach Umsetzer-Briefing.
 - **Build-Verify ist nur grobe Basis:** Bauen → prüfen → committen gilt; Förmlichkeit
   (Runden-Protokoll, Footer-Schreibweise) nach Augenmaß, kein Selbstzweck.
+
+## OpenCode-MCP: rea-Server (2026-10-13, User-Entscheidung)
+
+- **Befund „MCP rea failed / Request timed out":** kein Config-Fehler. Der Start läuft über
+  `npx -y rea-agents@6.4.0 mcp` und braucht bei jedem Connect die npm-Registry. Die Maschine hatte
+  heute 13:00–18:00 DNS-Flackern (`getaddrinfo ENOTFOUND`, 9–18/h — auch Model-Fetch/Update-Check
+  betroffen). Gegen eine unresolvable Registry retryt npm ~70 s; OpenCode's MCP-Connect-Timeout
+  bricht vorher ab ⇒ „Request timed out". `codegraph` (lokales Binary, kein Netz) lief durch —
+  daran wurde die Ursache eingegrenzt. Älteres Symptom (vor 12:04, alter Server-Prozess ohne `npx`
+  im PATH): `NotFound: ChildProcess.spawn` — mit Service-Neustart erledigt.
+- **Fix (User gewählt: minimal):** `command: ["npx","-y","--prefer-offline","rea-agents@6.4.0","mcp"]`
+  in `~/.config/opencode/opencode.jsonc` — warmer npx-Cache ⇒ ~0,6 s Start, kein Registry-Kontakt.
+  Verifiziert: `mcp connected server=rea tools=170`.
+- **`HOPPER_LAUNCHER_PATH` entfernt** (User: „remove hopper"): zeigte auf
+  `~/Applications/Hopper Disassembler.app/…` — die App lag im `~/.Trash`. Getestet: fehlendes
+  Hopper bricht das MCP-Handshake nicht, nur native-Analyse-Tools wären davon betroffen. Bei
+  Bedarf: Hopper neu installieren, Variable ergänzen.
+- **Reserve bei Wiederauftreten:** `npm i -g rea-agents@6.4.0` + MCP-Command auf den absoluten
+  Binary-Pfad (kein Netz im Startpfad); Maschinen-DNS prüfen (Public Resolver flackerten hinter
+  dem 10.x-LAN).
+- Protokoll/Begründung: `AGENTS.todo.md` „OpenCode-MCP: rea-Server".
 
 ## Repo
 

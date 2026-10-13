@@ -173,7 +173,7 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   (serde-Default aus OS-Locale) + Sprachwahl in den Einstellungen, alle UI-Strings der Feature-Module
   (inkl. Marktplatz-Ländernamen in `countries.rs`, Fenstertitel, Log-/Statuszeilen) darüber führen.
   Kein hartkodierter UI-Text mehr außerhalb `i18n.rs`. Weitere lateinische Sprachen später additiv.
-- [ ] **PORT-7 – Shell-Aufrufe plattformneutral** (Befund aus PORT-1-Verify, nicht blockierend):
+- [x] **PORT-7 – Shell-Aufrufe plattformneutral** (Befund aus PORT-1-Verify, nicht blockierend):
   nach dem Refactor liegen die Stellen in `src/backup.rs:63` („Im Ordner zeigen", `open -R`) und
   `src/login.rs:406` („im Browser öffnen", `open <url>`); auf Windows/Linux still wirkungslos. Soll:
   je OS `open`/`open -R` (macOS), `explorer`/`explorer /select,` (Windows), `xdg-open` (Linux) —
@@ -217,6 +217,93 @@ Pakete, die `main.rs`/`Cargo.toml` anfassen, bleiben seriell.
 
 Verworfen (siehe `AGENTS.md`): Benachrichtigungen nur über macOS-`UNUserNotificationCenter` +
 selbstsigniertes `.app` (war die erste Teilantwort des Users).
+
+## OpenCode-MCP: rea-Server (User-Entscheidung 2026-10-13)
+
+- [x] **rea-MCP dauerhaft gegen Netzwerk-Flackern abgesichert.** Befund: Server-Start via
+  `npx -y rea-agents@6.4.0 mcp` braucht bei *jedem* Connect die npm-Registry; die Maschine hatte
+  heute 13:00–18:00 DNS-Fehler (`getaddrinfo ENOTFOUND`, 9–18/h — Model-Fetch und Update-Check
+  scheiterten ebenfalls). Gegen eine unresolvable Registry retryt npm ~70 s, OpenCode's
+  MCP-Connect-Timeout bricht vorher ab ⇒ Status „failed" / „Request timed out" (15:31, 16:48,
+  17:36, 18:08). codegraph (lokales Binary, kein Netz) lief derselben Zeit durch — war der
+  Auslöser-Eingrenzung dienlich. Vorgeschichte (vor 12:04): alter Server-Prozess ohne `npx` im
+  PATH ⇒ `NotFound: ChildProcess.spawn` — durch Service-Neustart behoben, anderes Symptom.
+  **Fix (User gewählt: minimal):** `command: ["npx","-y","--prefer-offline","rea-agents@6.4.0","mcp"]`
+  (warmer npx-Cache ⇒ ~0,6 s Start, kein Registry-Kontakt). Verifiziert: rea connected, 170 Tools.
+- [x] **Stale `HOPPER_LAUNCHER_PATH` entfernt** (User: „remove hopper"). Die Variable zeigte auf
+  `/Users/florianreisinger/Applications/Hopper Disassembler.app/Contents/MacOS/hopper` — die App
+  liegt seit heute im `~/.Trash`. Testbefund: fehlendes Hopper bricht das MCP-Handshake **nicht**
+  (nur native-Analyse-Tools wären betroffen); die Variable war für den Startup-Timeout irrelevant.
+  Wiederherstellung (falls native Analyse gebraucht wird): Hopper neu installieren, Variable in
+  `~/.config/opencode/opencode.jsonc` ergänzen.
+- [ ] **Optional/Reserve (nur bei Wiederauftreten):** `npm install -g rea-agents@6.4.0` und MCP-Command
+  auf den absoluten Binary-Pfad stellen (`~/.nvm/versions/node/<v>/bin/rea mcp`) — null Netzwerk im
+  Startpfad. Außerdem Maschinen-DNS prüfen (öffentliche Resolver 1.1.1.1/8.8.4.4/8.8.8.8 hinter dem
+  10.x-LAN flackerten; ggf. Router-DNS statt Public-Resolvers).
+
+## Upload-Queue (User-Entscheidung 2026-10-13)
+
+- [x] **Slow-Mode (MVP):** Runtime-only `slow_mode` mit Checkbox in den Einstellungen und
+  `concurrency=1` im Upload-Lauf; nicht persistiert (Reset beim App-Start). Commit `0be2a81`.
+- [ ] **Post-MVP – Pro-Ziel-Limit:** optionales Feld im Backup-Ziel (Wert ≤ globaler Slider),
+  das die Anzahl der gleichzeitigen Uploads **für dieses Ziel** begrenzt (globaler Pool bleibt).
+- [ ] **Post-MVP – Netzwerkgesteuerte Drosselung:** automatische Reduktion/Pause anhand des
+  OS-Netzwerkstatus (costed/metered) bzw. SSID/Name-basierter Regeln; nicht als MVP.
+- [ ] **Hintergrund-Sync (PORT-5)** vorbereitet durch `docs/SPEC_BACKGROUND_SYNC.md`; braucht
+  `notify`-Watcher + periodischen Timer + Start nach Login.
+
+## Upload-Progress & Drag-and-Drop (Recon 2026-10-13)
+
+- [ ] **Upload-Progress (Spec `docs/SPEC_UPLOAD_PROGRESS.md`).** Globale Leiste um "N Artikel ... Noch etwa M Minuten" plus Per-Datei-Status (`Warten`, `Upload-Vorgang läuft (n)`, Warnzustand) und pro-Datei-Name/Zeit/Prozent ergänzen. Derzeit nur globale ETA + Ordnerzellen.
+- [ ] **Drag & Drop One-Time-Upload (Spec `docs/SPEC_ONE_TIME_UPLOAD.md`).** Full-Window-Drop-Zone, Scanning-Overlay, Ad-hoc-Queue-Zeile "Einmalige Sicherung", Cloud-Zielpfad (Default /All/{0}) und Upload-Lauf ohne persistiertes Backup-Ziel. Nutzt eframe/egui DroppedFiles + `folders::scan_images`.
+- [ ] **Per-Datei-Warteschlange** (mit oder ohne byte-progress; je nachdem, ob der Cookie-Upload feingranulare Fortschritts-Events bietet).
+
+## Scope-Inventar: vergessene Features & bewusste In/Out-Grenzen (User-Wunsch 2026-10-13)
+
+Anlass: Beim Reverse-Engineering sind Features aufgetaucht, die in keiner TODO standen. Ziel ist eine
+**absichtliche** Scope-Entscheidung — **nicht alles umsetzen**. „Scope" = Vorschlag/Empfehlung;
+**nicht umsetzen** heißt: dokumentiert und bewusst draußen. Nichts hiervon ist implementiert.
+
+Belege: `Localizable.strings` (Keys) + `Amazon Photos.dll` (Symbole), `docs/*`.
+
+| # | Feature | Beleg | Status bei uns | Scope (Vorschlag) |
+|---|---|---|---|---|
+| 1 | **Bidirektionale Synchronisation** (Sync-Ordner) | `enablesync`/`disablesync`, `navigationMenu_sync`, `failedsyncitemswindow_*`, `SyncEngineQueueTimeoutInSeconds` | fehlt komplett | **Out / Post-MVP** — anderer Produktkern (Sync ≠ Backup) |
+| 2 | **Interaktiver Dateinamens-Konflikt-Dialog** | `filenameconflict_overlayview_{title,body,ignore/replace/saveasnew}_*`, `_donotaskagain_`, `filenameconflict_toast` | „Nachfragen" existiert nur als Option, **kein** Dialog | **In (MVP-Lücke)** — sonst ist die Option wirkungslos |
+| 3 | **Finder-/Kontextmenü-Service** „Bei Amazon Photos hochladen" | `context_menu_upload`, `menu_services`, `ServicesMenu.strings` | fehlt | **Out / Post-MVP** — OS-Integration |
+| 4 | **Apple-Photos-/iPhoto-/Aperture-Import** | `mediaimport_*`, `onboard_noautosave_*` | fehlt | **Out** — nicht unser Datenmodell |
+| 5 | **Ausgeblendete Dateien** (Setting) | `ExcludeHiddenFilesAndFolders` (Default true), `preferences_(in|ex)cludehiddenfiles` | fehlt | **Out / optional** — kleine, spätere Einstellung |
+| 6 | **Proxy-Einstellungen** | `preferences_proxy_*` | fehlt | **Out** |
+| 7 | **Speicher-/Quota-Balken** | `youraccount_*` | bewusst nicht (MVP) | **Out (bereits entschieden)** |
+| 8 | **Videos hochladen** | ContentFilter-Bits, `no_photos_or_videos_found` | nur Bilder | **Out / Post-MVP (bereits getrackt)** |
+| 9 | **Downloads / Restore** | `navigationMenu_download`, `displayitememptymessage_download_*` | fehlt | **Out (bereits entschieden: nicht MVP)** |
+| 10 | **Datei-Management** (Albums, Favoriten, Papierkorb, Teilen) | `album`, `favorite`, `trash`, `restore` | fehlt | **Out** — Uploader-Scope |
+| 11 | **Autoplay / Media-Player** | `mediaimport_autoplayaction` | fehlt | **Out** |
+| 12 | **Upsell-/Trial-/Overquota-Banner** | `notification_{overquota,trialexpired,campaignwindow}_*`, `outage_banner_text` | fehlt | **Out** |
+| 13 | **Auto-Update** | `DefaultAutoUpdateAfterTimeInSeconds` | fehlt | **Out** |
+| 14 | **About / Privacy / ToS / Third-Party-Lizenzen** | `aboutwindow_*` | fehlt | **Out für MVP**, **In für ein öffentliches Release** (Lizenzhinweise) |
+| 15 | **Menüleisten-Status-Popup** (Statistiken, Benachrichtigungen) | `statuspopup_stats_*`, `contextmenu_*` | Tray existiert (PORT-3), Popup-Detail fehlt | **Post-MVP** |
+| 16 | **Tabellen-Sortierung/-Filter** (Name/Letzte/Status/Größe) | `statuswindow_{status,size,lastmodified}columntitle`, `statusall` | fehlt (keine Sortierung/Filter) | **Post-MVP** |
+| 17 | **Größe-Spalte + relatives „Letzte Aktualisierung"** | `datetimeago_*`, `sizecolumntitle` | fehlt | **In** (in `SPEC_UPLOAD_PROGRESS.md` enthalten) |
+| 18 | **iOS-Dedupe-Prompt** | `iosdedupeprompt_*` | fehlt | **Out** (Apple-Photos-Kontext) |
+| 19 | **Mehrere Konten** | `folderconflict_*` „anderes Benutzerkonto" | fehlt | **Out / UNKNOWN** |
+| 20 | **Crash-Relaunch (LaunchAgent)** | `WorkerMaxRestarts*`, macOS-LaunchAgent | fehlt | **Out** (macOS-spezifisch) |
+| 21 | **Retry-All / Re-add-to-queue / Failed-Fenster** | `readdtoqueue`, `retryall`, `failedsyncitemswindow_retry` | fehlt | **Teilweise In** — im Upload-Progress-TODO (Retry) |
+| 22 | **Sync-Mass-Delete-Benachrichtigungen** | `notification_syncmassdeletes_*` | fehlt | **Out** (Sync) |
+| 23 | **„Alle Aktivitäten anhalten" global (Upload+Download)** | `activitywindow_*` | nur Backup-Pause | **In bleibt** (Download Teil davon Out) |
+| 24 | **„Gleichzeitige Uploads"-Default = min(4, Cores)** | `UploadMaxQueues=4`, `MaxNumberOfQueuesPerProcessorCore=1.0` | Slider 1..8, Default **3** | **Entscheidung offen** — Original: `clamp(1, min(4, Cores×1), 8)` |
+
+### Concurrency-Cap „8" — Research-Ergebnis (belegt, `Infrastructure.AppSettings`/`CustomerSettings`)
+
+- `CustomerSettingsMaxSupportedUploadQueues = 8`, `…Min… = 1`; Downloads symmetrisch (8/1).
+  Die „8" ist **kein technisches Limit**, sondern die Obergrenze einer **kunden-/server-gelieferten**
+  Einstellung (`SettingsRefreshTimeInSeconds = 3600`), die der `CustomerSettings`-Getter per
+  `CheckMinMax` klemmt (`IgnoreCustomerSettingsUploadQueuesSetting` = false ⇒ gilt).
+- Der **Geräte-Default** ist kleiner: `UploadMaxQueues = 4` und `MaxNumberOfQueuesPerProcessorCore = 1.0`,
+  also `UploadQueues = max(1, min(4, ProcessorCount × 1))` — typisch **4** (bei ≤4 Kernen entsprechend
+  weniger). Download identisch (`DownloadMaxQueues = 4`).
+- **UNKNOWN:** eine inhaltliche Begründung der 8 gibt es im Code nicht — nur den gesetzten Wert.
+  Unser Slider `1..=8` trifft die Obergrenze; unser Default 3 weicht vom Original-Default ab.
 
 ## Offen (Backlog)
 
