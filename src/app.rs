@@ -2,7 +2,7 @@ use crate::app_menu;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
-use crate::folders::FolderStore;
+use crate::folders::{BackupFolder, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
 use crate::icons::{draw_avatar, nav_icon, status_dot, NavIcon};
 use crate::login;
@@ -18,6 +18,11 @@ use tokio::sync::watch;
 
 /// Height of the slim branded header shown above the Amazon sign-in webview.
 pub(crate) const HEADER_H: f32 = 60.0;
+
+/// Synthetic folder index of the transient one-time (drag & drop) upload
+/// target: it is never in `store.folders`, so no persisted index can collide
+/// with it and every run reports its counters under this one key.
+pub(crate) const ONE_TIME_IDX: usize = usize::MAX;
 
 // ---------------------------------------------------------------------------
 // App state
@@ -138,6 +143,13 @@ pub(crate) struct PrimePhotoApp {
     /// UI state of the autostart checkbox, kept in sync with the OS state.
     /// Runtime-only: not persisted in `Config` (see `set_autostart`).
     pub(crate) autostart_enabled: bool,
+    /// A file drag is currently hovering over the window (drop overlay on,
+    /// backup-page interactions off).
+    pub(crate) dropping_files: bool,
+    /// Transient one-time (drag & drop) upload target: never persisted, lives
+    /// only for the length of the run and then keeps its settled counters so
+    /// the Backup page can show the finished row. `None` until the first drop.
+    pub(crate) one_time: Option<BackupFolder>,
 }
 
 impl PrimePhotoApp {
@@ -201,6 +213,8 @@ impl PrimePhotoApp {
             tray_paused: false,
             autostart,
             autostart_enabled,
+            dropping_files: false,
+            one_time: None,
         }
     }
 
@@ -294,6 +308,46 @@ impl PrimePhotoApp {
         }
     }
 
+    /// Full-window overlay while a file drag hovers over the window
+    /// ("Einmalige Sicherung", docs/SPEC_ONE_TIME_UPLOAD.md §7): a
+    /// semi-transparent frame with a visible border plus the drop instruction.
+    ///
+    /// Drawn last in `update` so it covers every panel, and `interactable
+    /// (false)` so it lets clicks through to what is behind it instead of
+    /// stealing them — a drag is not a click.
+    fn drop_overlay(ctx: &egui::Context) {
+        let screen = ctx.screen_rect();
+        egui::Area::new("one_time_drop_overlay".into())
+            .order(egui::Order::Foreground)
+            .interactable(false)
+            .fixed_pos(screen.left_top())
+            .default_size(screen.size())
+            .show(ctx, |ui| {
+                let painter = ui.painter();
+                painter.rect(
+                    screen,
+                    8.0_f32,
+                    Color32::from_rgba_unmultiplied(0, 0, 0, 110),
+                    egui::Stroke::new(2.0_f32, theme::TEAL),
+                    egui::StrokeKind::Inside,
+                );
+                painter.text(
+                    screen.center(),
+                    egui::Align2::CENTER_CENTER,
+                    tr("FOTOS PER DRAG & DROP VERSCHIEBEN, UM SIE HOCHZULADEN"),
+                    egui::FontId::proportional(22.0),
+                    Color32::WHITE,
+                );
+                painter.text(
+                    screen.center() + egui::vec2(0.0, 34.0),
+                    egui::Align2::CENTER_CENTER,
+                    tr("Zur einmaligen Sicherung mit der Maus hierher ziehen"),
+                    egui::FontId::proportional(15.0),
+                    Color32::from_white_alpha(220),
+                );
+            });
+    }
+
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
@@ -360,6 +414,19 @@ impl PrimePhotoApp {
 
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Drag & drop input ("Einmalige Sicherung"). `hovered_files` is
+        // non-empty while a drag hovers over the window; `dropped_files` is
+        // consumed by reading it, so a drop is handled exactly once. eframe
+        // 0.31 ships this through by default (no `with_drag_and_drop` flag on
+        // any platform — see the crate notes), so no viewport setup is needed.
+        let drag_hover = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        let dropped: Vec<std::path::PathBuf> = ctx
+            .input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        self.dropping_files = drag_hover;
+        if !dropped.is_empty() {
+            self.start_one_time_upload(dropped);
+        }
+
         // Tray / menu-bar events (PORT-3). Delivered through `tray`'s queue so
         // the handler can also wake the on-demand UI; see `src/tray.rs`.
         for ev in tray::drain_events() {
@@ -518,6 +585,12 @@ impl eframe::App for PrimePhotoApp {
         if self.window_title.as_deref() != Some(title) {
             self.window_title = Some(title.to_owned());
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.to_owned()));
+        }
+
+        // Drawn last, after every panel: the drop overlay covers the whole
+        // window (and lets clicks through while it is visible).
+        if self.dropping_files {
+            Self::drop_overlay(ctx);
         }
     }
 }

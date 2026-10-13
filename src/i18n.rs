@@ -159,8 +159,15 @@ const EN: &[(&str, &str)] = &[
     ("Datensicherung hinzufügen …", "Add backup …"),
     ("Datensicherung stoppen", "Stop backup"),
     ("Datensicherung gestoppt: {}", "Backup stopped: {}"),
+    ("Einmalige Sicherung", "One-time backup"),
     ("Es läuft bereits ein Upload.", "An upload is already running."),
-    ("Im Finder anzeigen", "Show in Finder"),
+    (
+        "FOTOS PER DRAG & DROP VERSCHIEBEN, UM SIE HOCHZULADEN",
+        "DRAG & DROP PHOTOS TO UPLOAD",
+    ),
+    // Plattformneutral (PORT-7: open -R / explorer /select / xdg-open) —
+    // "Finder" ist nur macOS.
+    ("Im Dateimanager anzeigen", "Show in file manager"),
     ("Jetzt scannen und hochladen", "Scan and upload now"),
     (
         "Keine Fotos oder Videos in diesem Ordner gefunden.",
@@ -176,6 +183,10 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Wiederholen", "Retry"),
     ("Zuletzt aktualisiert: {}", "Last updated: {}"),
+    (
+        "Zur einmaligen Sicherung mit der Maus hierher ziehen",
+        "Drag here for a one-time backup",
+    ),
     ("{} Datei(en) werden hochgeladen …", "{} file(s) being uploaded …"),
     ("{}% hochgeladen", "{}% uploaded"),
     // -- backup configuration dialog ------------------------------------

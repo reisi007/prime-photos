@@ -1,4 +1,4 @@
-use crate::app::{Page, PrimePhotoApp};
+use crate::app::{Page, ONE_TIME_IDX, PrimePhotoApp};
 use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::config::Config;
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
@@ -91,6 +91,40 @@ impl UploadPlan {
         }
     }
 
+    /// Build a plan from an **explicit** file list instead of a folder scan
+    /// (the one-time drag & drop path): every entry belongs to the single
+    /// synthetic folder index `idx`, so the whole queue is one folder as far as
+    /// `run_upload`'s counters and `folder_opts` are concerned.
+    fn from_files(
+        idx: usize,
+        dedup: bool,
+        conflict: ConflictResolution,
+        files: Vec<PathBuf>,
+    ) -> Self {
+        let mut plan = UploadPlan {
+            items: Vec::new(),
+            queue: Vec::new(),
+            per_folder: HashMap::new(),
+            folder_opts: HashMap::new(),
+        };
+        plan.per_folder.insert(idx, files.len());
+        plan.folder_opts.insert(idx, (dedup, conflict));
+        for p in files {
+            let row = plan.items.len();
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            plan.queue.push(QueueEntry {
+                folder: idx,
+                name,
+                state: FileState::Waiting,
+            });
+            plan.items.push((row, idx, p));
+        }
+        plan
+    }
+
     /// Number of files this run would upload (before per-file dedup skips).
     fn count(&self) -> usize {
         self.items.len()
@@ -98,34 +132,32 @@ impl UploadPlan {
 }
 
 /// Publish a scanned plan on the shared upload state (active, counters, live
-/// queue and `msg` as the run-start log line), mark its folders as uploading
-/// and persist that. Both start paths go through here, so a manual run and a
-/// background run look and behave identically.
+/// queue and `msg` as the run-start log line). Both start paths go through
+/// here, so a manual run, a background run and a one-time run look and behave
+/// identically.
 ///
 /// Takes the live queue out of `plan`; the caller keeps `items`/`folder_opts`
 /// for the worker spawn.
-fn publish_plan(
-    plan: &mut UploadPlan,
-    store: &mut FolderStore,
-    shared: &Arc<Mutex<UploadShared>>,
-    msg: String,
-) {
-    {
-        let mut s = shared.lock().unwrap();
-        s.active = true;
-        s.started = Some(Instant::now());
-        s.done = 0;
-        s.failed = 0;
-        s.current.clear();
-        s.log.clear();
-        s.folder_total = plan.per_folder.clone();
-        s.folder_done.clear();
-        s.folder_failed.clear();
-        s.uploaded_ids.clear();
-        s.total = plan.items.len();
-        s.queue = std::mem::take(&mut plan.queue);
-        s.log(msg);
-    }
+fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: String) {
+    let mut s = shared.lock().unwrap();
+    s.active = true;
+    s.started = Some(Instant::now());
+    s.done = 0;
+    s.failed = 0;
+    s.current.clear();
+    s.log.clear();
+    s.folder_total = plan.per_folder.clone();
+    s.folder_done.clear();
+    s.folder_failed.clear();
+    s.uploaded_ids.clear();
+    s.total = plan.items.len();
+    s.queue = std::mem::take(&mut plan.queue);
+    s.log(msg);
+}
+
+/// Mark the plan's persisted folders as uploading (folder-targets only). The
+/// one-time target is transient, so it never reaches this and never gets saved.
+fn publish_folder_status(plan: &UploadPlan, store: &mut FolderStore) {
     for (&i, &count) in &plan.per_folder {
         if let Some(f) = store.folders.get_mut(i) {
             f.status = FolderStatus::Uploading;
@@ -133,6 +165,37 @@ fn publish_plan(
         }
     }
     let _ = store.save();
+}
+
+/// Publish a plan for **persisted** folder targets: the shared state above
+/// plus the folder status/side effects. The one-time path uses
+/// [`publish_state`] alone.
+fn publish_plan(
+    plan: &mut UploadPlan,
+    store: &mut FolderStore,
+    shared: &Arc<Mutex<UploadShared>>,
+    msg: String,
+) {
+    publish_state(plan, shared, msg);
+    publish_folder_status(plan, store);
+}
+
+/// Deepest directory that contains every dropped path, or `None` when they sit
+/// on different roots (e.g. two volumes). Only used to label the transient
+/// one-time target of a multi-path drop — a display value, never a scan root.
+fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut common = paths.first()?.parent()?.to_path_buf();
+    for p in paths.iter().skip(1) {
+        let parent = p.parent()?;
+        while !parent.starts_with(&common) {
+            common = common.parent()?.to_path_buf();
+        }
+    }
+    if common.as_os_str().is_empty() {
+        None
+    } else {
+        Some(common)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +486,117 @@ impl PrimePhotoApp {
         });
     }
 
+    // -- one-time upload (drag & drop) --------------------------------------
+
+    /// Start a one-time ("Einmalige Sicherung") run for the dropped paths.
+    ///
+    /// Same guards, same worker spawn as the manual path; the difference is the
+    /// target: the dropped files are an explicit list, not a scanned folder,
+    /// and the run lives on `self.one_time` — **never** persisted and never
+    /// inserted into `self.store.folders` (a drop must not create a permanent
+    /// backup target). Files are uploaded as-is: a dropped file passes through,
+    /// a dropped directory is scanned recursively, unsupported entries are
+    /// ignored silently (same contract as `scan_images`).
+    pub(crate) fn start_one_time_upload(&mut self, paths: Vec<PathBuf>) {
+        if self.upload_busy() {
+            self.log(tr("Es läuft bereits ein Upload."));
+            return;
+        }
+        if !self.is_logged_in() {
+            self.log(tr("Bitte zuerst anmelden (Einstellungen)."));
+            self.page = Page::Settings;
+            return;
+        }
+
+        // Collect the file list: file → as-is, directory → recursive scan.
+        let mut files: Vec<PathBuf> = Vec::new();
+        for p in &paths {
+            if p.is_file() {
+                if folders::is_supported_image(p) {
+                    files.push(p.clone());
+                }
+            } else if p.is_dir() {
+                files.extend(folders::scan_images(p));
+            }
+        }
+        if files.is_empty() {
+            self.log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
+            return;
+        }
+
+        // Display path of the transient target: the single dropped path, else
+        // the common parent of all of them (empty when there is none).
+        let display_path = if paths.len() == 1 {
+            paths[0].clone()
+        } else {
+            common_parent(&paths).unwrap_or_default()
+        };
+
+        // The transient target itself: the stored name stays the plain German
+        // key, `tr` is applied at render time. Dedup and conflict handling keep
+        // the folder defaults (docs/SPEC_ONE_TIME_UPLOAD.md §10.5).
+        self.one_time = Some(folders::BackupFolder {
+            path: display_path,
+            name: "Einmalige Sicherung".to_string(),
+            enabled: true,
+            dedup: true,
+            conflict_resolution: ConflictResolution::Ignore,
+            total_files: files.len(),
+            uploaded_files: 0,
+            last_updated: String::new(),
+            status: FolderStatus::Uploading,
+        });
+
+        // One plan, one synthetic folder index: the counters, the live queue
+        // and `folder_opts` look exactly like a single-folder run.
+        let mut plan = UploadPlan::from_files(
+            ONE_TIME_IDX,
+            true,
+            ConflictResolution::Ignore,
+            files,
+        );
+        let concurrency = if self.slow_mode { 1 } else { self.concurrency };
+        let limit = if self.limit_enabled {
+            self.limit_kbps
+        } else {
+            0
+        };
+        let count = plan.count();
+        // `publish_state` (not `publish_plan`): the one-time target has no
+        // persisted folder to mark, and nothing here may save the store.
+        publish_state(
+            &mut plan,
+            &self.upload,
+            tr1("{} Datei(en) werden hochgeladen …", count),
+        );
+        if self.slow_mode {
+            self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
+        }
+        self.paused.send_replace(false);
+        self.was_active = true;
+        // Manual run: restart the background-sync cadence, so its next tick does
+        // not start a second run right behind this one.
+        BG_SYNC_RESET.notify_one();
+
+        let cfg = self.config.clone();
+        let shared = self.upload.clone();
+        let paused = self.paused.clone();
+        let album = self.album_name.clone();
+        self.rt.spawn(async move {
+            run_upload(
+                plan.items,
+                cfg,
+                shared,
+                paused,
+                concurrency,
+                limit,
+                album,
+                plan.folder_opts,
+            )
+            .await;
+        });
+    }
+
     // -- background sync (PORT-5) -------------------------------------------
 
     /// Spawn the single supervising background-sync task — once per process,
@@ -468,6 +642,20 @@ impl PrimePhotoApp {
             }
         }
         let _ = self.store.save();
+        // The transient one-time target is settled the same way, but from the
+        // synthetic `ONE_TIME_IDX` counters and onto `self.one_time` — nothing
+        // is written back to the store here.
+        if let Some(one) = self.one_time.as_mut() {
+            if let Some(&done) = folder_done.get(&ONE_TIME_IDX) {
+                one.uploaded_files = done;
+                one.last_updated = now.clone();
+                one.status = if folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0) > 0 {
+                    FolderStatus::Error
+                } else {
+                    FolderStatus::Done
+                };
+            }
+        }
     }
 
     pub(crate) fn backup_ui(&mut self, ui: &mut egui::Ui) {
@@ -525,12 +713,17 @@ impl PrimePhotoApp {
             // Folder index -> position in `groups` (keeps first-seen order).
             let mut slot: HashMap<usize, usize> = HashMap::new();
             for e in &s.queue {
-                let folder = self
-                    .store
-                    .folders
-                    .get(e.folder)
-                    .map(|f| f.name.clone())
-                    .unwrap_or_default();
+                let folder = if e.folder == ONE_TIME_IDX {
+                    // The transient one-time target is not in `store.folders`,
+                    // so its queue group is labelled directly.
+                    tr("Einmalige Sicherung").to_string()
+                } else {
+                    self.store
+                        .folders
+                        .get(e.folder)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_default()
+                };
                 let idx = match slot.get(&e.folder).copied() {
                     Some(i) => i,
                     None => {
@@ -610,7 +803,8 @@ impl PrimePhotoApp {
         // Snapshot rows for read-only rendering.
         let rows: Vec<Row> = {
             let s = self.upload.lock().unwrap();
-            self.store
+            let mut rows: Vec<Row> = self
+                .store
                 .folders
                 .iter()
                 .enumerate()
@@ -628,13 +822,44 @@ impl PrimePhotoApp {
                         last_updated: f.last_updated.clone(),
                     }
                 })
-                .collect()
+                .collect();
+            // The transient one-time target is a single extra row after the
+            // persisted folders — same chrome, but it has no ⋯ menu and no
+            // pause toggle (nothing to configure, nothing to stop).
+            if let Some(one) = self.one_time.as_ref() {
+                let total = s
+                    .folder_total
+                    .get(&ONE_TIME_IDX)
+                    .copied()
+                    .unwrap_or(one.total_files);
+                let done = s
+                    .folder_done
+                    .get(&ONE_TIME_IDX)
+                    .copied()
+                    .unwrap_or(one.uploaded_files);
+                rows.push(Row {
+                    idx: ONE_TIME_IDX,
+                    name: tr("Einmalige Sicherung").to_string(),
+                    path: one.path.clone(),
+                    enabled: true,
+                    status: one.status,
+                    total,
+                    done,
+                    last_updated: one.last_updated.clone(),
+                });
+            }
+            rows
         };
 
         let mut actions: Vec<FolderAction> = Vec::new();
         egui::ScrollArea::vertical()
             .max_height(320.0)
             .show(ui, |ui| {
+                // While a file drag hovers the window, the backup page keeps
+                // its hands off: no clicks out from under the overlay.
+                if self.dropping_files {
+                    ui.disable();
+                }
                 for r in &rows {
                     let pct = if r.total > 0 {
                         r.done as f32 / r.total as f32
@@ -675,46 +900,51 @@ impl PrimePhotoApp {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        ui.menu_button("⋯", |ui| {
-                                            if ui.button(tr("Jetzt scannen und hochladen")).clicked() {
-                                                actions.push(FolderAction::Upload(r.idx));
-                                                ui.close_menu();
-                                            }
-                                            if ui.button(tr("Im Finder anzeigen")).clicked() {
-                                                actions.push(FolderAction::OpenFinder(r.idx));
-                                                ui.close_menu();
-                                            }
-                                            if ui.button(tr("Wiederholen")).clicked() {
-                                                actions.push(FolderAction::Retry(r.idx));
-                                                ui.close_menu();
-                                            }
-                                            if ui.button(tr("Bearbeiten")).clicked() {
-                                                actions.push(FolderAction::Edit(r.idx));
-                                                ui.close_menu();
-                                            }
-                                            ui.separator();
-                                            if ui.button(tr("Datensicherung stoppen")).clicked() {
-                                                actions.push(FolderAction::Remove(r.idx));
-                                                ui.close_menu();
-                                            }
-                                        });
-                                        let running = self.upload.lock().unwrap().active;
-                                        if ui
-                                            .add_enabled(
-                                                running,
-                                                egui::Button::new(
-                                                    RichText::new(if r.enabled {
-                                                        "⏸"
-                                                    } else {
-                                                        "▶"
-                                                    })
-                                                    .size(16.0),
+                                        // The one-time target is transient:
+                                        // no ⋯ menu (nothing to edit, reveal or
+                                        // stop) and no pause toggle.
+                                        if r.idx != ONE_TIME_IDX {
+                                            ui.menu_button("⋯", |ui| {
+                                                if ui.button(tr("Jetzt scannen und hochladen")).clicked() {
+                                                    actions.push(FolderAction::Upload(r.idx));
+                                                    ui.close_menu();
+                                                }
+                                                if ui.button(tr("Im Dateimanager anzeigen")).clicked() {
+                                                    actions.push(FolderAction::OpenFinder(r.idx));
+                                                    ui.close_menu();
+                                                }
+                                                if ui.button(tr("Wiederholen")).clicked() {
+                                                    actions.push(FolderAction::Retry(r.idx));
+                                                    ui.close_menu();
+                                                }
+                                                if ui.button(tr("Bearbeiten")).clicked() {
+                                                    actions.push(FolderAction::Edit(r.idx));
+                                                    ui.close_menu();
+                                                }
+                                                ui.separator();
+                                                if ui.button(tr("Datensicherung stoppen")).clicked() {
+                                                    actions.push(FolderAction::Remove(r.idx));
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                            let running = self.upload.lock().unwrap().active;
+                                            if ui
+                                                .add_enabled(
+                                                    running,
+                                                    egui::Button::new(
+                                                        RichText::new(if r.enabled {
+                                                            "⏸"
+                                                        } else {
+                                                            "▶"
+                                                        })
+                                                        .size(16.0),
+                                                    )
+                                                    .frame(false),
                                                 )
-                                                .frame(false),
-                                            )
-                                            .clicked()
-                                        {
-                                            actions.push(FolderAction::ToggleEnabled(r.idx));
+                                                .clicked()
+                                            {
+                                                actions.push(FolderAction::ToggleEnabled(r.idx));
+                                            }
                                         }
                                         ui.label(
                                             RichText::new(status_txt).color(status_col).size(12.0),
