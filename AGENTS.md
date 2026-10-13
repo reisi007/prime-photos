@@ -1,14 +1,14 @@
-# Prime Photo Uploader
+# Prime Photos
 
 Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Photos.
 
 ## Source of truth
 
 - GUI: `src/main.rs` (egui/eframe), theme in `src/theme.rs`
-- Upload engine: `src/amzn_photo.rs` (cookie-based Amazon Photos web API)
-- Persistent backup folders: `src/folders.rs` -> `~/Library/Application Support/amzn_photos_uploader/folders.toml`
+- Upload engine: `src/prime_photos.rs` (`PrimePhotos`, cookie-based upload API)
+- Persistent backup folders: `src/folders.rs` -> `~/Library/Application Support/prime_photos/folders.toml`
 - Login: `src/login.rs` (embedded wry WKWebView as a child view of the main window; cookies captured with an asynchronous main-queue probe)
-- Config: `src/config.rs`, stored at `~/Library/Application Support/amzn_photos_uploader/config.toml`
+- Config: `src/config.rs`, stored at `~/Library/Application Support/prime_photos/config.toml`
 - Protocol notes: `docs/PROTOCOL.md`
 
 ## Projektregeln
@@ -28,9 +28,10 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 
 ## Decisions
 
+- Name/Rename (user decision 2026-10-13): project, git repo and app are **"Prime Photos"**. Cargo package/binary `prime-photos`; upload module `src/prime_photos.rs` with struct `PrimePhotos`; config dir `~/Library/Application Support/prime_photos/` (was `amzn_photos_uploader`); the project directory is renamed to `prime-photos`. The old config folder is migrated **once, locally, by hand** (no migration code in the app).
 - GUI framework: egui/eframe (native ARM, single binary).
 - Auth (GUI): embedded WKWebView login, **in the same window as the app** (like the original). egui's window hosts a wry `WKWebView` child view; no extra window, no external browser, no CDP. Amazon's sign-in page is loaded directly (`/ap/signin?…` with `assoc_handle=amzn_photos_web_<cc>`). Cookie capture must **not** run inside egui's `update`: wry's `WebView::cookies` is synchronous and spins the macOS run loop, which re-enters winit's event handler and panics — so probes are dispatched to the main queue and the result is picked up on the next frame. A country/marketplace selector picks the TLD (default from system locale on first run).
-- Auth (login chrome): deliberate deviation from the measured original (`docs/UI_FLOWS.md` §2.1). While Amazon's page is open, a slim branded header (our upload logo + "Prime Photo Uploader" + "Abbrechen") sits above the webview and the window title reads "Login – Prime Photo Uploader". Reason: the app is a third-party tool, not Amazon's own, so its identity and a way to cancel must stay reachable. The measured window sizes stay the benchmark for the main app window.
+- Auth (login chrome): deliberate deviation from the measured original (`docs/UI_FLOWS.md` §2.1). While Amazon's page is open, a slim branded header (our upload logo + "Prime Photos" + "Abbrechen") sits above the webview and the window title reads "Login – Prime Photos". Reason: the app is a third-party tool, not Amazon's own, so its identity and a way to cancel must stay reachable. The measured window sizes stay the benchmark for the main app window.
 - Auth (upload engine): browser cookies (session-id + x-acb/at-acb/ubid-acb) -> `content-<zone>.drive.amazonaws.com/v2/upload`.
 - Flow note: this is the **web** flow (cookie-based). The desktop client's **device** flow (`amzn_photos_desktop_*` signin -> `/auth/register` -> refresh token -> `/auth/token` -> `upload-photos.amazon.de/v2/upload`) is documented in `docs/openapi.yaml` but not used.
 - UI reference: `docs/UI_FLOWS.md` + `docs/UI_STATES.md` (clean-room spec from the decompiled app + resources). Use them when changing the UI.
@@ -68,5 +69,6 @@ Native macOS (Apple Silicon) Rust app (egui) for uploading photos to Amazon Phot
 
 ## Repo
 
+- Project / git repo name: **Prime Photos** (directory `prime-photos`).
 - Git repository initialized on main.
 - Build: `cargo build` / `cargo build --release`.

@@ -11,7 +11,7 @@
 //!
 //! The MD5 is still stored (and indexed) so a cross-path dedup can be added later
 //! without a schema change. The index lives at
-//! `~/Library/Application Support/amzn_photos_uploader/dedup.sqlite3` and survives
+//! `~/Library/Application Support/prime_photos/dedup.sqlite3` and survives
 //! restarts. If the config directory cannot be created or opened, the index falls
 //! back to an in-memory database (dedup still works for the session) and finally
 //! to a no-op — it never panics.
@@ -72,7 +72,7 @@ impl DedupIndex {
         Some(
             dirs::config_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join("amzn_photos_uploader")
+                .join("prime_photos")
                 .join("dedup.sqlite3"),
         )
     }

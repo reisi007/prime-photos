@@ -14,9 +14,9 @@ def get_config_path() -> Path:
     Get OS-independent config path, similar to Rust's dirs::config_dir().
 
     Returns the appropriate config directory based on the OS:
-    - macOS: ~/Library/Application Support/amzn_photos_uploader/config.toml
-    - Linux: ~/.config/amzn_photos_uploader/config.toml
-    - Windows: %APPDATA%/amzn_photos_uploader/config.toml
+    - macOS: ~/Library/Application Support/prime_photos/config.toml
+    - Linux: ~/.config/prime_photos/config.toml
+    - Windows: %APPDATA%/prime_photos/config.toml
     """
     if sys.platform == "darwin":  # macOS
         config_dir = Path.home() / "Library" / "Application Support"
@@ -25,7 +25,7 @@ def get_config_path() -> Path:
     else:  # Linux and other Unix-like systems
         config_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 
-    return config_dir / "amzn_photos_uploader" / "config.toml"
+    return config_dir / "prime_photos" / "config.toml"
 
 
 def parse_cookies(cookie_string: str) -> dict:

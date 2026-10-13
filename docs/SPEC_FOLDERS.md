@@ -86,7 +86,7 @@ scan_images(dir) -> Vec<PathBuf>
 
 | Item | Value |
 |---|---|
-| Path | `dirs::config_dir()` (on macOS `~/Library/Application Support`) + `amzn_photos_uploader/folders.toml`; falls back to `std::env::temp_dir()` when `config_dir()` is `None` |
+| Path | `dirs::config_dir()` (on macOS `~/Library/Application Support`) + `prime_photos/folders.toml`; falls back to `std::env::temp_dir()` when `config_dir()` is `None` |
 | Format | TOML (pretty-printed via `toml::to_string_pretty`) |
 | Load | `std::fs::read_to_string` then `toml::from_str`; on read/parse error, defaults to empty store |
 | Save | creates parent dir if missing, then writes full file (all folders rewritten on every save) |

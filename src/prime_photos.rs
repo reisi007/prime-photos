@@ -267,14 +267,14 @@ pub struct ResponseUploadFailDetails {
 }
 
 #[derive(Debug)]
-pub struct AmznPhoto {
+pub struct PrimePhotos {
     conf: Config,
     web_dir_node: Option<ResponseSearchData>,
     client: Client,
     dry_run: bool,
 }
 
-impl AmznPhoto {
+impl PrimePhotos {
     pub fn new(conf: &Config, dry_run: bool) -> Self {
         // Configure client with connection pooling and optimized settings
         let client = Client::builder()
@@ -358,7 +358,7 @@ impl AmznPhoto {
         .expect("Can't parse the token renewal URL");
 
         // Provide timestamp as a parameter
-        let params = [("_", AmznPhoto::get_epoch_millis())];
+        let params = [("_", PrimePhotos::get_epoch_millis())];
         let mut headers = HeaderMap::new();
         headers.append("Content-Type", "application/json".parse().unwrap());
         headers.append(
@@ -418,7 +418,7 @@ impl AmznPhoto {
     }
 
     async fn list_albums(&self) -> Result<ResponseSearch, reqwest::Error> {
-        self.search(format!("?asset=ALL&filters=type%3A(ALBUMS)&limit=200&lowResThumbnail=true&searchContext=customer&sort=%5B%27createdDate+DESC%27%5D&tempLink=false&resourceVersion=V2&ContentType=JSON&_={}", AmznPhoto::get_epoch_millis()).as_str()).await
+        self.search(format!("?asset=ALL&filters=type%3A(ALBUMS)&limit=200&lowResThumbnail=true&searchContext=customer&sort=%5B%27createdDate+DESC%27%5D&tempLink=false&resourceVersion=V2&ContentType=JSON&_={}", PrimePhotos::get_epoch_millis()).as_str()).await
     }
 
     async fn create_album(&self, name: &str) -> Result<ResponseSearchData, reqwest::Error> {
@@ -574,7 +574,7 @@ impl AmznPhoto {
         filter: &str,
         node_id: &str,
     ) -> Result<ResponseNodes, reqwest::Error> {
-        let url = Url::parse(format!("https://www.amazon.{}/drive/v1/nodes/{}/children?asset=ALL&filters={}&searchOnFamily=false&tempLink=false&offset=0&resourceVersion=V2&ContentType=JSON&_={}", self.conf.country, node_id, filter, AmznPhoto::get_epoch_millis()).as_str()).expect("Can't parse children nodes URL");
+        let url = Url::parse(format!("https://www.amazon.{}/drive/v1/nodes/{}/children?asset=ALL&filters={}&searchOnFamily=false&tempLink=false&offset=0&resourceVersion=V2&ContentType=JSON&_={}", self.conf.country, node_id, filter, PrimePhotos::get_epoch_millis()).as_str()).expect("Can't parse children nodes URL");
         let params = [];
         self.find_nodes_internal(url, &params).await
     }
@@ -584,7 +584,7 @@ impl AmznPhoto {
             format!("https://www.amazon.{}/drive/v1/nodes/", self.conf.country).as_str(),
         )
         .expect("Can't parse the find node URL");
-        let epoch = AmznPhoto::get_epoch_millis();
+        let epoch = PrimePhotos::get_epoch_millis();
         let params = [
             ("filters", filter),
             ("resourceVersion", "V2"),

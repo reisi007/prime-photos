@@ -10,7 +10,7 @@
 - [x] "Alle Sicherungsvorgänge anhalten/fortsetzen" (global pause; seit 2026-10-13 stoppt sie auch
   laufende Übertragungen sofort — `watch`-Kanal, Commit `4a47795`).
 - [x] Concurrent uploads (Workers + JoinSet), per-file rate limit (Bandbreite tab).
-- [x] Login: embedded WKWebView **in the main window** (wry child view of the egui window); cookies captured via an async main-queue probe; manual cookie entry removed. Window title "Login – Prime Photo Uploader", slim branded header above the page (documented deviation from the original).
+- [x] Login: embedded WKWebView **in the main window** (wry child view of the egui window); cookies captured via an async main-queue probe; manual cookie entry removed. Window title "Login – Prime Photos", slim branded header above the page (documented deviation from the original).
 - [x] Country / marketplace selector before login (default from system locale on first run).
 - [x] `.xmp` sidecars rejected; RAW formats supported (single source in `folders.rs`).
 - [x] OpenAPI spec (`docs/openapi.yaml`) + protocol notes (`docs/PROTOCOL.md`).

@@ -182,6 +182,6 @@ impl FolderStore {
 pub fn store_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("amzn_photos_uploader")
+        .join("prime_photos")
         .join("folders.toml")
 }

@@ -3,7 +3,7 @@
 Status: backfill spec for **already implemented** behaviour. Clean-room: own words and
 tables only. Protocol/reference details from `docs/PROTOCOL.md`, `docs/openapi.yaml`,
 the official (read-only) `/Applications/Amazon Photos.app`, and the committed
-source state (`git show HEAD:src/amzn_photo.rs`, upload-worker parts of
+source state (`git show HEAD:src/prime_photos.rs`, upload-worker parts of
 `git show HEAD:src/main.rs`). The working tree is dirty with an unrelated in-flight
 Pause and menu fixes; **nothing in this spec is based on the working tree**.
 
@@ -38,7 +38,7 @@ This spec covers the **web/cookie upload path** actually used by this app:
 | Success | `201 Created` with the created file node (JSON) |
 | Duplicate | `409 Conflict` with `conflictNodeIds` (see §2.5) |
 
-Query parameters (our URL construction order in `AmznPhoto::upload_picture`):
+Query parameters (our URL construction order in `PrimePhotos::upload_picture`):
 
 | Param | Source / value | Notes |
 |---|---|---|
@@ -55,7 +55,7 @@ whether omitting `kind` is always accepted.
 
 ### 2.2 Required request headers (our committed client)
 
-`AmznPhoto::build_common_headers` plus per-upload inserts:
+`PrimePhotos::build_common_headers` plus per-upload inserts:
 
 | Header | Value (committed) |
 |---|---|
@@ -74,15 +74,15 @@ OAuth/token set. This is the intended web-flow difference.
 
 ### 2.3 Auth
 
-- All identity comes from the persisted `Config` (`~/Library/Application Support/amzn_photos_uploader/config.toml`): `country`, `zone`, `session_id`, `cookie_x_acb`, `cookie_at_acb`, `cookie_ubid_acb`.
+- All identity comes from the persisted `Config` (`~/Library/Application Support/prime_photos/config.toml`): `country`, `zone`, `session_id`, `cookie_x_acb`, `cookie_at_acb`, `cookie_ubid_acb`.
 - There is no token refresh in this path; `cookie_x_amz_access_token` is stored
   but **not used** by the committed web upload.
-- HTTP 401 is detected via `AmznPhoto::check_auth_error` and logged with a manual
+- HTTP 401 is detected via `PrimePhotos::check_auth_error` and logged with a manual
   cookie-renewal hint. No automatic refresh (backlog).
 
 ### 2.4 Capture date precedence (EXIF vs file time)
 
-Implemented in `AmznPhoto::upload_picture`, before any network call.
+Implemented in `PrimePhotos::upload_picture`, before any network call.
 
 EXIF order tried (each only if the previous was absent), read from the primary IFD
 via the `exif` crate, expecting `Value::Ascii` with one entry:
@@ -166,7 +166,7 @@ name (trimmed) is non-empty.
 
 1. Collect `shared.uploaded_ids` (all ids returned by `upload_picture`, i.e.
    successes **and** first conflict ids from 409s).
-2. Fresh `AmznPhoto` instance.
+2. Fresh `PrimePhotos` instance.
 3. `get_album(name)`:
    - `list_albums()`: `GET https://www.amazon.<cc>/drive/v1/search` with
      `?asset=ALL&filters=type%3A(ALBUMS)&limit=200&lowResThumbnail=true&searchContext=customer&sort=['createdDate DESC']&tempLink=false&resourceVersion=V2&ContentType=JSON&_=<epoch-ms>`.
@@ -196,11 +196,11 @@ synonyms.
 
 | File / symbol | Role |
 |---|---|
-| `src/amzn_photo.rs` `AmznPhoto` | HTTP client wrapper; all endpoints. |
-| `AmznPhoto::new(conf, dry_run)` | builds reqwest `Client` (pool 10 idle/host, 90 s idle timeout, 60 s tcp keepalive, 300 s total timeout). |
-| `AmznPhoto::upload_picture(pic_path, contents: Option<&[u8]>, md5sum: Option<&str>)` | full single-file upload (§2.1–§2.5). |
-| `AmznPhoto::get_album`, `create_album`, `add_to_album`, `list_albums` | album handling (§2.6). |
-| `AmznPhoto::update_web_pictures_dir_node`, `find_root_node`, `find_children_nodes` | resolves the destination (Web) folder. |
+| `src/prime_photos.rs` `PrimePhotos` | HTTP client wrapper; all endpoints. |
+| `PrimePhotos::new(conf, dry_run)` | builds reqwest `Client` (pool 10 idle/host, 90 s idle timeout, 60 s tcp keepalive, 300 s total timeout). |
+| `PrimePhotos::upload_picture(pic_path, contents: Option<&[u8]>, md5sum: Option<&str>)` | full single-file upload (§2.1–§2.5). |
+| `PrimePhotos::get_album`, `create_album`, `add_to_album`, `list_albums` | album handling (§2.6). |
+| `PrimePhotos::update_web_pictures_dir_node`, `find_root_node`, `find_children_nodes` | resolves the destination (Web) folder. |
 | `src/main.rs` `run_upload(...)` | builds queue, spawns workers, post-run album add. |
 | `src/main.rs` `upload_worker(...)` | per-worker loop, pause polling, rate limiting. |
 | `src/main.rs` `UploadShared` | shared counters/log (`total`, `current`, `done`, `folder_total`, `folder_done`, `failed`, `folder_failed`, `uploaded_ids`, `active`, `log`). |
@@ -230,10 +230,10 @@ synonyms.
   → first child.
 - Then same for `name:"Web"` under Pictures.
 - Result cached in `web_dir_node: Option<ResponseSearchData>` and reused for
-  every subsequent file in the same `AmznPhoto` instance.
+  every subsequent file in the same `PrimePhotos` instance.
 
 `find_nodes_internal` uses `GET` with query params and `build_common_headers`.
-Dry run returns empty data (so a dry-run `AmznPhoto` has no cached node and
+Dry run returns empty data (so a dry-run `PrimePhotos` has no cached node and
 uploads report parent `NONE`).
 
 ### 3.4 Worker scheduling (`run_upload`)
@@ -277,7 +277,7 @@ partial bytes; `RENAME` duplicate risk) are recorded in `AGENTS.todo.md`.
 
 | Concept | Our implementation |
 |---|---|
-| Upload raw bytes to content host | `AmznPhoto::upload_picture` → `POST {zone}…/v2/upload` |
+| Upload raw bytes to content host | `PrimePhotos::upload_picture` → `POST {zone}…/v2/upload` |
 | Parent folder node id | cached `web_dir_node` (Root/Pictures/Web) |
 | MD5 of body | `md5::compute` hex, sent as `x-amzn-file-md5` |
 | Capture/content date | §2.4 algorithm |

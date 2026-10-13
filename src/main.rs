@@ -1,4 +1,4 @@
-mod amzn_photo;
+mod prime_photos;
 mod app_menu;
 mod config;
 mod dedup;
@@ -6,7 +6,7 @@ mod folders;
 mod login;
 mod theme;
 
-use amzn_photo::AmznPhoto;
+use prime_photos::PrimePhotos;
 use config::Config;
 use dedup::DedupIndex;
 use eframe::egui::{self, Color32, RichText};
@@ -406,7 +406,7 @@ impl PrimePhotoApp {
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        ui.label(RichText::new("amazon photos").size(20.0).strong());
+        ui.label(RichText::new("Prime Photos").size(20.0).strong());
         ui.add_space(16.0);
         Self::nav_item(
             ui,
@@ -483,7 +483,7 @@ impl PrimePhotoApp {
                         upload_logo(ui, 30.0);
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
-                            ui.label(RichText::new("Prime Photo Uploader").strong().size(15.0));
+                            ui.label(RichText::new("Prime Photos").strong().size(15.0));
                             ui.label(theme::muted("Bei Amazon anmelden"));
                         });
                         ui.with_layout(
@@ -524,7 +524,7 @@ impl PrimePhotoApp {
             ui.add_space(56.0);
             upload_logo(ui, 84.0);
             ui.add_space(12.0);
-            ui.label(RichText::new("Prime Photo Uploader").size(28.0).strong());
+            ui.label(RichText::new("Prime Photos").size(28.0).strong());
             ui.add_space(4.0);
             ui.label(theme::muted("Fotos & Videos zu Amazon Photos hochladen"));
             ui.add_space(26.0);
@@ -923,9 +923,9 @@ impl eframe::App for PrimePhotoApp {
 
         // Keep the window title clear about what this window is.
         let title = if self.login.running || !self.is_logged_in() {
-            "Login – Prime Photo Uploader"
+            "Login – Prime Photos"
         } else {
-            "Prime Photo Uploader"
+            "Prime Photos"
         };
         if self.window_title.as_deref() != Some(title) {
             self.window_title = Some(title.to_owned());
@@ -947,7 +947,7 @@ async fn upload_worker(
     dedup: Arc<Mutex<DedupIndex>>,
     folder_opts: Arc<HashMap<usize, (bool, ConflictResolution)>>,
 ) {
-    let mut uploader = AmznPhoto::new(&cfg, false);
+    let mut uploader = PrimePhotos::new(&cfg, false);
     loop {
         while *pause_rx.borrow_and_update() {
             tokio::time::sleep(Duration::from_millis(400)).await;
@@ -1067,7 +1067,7 @@ async fn run_upload(
     let workers = concurrency.max(1).min(count.max(1));
 
     // One shared persistent MD5 index for the whole run (opened here, lives in
-    // ~/Library/Application Support/amzn_photos_uploader/dedup.sqlite3).
+    // ~/Library/Application Support/prime_photos/dedup.sqlite3).
     let dedup = Arc::new(Mutex::new(DedupIndex::open()));
     let folder_opts = Arc::new(folder_opts);
 
@@ -1089,7 +1089,7 @@ async fn run_upload(
     if !name.is_empty() {
         let ids = { shared.lock().unwrap().uploaded_ids.clone() };
         if !ids.is_empty() {
-            let mut up = AmznPhoto::new(&cfg, false);
+            let mut up = PrimePhotos::new(&cfg, false);
             if let Ok(c) = up.get_album(&name).await {
                 let _ = up.add_to_album(c.id, &ids).await;
             }
@@ -1239,7 +1239,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "Prime Photo Uploader",
+        "Prime Photos",
         options,
         Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
     )

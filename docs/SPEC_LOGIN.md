@@ -42,7 +42,7 @@ details (`docs/SPEC_UPLOAD.md`).
 | `Contents/MonoBundle/Amazon.Auth.Map.dll` (decompiled) | `AuthPortalUrl` base class, `AmazonCloudDriveAuthPortalUrl` subclass, `ClientIdProvider` |
 | `Contents/Resources/de.lproj/Localizable.strings` | German labels (keys cited inline) |
 | `docs/UI_FLOWS.md`, `docs/UI_STATES.md`, `docs/PROTOCOL.md` | window geometry, navigation vocabulary, device-flow endpoints |
-| `git show HEAD:src/login.rs`, `HEAD:src/config.rs`, login parts of `HEAD:src/main.rs`, `HEAD:src/amzn_photo.rs` | our committed implementation |
+| `git show HEAD:src/login.rs`, `HEAD:src/config.rs`, login parts of `HEAD:src/main.rs`, `HEAD:src/prime_photos.rs` | our committed implementation |
 
 ---
 
@@ -253,8 +253,8 @@ defined by our implementation (§ 4.3), not by the original.
 
 `PrimePhotoApp::update` (committed) routes to the login flow whenever
 `login.running || !is_logged_in()`, and sets the window title to
-"Login – Prime Photo Uploader" in that state, otherwise
-"Prime Photo Uploader". The window is sized once on first frame to
+"Login – Prime Photos" in that state, otherwise
+"Prime Photos". The window is sized once on first frame to
 `clamp(monitor × 0.82, 900..1500)` × `clamp(monitor × 0.85, 600..1000)`,
 i.e. it does **not** use the original's fixed 1130 × 770 / 880 × 530 frames
 (benchmark values are retained for the chrome, but our sizing is elastic). *observed.*
@@ -337,11 +337,11 @@ marketplace from `COUNTRIES` *observed*:
 While Amazon's page is open, a slim branded header sits above the webview
 (our documented deviation from the original's § 3.1 two-column layout):
 
-- upload logo (30 pt), app name "Prime Photo Uploader", subtitle
+- upload logo (30 pt), app name "Prime Photos", subtitle
   "Bei Amazon anmelden";
 - a spinner while no error, otherwise the error text in red;
 - an "Abbrechen" button on the right that calls `WebviewLogin::cancel`.
-- Window title forced to "Login – Prime Photo Uploader" (§ 4.2).
+- Window title forced to "Login – Prime Photos" (§ 4.2).
 
 Rationale documented in `AGENTS.md`: this is a third-party tool, so its
 identity and a cancel path must stay reachable. Window *sizes* from the original
@@ -437,11 +437,11 @@ Config schema (`Config`, committed) *observed:*
 | `cookie_x_amz_access_token` | `""` | `sess-at-acb*` value |
 
 Storage path:
-`~/Library/Application Support/amzn_photos_uploader/config.toml` (`config_dir()`).
+`~/Library/Application Support/prime_photos/config.toml` (`config_dir()`).
 
 ### 4.9 Web (cookie) flow after sign-in (committed)
 
-`AmznPhoto::build_common_headers` and `renew_auth_token` (committed) build the
+`PrimePhotos::build_common_headers` and `renew_auth_token` (committed) build the
 upload-cookie header as *observed*:
 
 ```
@@ -493,7 +493,7 @@ but `build_common_headers` does not send `x-amz-access-token`); treat as
 | Concern | Original (Amazon Photos 11.3) | Ours (committed `HEAD`) |
 |---|---|---|
 | Sign-in window | Separate `NSWindow`, 880 × 530, titled/closable/miniaturizable | Same eframe window, elastic sizing, header 16/8 margin (deviation) |
-| Window title | "Amazon Photos" (`clouddrive_desktop_title`) | "Login – Prime Photo Uploader" (deviation, documented) |
+| Window title | "Amazon Photos" (`clouddrive_desktop_title`) | "Login – Prime Photos" (deviation, documented) |
 | Closable while signing in | Closing quits the whole app (`HandleShouldClose → Quit`) | "Abbrechen" cancels only the webview; returns to picker |
 | Layout | Two columns: 500 pt welcome/marketing panel + 380 × 528 auth container | One column: branded 60 pt header (`HEADER_H`) + webview; our pre-login screen shows logo + marketplace picker |
 | Auth page | `https://www.<domain>/ap/signin?…` with device OAuth params, `assoc_handle=amzn_photos_desktop_<region>`, `pageId=amzn_photos_desktop_<amazonRegion>` | Same host/path but minimal param set, `assoc_handle=amzn_photos_web_<cc>` |
@@ -555,7 +555,7 @@ Our own labels (committed UI) — *observed*:
 | Success log | "Login erfolgreich – Cookies übernommen." |
 | Webview error prefix (page) | "Anmeldeseite konnte nicht geöffnet werden: {e}" |
 | Cookie error prefix | "Cookies konnten nicht gelesen werden: {e}" |
-| Window title (login state) | "Login – Prime Photo Uploader" |
+| Window title (login state) | "Login – Prime Photos" |
 
 ---
 
@@ -601,7 +601,7 @@ Marked *unknown* rather than guessed:
   `apply_cookie_string`, `parse_cookie_string`, `login_ui`, `login_screen_ui`,
   `system_country`, `COUNTRIES`, country-comboboxes, window-title logic,
   `pending_login` deferral.
-- `src/amzn_photo.rs` — `build_common_headers`, `renew_auth_token` (cookie
+- `src/prime_photos.rs` — `build_common_headers`, `renew_auth_token` (cookie
   header, zone interpolation).
 
 ## 9. Change checklist (if editing this feature)

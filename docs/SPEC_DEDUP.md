@@ -345,7 +345,7 @@ the customer has never been prompted (`HasCustomerSeenApplePhotosDuplicatesPromp
   files" will therefore start with the `uploads.precomputed_md5` index and may
   later add a small content-MD5 index. Until a local cloud cache exists, the
   server-side 409 path (§2.3) is the effective second line of defence.
-- Our app hard-codes `conflictResolution=RENAME` in `AmznPhoto::upload_picture`
+- Our app hard-codes `conflictResolution=RENAME` in `PrimePhotos::upload_picture`
   instead of `NONE`. With RENAME, a duplicate name produces a renamed copy
   rather than being detected as content duplicate. Aligning to `NONE` (or, better,
   an explicit pre-flight) is part of P1.

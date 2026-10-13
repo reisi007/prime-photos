@@ -17,7 +17,7 @@ impl Config {
     pub fn get_config_path() -> io::Result<PathBuf> {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "No config directory found"))?;
-        Ok(config_dir.join("amzn_photos_uploader").join("config.toml"))
+        Ok(config_dir.join("prime_photos").join("config.toml"))
     }
 
     /// Load the configuration from the file system.

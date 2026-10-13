@@ -29,7 +29,7 @@ pub fn install() {
     main_menu.addItem(&app_item);
     app_menu.addItem(&item(
         mtm,
-        "Prime Photo Uploader beenden",
+        "Prime Photos beenden",
         sel!(terminate:),
         "q",
     ));
