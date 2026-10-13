@@ -408,7 +408,7 @@ impl PrimePhotoApp {
             ui.add_space(16.0);
             if ui.link(tr("Amazon Photos im Browser öffnen")).clicked() {
                 let url = login::login_url(&self.config.country);
-                let _ = std::process::Command::new("open").arg(url).spawn();
+                let _ = crate::platform::open_url(&url);
             }
         });
     }

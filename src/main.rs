@@ -8,6 +8,7 @@ mod i18n;
 mod icons;
 mod login;
 mod notify;
+mod platform;
 mod theme;
 mod tray;
 mod upload;

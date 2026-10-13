@@ -61,10 +61,7 @@ impl PrimePhotoApp {
             }
             FolderAction::OpenFinder(i) => {
                 if let Some(f) = self.store.folders.get(i) {
-                    let _ = std::process::Command::new("open")
-                        .arg("-R")
-                        .arg(&f.path)
-                        .spawn();
+                    let _ = crate::platform::reveal_in_file_manager(&f.path);
                 }
             }
             FolderAction::ToggleEnabled(i) => {
