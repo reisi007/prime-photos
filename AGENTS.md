@@ -65,6 +65,17 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   für den aktuellen Lauf `concurrency = 1` erzwingt; bei App-Neustart zurückgesetzt. Automatische
   Drosselung anhand des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs, Post-MVP).
 
+## Assets: Tray-Icons + Logo (User 2026-10-14) — geplant, **nicht** implementiert
+
+Eigene Assets des Users liegen künftig in **`assets/`** (PNG mit Alpha) und werden per
+`include_bytes!` + die vorhandene `image`-Crate eingebunden (keine neue Dependency, kein
+Laufzeit-Pfad, self-contained Binary). Konkrete Dateiliste + Formatvorgaben steht im Ledger
+(`AGENTS.todo.md` → „Assets"). Fehlt ein Asset, fällt die App auf die heutige gezeichnete
+Variante zurück (`src/icons.rs`) — nie ein Crash, nie ein leeres Tray.
+
+MVP-Zielbild des Users: **polished** — Autostart, effizienter funktionierender Upload
+(Event-Watcher + Stat-Check + Wasserzeichen, siehe unten) und echte Tray-/Logo-Assets.
+
 ## Geplante Implementierungs-Wellen (User-Auswahl 2026-10-14) — dokumentiert, **nicht gestartet**
 
 Der User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Startauftrag** erteilt

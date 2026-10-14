@@ -298,6 +298,40 @@ per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
   Cold-Boot-Scan, halb geschriebene Dateien. Nachtrag: Gap-Analyse nach PKG-2a auf den
   neuen Port-Stand aktualisiert (läuft).
 
+## Assets: Tray-Icons + Logo (User-Vorbereitung 2026-10-14) — geplant, **nicht** implementiert
+
+Der User bereitet eigene Assets in einem `assets/`-Ordner vor (Tray-Icons + Logo). Auftrag:
+einplanen, damit „MVP polished" inkl. Autostart und effizientem Upload erreicht wird.
+
+**Verbindliche Einbindung (Vorgabe, damit es auf jeder Plattform/im Bundle funktioniert):**
+- Ablageort: **`assets/` im Repo-Root**, PNG mit Alpha.
+- Einbindung per **`include_bytes!`** (nicht zur Laufzeit vom Pfad) + Dekodierung über die
+  bereits vorhandene `image`-Crate → `tray_icon::Icon::from_rgba` bzw. eframe-Viewport-Icon.
+  Damit keine neue Dependency, keine Pfadauflösung im `.app`-Bündel, Binary bleibt
+  self-contained.
+- Fehlt oder ist ein Asset kaputt: **Fallback auf die heutige gezeichnete Variante**
+  (`src/icons.rs` `upload_logo`, Tray-Glyph) — die App darf nie wegen eines Assets crashen
+  oder ein leeres Tray zeigen.
+
+**Vom User vorzubereitende Dateien** (Name = Dateiname, wird exakt so eingebunden):
+
+| Datei | Zweck | Format-Vorgabe |
+|---|---|---|
+| `assets/tray.png` | Basis-Tray-Icon (Standardzustand) | monochrom + Alpha, als macOS-**template** geeignet (Schwarz/Weiß, kein Farbverlauf); 32 px, optional `@2x` |
+| `assets/tray-active.png` | Zustand „Upload läuft" | wie oben, Variante mit Aktiv-Signal |
+| `assets/tray-paused.png` | Zustand „Angehalten" | wie oben, Pause-Signal |
+| `assets/tray-done.png` | Zustand „Fertig" (kurz, dann zurück auf Basis) | optional |
+| `assets/tray-error.png` | Zustand „Fehler" | optional |
+| `assets/logo.png` | App-Logo: Fenster-/Dock-Icon, Login-Header, About-Fenster | mind. 256×256, mit Alpha, quadratisch |
+
+Recherche-Grundlage: `docs/SPEC_NOTIFICATIONS.md` §2.4 (Icon-/Status-Map des Originals:
+idle/processing/paused/done/error) und §2.3 (Menüleisten-Item); das Original liefert monochrome
+Template-Bilder plus eine farbige Ungelesen-Variante.
+
+**Einplanung:** Symbolwechsel zur Laufzeit (aktiv/pausiert/Fehler) gehört in die Asset-Welle;
+das Dock-/Fenster-Icon ist davon unabhängig und kann allein kommen. Nicht Teil: das `.app`-Icon
+für das macOS-Bundle (`packaging/make-app.sh`) — eigener, bereits zurückgestellter Punkt.
+
 ## Implementierungs-Wellen (User-Auswahl 2026-10-14) — **NUR DOKUMENTIERT, NICHT GESTARTET**
 
 User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Startauftrag** erteilt
