@@ -327,6 +327,11 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
    Commit `81cd277`. Umsetzung: 409 wird gemeldet; `Ask` stellt pro Datei die Frage
    (Ignorieren / Als neue Datei speichern / Ersetzen) mit „Nicht noch einmal fragen" als
    run-weitem Override; Fragen sind serialisiert, 60-s-Timeout → Ignore (kein Stillstand).
+   **Unabhängig verifiziert** (PASS mit 2 Medium-Findings, beide behoben in `a3a3625`):
+   F1 = die 409-Auflösung trug sich nicht in den MD5-Index ein (jede spätere Runde hätte die
+   Datei erneut komplett gesendet); F2 = der „nicht noch einmal fragen"-Override überlebte den
+   Lauf und konnte später Dateien still überschreiben. Dazu F3 (ETA-Rate jetzt Wanduhr statt
+   Worker-Summe) und F4 (defensive Ask-Normalisierung).
 2. **Autostart-Default.** PORT-4 liefert den Schalter; ob er bei Installation **an** oder **aus**
    sein soll, ist eine Produktentscheidung (Default bisher: aus).
 3. **Hintergrund-Sync-Takt (PORT-5-Detail).** Event-driven ist spezifiziert (deutig aus dem User-
