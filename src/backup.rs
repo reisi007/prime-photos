@@ -811,7 +811,7 @@ impl PrimePhotoApp {
             self.config_form = Some(BackupConfigForm {
                 path: folder,
                 dedup: true,
-                conflict_resolution: ConflictResolution::Ignore,
+                conflict_resolution: ConflictResolution::default(),
                 mode: ConfigFormMode::Create,
                 error: None,
             });
@@ -1043,7 +1043,7 @@ impl PrimePhotoApp {
             name: "Einmalige Sicherung".to_string(),
             enabled: true,
             dedup: true,
-            conflict_resolution: ConflictResolution::Ignore,
+            conflict_resolution: ConflictResolution::default(),
             total_files: files.len(),
             uploaded_files: 0,
             last_updated: String::new(),
@@ -1055,7 +1055,7 @@ impl PrimePhotoApp {
         let mut plan = UploadPlan::from_files(
             ONE_TIME_IDX,
             true,
-            ConflictResolution::Ignore,
+            ConflictResolution::default(),
             files,
         );
         let concurrency = if self.slow_mode { 1 } else { self.concurrency };

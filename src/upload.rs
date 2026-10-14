@@ -391,7 +391,7 @@ pub(crate) async fn upload_worker(
         let (dedup_on, conflict) = folder_opts
             .get(&idx)
             .copied()
-            .unwrap_or((true, ConflictResolution::Ignore));
+            .unwrap_or((true, ConflictResolution::default()));
 
         // Stat before reading (user decision 2026-10-14): the recorded
         // `size`/`mtime` decide the cheap skip path, so an already-uploaded,
@@ -491,8 +491,9 @@ pub(crate) async fn upload_worker(
         // Conflict policy (docs/SPEC_DEDUP.md §4.1): a 409 is reported by the
         // engine. `Ignore` maps it to "already there" (finished, no bytes); `Ask`
         // waits for one user decision per file (with an optional "don't ask
-        // again" for the rest of the run); `SaveAsNew`/`Replace` are plain wire
-        // values and never produce a 409.
+        // again" for the rest of the run). `SaveAsNew` (`RENAME`) still yields a
+        // 409 for a content duplicate (`errorCode = "DuplicatesConflictError"`):
+        // that is the intended safety net, not a name clash.
         let mut resolution = {
             let s = shared.lock().unwrap();
             s.conflict_override.unwrap_or(conflict)

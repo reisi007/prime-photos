@@ -344,7 +344,7 @@ impl PrimePhotoApp {
                     name: "Einmalige Sicherung".to_string(),
                     enabled: true,
                     dedup: true,
-                    conflict_resolution: ConflictResolution::Ignore,
+                    conflict_resolution: ConflictResolution::default(),
                     total_files: files.len(),
                     uploaded_files: 0,
                     last_updated: String::new(),
