@@ -316,23 +316,24 @@ per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
   Netz für *verpasste* Events (Watcher-Limit, ausgeworfenes Laufwerk) ein eigener, noch nicht
   entschiedener Punkt (siehe unten „Offen").
 
-## Assets: Tray-Icons + Logo (User-Vorbereitung 2026-10-14) — geplant, **nicht** implementiert
+## Assets: Tray-Icons + Logo — Quellen geliefert (2026-10-14), Einbindung **offen**
 
-Der User bereitet eigene Assets in einem `assets/`-Ordner vor (Tray-Icons + Logo). Auftrag:
-einplanen, damit „MVP polished" inkl. Autostart und effizientem Upload erreicht wird.
+Eigene Assets liegen in `assets/` — **als SVG-Quellen** (maßgeblich: `AGENTS.md` §„Assets"), daraus
+rastet der Build die PNGs. Auftrag: einplanen, damit „MVP polished" inkl. Autostart und effizientem
+Upload erreicht wird.
 
 **Verbindliche Einbindung (Vorgabe, damit es auf jeder Plattform/im Bundle funktioniert):**
-- Ablageort: **`assets/` im Repo-Root**, PNG mit Alpha.
-- Einbindung per **`include_bytes!`** (nicht zur Laufzeit vom Pfad) + Dekodierung über die
+- Ablageort: **`assets/` im Repo-Root**, **SVG-Quellen** — keine committeten PNGs mehr (sie entstehen im Build).
+- `build.rs` rastet die SVGs mit `resvg` (`[build-dependencies]`, `default-features = false`, reine
+  Rust-Bibliothek, keine Laufzeit-Abhängigkeit) nach `OUT_DIR`; Einbindung per
+  **`include_bytes!(concat!(env!("OUT_DIR"), …))`** (nicht zur Laufzeit vom Pfad) + Dekodierung über die
   bereits vorhandene `image`-Crate → `tray_icon::Icon::from_rgba` bzw. eframe-Viewport-Icon.
-  Damit keine neue Dependency, keine Pfadauflösung im `.app`-Bündel, Binary bleibt
-  self-contained.
-**Kein Fallback (User-Vorgabe 2026-10-14):** fehlt ein Asset, ist das ein **Compile-Fehler** —
-`include_bytes!` bricht den Build von selbst. Kein `Option`, keine `path.exists()`-Prüfung, kein
-Rückfall auf die gezeichnete Variante (`src/icons.rs` bleibt nur für die Vektor-Glyphen im UI selbst:
-Navigation, Status-Punkt, Flagge). Ein Dekodier-Fehler zur Laufzeit ist ebenfalls hart (fail fast,
-klare Meldung) — eine stille degradierte UI ist ausdrücklich **nicht** gewollt. Da noch nichts
-implementiert ist, wirkt sich das erst aus, wenn die Dateien in `assets/` eingebunden werden.
+  Keine Pfadauflösung im `.app`-Bündel, Binary bleibt self-contained.
+**Kein Fallback (User-Vorgabe 2026-10-14):** fehlt ein SVG, bricht `build.rs` den Build (Compile-Fehler).
+Kein `Option`, keine `path.exists()`-Prüfung, kein Rückfall auf die gezeichnete Variante (`src/icons.rs`
+bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Ein Dekodier-Fehler
+zur Laufzeit ist ebenfalls hart (fail fast, klare Meldung) — eine stille degradierte UI ist
+ausdrücklich **nicht** gewollt.
 
 **Geliefert (Stand 2026-10-14) — Quellen sind SVGs in `assets/`:**
 
@@ -357,38 +358,34 @@ committen" (zwei Quellen, die auseinanderlaufen). **Theme:** `egui::Context::sys
 weiß, hell ⇒ schwarz, `None` ⇒ farbiges Logo (immer sichtbar). **Zu erzeugende PNGs:** fünf Zustände ×
 {schwarz, weiß} × {32, 64} + `logo` 1024 + `logo-small` 256 + `logo-small-black` 256.
 
-Der Tray-Satz ist durchgängig **monochrom schwarz auf transparent** — genau die macOS-Template-
-Semantik (die Vorschau `preview-tray.png` zeigt alle fünf Zustände invertiert auf dunklem Grund).
-Die übrigen Dateien sind **Vorbereitungs-/QA-Artefakte**, keine Laufzeit-Assets: `chk-logo-*.png`
-(6 Varianten für helle/dunkle Hintergründe), `contact-sheet.png`, `zoom-corners.png`,
-`debug-mask-*.png` (1,4 MB je Datei!), `preview-tray.png`. **Entscheidung offen:** diese
-QA-Artefakte gehören **nicht** in den Git-Bestand (Blähung) — beim Asset-Commit weglassen bzw.
-separat ablegen; nur die Laufzeit-Dateien der Tabelle oben werden eingebettet.
+Der Tray-Satz ist durchgängig **monochrom (`currentColor`) auf transparent** — genau die
+macOS-Template-Semantik. Es gibt **keine** separaten schwarzen/weißen Dateien und **keine**
+PNG-Zwillinge im Repo: Weiß/Schwarz ist ein Raster-Override beim Build (`*{color:#fff}` bzw. `#000`).
+Es gibt auch **keine QA-Artefakte** mehr im Repo — die früheren Kontrollbilder (`chk-logo-*`,
+`contact-sheet`, `zoom-corners`, `debug-mask-*`, `preview-tray`) und der komplette PNG-Satz wurden
+entfernt; committet werden ausschließlich die acht SVG-Quellen der Tabelle oben.
 
 **Einbindungspunkte, die bereits existieren (verifiziert im Code):**
 - `src/tray.rs`: `ICON_SIZE = 32`, `tray_icon::Icon::from_rgba(…)`, und **auf macOS ist das
   Template-Flag schon gesetzt** (`with_icon_templated`, nicht-deprecatierter Nachfolger von
   `with_icon_as_template(true)`), außermacOS `with_icon(icon)`. Der heutige Glyph wird gezeichnet
-  und ist **teal** — die neuen Schwarz/Alpha-Dateien passen dort 1:1 hinein.
+  und ist **teal** — die neuen schwarz/Alpha-Raster passen dort 1:1 hinein.
 - macOS skaliert (`tray-icon` 0.26.1, `to_nsimage(max_height)`) auf die Menüleisten-Höhe **herunter**;
-  ein Icon, das schon passt, wird nicht hochskaliert. ⇒ Als Quelle die **`@2x`-Datei** nehmen
-  (mehr Bitmap pro Punkt = retina-scharf), die 32-px-Datei für die Nicht-macOS-Pfade/1×-Fälle.
-- Dock-/Fenster-Icon: eframe-Viewport-Icon (RGBA) aus `logo.png`; die gezeichnete Variante
-  `src/icons.rs::upload_logo` bleibt nur, wo sie heute als Vektor genutzt wird.
+  ein Icon, das schon passt, wird nicht hochskaliert. ⇒ Als Quelle das 64-px-Raster (`@2x`) nehmen
+  (mehr Bitmap pro Punkt = retina-scharf), das 32-px-Raster für die Nicht-macOS-Pfade/1×-Fälle.
+- Dock-/Fenster-Icon: eframe-Viewport-Icon (RGBA) aus dem Build-Raster von `logo.svg` (1024 px); die
+  gezeichnete Variante `src/icons.rs::upload_logo` bleibt nur, wo sie heute als Vektor genutzt wird.
 
 **Windows/Linux-Tray (User-Entscheidung 2026-10-14): weiße Varianten + Theme-Erkennung.** Außerhalb
 macOS wird das Icon **ohne** Template-Flag gesetzt (`with_icon`), ein schwarzes Monochrom-Icon wäre
-auf dunkler Taskleiste unsichtbar. Deshalb liefert der User die fünf Zustände **zusätzlich in weiß**
-(gleiche Maße, gleiche `@2x`-Logik): `tray-white.png`, `tray-active-white.png`,
-`tray-paused-white.png`, `tray-done-white.png`, `tray-error-white.png` (je + `@2x`). Die App wählt
-per **Theme-Erkennung** — Windows: `AppsUseLightTheme` in `HKCU\…\Themes\Personalize` (0 = dunkel
-⇒ weiß); Linux: GTK `color-scheme` via `gsettings` (bevorzugt) bzw. `GTK_THEME`-Umgebungsvariable
-⇒ weiß bei dunkel. **Fallback bei fehlgeschlagener Erkennung: das farbige `logo.png`** — das ist auf
-jedem Hintergrund sichtbar (dann ohne Zustandswechsel). macOS bleibt beim Template-Satz (das System
-invertiert selbst). **Verworfen:** farbiges Logo als generelle Non-macOS-Lösung (verliert die
-Zustände); „bewusst akzeptieren" (nicht polished). Umsetzung erst, wenn die weißen Dateien vorliegen
-— die Assets sind per Vorgabe **compile-pflichtig**, also bricht ein früherer Einbau den Build.
-Nicht umgesetzt.
+auf dunkler Taskleiste unsichtbar. Weiß entsteht **beim Rastern aus derselben SVG-Quelle** per
+`currentColor`-Override (`*{color:#fff}`) — es gibt **keine** separaten `tray-*-white`-Dateien. Die App
+wählt per **Theme-Erkennung** — `egui::Context::system_theme()` (in 0.31 vorhanden): dunkel ⇒ weiß,
+hell ⇒ schwarz; `None` (unbekannt) ⇒ das **farbige `logo`-Raster**, das auf jedem Hintergrund sichtbar
+ist (dann ohne Zustandswechsel). macOS bleibt beim schwarzen Template-Satz (das System invertiert
+selbst). **Verworfen:** farbiges Logo als generelle Non-macOS-Lösung (verliert die Zustände);
+„bewusst akzeptieren" (nicht polished). **Die Quellen liegen vor ⇒ Umsetzung kann starten;** die
+Assets sind per Vorgabe **compile-pflichtig** (`build.rs` bricht bei fehlendem SVG).
 
 Recherche-Grundlage: `docs/SPEC_NOTIFICATIONS.md` §2.4 (Icon-/Status-Map des Originals:
 idle/processing/paused/done/error) und §2.3 (Menüleisten-Item); das Original liefert monochrome
@@ -588,6 +585,22 @@ wurden (dort `11.3.0`/Build `36`). Die Specs bleiben also gültig; 202 DLLs im B
   eigener Punkt, nicht Teil dieser Welle.
 
 ### Welle 4 — Release-Pflicht: About / Third-Party-Lizenzen
+
+**RECON ERLEDIGT (2026-10-14): `docs/SPEC_ABOUT.md` liegt vor** (Clean-Room, 350 Zeilen). Die
+entscheidenden Befunde:
+- **Das Original hat KEINE Drittanbieter-Lizenzliste** — keine Datei im Bundle, keine Embedded-Resource,
+  kein `.nib`/`.storyboardc`, kein Lizenztext in `strings`. Es gibt nur einen **Link**
+  „Drittanbieterlizenzen" → `https://www.amazon.<TLD>/photos/desktop/thirdpartylicenses`, im
+  System-Browser. **Folge für uns: die Liste müssen wir selbst erzeugen** (Lizenzhinweise sind
+  Pflicht) — sie ist nicht „nachbaubar", es gibt nichts nachzubauen.
+- Versionsanzeige des Originals: `CFBundleShortVersionString` + `.` + `CommitId` (installiert:
+  `11.3.0.1d7941b5`); Build `36` wird **nicht** angezeigt. Ein About-Fenster als **Sheet**,
+  Logo + Version + Seriennummer + „Send-Logs" + drei Rechts-Links, seriennummer/Version selektierbar,
+  kein Standard-macOS-About; Auslöser: Tray-Statusmenü + App-Menü (erster Eintrag), **kein** Kürzel.
+- Rechtstexte sind reine **Links** (ToS wechselt mit Anmeldestatus), kein In-App-Rechtstextfenster;
+  Release Notes ist ein eigenes Fenster (WebView auf eine CloudFront-Seite).
+- Offengelegt: Code setzt 504×410, die Constraints fordern 572 pt Höhe → tatsächliche Größe UNKNOWN.
+
 
 - About-Fenster mit Version, Kurzhinweis, Datenschutz/ToS-Hinweis und Third-Party-Lizenzen
   (`notify`, `reqwest`, `egui`/`eframe`, `rusqlite`, `wry`, `md5`, `image`, `kamadak-exif`,
