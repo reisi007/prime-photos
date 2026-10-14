@@ -643,11 +643,20 @@ zeigt, was Tests nicht können (Namen am Server, „bereits im Konto" statt „4
 kein Absturz am Laufende). **Empfehlung: vor jeder weiteren Welle.**
 Abnahme: Lauf über ein kleines Ziel; die Fußzeile zeigt die vier Zahlen; ein bewusst umbenanntes
 Testfile wird als „bereits im Konto" gezählt und im **zweiten** Lauf **ohne** erneutes Hashen wieder so.
+**Warum das nicht durch Tests ersetzbar ist (Verifier-Fund 2026-10-14):** der Round-Trip der
+`origin`-Markierung ist nur auf **Index-Ebene** bewiesen (Unit-Test) plus der Codeposition
+(„Stat-Zweig liegt vor dem Lesen"); einen End-to-End-Test über `upload_worker` gibt es im Repo
+**nicht**. Genau das prüft dieser Lauf.
 
 ### Welle 2 — Konflikt-/Duplikat-Kette abschließen (ein Umfeld, dieselben Dateien)
 - **2.1 409-Ursache trennen** (`upload.rs`, `prime_photos.rs`): `DuplicatesConflictError` ⇒
   „bereits im Konto", `NameAlreadyExists` ⇒ Konflikt (Prompt/Fehler je Option). **Beide Codes sind
   live belegt**, beide liefern `conflictNodeIds`.
+  **Dazu (Verifier-Fund 2026-10-14, vorbestehend):** der 409-Pfad ruft heute `record_upload` ⇒
+  `origin='uploaded'`, dadurch meldet der **nächste** Lauf „unverändert" statt „bereits im Konto" —
+  obwohl nichts hochgeladen wurde. Beim Trennen der Ursachen den **Inhaltsduplikat**-Fall als
+  `content_skip` merken, damit die Anzeige konsistent bleibt (der `NameAlreadyExists`-Fall bleibt
+  ein Konflikt und wird nicht als „im Konto" verbucht).
 - **2.2 „Ersetzen" reparieren** (`prime_photos.rs`, `urls.rs`): heute `OVERWRITE` ⇒ **404**, die
   Option ist **kaputt** (live belegt). Korrekt: `POST(NONE)` ⇒ 409 ⇒ `conflict_node_id()` ⇒
   `PUT /v2/upload/<nodeId>` (live: 200, In-place-Tausch).
@@ -679,6 +688,11 @@ Material Symbols). Das Original hat **keine** Lizenzliste — wir erzeugen sie s
   Login-WebView/Upload, unsichtbarer `config_error`), Nav-Accessibility.
 - **5.3** Optional/Branding: die Zeile „Amazon Photos" im Account-Block durch die Domain ersetzen
   (Projektregel: kein Amazon-Branding im eigenen Fenster).
+- **5.4** (Verifier-Fund 2026-10-14, nicht blockierend) Bei fehlgeschlagener
+  `ensure_origin_column`-Migration `conn: None` zurückgeben: heute bleibt eine **halb
+  funktionierende** Verbindung — `record`/`should_skip`/`stat_matches` scheitern dann still, der
+  **ganze** Dedup-Index fällt aus (jede Datei würde wieder gelesen und neu gesendet), nicht nur die
+  Herkunfts-Unterscheidung. Dazu den überzeichnenden Kommentar in `src/dedup.rs` korrigieren.
 
 ### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
 Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,
