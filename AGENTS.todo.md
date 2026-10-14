@@ -135,7 +135,8 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
 - [ ] **P2 – Nav-Accessibility.** Selbstgezeichnete `nav_item`-Zeilen (`allocate_exact_size`) haben keine
   Keyboard-Fokus-/Accessibility-Semantik; optional `Sense`-Widget/`widget_info` ergänzen.
 
-- [ ] **P2 – Profilbild fehlt.** Wenn **angemeldet**: das **echte Amazon-Profilbild** im Account-Block
+- [x] **P2 – Profilbild fehlt.** **Erledigt in Welle 3** (`f81c679`; die Live-Belege für
+  `preferences` und die Thumbnail-Route stehen im Ledger). Wenn **angemeldet**: das **echte Amazon-Profilbild** im Account-Block
   der Sidebar anzeigen. Wenn **nicht angemeldet**: ein Icon (Personen-Symbol) stattdessen. Die
   **farbliche Kodierung beibehalten** (grün = angemeldet, rot = nicht angemeldet) — User möchte sie
   ausdrücklich behalten. Woher das echte Profilbild kommt (Amazon-Account-/Photos-API), ist noch
@@ -628,6 +629,65 @@ Auswahl des Users als „Sonst noch offene Punkte"; bewusst **ohne** Starttermin
 Alle Rechte-/Verhaltensfragen sind entweder aus den acht Clean-Room-Specs belegt oder als
 UNKNOWN markiert. Wo eine Spec einen Original-Wert nennt, gilt er als Vorgabe, nicht als Ratewert.
 
+## Wellenplan (Neufassung 2026-10-14, nach der Duplikat-/Konflikt-Kette) — **NUR PLAN**
+
+Der User hat die Restliste ausdrücklich **nur gruppiert** haben wollen („dann rest in wellen
+gruppieren, ausgeben und stoppen"). **Keine** Welle startet ohne ausdrücklichen Auftrag. Die Wellen
+sind nach **gemeinsamem Umfeld/Dateien** geschnitten, damit jede in einem Durchgang ohne
+Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
+
+### Welle 1 — Verifikation am **echten Lauf** (kein Code)
+Alles seit dem ersten echten Upload ist **gebaut und getestet, aber nie gelaufen**: NFC-Normalisierung,
+Konflikt-Default + Verdrahtung, Inhalts-Dedupe + Markierung, Ergebnis-Aufschlüsselung. Ein echter Lauf
+zeigt, was Tests nicht können (Namen am Server, „bereits im Konto" statt „480 fertig", kein `O□FB`,
+kein Absturz am Laufende). **Empfehlung: vor jeder weiteren Welle.**
+Abnahme: Lauf über ein kleines Ziel; die Fußzeile zeigt die vier Zahlen; ein bewusst umbenanntes
+Testfile wird als „bereits im Konto" gezählt und im **zweiten** Lauf **ohne** erneutes Hashen wieder so.
+
+### Welle 2 — Konflikt-/Duplikat-Kette abschließen (ein Umfeld, dieselben Dateien)
+- **2.1 409-Ursache trennen** (`upload.rs`, `prime_photos.rs`): `DuplicatesConflictError` ⇒
+  „bereits im Konto", `NameAlreadyExists` ⇒ Konflikt (Prompt/Fehler je Option). **Beide Codes sind
+  live belegt**, beide liefern `conflictNodeIds`.
+- **2.2 „Ersetzen" reparieren** (`prime_photos.rs`, `urls.rs`): heute `OVERWRITE` ⇒ **404**, die
+  Option ist **kaputt** (live belegt). Korrekt: `POST(NONE)` ⇒ 409 ⇒ `conflict_node_id()` ⇒
+  `PUT /v2/upload/<nodeId>` (live: 200, In-place-Tausch).
+- **2.3 „Nicht noch einmal fragen" pro Ziel persistieren** (`folders.rs`, `backup_config.rs`, Schema):
+  heute gilt es nur für den laufenden Lauf.
+- **2.4 Rest laut `docs/SPEC_CONFLICT_OPTIONS.md`** — jede Variante mit Abnahmekriterium; bewusste
+  Abweichungen dokumentieren: die Client-Vorprüfung des Originals ersetzen wir durch die
+  Server-Antwort (kein Node-Cache), die `.heic`-iOS-Heuristik bleibt draußen.
+
+### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
+- **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
+  `src/backup.rs`) entfernen — Baum/Liste mit Spalten wie im Recon.
+- **3.2** `CollapsingHeader`-Zustand hält nicht: feste ID (`id_salt`); dieselbe Fehlerklasse bei
+  **jedem** `CollapsingHeader` mit dynamischen Zahlen prüfen.
+- **3.3** Zeile zeigt „Fehler" statt „Upload läuft": Status **live** ableiten (läuft `folder_total`
+  für dieses Ziel ⇒ „Upload läuft"; erst nach `finalize` gilt der persistierte Ausgang).
+- **3.4** Die zwei noch **gezeichneten** Glyphen (Nav-Icons, Flagge) auf Material Symbols umstellen
+  (User-Regel: nichts selbst zeichnen außer dem Logo).
+
+### Welle 4 — Release-Pflicht: About + Third-Party-Lizenzen (die alte „Welle 4")
+Recon liegt vor (`docs/SPEC_ABOUT.md`), Attributionen sind gepflegt (`docs/THIRD_PARTY.md`, u. a.
+Material Symbols). Das Original hat **keine** Lizenzliste — wir erzeugen sie selbst.
+
+### Welle 5 — Robustheit & Politur (klein, unabhängig)
+- **5.1** `rfd::FileDialog::pick_folder()` (`src/backup.rs`, `src/backup_config.rs`) auf
+  `AsyncFileDialog`: modales `NSOpenPanel` mit eigener RunLoop = **dieselbe Klasse** wie der behobene
+  Absturz (`notify-rust`). **Ungeprüft**, ob es real abstürzt.
+- **5.2** P2-Reste: Icon-Ausrichtung (`docs/UI_FLOWS.md` §3.1), Logout-Residuen (laufender
+  Login-WebView/Upload, unsichtbarer `config_error`), Nav-Accessibility.
+- **5.3** Optional/Branding: die Zeile „Amazon Photos" im Account-Block durch die Domain ersetzen
+  (Projektregel: kein Amazon-Branding im eigenen Fenster).
+
+### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
+Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,
+Queue-Paginierung, Fehlerfenster (`readdtoqueue`/`retryall`), Pause **pro Ordner**, Sortierung/Filter +
+Größen-Spalte, Tray-Status-Popup, „Details anzeigen"-Panel, Videos, echte Speichernutzung (Quota),
+`.app`-Bundle + Icon, „Startseite". **Out of Scope bleibt Out of Scope:** Sync, Downloads/Restore,
+Datei-Management, Apple-Photos-Import, Autoplay, Upsell-/Quota-Banner, Auto-Update, Proxy,
+ausgeblendete Dateien, iOS-Dedupe-Prompt, Crash-Relaunch.
+
 ## Doku-Auftrag „Rest-Specs" (User-Wunsch 2026-10-14) — ERLEDIGT
 
 Alle acht beauftragten Clean-Room-Specs sind geschrieben, after-verify-round-korrigiert und
@@ -876,7 +936,7 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
 „bereits im Konto" gewertet. **Also: nein, wir unterstützen noch nicht alle.**
 
 **Checkliste (Anlegen bleibt Pflicht, Abarbeiten nur auf Auftrag):**
-- [ ] **Inhalts-Dedupe über Pfade** — vor dem Upload per MD5 im lokalen Index prüfen, ob derselbe
+- [x] **Inhalts-Dedupe über Pfade** (umgesetzt `f3c773b`, Verify Runde 1 APPROVE; Zählung als „bereits im Konto") — vor dem Upload per MD5 im lokalen Index prüfen, ob derselbe
       Inhalt schon hochgeladen wurde, unabhängig von Pfad und Name. Fängt NFD/NFC-Zwillinge,
       verschobene und umbenannte Dateien. `ix_uploads_md5` (`src/dedup.rs`) liegt dafür **ungenutzt**
       da. Abnahme: gleicher Inhalt unter anderem Pfad ⇒ **kein** zweiter Upload; Test beweist es
@@ -935,7 +995,9 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       über den frisch angelegten Ordner (`backup_config.rs:203`) ⇒ ein **neu angelegtes** Ziel ist
       weiterhin „Ignorieren". Der Typ-Default greift nur, wenn eine `folders.toml` das Feld gar nicht
       enthält.
-- [ ] **Die fest verdrahteten `Ignore`-Stellen auf den Default ziehen** (Folgepaket aus dem Verify).
+- [x] **Die fest verdrahteten `Ignore`-Stellen auf den Default ziehen** — **umgesetzt** (`dc37b5a`,
+      Verify APPROVE: Create-Form, Einmal-/Drag&Drop-Queue, defensiver Fallback; Dialog-Antwort und
+      60-s-Timeout bewusst unverändert).
       **Der wirksame Punkt ist `backup.rs:814`** (Create-Form). Dazu `app.rs:347` +
       `backup.rs:1046/1058` (Einmal-/Drag&Drop-Queue — das Original wendet dort die
       „Ordner-Defaults" an, `SPEC_ONE_TIME_UPLOAD.md` §10.5) und `upload.rs:394` (defensiver
