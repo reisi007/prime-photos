@@ -59,6 +59,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - MVP scope (user decision 2026-10-13): login, upload-target creation ("Upload-Ziel erstellen": backup configuration with destination, content filter, interval, dedup, conflict handling), upload flow, settings dialog. The download flow is relevant but explicitly NOT part of the MVP.
 - Dedup (user decision 2026-10-13): a **persistent local MD5 index in SQLite** (like the original) decides skips (same path + same MD5 → skip; same path + different MD5 → re-upload; new file → upload). Server 409 is only a safety net, treated as "Ignored/Zuvor hochgeladen", not an error (mirrors the original's client-side `PreUploadCheck`).
 - Conflict handling (user decision 2026-10-13): all **four original options** per upload target (Nachfragen / Ignorieren / Als neue Datei speichern / Ersetzen), mapped to `conflictResolution` (`NONE`/`RENAME`/`OVERWRITE`). Replaces the current hard-coded `RENAME`.
+- Conflict-handling **default** (user decision 2026-10-14): a file's identity is its **content**. New targets default to **`SaveAsNew`** ("Neue Datei automatisch umbenennen", wire `RENAME`) together with `dedup = true` — the rule is *content differs ⇒ upload* (renamed when the name is taken), *same content ⇒ skip* ("only renamed"). Same content is already caught **server-side** by MD5 (`409` + `errorCode = "DuplicatesConflictError"`, live proven) and, once implemented, by the local cross-path MD5 check; that server check is what makes `SaveAsNew` safe today. The existing target "Sport" was switched **manually, once** (`conflict_resolution = "saveasnew"` in `~/Library/Application Support/prime_photos/folders.toml`) — no migration code, like the config-dir rename. **Watch out:** `ConflictResolution` uses `#[serde(rename_all = "lowercase")]`, so the file value is `saveasnew`, **not** `save_as_new` — renaming the serde rule would break existing config files.
 - Backup configuration window (user decision 2026-10-13): build the full "Datensicherungseinstellungen" window now (destination, content filter, interval, dedup, conflict handling, save/cancel), and **share the form logic** with the create-backup flow (same dialog for create and edit) instead of a separate row-menu. Fields whose backend does not exist yet (destination, content filter, interval) are shown **disabled** with a "Noch nicht verfügbar" hover (user decision 2026-10-13: "volle Anordnung, Rest ausgegraut"); functional now: source folder (read-only when editing), dedup, name-conflict policy.
 
 ## Upload-Queue & Concurrency (User-Entscheidung 2026-10-13)
@@ -391,8 +392,10 @@ das Original hat **zwei orthogonale** Mechanismen — **Inhalts-Dedupe** (MD5, *
 **User-Entscheidung: alles umsetzen, was das Original kann.** Offene Punkte stehen als Checkliste im
 Ledger (`AGENTS.todo.md` → „Duplikate & Dateikonflikte"); die vier belegten Lücken sind
 Inhalts-Dedupe über Pfade, das Trennen der 409-Ursache (`MD5_DUPLICATE` vs. `NameAlreadyExists`),
-das Persistieren von „Nicht noch einmal fragen" **pro Ziel** und das Prüfen, ob der Server unser
-`conflictResolution=OVERWRITE` überhaupt akzeptiert (das Original sendet es **nie** — unbelegt).
+das Persistieren von „Nicht noch einmal fragen" **pro Ziel** und das Reparieren von „Ersetzen":
+`conflictResolution=OVERWRITE` wird vom Cookie-Host **nicht akzeptiert** (`POST` ⇒ 404, leerer
+Body — live belegt), der Weg des Originals ist `PUT /v2/upload/<nodeId>?conflictResolution=NONE`
+(⇒ 200, gleiche Node-ID, Inhalt wirklich getauscht).
 **Verworfen:** beim rein pfadbasierten Index bleiben (er erkennt den NFD/NFC-Zwilling nicht).
 
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)

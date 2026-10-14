@@ -873,17 +873,43 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       verschobene und umbenannte Dateien. `ix_uploads_md5` (`src/dedup.rs`) liegt dafür **ungenutzt**
       da. Abnahme: gleicher Inhalt unter anderem Pfad ⇒ **kein** zweiter Upload; Test beweist es
       ohne Netz.
-- [ ] **409-Ursache trennen** — das Original unterscheidet `MD5_DUPLICATE` (Inhaltsduplikat ⇒ wie
-      ignoriert) von `NameAlreadyExists` (⇒ Fehler). Wir machen aus jedem 409 „bereits im Konto".
-      **Belegt (2026-10-14):** der Server nennt den Grund selbst — live `errorCode =
-      "DuplicatesConflictError"` samt `errorDetails.conflictNodeIds` (siehe unten).
+- [ ] **409-Ursache trennen** — das Original unterscheidet Inhaltsduplikat (⇒ wie ignoriert) von
+      Namenskonflikt (⇒ Fehler); wir machen aus jedem 409 „bereits im Konto".
+      **Beide Gründe sind jetzt live belegt (2026-10-14), mit exakter Schreibweise:**
+      Inhaltsduplikat ⇒ `errorCode = "DuplicatesConflictError"`; Namenskonflikt ⇒
+      `errorCode = "NameAlreadyExists"` (**MixedCase** — der Recon nennt auch `NAME_ALREADY_EXISTS`,
+      auf unserem Host gilt diese Form). **Beide** tragen `errorDetails.conflictNodeIds` mit der ID
+      des vorhandenen Knotens. Abnahme: ein Inhaltsduplikat zählt als „bereits im Konto", ein
+      Namenskonflikt wird als Konflikt behandelt (Prompt/Fehler je Option); Test über die
+      Fehlertexte, ohne Netz.
 - [ ] **„Nicht noch einmal fragen" pro Ziel persistieren** — das Original schreibt die Antwort in
       `schedules.conflict_resolution` zurück; bei uns gilt sie nur für den laufenden Lauf. Braucht
       ein **neues persistiertes Feld pro Ziel** (bewusste Schemaänderung, nicht „nur flüchtig").
-- [ ] **`conflictResolution=OVERWRITE` beim Server prüfen** — das Original sendet es **nie**; ob
-      unser „Ersetzen" akzeptiert wird, ist **unbelegt**.
+- [ ] **„Ersetzen" reparieren (PUT + Node-ID).** **Verdikt der Probe (2026-10-14):**
+      `POST …/v2/upload?conflictResolution=OVERWRITE` wird **nicht akzeptiert** — **404 mit leerem
+      Body** (kein `errorCode`) ⇒ unser „Ersetzen" ist **kaputt**: es ersetzt nichts und fällt in den
+      generischen Fehlerzweig (Upload-Fehler, kein Konflikt-Skip, kein Dialog). Der Weg des
+      Originals **funktioniert**: `PUT /v2/upload/<nodeId>?conflictResolution=NONE&…` ⇒ **200**,
+      **gleiche** Node-ID, Inhalt wirklich getauscht (`size`/`md5` und `version` hochgezählt); ein
+      `overwrite`-Parameter war **nicht** nötig. **Umsetzung:** wir brauchen die Node-ID des
+      vorhandenen Knotens — billigster Weg ohne eigene Persistenz ist der Zwei-Schritt
+      `POST(NONE)` ⇒ 409 ⇒ `conflict_node_id()` (`src/prime_photos.rs:289`) ⇒ PUT.
+      **Bestätigt (2026-10-14):** auch der **Namenskonflikt**-409 liefert
+      `errorDetails.conflictNodeIds` — mit genau der ID des bestehenden Knotens. Der Zwei-Schritt-Weg
+      ist damit tragfähig, **ohne** eigenen Node-Cache. **Nebenfund:** `docs/openapi.yaml` listet
+      `OVERWRITE` als gültig — das ist aber die **Geräte-Flow**-Doku (`upload-photos.amazon.de`),
+      nicht unser Cookie-Host.
 - [ ] **Alle Varianten laut Liste** (`docs/SPEC_CONFLICT_OPTIONS.md`) umsetzen, jede mit
       Abnahmekriterium.
+- [ ] **Code-Default auf `SaveAsNew` umstellen** (User-Entscheidung 2026-10-14: „wenn inhaltlich
+      anders hochladen, sonst überspringen wenn es nur umbenannt wurde"). Heute steht `#[default]`
+      auf `Ignore` (`src/folders.rs:136-137`); Ziel ist `SaveAsNew` (`RENAME`) bei `dedup = true`.
+      Eine Zeile plus ein Test, der den Default festnagelt, damit er nicht wieder driftet; die
+      Doc-Kommentare am Enum mitziehen. Die **lokale** Config des Ziels „Sport" ist bereits manuell
+      umgestellt (`conflict_resolution = "saveasnew"`; Serde-Name ist **lowercase**, nicht
+      `save_as_new`). **`RENAME` ist live bestätigt (2026-10-14):** ⇒ **201**, der Server legt eine
+      **umbenannte Kopie** an (`name (2026-10-14T20_22_13.091).ext` — Zeitstempel vor die Endung,
+      Doppelpunkte zu `_`), kein 409. Der neue Default ist auf unserem Host also tragfähig.
 
 **Live-Beleg 2026-10-14 (genau ein Upload-Versuch, `.cr3`).** Verdacht: 121 der 480 Index-Zeilen
 seien nie im Konto angekommen (die Server-Suche fand sie nicht). Test: eine davon
