@@ -51,9 +51,9 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   - [x] **F-2:** Pacing-Sleep über Pause/Resume behoben (Commit `029ff01`): der Throttle wird in
     ≤200-ms-Slices geschlafen, pausiert wird geparkt und die Restzeit bleibt über die Pause erhalten
     (Resume setzt den Throttle fort statt ihn zu überspringen). Verifiziert (Verifier: PASS).
-  - [ ] **F-3:** Abbruch verwirft bereits gesendete Bytes (Datei startet bei 0) UND `conflictResolution=RENAME`
-    erzeugt bei Abbruch nach Server-Anlage ein Duplikat statt 409-Dedupe — Widerspruch zum Ziel „keine
-    Bandbreite verschwenden". Entscheidung nötig: „aktuelles Element fertig, dann ruhen" vs. sofortiger Abbruch; `RENAME` überdenken.
+  - [x] **F-3:** Behoben (Commit `0fd04dd`) — Pause entscheidet nur am Schleifenkopf: die laufende
+    Datei wird fertig, das nächste Element wartet. Kein Byte verworfen, kein `RENAME`-Duplikat mehr
+    (User-Entscheidung: „erst Datei fertig, dann pausieren").
 
 - [x] **P1 – Nur neue Dateien hochladen (Dedup).** Erledigt, Commit `b47bf9b` (persistenter
   SQLite-MD5-Index); Server-409 als Sicherheitsnetz) Vor dem Upload prüfen, ob dieselbe Datei (md5)
@@ -323,11 +323,10 @@ Belege: `Localizable.strings` (Keys) + `Amazon Photos.dll` (Symbole), `docs/*`.
 
 Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
 
-1. **Konflikt-Dialog „Nachfragen" (größte offene MVP-Lücke).** `ConflictResolution::Ask` ist heute
-   ein No-Op (mappt wie `Ignore` auf `conflictResolution=NONE`). Für einen echten Dialog braucht es
-   die Nutzerentscheidung: pro **Datei** oder pro **Lauf** fragen? Welche Optionen anbieten (Original:
-   Ignorieren / Als neue Datei speichern / Ersetzen + „Nicht noch einmal fragen")? Und was passiert
-   während der Frage mit dem Upload-Lauf (Pause, Rest zurückstellen, Retry als neuer Job)?
+1. ✅ **ERLEDIGT (User-Entscheidung 2026-10-13: „pro Datei")** — **Konflikt-Dialog „Nachfragen"**,
+   Commit `81cd277`. Umsetzung: 409 wird gemeldet; `Ask` stellt pro Datei die Frage
+   (Ignorieren / Als neue Datei speichern / Ersetzen) mit „Nicht noch einmal fragen" als
+   run-weitem Override; Fragen sind serialisiert, 60-s-Timeout → Ignore (kein Stillstand).
 2. **Autostart-Default.** PORT-4 liefert den Schalter; ob er bei Installation **an** oder **aus**
    sein soll, ist eine Produktentscheidung (Default bisher: aus).
 3. **Hintergrund-Sync-Takt (PORT-5-Detail).** Event-driven ist spezifiziert (deutig aus dem User-
@@ -341,7 +340,8 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
    Doku-Maßwerte/Design-Abmachung, kein Rate-Wert.
 8. **Echtes Profilbild** im Account-Block: keine API identifiziert.
 9. **Logout während laufendem Upload:** `logout()` löscht die Auth-Cookies, stoppt aber den laufenden Lauf nicht. Soll der Upload stoppen/pausieren oder weiterlaufen und mit 401 scheitern? (Eine saubere Antwort bräuchte einen Abbruch-Kanal in der Upload-Pipeline.)
-10. **F-3 – Pause/Abbruch verwirft gesendete Bytes.** Ein Abbruch im laufenden Upload startet die
+10. ✅ **ERLEDIGT (User-Entscheidung 2026-10-13: „erst Datei fertig, dann pausieren")** — Commit
+   `0fd04dd`. **F-3 – Pause/Abbruch verwirft gesendete Bytes.** Ein Abbruch im laufenden Upload startet die
    Datei später bei 0 (die bereits gesendeten Bytes sind verloren), und `conflictResolution=RENAME`
    erzeugt bei Abbruch nach Server-Anlage ein Duplikat statt eines 409-Dedupe — beides widerspricht
    dem Ziel „keine Bandbreite verschwenden". Entscheidung nötig: **„aktuelles Element fertig, dann
