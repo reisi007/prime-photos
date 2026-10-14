@@ -398,6 +398,28 @@ Template-Bilder plus eine farbige Ungelesen-Variante.
 das Dock-/Fenster-Icon ist davon unabhängig und kann allein kommen. Nicht Teil: das `.app`-Icon
 für das macOS-Bundle (`packaging/make-app.sh`) — eigener, bereits zurückgestellter Punkt.
 
+## URL-Util `src/urls.rs` (User-Entscheidung 2026-10-14) — beauftragt, **nicht** umgesetzt
+
+Anlass: Die Umsetzung des Profilbilds hatte den Thumbnail-Host **hartkodiert auf `.de`** — aufgefallen
+ist das erst in der Verifikation. Der User: *„Können wir das URL-Bauen in eine eigene Datei auslagern
+und als Regel etablieren, dass über diese Util alle URLs auf Marktplatz-Basis individualisiert werden
+muss?"* → **Ja**, als Projektregel in `AGENTS.md` festgehalten.
+
+**Umfang (nächstes Paket, nach dem Commit von Welle 3 — dieselben Dateien):**
+- Neue Datei **`src/urls.rs`** als einziger Ort für marktplatz- und zonenabhängige URLs. Die
+  Land→Domain-Zuordnung **`amazon_domain`** (heute `src/login.rs:38`) **zieht dorthin um**; `login.rs`,
+  `prime_photos.rs` und `app.rs` beziehen sie von dort (ein Pfad, keine zweite Tabelle).
+- Builder für alle heute verstreuten Routen: Signin (`login.rs:67`), `photos/auth/token`,
+  `drive/v1/nodes` (GET/POST), `…/nodes/{id}/children` (2 Varianten), `drive/v1/search`,
+  `drive/v1/account/preferences`, `v1/thumbnail/<id>`, sowie der Upload-Host
+  `content-<zone>.drive.amazonaws.com/v2/upload`.
+- **Regel:** außerhalb `src/urls.rs` kein `format!("https://www.amazon.{}…")`, kein
+  `thumbnails-photos.amazon.`-Literal, kein `content-{zone}`-Literal — Tests gehören in die Util.
+- **Marktplatzneutral:** kein Literal-TLD; Ableitung nur über die Util. Belegter Stand: das Host-Muster
+  `thumbnails-photos.amazon.<tld>` existiert für `.de/.com/.co.uk/.fr/.it/.es/.ca/.co.jp` (DNS +
+  HTTP-Antwort geprüft); **inhaltlich** getestet ist nur `.de` (es gibt nur ein DE-Konto).
+- Reiner Refactor: die erzeugten URLs bleiben **byte-identisch** zu heute.
+
 ## Implementierungs-Wellen (User-Auswahl 2026-10-14) — **NUR DOKUMENTIERT, NICHT GESTARTET**
 
 User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Startauftrag** erteilt

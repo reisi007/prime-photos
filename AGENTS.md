@@ -25,6 +25,15 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   (dort wird tatsächlich angemeldet). In Docs, die die Original-App beschreiben, bleibt die
   faktische Nennung des Referenz-Produkts erlaubt (das ist Recon eines echten Produkts); nur
   **unser** Projekt/Code/UI darf sich nirgends als offizielle Amazon-App darstellen.
+- **Marktplatz-URLs zentral (Projektregel, User-Entscheidung 2026-10-14):** Jede vom **Marktplatz**
+  (oder der Zone) abhängige URL wird **ausschließlich in `src/urls.rs`** gebaut. Außerhalb dieser Datei
+  darf **kein** `format!("https://www.amazon.{}…")`, **kein** `thumbnails-photos.amazon.`-Literal und
+  **kein** `content-{zone}`-Literal stehen (Tests gehören in die Util). Anlass: die Umsetzung des
+  Profilbilds hatte den Thumbnail-Host auf `.de` hartkodiert — das fiel erst in der Verifikation auf,
+  weil URLs über mehrere Dateien verstreut waren. Die Land→Domain-Zuordnung (`amazon_domain`, heute
+  `src/login.rs`) zieht in die Util um; `login.rs`, `prime_photos.rs` und `app.rs` beziehen sie von
+  dort. **Jede neue Route:** Util-Funktion + Test, der mindestens `de` **und** einen Nicht-DE-Marktplatz
+  prüft. Marktplatzneutral heißt: kein Literal-TLD im Code, die Ableitung passiert nur in der Util.
 - **Subagenten führen nichts Neues ein (Projektregel, 2026-10-13):** Jeder Auftrag ist strikt auf die
   beauftragte Änderung begrenzt — keine zusätzlichen Features, Dateien, Abhängigkeiten, Refactorings
   oder „Verbesserungen" auf Verdacht. Unklarheiten werden zurückgemeldet, nicht eigenmächtig gelöst.
