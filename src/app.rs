@@ -288,7 +288,11 @@ impl PrimePhotoApp {
                     total_files: files.len(),
                     uploaded_files: 0,
                     last_updated: String::new(),
-                    status: FolderStatus::Uploading,
+                    // Not `Uploading`: at this point no run is live yet, so the
+                    // row must not claim to be uploading (it would render
+                    // "0 %"). `Idle` is the "waiting / not active" state;
+                    // `resume_one_time` flips it as soon as the run starts.
+                    status: FolderStatus::Idle,
                 }),
                 true,
             ),

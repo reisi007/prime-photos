@@ -3,7 +3,7 @@ use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::config::Config;
 use crate::dedup::DedupIndex;
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
-use crate::i18n::{tr, tr1};
+use crate::i18n::{tr, tr1, tr2, tr3};
 use crate::theme;
 use crate::upload::{run_upload, status_text, upload_progress_text, FileState, QueueEntry, UploadShared};
 use eframe::egui::{self, RichText};
@@ -37,6 +37,19 @@ struct Row {
     total: usize,
     done: usize,
     last_updated: String,
+}
+
+/// Sum over **every** target — `(done, total)` — the single source of the
+/// footer's aggregate progress (user decision 2026-10-14: one display over all
+/// backup targets, the one-time row included). Pure: no lock, no UI, no
+/// filesystem, and therefore cheap to test. A target that knows no total
+/// (`total == 0`) contributes nothing and can never skew the sum; the caller
+/// guards the division by zero.
+fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
+    rows.iter()
+        .fold((0usize, 0usize), |(done, total), r| {
+            (done + r.done, total + r.total)
+        })
 }
 
 // ---------------------------------------------------------------------------
@@ -1236,16 +1249,10 @@ impl PrimePhotoApp {
             } else {
                 tr("Alle Sicherungsvorgänge anhalten")
             };
-            let (running, done, total) = {
-                let s = self.upload.lock().unwrap();
-                (s.active, s.done, s.total)
-            };
-            // Byte-based progress text (byte ETA when the run's sizes are known,
-            // else the old file-count estimate).
-            let progress_text = {
-                let s = self.upload.lock().unwrap();
-                upload_progress_text(&s)
-            };
+            // Only the live "is a run active" flag stays here; the aggregated
+            // progress display moved to the footer below (user decision
+            // 2026-10-14): one display over *all* targets, not just this run.
+            let running = self.upload.lock().unwrap().active;
             if ui
                 .add_enabled(
                     // Pausable in the idle state too (user decision 2026-10-14):
@@ -1263,19 +1270,6 @@ impl PrimePhotoApp {
                 // reports a failure through `config_error` as usual.
                 self.config.paused = next;
                 self.save_config();
-            }
-            if running {
-                ui.spinner();
-                let frac = if total > 0 {
-                    (done as f32 / total as f32).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                ui.add(
-                    egui::ProgressBar::new(frac)
-                        .desired_width(240.0)
-                        .text(progress_text),
-                );
             }
         });
 
@@ -1547,6 +1541,59 @@ impl PrimePhotoApp {
         for a in actions {
             self.apply_action(a);
         }
+
+        // Footer: exactly **one** aggregated progress display over *all* backup
+        // targets — the persisted folders plus the transient one-time row
+        // (`rows` above). It replaces the old header bar, which only showed the
+        // currently running run, and it stays visible while idle (user decision
+        // 2026-10-14). Without any target nothing is drawn — the empty-folder
+        // hint above stays untouched.
+        if !rows.is_empty() {
+            ui.add_space(8.0);
+            let (sum_done, sum_total) = aggregate_progress(&rows);
+            let frac = if sum_total > 0 {
+                (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            // The byte/ETA detail only exists for a live run; `rows` is a plain
+            // snapshot, so the shared state is locked once more here (no guard
+            // is held at this point).
+            let (running, progress_text) = {
+                let s = self.upload.lock().unwrap();
+                if s.active {
+                    (true, upload_progress_text(&s))
+                } else {
+                    (false, String::new())
+                }
+            };
+            ui.horizontal(|ui| {
+                // A spinner belongs to this one display and only while a run is
+                // active — never a second, separate indicator.
+                if running {
+                    ui.spinner();
+                }
+                let text = if running {
+                    // File counts over every target, plus the run's byte/ETA
+                    // detail from `upload_progress_text` (kept verbatim).
+                    tr3(
+                        "Gesamt: {} von {} Dateien · {}",
+                        sum_done,
+                        sum_total,
+                        progress_text,
+                    )
+                } else if sum_total > 0 && sum_done >= sum_total {
+                    tr("Alles aktuell").to_string()
+                } else {
+                    tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
+                };
+                ui.add(
+                    egui::ProgressBar::new(frac)
+                        .desired_width(240.0)
+                        .text(text),
+                );
+            });
+        }
     }
 }
 
@@ -1559,6 +1606,41 @@ mod tests {
         range
             .map(|i| (0, PathBuf::from(format!("/photos/{i}.jpg"))))
             .collect()
+    }
+
+    /// A `Row` reduced to what the aggregate reads (`idx`, `total`, `done`).
+    fn row(idx: usize, total: usize, done: usize) -> Row {
+        Row {
+            idx,
+            name: String::new(),
+            path: PathBuf::new(),
+            enabled: true,
+            status: FolderStatus::Idle,
+            total,
+            done,
+            last_updated: String::new(),
+        }
+    }
+
+    #[test]
+    fn aggregate_is_zero_without_rows() {
+        assert_eq!(aggregate_progress(&[]), (0, 0));
+    }
+
+    #[test]
+    fn aggregate_sums_folders_and_the_one_time_row() {
+        // Two persisted folders plus the transient one-time row
+        // (`ONE_TIME_IDX`): the footer sums over all three.
+        let rows = vec![row(0, 100, 40), row(1, 20, 20), row(ONE_TIME_IDX, 5, 1)];
+        assert_eq!(aggregate_progress(&rows), (61, 125));
+    }
+
+    #[test]
+    fn aggregate_ignores_a_target_without_a_total() {
+        // A target that knows no total contributes nothing — it must not skew
+        // the sum (and the caller guards the division by zero).
+        let rows = vec![row(0, 0, 0), row(1, 10, 3)];
+        assert_eq!(aggregate_progress(&rows), (3, 10));
     }
 
     #[test]

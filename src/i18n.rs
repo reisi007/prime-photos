@@ -151,6 +151,7 @@ const EN: &[(&str, &str)] = &[
     // -- backup list ----------------------------------------------------
     ("Alle Sicherungsvorgänge anhalten", "Pause all backups"),
     ("Alle Sicherungsvorgänge fortsetzen", "Resume all backups"),
+    ("Alles aktuell", "Everything up to date"),
     ("Automatisch gesicherte Ordner:", "Automatically backed up folders:"),
     ("Bearbeiten", "Edit"),
     ("Bitte zuerst anmelden (Einstellungen).", "Please sign in first (Settings)."),
@@ -162,6 +163,11 @@ const EN: &[(&str, &str)] = &[
     (
         "FOTOS PER DRAG & DROP VERSCHIEBEN, UM SIE HOCHZULADEN",
         "DRAG & DROP PHOTOS TO UPLOAD",
+    ),
+    ("Gesamt: {} von {} Dateien", "Total: {} of {} files"),
+    (
+        "Gesamt: {} von {} Dateien · {}",
+        "Total: {} of {} files · {}",
     ),
     // Plattformneutral (PORT-7: open -R / explorer /select / xdg-open) —
     // "Finder" ist nur macOS.
