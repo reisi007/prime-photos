@@ -407,7 +407,8 @@ Anlass: User-Fragen „haben wir wie im Original einen alle-stoppen/alle-fortset
   §10.3). Auftrag: abgelegte Dateien **temporär in derselben SQLite** speichern, in der der
   MD5-Dedup-Index liegt, und **nach vollständig abgeschlossenem Upload wieder entfernen**. Nach
   Neustart steht die Zeile „Einmalige Sicherung" wieder und der Lauf wird fortgesetzt
-  (gleiche Guards wie der Hintergrund-Tick: Schalter/angemeldet/nicht pausiert/nicht aktiv).
+  (gleiche Guards wie der Kaltstart: `background_sync_pass`/`can_start` — Hauptschalter an,
+  angemeldet, nicht pausiert, kein Lauf aktiv; der alte 15/90-Minuten-Tick existiert nicht mehr).
   Bandbreite bleibt sauber, weil der MD5-Index ohnehin persistent ist.
 - [ ] **P3 – Gesamt-Fortschritt über alle Uploads (User-Wunsch 2026-10-14).** Der Kopfzeilen-Balken
   zeigt nur den **gerade laufenden** Lauf; manuelle Läufe starten pro Ordner
@@ -493,13 +494,18 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
    Worker-Summe) und F4 (defensive Ask-Normalisierung).
 2. **Autostart-Default.** PORT-4 liefert den Schalter; ob er bei Installation **an** oder **aus**
    sein soll, ist eine Produktentscheidung (Default bisher: aus).
-3. **Hintergrund-Sync-Takt (PORT-5-Detail).** Event-driven ist spezifiziert (deutig aus dem User-
-   Entscheidungssatz); ein **Mindestabstand** zwischen automatischen Läufen (z. B. 15/60 min)
-   und ob ein Lauf nur bei bestehendem WLAN startet, ist nicht festgelegt.
+3. ~~**Hintergrund-Sync-Takt (PORT-5-Detail).**~~ **Größtenteils erledigt/obsolet (2026-10-14):**
+   Event-driven ist umgesetzt (`notify`-Watcher, siehe Abschnitt „Erkennung neuer/geänderter
+   Dateien"); der frühere 15/90-Minuten-Takt ist entfernt. **Offen bleibt nur:** (a) ob nach einem
+   Event-Lauf ein Cooldown gelten soll (mehrere Drops kurz hintereinander) und (b) ob ein Lauf nur
+   bei bestehendem WLAN/nicht-kostenpflichtigem Netz starten soll — beides Plattform-APIs, noch
+   nicht festgelegt.
 4. **Pro-Ziel-Limit / netzwerkgesteuerte Drosselung** (bereits als Post-MVP markiert).
 5. **macOS-Signatur:** selbstsignierte Identität (Keychain-Zugriff), ob Benachrichtigungen im
    signierten Bundle erscheinen, ob `--options runtime` für ad-hoc nötig ist.
-6. **Öffentliches Remote/Push** (Repo ist public-zielend, aber noch kein Remote konfiguriert).
+6. ✅ **ERLEDIGT (2026-10-14)** — **Öffentliches Remote/Push:** Repo
+   `https://github.com/reisi007/prime-photos` (public), Remote `origin`, Branch `main`;
+   `CI`-Workflow zweimal grün (Linux build + test).
 7. **Nav-Accessibility + Icon-Ausrichtung** (`nav_item`, Status-/Upload-Icons): brauchen die
    Doku-Maßwerte/Design-Abmachung, kein Rate-Wert.
 8. **Echter Name/Profilbild** im Account-Block — **Endpunkt jetzt belegt** (`docs/SPEC_ACCOUNT_BILLING.md`):
