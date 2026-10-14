@@ -881,6 +881,10 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       verschobene und umbenannte Dateien. `ix_uploads_md5` (`src/dedup.rs`) liegt dafür **ungenutzt**
       da. Abnahme: gleicher Inhalt unter anderem Pfad ⇒ **kein** zweiter Upload; Test beweist es
       ohne Netz.
+      **Zählung (User-Entscheidung 2026-10-14): als „bereits im Konto"** (`conflict_skipped`) — der
+      Inhalt ist da, egal ob der Server es gemeldet hat oder wir es lokal erkennen. „unverändert"
+      bleibt dem **gleichen Pfad** vorbehalten; gleicher Pfad + anderer MD5 wird hochgeladen.
+      **Status: umgesetzt, Verify läuft** (inkl. der zwei offenen NFC-Anzeige-Lücken).
 - [ ] **409-Ursache trennen** — das Original unterscheidet Inhaltsduplikat (⇒ wie ignoriert) von
       Namenskonflikt (⇒ Fehler); wir machen aus jedem 409 „bereits im Konto".
       **Beide Gründe sind jetzt live belegt (2026-10-14), mit exakter Schreibweise:**
