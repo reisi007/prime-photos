@@ -70,7 +70,14 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 Eigene Assets des Users liegen künftig in **`assets/`** (PNG mit Alpha) und werden per
 `include_bytes!` + die vorhandene `image`-Crate eingebunden (keine neue Dependency, kein
 Laufzeit-Pfad, self-contained Binary). Konkrete Dateiliste + Formatvorgaben steht im Ledger
-(`AGENTS.todo.md` → „Assets").
+(`AGENTS.todo.md` → „Assets"). **Geliefert (2026-10-14):** vollständiger Tray-Satz
+(`tray`/`tray-active`/`tray-paused`/`tray-done`/`tray-error`, je 32 px + `@2x`, monochrom + Alpha
+= macOS-Template) und Logo (`logo.png` 1024², `logo-small*.png`). Nur die Laufzeit-Dateien werden
+eingebettet; die QA-Artefakte in `assets/` (`chk-logo-*`, `contact-sheet`, `zoom-corners`,
+`debug-mask-*`, `preview-tray`) gehören nicht in den Git-Bestand. Einbindungspunkte existieren
+bereits (`src/tray.rs`: `with_icon_templated` auf macOS, `with_icon` sonst, `ICON_SIZE = 32`);
+offen ist nur das **Windows/Linux-Tray auf dunkler Taskleiste** (schwarzes Monochrom kann
+verschwinden) — braucht eine Entscheidung.
 **Kein Fallback (User 2026-10-14):** fehlt ein Asset, ist das ein **Compile-Fehler** — ohne
 `Option`, ohne `exists()`-Prüfung, ohne Rückfall auf die gezeichnete Variante (`src/icons.rs`
 bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Dekodier-Fehler

@@ -334,16 +334,43 @@ Navigation, Status-Punkt, Flagge). Ein Dekodier-Fehler zur Laufzeit ist ebenfall
 klare Meldung) — eine stille degradierte UI ist ausdrücklich **nicht** gewollt. Da noch nichts
 implementiert ist, wirkt sich das erst aus, wenn die Dateien in `assets/` eingebunden werden.
 
-**Vom User vorzubereitende Dateien** (Name = Dateiname, wird exakt so eingebunden):
+**Geliefert (Stand 2026-10-14) — der Satz ist vollständig, gemessen mit `sips`:**
 
-| Datei | Zweck | Format-Vorgabe |
-|---|---|---|
-| `assets/tray.png` | Basis-Tray-Icon (Standardzustand) | monochrom + Alpha, als macOS-**template** geeignet (Schwarz/Weiß, kein Farbverlauf); 32 px, optional `@2x` |
-| `assets/tray-active.png` | Zustand „Upload läuft" | wie oben, Variante mit Aktiv-Signal |
-| `assets/tray-paused.png` | Zustand „Angehalten" | wie oben, Pause-Signal |
-| `assets/tray-done.png` | Zustand „Fertig" (kurz, dann zurück auf Basis) | optional |
-| `assets/tray-error.png` | Zustand „Fehler" | optional |
-| `assets/logo.png` | App-Logo: Fenster-/Dock-Icon, Login-Header, About-Fenster | mind. 256×256, mit Alpha, quadratisch |
+| Datei | px | Alpha | Zweck |
+|---|---|---|---|
+| `assets/tray.png` + `tray@2x.png` | 32 / 64 | ja | Tray-Basis (Leerlauf: Upload-Pfeil) |
+| `assets/tray-active.png` + `@2x` | 32 / 64 | ja | „Upload läuft" (Pfeil mit Bewegungslinien) |
+| `assets/tray-paused.png` + `@2x` | 32 / 64 | ja | „Angehalten" (zwei Balken) |
+| `assets/tray-done.png` + `@2x` | 32 / 64 | ja | „Fertig" (Haken) |
+| `assets/tray-error.png` + `@2x` | 32 / 64 | ja | „Fehler" (Ausrufezeichen) |
+| `assets/logo.png` | 1024 | ja | Dock-/Fenster-Icon, About, ggf. Login-Header (orange, Upload-Pfeil + Fotostapel) |
+| `assets/logo-small.png` | 256 | ja | kleine Logo-Variante |
+| `assets/logo-small-black.png` | 256 | ja | schwarze Variante (dunkler Hintergrund) |
+
+Der Tray-Satz ist durchgängig **monochrom schwarz auf transparent** — genau die macOS-Template-
+Semantik (die Vorschau `preview-tray.png` zeigt alle fünf Zustände invertiert auf dunklem Grund).
+Die übrigen Dateien sind **Vorbereitungs-/QA-Artefakte**, keine Laufzeit-Assets: `chk-logo-*.png`
+(6 Varianten für helle/dunkle Hintergründe), `contact-sheet.png`, `zoom-corners.png`,
+`debug-mask-*.png` (1,4 MB je Datei!), `preview-tray.png`. **Entscheidung offen:** diese
+QA-Artefakte gehören **nicht** in den Git-Bestand (Blähung) — beim Asset-Commit weglassen bzw.
+separat ablegen; nur die Laufzeit-Dateien der Tabelle oben werden eingebettet.
+
+**Einbindungspunkte, die bereits existieren (verifiziert im Code):**
+- `src/tray.rs`: `ICON_SIZE = 32`, `tray_icon::Icon::from_rgba(…)`, und **auf macOS ist das
+  Template-Flag schon gesetzt** (`with_icon_templated`, nicht-deprecatierter Nachfolger von
+  `with_icon_as_template(true)`), außermacOS `with_icon(icon)`. Der heutige Glyph wird gezeichnet
+  und ist **teal** — die neuen Schwarz/Alpha-Dateien passen dort 1:1 hinein.
+- macOS skaliert (`tray-icon` 0.26.1, `to_nsimage(max_height)`) auf die Menüleisten-Höhe **herunter**;
+  ein Icon, das schon passt, wird nicht hochskaliert. ⇒ Als Quelle die **`@2x`-Datei** nehmen
+  (mehr Bitmap pro Punkt = retina-scharf), die 32-px-Datei für die Nicht-macOS-Pfade/1×-Fälle.
+- Dock-/Fenster-Icon: eframe-Viewport-Icon (RGBA) aus `logo.png`; die gezeichnete Variante
+  `src/icons.rs::upload_logo` bleibt nur, wo sie heute als Vektor genutzt wird.
+
+**Offener Punkt für den Asset-Auftrag (braucht eine User-Entscheidung):** außerhalb macOS wird das
+Icon **ohne** Template-Flag gesetzt (`with_icon`) — ein **schwarzes** Monochrom-Icon kann auf einer
+**dunklen Windows-Taskleiste** praktisch verschwinden. Optionen: (a) weiße Varianten + Theme-
+Erkennung, (b) das farbige Logo als Windows/Linux-Tray-Icon, (c) als bekannte Einschränkung
+akzeptieren. Nicht entschieden, nicht umgesetzt.
 
 Recherche-Grundlage: `docs/SPEC_NOTIFICATIONS.md` §2.4 (Icon-/Status-Map des Originals:
 idle/processing/paused/done/error) und §2.3 (Menüleisten-Item); das Original liefert monochrome
