@@ -41,6 +41,14 @@ pub struct Config {
     /// existing `config.toml` without this key still loads — unpaused.
     #[serde(default)]
     pub paused: bool,
+    /// Persisted **intent** for the auto-launch (login item), user decision
+    /// 2026-10-14: `None` = never decided / platform unsupported, `Some(true)`
+    /// = it should be on, `Some(false)` = the user deliberately turned it off.
+    /// The OS state stays the operational truth; this field only records what
+    /// the app should enforce on the next start. `#[serde(default)]` (`None`)
+    /// so an existing `config.toml` without this key still loads.
+    #[serde(default)]
+    pub autostart_enabled: Option<bool>,
 }
 
 impl Config {
@@ -106,6 +114,42 @@ impl Config {
             language: None,
             background_sync: true,
             paused: false,
+            autostart_enabled: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal TOML that satisfies every non-defaulted field of `Config`.
+    /// Deliberately has **no** `autostart_enabled` key.
+    const LEGACY_TOML: &str = r#"
+country = "de"
+zone = "eu"
+user_agent = "ua"
+session_id = ""
+cookie_x_acb = ""
+cookie_at_acb = ""
+cookie_ubid_acb = ""
+cookie_x_amz_access_token = ""
+"#;
+
+    #[test]
+    fn config_without_autostart_key_loads_as_none() {
+        let config: Config = toml::from_str(LEGACY_TOML).unwrap();
+        assert_eq!(config.autostart_enabled, None);
+    }
+
+    #[test]
+    fn config_autostart_intent_roundtrips() {
+        for intent in [Some(true), Some(false)] {
+            let mut config = Config::default();
+            config.autostart_enabled = intent;
+            let serialized = toml::to_string_pretty(&config).unwrap();
+            let back: Config = toml::from_str(&serialized).unwrap();
+            assert_eq!(back.autostart_enabled, intent);
         }
     }
 }

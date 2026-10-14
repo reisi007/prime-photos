@@ -103,6 +103,35 @@ impl Autostart {
     }
 }
 
+/// What the persisted autostart intent asks us to do at startup (PKG-3).
+///
+/// Pure decision, no OS access: derived from the `Config` intent and the
+/// current OS state so it is cheap to unit-test.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum AutostartAction {
+    /// Never decided before (`None`): turn the login item on and record
+    /// `Some(true)`. The enable is a no-op when the OS state is already on.
+    EnableAndRecord,
+    /// Intent says "on" but the OS state is off: repair the login item
+    /// (plist deleted, app moved).
+    Enable,
+    /// Nothing to do (already on, or the user vetoed with `Some(false)`).
+    Nothing,
+}
+
+/// Derive the startup action from the persisted intent and the OS state.
+///
+/// `None` (never decided) ⇒ enable and record; `Some(true)` + OS off ⇒ repair;
+/// `Some(false)` always ⇒ nothing (never fight a deliberate "off" — a login
+/// item the user created by hand is not touched).
+fn autostart_action(intent: Option<bool>, os_enabled: bool) -> AutostartAction {
+    match intent {
+        None => AutostartAction::EnableAndRecord,
+        Some(true) if !os_enabled => AutostartAction::Enable,
+        _ => AutostartAction::Nothing,
+    }
+}
+
 pub(crate) struct PrimePhotoApp {
     pub(crate) rt: Arc<Runtime>,
     pub(crate) config: Config,
@@ -141,7 +170,8 @@ pub(crate) struct PrimePhotoApp {
     /// platform does not support it.
     pub(crate) autostart: Autostart,
     /// UI state of the autostart checkbox, kept in sync with the OS state.
-    /// Runtime-only: not persisted in `Config` (see `set_autostart`).
+    /// The **intent** behind it is persisted in `Config.autostart_enabled`
+    /// (see `set_autostart` / `autostart_action`).
     pub(crate) autostart_enabled: bool,
     /// A file drag is currently hovering over the window (drop overlay on,
     /// backup-page interactions off).
@@ -164,9 +194,13 @@ impl PrimePhotoApp {
         // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
         app_menu::install();
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
-        let (mut config, config_error) = match Config::load() {
-            Ok(c) => (c, None),
-            Err(e) => (Config::default(), Some(e.to_string())),
+        // `config_loaded_ok` is derived directly from the `Config::load()`
+        // result: a broken/unreadable file yields `Config::default()` (with
+        // empty cookies) in memory, and that fallback must never be written
+        // over the still-present, hand-fixable `config.toml` (PKG-3 guard).
+        let (mut config, config_error, config_loaded_ok) = match Config::load() {
+            Ok(c) => (c, None, true),
+            Err(e) => (Config::default(), Some(e.to_string()), false),
         };
         // Set the UI language before anything renders (or builds the tray).
         // `None` means "automatic": follow the system locale.
@@ -191,6 +225,40 @@ impl PrimePhotoApp {
         let autostart = Autostart::new();
         // Seed the checkbox from the OS state (is the login item already
         // registered?); `false` when unsupported or the state is unreadable.
+        let os_enabled = autostart.is_enabled().unwrap_or(false);
+        // Apply the persisted autostart intent (PKG-3, user decision
+        // 2026-10-14: the login item defaults to **on** — without it no folder
+        // watcher runs after a restart/logout). On an unsupported platform or a
+        // failing OS call nothing is persisted; the `log` facade reports it and
+        // the app keeps running.
+        match autostart_action(config.autostart_enabled, os_enabled) {
+            AutostartAction::EnableAndRecord => match autostart.enable() {
+                Ok(()) => {
+                    config.autostart_enabled = Some(true);
+                    // Only persist the intent when the on-disk config was
+                    // loaded successfully. Otherwise `config` is the default
+                    // fallback (empty cookies); saving it would clobber a
+                    // broken-but-hand-fixable `config.toml` and force a
+                    // re-login. A failed load keeps `config_error` set and
+                    // leaves the file untouched.
+                    if config_loaded_ok {
+                        if let Err(e) = config.save() {
+                            log::warn!(
+                                "Autostart (Login-Item) Absicht konnte nicht gespeichert werden: {e}"
+                            );
+                        }
+                    }
+                }
+                Err(e) => log::warn!("Autostart (Login-Item) konnte nicht aktiviert werden: {e}"),
+            },
+            AutostartAction::Enable => {
+                if let Err(e) = autostart.enable() {
+                    log::warn!("Autostart (Login-Item) konnte nicht aktiviert werden: {e}");
+                }
+            }
+            AutostartAction::Nothing => {}
+        }
+        // The checkbox mirrors reality: read the OS state back after the action.
         let autostart_enabled = autostart.is_enabled().unwrap_or(false);
         // The persisted pause state survives a restart (user decision
         // 2026-10-14): seed the sender from the config we just loaded instead
@@ -262,14 +330,13 @@ impl PrimePhotoApp {
     /// Turn the auto-launch (login item) registration on or off and re-sync the
     /// UI flag from the OS state.
     ///
-    /// **Runtime-only / not persisted:** the flag lives in `PrimePhotoApp`, not
-    /// in `Config` — this package may not touch `config.rs` (another agent owns
-    /// it), so there is no serialized field to write. On startup the checkbox is
-    /// therefore seeded from the OS state, and a manual change survives until
-    /// the registration itself is changed (e.g. from the OS or another tool).
+    /// **Persisted intent (PKG-3, user decision 2026-10-14):** a successful
+    /// change is recorded in `Config.autostart_enabled` (`Some(true)`/`Some(false)`)
+    /// and saved, so a deliberate "off" survives a restart. On an unsupported
+    /// platform or a failing registration nothing is persisted.
     ///
-    /// Never panics: on an unsupported platform (or a failing registration) the
-    /// failure is reported on the `log` facade and the flag snaps back to `false`.
+    /// Never panics: on failure the cause is reported on the `log` facade and
+    /// the flag snaps back to the real OS state.
     pub(crate) fn set_autostart(&mut self, enabled: bool) {
         let result = if enabled {
             self.autostart.enable()
@@ -279,8 +346,18 @@ impl PrimePhotoApp {
         // Report the real state, not the intent: a failed enable/disable must
         // not leave the checkbox claiming something the OS does not do.
         self.autostart_enabled = self.autostart.is_enabled().unwrap_or(false);
-        if let Err(e) = result {
-            log::warn!("Autostart (Login-Item) konnte nicht geändert werden: {e}");
+        match result {
+            Ok(()) => {
+                // Record the achieved intent so it is re-applied on the next
+                // start (including a deliberate "off").
+                self.config.autostart_enabled = Some(self.autostart_enabled);
+                if let Err(e) = self.config.save() {
+                    self.config_error = Some(e.to_string());
+                }
+            }
+            Err(e) => {
+                log::warn!("Autostart (Login-Item) konnte nicht geändert werden: {e}");
+            }
         }
     }
 
@@ -634,5 +711,47 @@ impl eframe::App for PrimePhotoApp {
         if self.dropping_files {
             Self::drop_overlay(ctx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autostart_action_never_decided_enables_and_records() {
+        // `None` ⇒ enable + record, regardless of the current OS state.
+        assert_eq!(
+            autostart_action(None, false),
+            AutostartAction::EnableAndRecord
+        );
+        assert_eq!(
+            autostart_action(None, true),
+            AutostartAction::EnableAndRecord
+        );
+    }
+
+    #[test]
+    fn autostart_action_intent_on_repairs_only_when_the_os_is_off() {
+        assert_eq!(
+            autostart_action(Some(true), false),
+            AutostartAction::Enable
+        );
+        assert_eq!(
+            autostart_action(Some(true), true),
+            AutostartAction::Nothing
+        );
+    }
+
+    #[test]
+    fn autostart_action_deliberate_off_is_a_veto() {
+        assert_eq!(
+            autostart_action(Some(false), false),
+            AutostartAction::Nothing
+        );
+        assert_eq!(
+            autostart_action(Some(false), true),
+            AutostartAction::Nothing
+        );
     }
 }
