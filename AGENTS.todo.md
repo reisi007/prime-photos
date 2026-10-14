@@ -772,6 +772,28 @@ Belege: `Localizable.strings` (Keys) + `Amazon Photos.dll` (Symbole), `docs/*`.
 - **Fürs öffentliche Release:** als bekannte Einschränkung nennen — gehört zusätzlich in
   `docs/RELEASE.md` (noch zu ergänzen).
 
+## Logging ist heute stumm — Befund + Fix (2026-10-14)
+
+**Befund:** `env_logger` ist in `Cargo.toml` als Abhängigkeit vorhanden, wird aber **nirgends
+initialisiert** (kein `env_logger::init()` in `src/main.rs` oder sonst im Code). Damit sind alle
+**16** `log::warn!/error!/…`-Aufrufe im Projekt wirkungslos: Autostart-Fehler, Kontoname/Profilbild-
+Fehler, Watcher-Fehler, 401-Hinweise, Save-Fehler usw. laufen ins Leere. Aufgefallen beim Versuch, den
+**ersten echten Upload** mitzuschreiben (User-Wunsch: „gerne wenn du auch Logs machst") — ohne Logger
+gibt es keine Zeile Ausgabe, weder auf stderr noch in einer Datei.
+
+**Fix (kleines Paket, unmittelbar nach der Asset-Welle — teilt sich `src/main.rs` mit ihr):**
+`env_logger::init()` als erste Anweisung in `fn main()` (keine neue Abhängigkeit, sie ist schon da).
+Steuerung über die übliche `RUST_LOG`-Umgebungsvariable. Zusätzlich im Ledger/`docs/BUILD.md`
+notieren, wie man einen Lauf mitschreibt:
+`RUST_LOG=info ./target/debug/prime-photos > ~/…/prime-photos.log 2>&1`.
+Prüfen: `RUST_LOG=info` muss dann echte Zeilen liefern (z. B. den Autostart-/Avatar-Pfad), und ohne
+`RUST_LOG` bleibt es still (Default von `env_logger` ist `error`).
+
+**Beobachtung ohne Logger (für den Upload-Lauf genutzt):** der MD5-Index
+(`~/Library/Application Support/prime_photos/dedup.sqlite3`, Tabelle `uploads`) ist die
+Belastbarste Quelle — er bekommt pro hochgeladener Datei eine Zeile; dazu `folders.toml`
+(Zähler/Status) und die Server-Sicht über die dokumentierten Routen.
+
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
 Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
