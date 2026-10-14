@@ -142,6 +142,18 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
   Wasserzeichen, keine dauerhafte Sicherung — nur die temporäre Queue bis zum Abschluss
   (siehe unten).
 - **Pause blockt auch Events** (globale Pause, siehe oben).
+- **Event-Puffer: unbegrenzt, kein Verwerfen (User-Entscheidung 2026-10-14).** Events, die während
+  eines laufenden Uploads **oder einer Pause** eintreffen, werden geparkt und beim nächsten
+  Durchlauf vollständig abgearbeitet. Es gibt **keine Obergrenze** (die frühere 500er-Kappe
+  `WATCH_PENDING_MAX` ist entfernt): die Liste wächst dynamisch mit der Zahl der **verschiedenen**
+  geänderten Pfade (~1,2 MB bei 10.000, ~12 MB bei 100.000 — vernachlässigbar), Dedup per
+  `HashSet<PathBuf>` in O(1) statt vorher O(n²). Bursts von **10.000+** Dateien (Kamera-Import,
+  Ordner-Kopie, lange Pause) sind damit vollständig abgedeckt; verworfen wird nichts.
+  Ein neuer Burst **ersetzt** den geparkten Bestand nicht mehr, sondern wird mit ihm **vereinigt**
+  (das war ein echter Verlust-Bug: bei mehreren Bursts während einer Pause überlebte nur der
+  letzte); erlaubt `can_start` einen Lauf, geht der vereinigte Bestand in **einen** Lauf.
+  Umsetzung: `src/backup.rs` (`park_paths`, `pending`/`pending_seen`), Commit `2eea96c`, Verify
+  Runde 1 APPROVE.
 - **Verworfen:** der periodische Hintergrund-Scan als Erkennungsmechanismus (User 2026-10-14:
   „file add / edit per event abfragen"); ein `BackupScanIntervalInHours`-Takt.
 - **Offen:** Sicherheitsnetz für verpasste Events (Watcher-Limit, ausgeworfenes Laufwerk,

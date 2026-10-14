@@ -280,7 +280,7 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
 Anlass: „periodic background scan is not mvp ready ... hard requirement OS-level file locks" →
 per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
 
-- [x] **D1 – OS-Event-Watcher statt Polling.** Umgesetzt (PKG-2a, uncommittet, in Verifikation):
+- [x] **D1 – OS-Event-Watcher statt Polling.** Umgesetzt und **committet** (`465a525`, PKG-2a):
   `notify` 8.2.0 (User-Vorgabe, dokumentiert, weil die Projektregel „keine zusätzlichen
   Abhängigkeiten" hier vom User ausdrücklich aufgehoben wird), Watcher pro aktiviertem
   Backup-Ordner in `src/backup.rs` (`sync_watchers`, `watch_loop`), `WATCH_DEBOUNCE` 5 s,
@@ -290,8 +290,8 @@ per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
 - [x] **D3 – Stat-Check vor dem Hash** (`src/dedup.rs`): umgesetzt und **committet**
   (`488d1e4`). Treffer nur bei path+size+mtime; unbekannte mtime (0) erg nie einen Treffer.
   Das MD5 bleibt Identität (`docs/SPEC_DEDUP.md` §1).
-- [x] **D4 – Kaltstart-Sicherheitsnetz (Wasserzeichen):** implementiert (PKG-2a, uncommittet,
-  in Verifikation): Tabelle `folder_scan(path, max_mtime, scanned_at)` in derselben SQLite,
+- [x] **D4 – Kaltstart-Sicherheitsnetz (Wasserzeichen):** umgesetzt und **committet** (`465a525`,
+  PKG-2a): Tabelle `folder_scan(path, max_mtime, scanned_at)` in derselben SQLite,
   `folder_max_mtime`/`record_folder_scan`, `folders::max_mtime()` (reiner Metadaten-Durchlauf),
   `scan_new_since()`. Fortschreiben nur nach fehlerfreiem Lauf, mit dem zum
   Entscheidungszeitpunkt gelesenen Wert (während des Uploads dazugekommene Dateien werden
@@ -299,7 +299,22 @@ per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
 - [x] **D5 – Clean-Room-Doku** `docs/SPEC_CHANGE_DETECTION.md`: **erledigt** (Commit
   `4ca98b2`) — Watcher-Mechanik, Indikatoren (QuickScan braucht Stat-Kombination),
   Cold-Boot-Scan, halb geschriebene Dateien. Nachtrag: Gap-Analyse nach PKG-2a auf den
-  neuen Port-Stand aktualisiert (läuft).
+  neuen Port-Stand aktualisiert (**erledigt**, `777938f`).
+- [x] **D6 – Event-Puffer ohne Kappe (User-Entscheidung 2026-10-14).** Anlass: Der Nutzer
+  hinterfragte die 500er-Kappe („10k files zum uploaden sollte schon unterstützt werden …
+  warum kann die Liste nicht unlimitiert groß sein bzw. dynamisch wachsen") und stellte fest,
+  dass ein bloßes `log::warn!` den Bug nur lauter macht, statt ihn zu beheben. Umgesetzt
+  (**committet** `2eea96c`, PKG-2b): `WATCH_PENDING_MAX` ersatzlos entfernt (keine Obergrenze,
+  Liste wächst dynamisch), Dedup per `HashSet<PathBuf>` O(1) statt O(n²), reiner Helfer
+  `park_paths`. **Dabei gefundener und behobener Verlust-Bug:** der Event-Block in `watch_loop`
+  hat den geparkten Bestand mit `pending = handle_files(…)` **überschrieben** — bei mehreren
+  Bursts während einer Pause überlebte nur der letzte; jetzt wird **vereinigt** und bei
+  erlaubtem Lauf alles in **einem** Lauf gestartet. 3 neue Tests (2.000 Pfade ohne Kappung,
+  Doppelpfad ⇒ 1 Eintrag, Vereinigung ohne Verlust/Duplikate). Verify Runde 1: APPROVE.
+  **Nicht verworfen, sondern bewusst offen:** ein optionaler Rescan-Fallback bei Überlauf ist
+  mit der unbegrenzten Liste **nicht mehr nötig** (es gibt keinen Überlauf) — bleibt aber als
+  Netz für *verpasste* Events (Watcher-Limit, ausgeworfenes Laufwerk) ein eigener, noch nicht
+  entschiedener Punkt (siehe unten „Offen").
 
 ## Assets: Tray-Icons + Logo (User-Vorbereitung 2026-10-14) — geplant, **nicht** implementiert
 
