@@ -809,6 +809,18 @@ Debug-Binary**. Vier Befunde, zwei davon mit User-Entscheidung:
    Dedup-Schlüssel sind Pfade, die dürfen sich nicht verschieben. Verworfen: eine eigene
    Mini-Tabelle (handgepflegt, unvollständig) und „andere Schrift einbetten" (löst das
    Kombinationszeichen-Problem nicht).
+   **Erweitert (User-Entscheidung 2026-10-14, nach der Server-Prüfung): NFC gilt auch für den
+   Upload-Namen.** Belege: der Server normalisiert **nicht** — NFD-Abfrage findet nur die NFD-Datei,
+   NFC-Abfrage nur die NFC-Datei (`27_ÖFB-Reisinger_01.dng`: NFD-Treffer, NFC `count=0`). macOS
+   liefert NFD, Windows NFC ⇒ derselbe Name ist ein **anderer String**. **Warum das zählt:** die
+   Namensbehandlung ist exakt/ordinal (Original `GetNodeByNameAndParentIfExists`; unser
+   `Ask`/`SaveAsNew`/`Replace` hängt am Namen) — ohne Normalisierung findet „Ersetzen" auf dem Mac
+   die von Windows angelegte Datei nicht. **Korrektur:** ein zweiter Upload **desselben Inhalts**
+   wird schon **serverseitig** abgewiesen (`409`, `errorCode = "DuplicatesConflictError"`); der
+   frühere Schluss „beide Formen derselben Datei im Konto" war **falsch** —
+   `27_ÖFB-Reisinger_01.jpg` liegt dort zweimal als **verschiedene Fotos** (NFD 28.09., 6.274.270 B,
+   MD5 `1d16ed8f…` = unsere Datei; NFC 28.03., 8.911.096 B, MD5 `c5f0f37e…` = anderes Bild). Pfad
+   und MD5-Index bleiben unverändert. **Status: entschieden, noch nicht umgesetzt.**
 2. **Fortschritt doppelt angezeigt:** die Seiten-Fußzeile (P3, mit Spinner + „Gesamt: x von y · z % ·
    noch …") **und** die untere Statusleiste (`TopBottomPanel::bottom("log")`, `src/app.rs:808`,
    „Upload läuft: n/total · <Datei> · ETA").
@@ -840,6 +852,68 @@ Binary (per Terminal gestartet, ohne `Info.plist`). `packaging/Info.plist` enth�
 `NSHighResolutionCapable = true`, das gebaute `.app` ist also retina-scharf. **Konsequenz:** für
 Sichtprüfungen/Screenshots künftig das Bundle bauen (`packaging/make-app.sh`), nicht die nackte
 Binary starten.
+
+## Duplikate & Dateikonflikte — User-Entscheidung 2026-10-14: alle Varianten wie das Original
+
+Recon-Grundlage: `docs/SPEC_DUPLICATES.md` (Mechanismen, Erkennungsweg, lokaler Zustand, 409,
+Gap-Tabelle) und `docs/SPEC_CONFLICT_OPTIONS.md` (vollständige Varianten-Liste mit Abnahmekriterium,
+kommt von einem Subagenten). Kernbefund: **zwei orthogonale Mechanismen** — Inhalts-Dedupe (MD5,
+**über Pfade hinweg**, `GetNodeByMd5`) und Namenskonflikt (exakter Name + Parent, **pro Ziel**;
+global existiert nichts).
+
+**Unser Stand heute:** vier Konflikt-Optionen pro Ziel sind da (`ConflictResolution::{Ask,Ignore,
+SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResolution=NONE`;
+`wire_value()` `:148-154`), Dedupe ist **rein pfadbasiert** (`DedupIndex::should_skip`/`stat_matches`,
+`src/dedup.rs:101/143`; Skip-Pfade `src/upload.rs:418` und `:465`), 409 wird pauschal als
+„bereits im Konto" gewertet. **Also: nein, wir unterstützen noch nicht alle.**
+
+**Checkliste (Anlegen bleibt Pflicht, Abarbeiten nur auf Auftrag):**
+- [ ] **Inhalts-Dedupe über Pfade** — vor dem Upload per MD5 im lokalen Index prüfen, ob derselbe
+      Inhalt schon hochgeladen wurde, unabhängig von Pfad und Name. Fängt NFD/NFC-Zwillinge,
+      verschobene und umbenannte Dateien. `ix_uploads_md5` (`src/dedup.rs`) liegt dafür **ungenutzt**
+      da. Abnahme: gleicher Inhalt unter anderem Pfad ⇒ **kein** zweiter Upload; Test beweist es
+      ohne Netz.
+- [ ] **409-Ursache trennen** — das Original unterscheidet `MD5_DUPLICATE` (Inhaltsduplikat ⇒ wie
+      ignoriert) von `NameAlreadyExists` (⇒ Fehler). Wir machen aus jedem 409 „bereits im Konto".
+      **Belegt (2026-10-14):** der Server nennt den Grund selbst — live `errorCode =
+      "DuplicatesConflictError"` samt `errorDetails.conflictNodeIds` (siehe unten).
+- [ ] **„Nicht noch einmal fragen" pro Ziel persistieren** — das Original schreibt die Antwort in
+      `schedules.conflict_resolution` zurück; bei uns gilt sie nur für den laufenden Lauf. Braucht
+      ein **neues persistiertes Feld pro Ziel** (bewusste Schemaänderung, nicht „nur flüchtig").
+- [ ] **`conflictResolution=OVERWRITE` beim Server prüfen** — das Original sendet es **nie**; ob
+      unser „Ersetzen" akzeptiert wird, ist **unbelegt**.
+- [ ] **Alle Varianten laut Liste** (`docs/SPEC_CONFLICT_OPTIONS.md`) umsetzen, jede mit
+      Abnahmekriterium.
+
+**Live-Beleg 2026-10-14 (genau ein Upload-Versuch, `.cr3`).** Verdacht: 121 der 480 Index-Zeilen
+seien nie im Konto angekommen (die Server-Suche fand sie nicht). Test: eine davon
+(`…/ÖFB/2026-09-27-Kosovo/27_ÖFB-Reisinger_31.cr3`, MD5 `0289be68ad920cc22964e09c77da64cd`) erneut
+mit `conflictResolution=NONE` gesendet ⇒ **HTTP 409**:
+`errorCode = "DuplicatesConflictError"`, Message „Duplicate files already exist with
+FILE_MD5='0289be68…' …\", `errorDetails.conflictNodeIds = [N5RwmpPvR5SKmUbQsdxU6g]`.
+**Ergebnis: die Datei liegt im Konto — es gab keinen stillen Verlust.** Die 121 waren ein Artefakt
+der Server-**Suche**, die als Beweis **unbrauchbar** ist: dieselbe Abfrage antwortete für dieselbe
+Datei zuerst `count=1` mit Datum aus dem Lauf und später stabil `count=0`.
+**Nebenfunde:** (a) der Server **dedupliziert per Inhalt** (nicht nur per Name) und nennt den
+vorhandenen Knoten — die 409-Trennung ist damit **belegt** und direkt umsetzbar; (b) unser
+Cookie-Upload sendet **kein** `Content-MD5` (base64), nur `x-amzn-file-md5` (hex) — die
+`Content-MD5`-Notiz in `AGENTS.md` gilt nur für den **Geräte**-Flow; (c) der Zielordner „Web" hat
+**40.791** Dateien, `sort=['createdDate DESC']` funktioniert (`createdDate` ist die **Aufnahme-**,
+nicht die Upload-Zeit), ein `createdDate`-Filter gibt es nicht, und `parents:`+`name:` kombiniert
+der Server nicht.
+
+**Verworfen:** beim rein pfadbasierten Index bleiben (er erkennt den NFD/NFC-Zwilling nicht, und
+genau der entsteht zwischen macOS und Windows).
+
+## Offene Kandidaten derselben Absturzklasse (2026-10-14) — **ungeprüft**
+
+Regel aus dem Absturz am Laufende (unten): **keine synchrone AppKit-/RunLoop-API direkt aus
+`update`.** Die Kandidaten standen bisher nur im Fix-Bericht, nicht im Ledger — hiermit nachgetragen:
+- [ ] **`rfd::FileDialog::pick_folder()`** (`src/backup.rs:808`, `src/backup_config.rs:59`) — öffnet
+      auf macOS ein **modales** `NSOpenPanel` und blockiert mit eigener RunLoop. Dieselbe Klasse wie
+      der Absturz (`notify-rust`). **Ungeprüft:** ob es real abstürzt, ist **nicht** belegt. Prüfen
+      und ggf. auf den asynchronen Weg (`AsyncFileDialog` + `self.rt`) umstellen — der Tokio-Runtime
+      existiert bereits (`src/backup.rs:925`).
 
 ## Erster echter Upload: ERFOLGREICH (2026-10-14) + Absturz am Laufende (behoben)
 

@@ -349,6 +349,52 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
 - **Regel:** Kein hartkodierter UI-Text außerhalb von `src/i18n.rs`. Neue Strings kommen direkt
   zweisprachig dazu. Die Marktplatz-Ländernamen in `countries.rs` sind ebenfalls UI-Text (→ i18n).
 
+## Dateinamen-Kodierung: NFC (User-Entscheidung 2026-10-14)
+
+- **Der Upload-Name wird auf NFC normalisiert — und der Anzeigetext ebenso.** Belegter Anlass: der
+  Server normalisiert **nicht**. Eine Abfrage in NFD findet nur die NFD-Datei, eine in NFC nur die
+  NFC-Datei (`27_ÖFB-Reisinger_01.dng`: NFD-Treffer, NFC `count=0`). macOS liefert **NFD**, Windows
+  **NFC** ⇒ derselbe Dateiname ist auf den beiden Plattformen ein **anderer String**.
+- **Warum das zählt (belegt):** die Namensbehandlung ist **exakt/ordinal** — das Original sucht den
+  Zielknoten per `GetNodeByNameAndParentIfExists` (exaktes `name = ?`), und unser Konfliktweg
+  (`Ask`/`SaveAsNew`/`Replace`) hängt ebenso am Namen. Ohne Normalisierung findet „Ersetzen" auf dem
+  Mac die von Windows (NFC) angelegte Datei **nicht** und legt eine zweite an — dieselbe Aktion
+  verhält sich also je Plattform verschieden. Dazu die Anzeige: macOS-Namen (NFD) rendern in der
+  eingebetteten Schrift als `O□FB`.
+- **Was NFC *nicht* verhindert (Korrektur 2026-10-14):** ein zweiter Upload **desselben Inhalts**
+  wird schon **serverseitig** abgewiesen — live belegt: `409` mit
+  `errorCode = "DuplicatesConflictError"`, die Message nennt den `FILE_MD5` und
+  `errorDetails.conflictNodeIds`. Ein früherer Schluss, im Konto lägen „beide Formen derselben
+  Datei", war **falsch**: `27_ÖFB-Reisinger_01.jpg` existiert dort zweimal, aber als **verschiedene
+  Fotos** (NFD 28.09.2026, 6.274.270 B, MD5 `1d16ed8f…` = unsere Datei; NFC 28.03.2026, 8.911.096 B,
+  MD5 `c5f0f37e…` = anderes Bild mit gleichem Namen). Namensgleichheit aus zwei Shootings — **kein**
+  Duplikat derselben Datei.
+- NFC ist die gemeinsame Form: Windows und die Web-Seite sind NFC, und das Original sendet auf
+  Windows ebenfalls NFC (auf macOS roh NFD — es normalisiert gar nicht, belegt in
+  `docs/SPEC_FILENAME_ENCODING.md`).
+- **Unverändert bleiben: der lokale Pfad und der MD5-Index.** Die Dedup-Schlüssel sind Pfade, die
+  dürfen sich nicht verschieben; die Normalisierung betrifft **nur** den Namen, der an den Server
+  geht, und den Anzeigetext.
+- Damit ist die frühere Entscheidung „`unicode-normalization` als Abhängigkeit, NFC **nur** für den
+  Anzeigetext" (2026-10-14) **erweitert** — sie war zum Zeitpunkt der neuen Frage noch nicht
+  umgesetzt, und sie deckte den Upload-Namen nicht ab.
+- **Verworfen:** NFD senden (macht Windows zum Sonderfall, der die Doppelungen erzeugt); nichts tun
+  (die Doppelungen bleiben).
+
+## Duplikate & Dateikonflikte: alle Varianten wie das Original (User-Entscheidung 2026-10-14)
+
+Recon: `docs/SPEC_DUPLICATES.md` (Mechanismen, Erkennungsweg, 409, Gap-Tabelle) und
+`docs/SPEC_CONFLICT_OPTIONS.md` (die vollständige Varianten-Liste mit Abnahmekriterium). Kernbefund:
+das Original hat **zwei orthogonale** Mechanismen — **Inhalts-Dedupe** (MD5, **über Pfade hinweg**,
+`GetNodeByMd5`) und **Namenskonflikt** (exakter Name + Parent, **pro Ziel**, global gibt es nichts).
+
+**User-Entscheidung: alles umsetzen, was das Original kann.** Offene Punkte stehen als Checkliste im
+Ledger (`AGENTS.todo.md` → „Duplikate & Dateikonflikte"); die vier belegten Lücken sind
+Inhalts-Dedupe über Pfade, das Trennen der 409-Ursache (`MD5_DUPLICATE` vs. `NameAlreadyExists`),
+das Persistieren von „Nicht noch einmal fragen" **pro Ziel** und das Prüfen, ob der Server unser
+`conflictResolution=OVERWRITE` überhaupt akzeptiert (das Original sendet es **nie** — unbelegt).
+**Verworfen:** beim rein pfadbasierten Index bleiben (er erkennt den NFD/NFC-Zwilling nicht).
+
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
