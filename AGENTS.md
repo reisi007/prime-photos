@@ -203,6 +203,30 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
   laufenden Lauf. Manuelle Läufe starten weiterhin pro Ordner; die Anzeige summiert trotzdem über
   alle.
 
+## Zeilen-Aktionen & Ergebnis-Anzeige (User-Entscheidung 2026-10-14)
+
+Anlass: Der User suchte einen Rescan-Button und erwartete ein **vertikales „…"-Icon** mit Popup bei
+Linksklick; außerdem zweifelte er die Zahl „480 fertig" an („passt die Anzahl wirklich von heute?").
+
+- **Zeilen-Menü: gezeichneter vertikaler Kebab** (drei Punkte untereinander), **immer sichtbar**, mit
+  Tooltip „Aktionen"; Linksklick öffnet das Popup (egui-Verhalten bleibt). **Warum gezeichnet und nicht
+  als Text:** die gemessene Font-Abdeckung von egui 0.31 ist
+  `epaint_default_fonts-0.31.1` — `⋮` U+22EE fehlt in **allen vier** Fonts (Hack, Ubuntu-Light,
+  NotoEmoji, emoji-icon-font), ein Text-`⋮` erschiene als □ (dieselbe Fehlerklasse wie die
+  Umlaut-NFD-Lücke). `⋯` U+22EF gibt es nur in Hack-Regular. Icon daher in `src/icons.rs` zeichnen
+  (wie `nav_icon`/`draw_flag_badge`). Aktuell existiert genau **eine** `⋯`-Stelle: `src/backup.rs:1501`.
+- **Rescan wird sichtbar:** pro Ordner-Zeile ein **eigener, gezeichneter ⟳-Button**, der direkt
+  „Jetzt scannen und hochladen" auslöst. Der Kebab-Popup behält den Rest (Im Dateimanager anzeigen,
+  Bearbeiten, Trennen, Pausieren). Grund: der Rescan existierte, war aber nur im Text-`⋯` versteckt.
+  **Global bleibt es weiterhin ohne „Alles neu prüfen"** (nicht beauftragt).
+- **Ergebnis wird aufgeschlüsselt:** „fertig" darf **nicht** länger echt-Upload, 409 „schon im Konto"
+  und lokalen Dedup-Skip zusammenwerfen. Anzeige fortan getrennt:
+  **neu hochgeladen / bereits im Konto / unverändert / Fehler**. Belegte Ursache: `src/upload.rs` zählt
+  in allen drei Fällen `s.done += 1` (`:496` Uploaded, `:552` ConflictSkipped, `:376`/`:421` lokaler
+  Skip) — die Ausgänge liegen dort schon getrennt vor und werden nur nicht berichtet.
+  **Konsequenz für die Regel „eine aggregierte Anzeige":** das bleibt für den *Fortschritt* eines
+  laufenden Uploads richtig, gilt aber nicht für das *Ergebnis* — das Ergebnis wird aufgeschlüsselt.
+
 ## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
 
 Bewusste, absichtliche Abgrenzung. Die vollständige Feature-für-Feature-Liste mit Beleg-Keys/-Symbolen
