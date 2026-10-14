@@ -12,7 +12,7 @@ use eframe::egui::{self, RichText};
 use notify;
 use notify::Watcher;
 use rfd::FileDialog;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -303,11 +303,6 @@ const WATCH_DEBOUNCE: Duration = Duration::from_secs(5);
 /// (`BackupWatcherPollIntervalInSeconds` = 30 s, §4.3).
 const WATCH_POLL: Duration = Duration::from_secs(30);
 
-/// Upper bound for the "seen while a run was busy or paused" file list: a folder
-/// that changes faster than the uploads drain it must not grow the list without
-/// limit.
-const WATCH_PENDING_MAX: usize = 500;
-
 /// Set once the supervising background task has been spawned for this process —
 /// `ensure_background_sync` is idempotent through it.
 static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
@@ -501,18 +496,18 @@ async fn background_sync_pass(
 /// A directory is not a photo, and a path that no longer exists is a deletion —
 /// both are ignored, exactly like the original's event type gate
 /// (`docs/SPEC_CHANGE_DETECTION.md` §4.3). Returns `false` on a watcher error so
-/// the caller can re-arm the set.
-fn collect_event_paths(res: notify::Result<notify::Event>, paths: &mut Vec<PathBuf>) -> bool {
+/// the caller can re-arm the set. `seen` is the batch's path set, so a path the OS
+/// reports more than once is folded in only once — O(1) per path, no scan of the
+/// list, and no cap: the batch grows as large as the burst.
+fn collect_event_paths(
+    res: notify::Result<notify::Event>,
+    paths: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+) -> bool {
     match res {
         Ok(ev) => {
             for p in ev.paths {
-                if paths.len() >= WATCH_PENDING_MAX {
-                    log::warn!(
-                        "Ordner-Wächter: Event-Puffer voll ({WATCH_PENDING_MAX}), weitere Events dieser Runde verworfen"
-                    );
-                    break;
-                }
-                if p.is_file() && folders::is_supported_image(&p) && !paths.iter().any(|q| *q == p) {
+                if p.is_file() && folders::is_supported_image(&p) && seen.insert(p.clone()) {
                     paths.push(p);
                 }
             }
@@ -546,14 +541,44 @@ fn map_to_folders(store: &FolderStore, paths: &[PathBuf]) -> Vec<(usize, PathBuf
         .collect()
 }
 
-/// Start a run for exactly `files`, or park them when no run may start right now
-/// (busy, paused, signed out, switch off). Returns what is still waiting.
+/// Merge `files` into the parked stock, de-duplicated by **path** (the identity
+/// of an event). Returns how many paths were newly taken up, so a caller can tell
+/// a real addition from a redundant re-report. Pure — no store, no watcher, no
+/// filesystem, no runtime state — and therefore cheap to test.
 ///
-/// The running `run_upload` owns a fixed item list, so a burst that arrives
-/// mid-run is never written into it — it is remembered here and picked up by the
-/// next pass. The list is bounded and de-duplicated.
+/// There is deliberately **no upper bound**: a burst of 10 000+ files (a camera
+/// import, a folder copy, a long pause) is kept in full. Memory grows with the
+/// number of *distinct* changed paths (~1.2 MB at 10 000, ~12 MB at 100 000 —
+/// negligible), and nothing is ever dropped.
+fn park_paths(
+    pending: &mut Vec<(usize, PathBuf)>,
+    seen: &mut HashSet<PathBuf>,
+    files: impl IntoIterator<Item = (usize, PathBuf)>,
+) -> usize {
+    let mut added = 0;
+    for (idx, path) in files {
+        if seen.insert(path.clone()) {
+            pending.push((idx, path));
+            added += 1;
+        }
+    }
+    added
+}
+
+/// Fold `files` into the parked stock and, if a run may start right now, upload
+/// **all** of them in a single run; otherwise they stay parked until a later pass
+/// is allowed to start one.
+///
+/// `pending`/`pending_seen` are the "seen while a run was busy or paused" list and
+/// its exact path set; the caller keeps them across passes. Merging instead of
+/// replacing is what makes a burst that arrives while paths are already parked
+/// lose nothing, and de-duplication by path keeps the list at one entry per file
+/// even when the OS reports an event more than once. The list is unbounded; an
+/// empty merge with an empty stock is a no-op.
 fn handle_files(
-    files: Vec<(usize, PathBuf)>,
+    files: impl IntoIterator<Item = (usize, PathBuf)>,
+    pending: &mut Vec<(usize, PathBuf)>,
+    pending_seen: &mut HashSet<PathBuf>,
     store: &mut FolderStore,
     shared: &Arc<Mutex<UploadShared>>,
     paused: &watch::Sender<bool>,
@@ -561,29 +586,18 @@ fn handle_files(
     concurrency: usize,
     limit_kbps: u32,
     album: &str,
-) -> Vec<(usize, PathBuf)> {
-    if files.is_empty() {
-        return Vec::new();
+) {
+    // Merge first, never replace: the new burst and the parked stock become one
+    // de-duplicated list, so a burst that lands mid-pause cannot drop the old one.
+    park_paths(pending, pending_seen, files);
+    if pending.is_empty() || !can_start(cfg, paused, shared) {
+        return;
     }
-    if !can_start(cfg, paused, shared) {
-        let total = files.len();
-        let mut rest: Vec<(usize, PathBuf)> = Vec::new();
-        for (i, f) in files.into_iter().enumerate() {
-            if rest.len() >= WATCH_PENDING_MAX {
-                log::warn!(
-                    "Ordner-Wächter: Event-Puffer voll ({WATCH_PENDING_MAX}), {} Pfad(e) dieser Runde verworfen",
-                    total - i
-                );
-                break;
-            }
-            if !rest.iter().any(|(_, p)| *p == f.1) {
-                rest.push(f);
-            }
-        }
-        return rest;
-    }
-    let Some(plan) = UploadPlan::build_from_events(store, &files) else {
-        return Vec::new();
+    let batch = std::mem::take(pending);
+    // `pending_seen` mirrors `pending` exactly: both are cleared together.
+    pending_seen.clear();
+    let Some(plan) = UploadPlan::build_from_events(store, &batch) else {
+        return;
     };
     let count = plan.count();
     start_background_run(
@@ -602,7 +616,6 @@ fn handle_files(
         // still caught by the next start.
         Vec::new(),
     );
-    Vec::new()
 }
 
 /// One watcher per enabled backup folder, re-synced with the persisted store on
@@ -663,9 +676,15 @@ fn sync_watchers(
 }
 
 /// The supervising watcher task, for the rest of the process: one watcher per
-/// enabled backup folder, a debounce per burst, and a bounded "seen while busy"
-/// list. Detached from the UI struct — every guard is re-checked here, it never
-/// panics into the app and never touches the UI thread.
+/// enabled backup folder, a debounce per burst, and a "seen while a run was busy
+/// or paused" list that is merged, never replaced. Detached from the UI struct —
+/// every guard is re-checked here, it never panics into the app and never touches
+/// the UI thread.
+///
+/// The pending list has **no cap**: a burst of 10 000+ files (a camera import, a
+/// folder copy, a long pause) is carried in full, one entry per *distinct* changed
+/// path (~1.2 MB at 10 000, ~12 MB at 100 000 — negligible), and nothing is
+/// dropped. When a run is allowed again, everything parked goes into a single run.
 async fn watch_loop(
     shared: Arc<Mutex<UploadShared>>,
     paused: watch::Sender<bool>,
@@ -677,18 +696,24 @@ async fn watch_loop(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<notify::Result<notify::Event>>();
     let mut watchers: HashMap<PathBuf, notify::RecommendedWatcher> = HashMap::new();
     let mut pending: Vec<(usize, PathBuf)> = Vec::new();
+    // `pending_seen` holds exactly the paths in `pending`; together they make the
+    // merge O(1) per path instead of a linear scan of the list.
+    let mut pending_seen: HashSet<PathBuf> = HashSet::new();
     loop {
         // Freshest settings + store on every pass (the supervisor is detached
         // from the UI struct, so the persisted files are its only source).
         let cfg = Config::load().unwrap_or(last_config.clone());
         sync_watchers(&mut watchers, &tx, &cfg);
 
-        // Retry what was remembered while a run was busy or paused.
+        // Retry what was remembered while a run was busy or paused: no new burst,
+        // just the parked stock — merged with itself (a no-op) so no path is taken
+        // up twice, then started if a run is allowed now.
         if !pending.is_empty() {
             let mut store = FolderStore::load();
-            let files = std::mem::take(&mut pending);
-            pending = handle_files(
-                files,
+            handle_files(
+                std::iter::empty(),
+                &mut pending,
+                &mut pending_seen,
                 &mut store,
                 &shared,
                 &paused,
@@ -711,9 +736,10 @@ async fn watch_loop(
         // Debounce: give the burst time to land, then take all of it at once.
         tokio::time::sleep(WATCH_DEBOUNCE).await;
         let mut paths: Vec<PathBuf> = Vec::new();
+        let mut batch_seen: HashSet<PathBuf> = HashSet::new();
         let rest = std::iter::from_fn(|| rx.try_recv().ok());
         for res in std::iter::once(first).chain(rest) {
-            if !collect_event_paths(res, &mut paths) {
+            if !collect_event_paths(res, &mut paths, &mut batch_seen) {
                 // A watcher error (ejected volume, watch limit): drop the whole
                 // set and let the next pass re-arm it — that poll is the
                 // backoff, the app keeps running either way.
@@ -722,20 +748,23 @@ async fn watch_loop(
         }
         let mut store = FolderStore::load();
         let files = map_to_folders(&store, &paths);
-        // An empty batch (only directories, only deletions) must not drop what
-        // is still parked from earlier.
-        if !files.is_empty() {
-            pending = handle_files(
-                files,
-                &mut store,
-                &shared,
-                &paused,
-                &cfg,
-                concurrency,
-                limit_kbps,
-                &album,
-            );
-        }
+        // Merge the new burst with the parked stock and start one run for all of
+        // it if one is allowed. Merging (not replacing) is what keeps an earlier
+        // burst — e.g. one parked during a pause — from being dropped by this one;
+        // an empty batch (only directories, only deletions) therefore cannot lose
+        // what is still parked either.
+        handle_files(
+            files,
+            &mut pending,
+            &mut pending_seen,
+            &mut store,
+            &shared,
+            &paused,
+            &cfg,
+            concurrency,
+            limit_kbps,
+            &album,
+        );
     }
 }
 
@@ -1445,5 +1474,64 @@ impl PrimePhotoApp {
         for a in actions {
             self.apply_action(a);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `n` distinct event entries for one folder, as `park_paths` takes them.
+    fn files(range: std::ops::Range<usize>) -> Vec<(usize, PathBuf)> {
+        range
+            .map(|i| (0, PathBuf::from(format!("/photos/{i}.jpg"))))
+            .collect()
+    }
+
+    #[test]
+    fn park_keeps_every_path_without_a_cap() {
+        let mut pending: Vec<(usize, PathBuf)> = Vec::new();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+
+        // A burst far beyond the old 500-path cap: all of it survives.
+        let added = park_paths(&mut pending, &mut seen, files(0..2_000));
+
+        assert_eq!(added, 2_000);
+        assert_eq!(pending.len(), 2_000);
+        assert_eq!(seen.len(), 2_000);
+    }
+
+    #[test]
+    fn park_deduplicates_by_path() {
+        let mut pending: Vec<(usize, PathBuf)> = Vec::new();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+        let p = PathBuf::from("/photos/a.jpg");
+
+        assert_eq!(park_paths(&mut pending, &mut seen, vec![(0, p.clone())]), 1);
+        // The same path again is already known: nothing is added.
+        assert_eq!(park_paths(&mut pending, &mut seen, vec![(0, p.clone())]), 0);
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(seen.len(), 1);
+    }
+
+    #[test]
+    fn park_merges_a_new_burst_without_loss_or_duplicates() {
+        let mut pending: Vec<(usize, PathBuf)> = Vec::new();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
+
+        // A stock parked while a run was busy or paused ...
+        park_paths(&mut pending, &mut seen, files(0..100));
+        // ... plus a burst that overlaps it (50..150): only the 50 new paths are
+        // added, the 50 overlapping ones are neither duplicated nor dropped.
+        let added = park_paths(&mut pending, &mut seen, files(50..150));
+
+        assert_eq!(added, 50);
+        assert_eq!(pending.len(), 150);
+        assert_eq!(seen.len(), 150);
+        // The invariant the merge relies on: `seen` mirrors `pending` exactly.
+        let pending_paths: HashSet<PathBuf> =
+            pending.iter().map(|(_, p)| p.clone()).collect();
+        assert_eq!(pending_paths, seen);
     }
 }
