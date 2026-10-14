@@ -433,7 +433,23 @@ antwortet mit **HTTP 200** auf **genau unseren** Cookie-Satz (`session-id`, `x-a
 Die in `docs/SPEC_ACCOUNT_BILLING.md` §9 geführte UNKNOWN („akzeptiert der Endpunkt unsere
 Cookie-Session?") ist damit **beantwortet: ja**. Getestet ohne Diagnose-Code (kein Code geändert,
 kein Probing im Produkt), nur lokal mit den Cookies aus `config.toml`; **keine** Cookie-Werte oder
-Namensinhalte protokolliert. **Thumbnail-Route (Stand 2026-10-14):** Der nötige Dienst ist **schon dokumentiert** — `docs/PROTOCOL.md`
+Namensinhalte protokolliert. **Thumbnail-Route: GELÖST UND LIVE BEWIESEN (2026-10-14, Recon + eigener Test):** Die Route liegt **nicht**
+unter `/drive/v1`, sondern auf dem eigenen Host (`docs/PROTOCOL.md` §2.4, `thumbnailServiceUrl`):
+
+```
+GET https://thumbnails-photos.amazon.de/v1/thumbnail/<avatarNodeId>?viewBox=60%2C60&fit=clip&encoding=jpeg
+```
+
+Antwort = **direkte Bilddaten** (JPEG), kein JSON, kein `tempLink`. Mit **unserem Cookie-Satz** (derselbe
+wie `build_common_headers`, also ohne den gerätespezifischen `x-amz-access-token`, den das Original
+schickt) liefert der Aufruf **HTTP 200, `image/jpeg`, 2 135 Bytes, 60×60**. Der Umweg über `tempLink`
+(= Rohdatei, bei diesem Konto 13,5 MB CR3) war die falsche Spur. Der Recon hat die URL-Konstruktion im
+Original belegt (`EndpointsProvider.GetThumbnailUrl`, `CloudDriveService.DownloadThumbnail`,
+`ThumbnailWorker.GetSmartCroppedThumbnail`, `AvatarViewBoxSize = 60`) und in
+`docs/SPEC_ACCOUNT_BILLING.md` §3.4/§9 dokumentiert; die dort zuletzt offene UNKNOWN („akzeptiert der
+Thumbnail-Host unsere Cookie-Session?") ist mit diesem Test **beantwortet: ja**.
+
+
 §2.4 enthält die Endpoint-Discovery mit `thumbnailServiceUrl: https://thumbnails-photos.amazon.de/`
 (daneben `metadataUrl: https://cdws.eu-west-1.amazonaws.com/drive/v1/`, `downloadServiceUrl`,
 `photosBFFUrl`, `uploadServiceUrl`). Die Erwartung „das Original lädt einen Thumb, nicht das RAW" ist
