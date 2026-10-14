@@ -875,6 +875,39 @@ im Fix-Bericht erfasst.
 `uploaded_files = 480` (die Zeile hätte „480 von 150" gezeigt) — beim Abschluss wurde nur
 `uploaded_files` fortgeschrieben, nicht `total_files`. Wird im selben Paket mitrepariert.
 
+## Verifikation „fertig\" nach dem Lauf (2026-10-14) — die Zahl ist irreführend, die Anzeige falsch
+
+Der User zweifelte die Zahl an („passt die Anzahl wirklich von heute?\"). **Zu Recht.** Drei Befunde:
+
+**1. `done` mischt drei völlig verschiedene Ausgänge (Code-Beleg).** In `src/upload.rs`:
+`FileOutcome::Uploaded` → `s.done += 1` (`:496`), `FileOutcome::ConflictSkipped` → **ebenfalls** `s.done += 1`
+(`:552`, Log „Vorhanden, übersprungen", das ist der 409-Fall: die Datei lag **schon** im Konto), und der
+lokale Dedup-/Stat-Skip zählt ebenfalls als `done` (`:376`, `:421`, Log „unverändert"). **„480 fertig"
+heißt also nicht „480 neu hochgeladen"**, sondern „480 abgearbeitet" — die App kann die Fälle heute
+nicht auseinanderhalten. Das ist die eigentliche Antwort auf die Frage.
+
+**2. Pro Datei am Server gegengeprüft** (`GET /drive/v1/nodes?filters=name:(\"…\")`, belegt die
+Existenz **und** das Server-Datum; Fenster unseres Laufs = 14.10.2026 19:00–19:20 UTC):
+`22_Vikings-Reisinger_166-2.jpg` liegt dort seit **27.08.2026** (lokal als „hochgeladen 19:05"
+verbucht ⇒ 409-übersprungen), `27_ÖFB-Reisinger_36.jpg` seit **28.09.2026**,
+`22_Vikings-Reisinger_192-2.jpg` sogar **zweimal** (27.08. + 19.09.) — dagegen
+`13_ÖFB-Reisinger_18/24/30.dng` mit **createdDate 14.10. 19:09** = in diesem Lauf **wirklich neu**.
+Die Zahl der echten Neuzugänge wurde über alle 480 Index-Einträge bestimmt (siehe unten).
+
+**3. Anzeige-Fehler, der genau wie „fertig passt nicht" aussieht:** `src/backup.rs:1457-1462` rechnet
+`pct = done / total` und druckt das **ungekappt** als zweite Zeile („{pct}% hochgeladen"). Mit dem
+Altzustand `total_files = 150` bei `uploaded_files = 480` stand dort **„320% hochgeladen"** — während
+die Statuszeile darüber „100% hochgeladen" meldete. Ursache ist derselbe Fehler wie beim Absturz-Paket
+(`finalize_upload` schrieb `uploaded_files`, aber nicht `total_files`); Fix läuft. **Offen bleibt, ob
+`pct` zusätzlich gekappt (`clamp(0.0, 1.0)`) werden soll** — ein inkonsistenter Altzustand darf nie
+wieder „320%" zeigen.
+
+**Rescan-Weg (User fragte):** **global gibt es keinen** — der Backup-Kopf hat nur „Datensicherung
+hinzufügen …" und den Pause/Fortsetzen-Umschalter (`src/backup.rs:1255`, `:1262`). **Pro Ordner** gibt
+es ihn, aber versteckt: im **⋯-Menü** der Zeile als **„Jetzt scannen und hochladen"**
+(`FolderAction::Upload`, `src/backup.rs:1489`). Die Einmal-Zeile hat bewusst kein ⋯-Menü
+(`src/backup.rs:1486`). Kalte Erkennung passiert sonst nur beim Start (max-mtime-Wasserzeichen).
+
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
 Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
