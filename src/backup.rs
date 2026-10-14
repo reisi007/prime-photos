@@ -181,7 +181,14 @@ fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: 
     };
     s.bytes_done = 0;
     s.net_bytes = 0;
+    s.net_started = None;
     s.upload_secs = 0.0;
+    // Conflict prompt state is per run: a "don't ask again" choice from a
+    // previous run must never silently overwrite files in this one.
+    s.pending_conflict = None;
+    s.conflict_answer = None;
+    s.conflict_remember = false;
+    s.conflict_override = None;
     s.log(msg);
 }
 
@@ -642,6 +649,9 @@ impl PrimePhotoApp {
 
         let mut remember = self.upload.lock().unwrap().conflict_remember;
         let mut answer: Option<ConflictResolution> = None;
+        // NOTE: egui 0.31 has no `Window::modal`; the dialog is centred and
+        // covers the page it matters for. A second upload run is still
+        // impossible while it waits (`upload_busy()`).
         egui::Window::new(tr("Dateiname-Konflikt"))
             .collapsible(false)
             .resizable(false)

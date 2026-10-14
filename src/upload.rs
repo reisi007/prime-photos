@@ -66,8 +66,11 @@ pub(crate) struct UploadShared {
     pub(crate) bytes_total: u64,
     pub(crate) bytes_done: u64,
     pub(crate) net_bytes: u64,
-    /// Seconds spent actually transferring (dedup skips are excluded, they would
-    /// otherwise report an infinite rate).
+    /// Wall-clock instant of the first completed transfer; the byte rate is
+    /// measured from here (`upload_secs`), so the ETA does not depend on how
+    /// many workers ran in parallel.
+    pub(crate) net_started: Option<Instant>,
+    /// Seconds since `net_started` (wall clock). 0 while nothing has finished.
     pub(crate) upload_secs: f64,
     /// Interactive name-conflict prompt (docs/SPEC_DEDUP.md §4.1): the file name
     /// the user must decide on. `Some` while the run is waiting for the answer.
@@ -436,7 +439,13 @@ pub(crate) async fn upload_worker(
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    let answer = resolve_conflict(&shared, &name).await;
+                    let answer = match resolve_conflict(&shared, &name).await {
+                        // The prompt can only answer with a concrete policy;
+                        // normalise defensively so `Ask` can never bounce the
+                        // file through this loop a second time.
+                        ConflictResolution::Ask => ConflictResolution::Ignore,
+                        a => a,
+                    };
                     if answer == ConflictResolution::Ignore {
                         existing_conflict_id = Some(existing.to_string());
                         break FileOutcome::ConflictSkipped;
@@ -449,8 +458,7 @@ pub(crate) async fn upload_worker(
         let mut requeued = false;
         match outcome {
             FileOutcome::Uploaded(id) => {
-                // Remember the upload (also for the server-side 409 case, which
-                // upload_picture returns as Ok) so the next scan skips it.
+                // Remember the upload so the next scan skips it.
                 dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
                 let mut s = shared.lock().unwrap();
                 s.done += 1;
@@ -461,7 +469,12 @@ pub(crate) async fn upload_worker(
                 }
                 s.bytes_done = s.bytes_done.saturating_add(size);
                 s.net_bytes = s.net_bytes.saturating_add(size);
-                s.upload_secs += started.elapsed().as_secs_f64();
+                // Throughput is measured against wall clock, not by summing
+                // per-file durations: with several workers that sum is a
+                // multiple of the real elapsed time and the ETA would be
+                // pessimistic by roughly the worker count.
+                let first = *s.net_started.get_or_insert_with(Instant::now);
+                s.upload_secs = first.elapsed().as_secs_f64();
                 s.touch_queue();
                 s.log(format!("OK    {}", path.display()));
             }
@@ -497,6 +510,12 @@ pub(crate) async fn upload_worker(
                 // 409 with `Ignore` (or an `Ask` answered with "Ignorieren"):
                 // the file is already on the server. Finished and dedup-friendly
                 // — not an error, and no bytes were transferred.
+                //
+                // Record it in the local MD5 index like a real upload: without
+                // this, every later run would read, hash and re-send the whole
+                // file just to get the same 409 again — exactly the wasted
+                // bandwidth this whole path exists to avoid.
+                dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
                 let mut s = shared.lock().unwrap();
                 s.done += 1;
                 *s.folder_done.entry(idx).or_insert(0) += 1;
