@@ -208,17 +208,32 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
 Anlass: Der User suchte einen Rescan-Button und erwartete ein **vertikales „…"-Icon** mit Popup bei
 Linksklick; außerdem zweifelte er die Zahl „480 fertig" an („passt die Anzahl wirklich von heute?").
 
-- **Zeilen-Menü: gezeichneter vertikaler Kebab** (drei Punkte untereinander), **immer sichtbar**, mit
-  Tooltip „Aktionen"; Linksklick öffnet das Popup (egui-Verhalten bleibt). **Warum gezeichnet und nicht
-  als Text:** die gemessene Font-Abdeckung von egui 0.31 ist
-  `epaint_default_fonts-0.31.1` — `⋮` U+22EE fehlt in **allen vier** Fonts (Hack, Ubuntu-Light,
-  NotoEmoji, emoji-icon-font), ein Text-`⋮` erschiene als □ (dieselbe Fehlerklasse wie die
-  Umlaut-NFD-Lücke). `⋯` U+22EF gibt es nur in Hack-Regular. Icon daher in `src/icons.rs` zeichnen
-  (wie `nav_icon`/`draw_flag_badge`). Aktuell existiert genau **eine** `⋯`-Stelle: `src/backup.rs:1501`.
-- **Rescan wird sichtbar:** pro Ordner-Zeile ein **eigener, gezeichneter ⟳-Button**, der direkt
+- **Icons kommen aus einer professionellen Icon-Sammlung, nicht selbst gezeichnet** (User-Korrektur
+  2026-10-14, nachdem er „selbst zeichnen" abgelehnt hat: „so gut wie es geht nicht selbst zeichnen,
+  sondern icons nutzen … besser was nehmen, was lizenzrechtlich passt und professionell ist").
+  Konkret: **Material Symbols (Google, Apache-2.0)**, als **SVG** in `assets/` über die **vorhandene**
+  Pipeline (`build.rs`/`resvg` → `OUT_DIR`-Raster → `include_bytes!`), zur Laufzeit per **Tint** in die
+  Theme-Farbe. **Kein Icon-Font** (User: „potentiell nicht die Iconfont selbst einbinden, sondern die
+  PNGs in der richtigen Größe") — Raster statt Font, keine neue Abhängigkeit.
+  Belege: `assets/icon-more-vert.svg` (Kebab) und `assets/icon-refresh.svg`, Quellen im
+  Material-Symbols-Repo (`symbols/web/<name>/materialsymbolsoutlined/<name>_24px.svg`), Hashes und
+  Attribution in `docs/THIRD_PARTY.md`.
+  **Falle, die dabei zu beachten ist:** die Quellen haben **kein** `fill`/`currentColor` (Standard =
+  schwarz), der vorhandene Asset-Override `*{color:…}` färbt sie also **nicht** — für die Icon-Gruppe
+  greift ein **fill**-Override. Das wird durch einen Test belegt (Raster ist gedeckt und weiß).
+- **Zeilen-Menü: vertikaler Kebab, immer sichtbar**, Tooltip „Aktionen", Linksklick öffnet das Popup
+  (egui 0.31 hat **kein** `From<Image> for WidgetText` ⇒ `ui.menu_button` scheidet aus; es wird der
+  dokumentierte Weg `Button::image` + `popup_below_widget` + `memory_mut(toggle_popup)` benutzt).
+  Aktuell existiert genau **eine** `⋯`-Stelle: `src/backup.rs:1501`.
+- **Rescan wird sichtbar:** pro Ordner-Zeile ein **eigener Refresh-Icon-Button**, der direkt
   „Jetzt scannen und hochladen" auslöst. Der Kebab-Popup behält den Rest (Im Dateimanager anzeigen,
   Bearbeiten, Trennen, Pausieren). Grund: der Rescan existierte, war aber nur im Text-`⋯` versteckt.
   **Global bleibt es weiterhin ohne „Alles neu prüfen"** (nicht beauftragt).
+  **Verworfen (2026-10-14):** das Zeilen-Icon **selbst zu zeichnen** (in `src/icons.rs`) — der User
+  will keine handgemachten Formen, sondern eine lizenzierte Icon-Bibliothek. Ebenfalls verworfen:
+  das Textzeichen `⋮` (U+22EE **fehlt in allen vier** Fonts von `epaint_default_fonts-0.31.1` — Hack,
+  Ubuntu-Light, NotoEmoji, emoji-icon-font — und erschiene als □; `⋯` U+22EF gibt es nur in
+  Hack-Regular) und ein **Icon-Font-Crate** als zweite Icon-Quelle.
 - **Ergebnis wird aufgeschlüsselt:** „fertig" darf **nicht** länger echt-Upload, 409 „schon im Konto"
   und lokalen Dedup-Skip zusammenwerfen. Anzeige fortan getrennt:
   **neu hochgeladen / bereits im Konto / unverändert / Fehler**. Belegte Ursache: `src/upload.rs` zählt

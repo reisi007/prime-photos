@@ -913,17 +913,25 @@ es ihn, aber versteckt: im **⋯-Menü** der Zeile als **„Jetzt scannen und ho
 Drei Entscheidungen (Details in `AGENTS.md` → „Zeilen-Aktionen & Ergebnis-Anzeige"), noch **nicht**
 umgesetzt:
 
-- [ ] **Gezeichneter vertikaler Kebab**, immer sichtbar, Tooltip „Aktionen", Linksklick → Popup.
-  Begründung: `⋮` U+22EE fehlt in allen vier Fonts von `epaint_default_fonts-0.31.1` (gemessen) ⇒
-  Textzeichen wäre ein □. Einzige `⋯`-Stelle: `src/backup.rs:1501`. Icon nach `src/icons.rs`.
-- [ ] **Sichtbarer ⟳-Rescan-Button pro Zeile** (löst „Jetzt scannen und hochladen" aus); der Popup
-  behält die restlichen Aktionen. Grund: der Rescan existierte, war aber im Text-`⋯` nicht auffindbar.
-  Global weiterhin kein „Alles neu prüfen" (bewusst nicht beauftragt).
+- [ ] **Vertikaler Kebab als echtes Icon** (Material Symbols `more_vert`), immer sichtbar, Tooltip
+  „Aktionen", Linksklick → Popup via `Button::image` + `popup_below_widget` (egui 0.31 hat kein
+  `Image → WidgetText`, `ui.menu_button` scheidet aus). Einzige `⋯`-Stelle: `src/backup.rs:1501`.
+- [ ] **Sichtbarer Refresh-Button pro Zeile** (Material Symbols `refresh`), löst „Jetzt scannen und
+  hochladen" aus; der Popup behält die restlichen Aktionen. Grund: der Rescan existierte, war aber im
+  Text-`⋯` nicht auffindbar. Global weiterhin kein „Alles neu prüfen" (bewusst nicht beauftragt).
 - [ ] **Ergebnis aufschlüsseln: neu / bereits im Konto / unverändert / Fehler.** Belegte Ursache:
   `src/upload.rs` zählt alle drei Ausgänge als `s.done += 1` (`:496`, `:552`, `:376`/`:421`) ⇒ die
   Zahl „480 fertig" war nicht als „480 neu" lesbar. Die Ausgänge liegen bereits getrennt vor.
-- [ ] **Verworfen:** das Text-`⋯` behalten und nur einen Tooltip ergänzen; den Rescan weiter nur im
-  Popup lassen; „fertig" unaufgeschlüsselt lassen und nur >100 % klemmen.
+- [x] **Icon-Herkunft entschieden (User 2026-10-14):** Material Symbols (Apache-2.0) als SVG durch die
+  vorhandene resvg-Pipeline, Raster + Laufzeit-Tint, **kein** Icon-Font, keine neue Abhängigkeit.
+  Attribution sammelt `docs/THIRD_PARTY.md` (Eingang für die About-/Lizenzseite, Welle 4).
+  **Verworfen:** (a) die Zeilen-Icons **selbst zeichnen** — der User will keine handgemachten Formen;
+  (b) das Textzeichen `⋮` U+22EE — **fehlt in allen vier** Fonts von `epaint_default_fonts-0.31.1`
+  (`⋯` U+22EF gibt es nur in Hack-Regular), es erschiene als □; (c) ein **Icon-Font-Crate** als
+  zweite Icon-Quelle. **Verworfen** ebenfalls: „alles als fertig belassen und nur >100 % klemmen".
+- [ ] **Offen (nicht beauftragt):** die bisher **gezeichneten** UI-Glyphen (`nav_icon`, Flagge,
+  Logo) auf dieselbe Icon-Quelle umstellen — gleiche Pipeline, aber eigener Auftrag; der User wollte
+  das Logo ausdrücklich ausgenommen („abseits vom Logo").
 
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
