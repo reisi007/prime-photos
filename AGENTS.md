@@ -70,11 +70,25 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 Eigene Assets des Users liegen künftig in **`assets/`** (PNG mit Alpha) und werden per
 `include_bytes!` + die vorhandene `image`-Crate eingebunden (keine neue Dependency, kein
 Laufzeit-Pfad, self-contained Binary). Konkrete Dateiliste + Formatvorgaben steht im Ledger
-(`AGENTS.todo.md` → „Assets"). Fehlt ein Asset, fällt die App auf die heutige gezeichnete
-Variante zurück (`src/icons.rs`) — nie ein Crash, nie ein leeres Tray.
+(`AGENTS.todo.md` → „Assets").
+**Kein Fallback (User 2026-10-14):** fehlt ein Asset, ist das ein **Compile-Fehler** — ohne
+`Option`, ohne `exists()`-Prüfung, ohne Rückfall auf die gezeichnete Variante (`src/icons.rs`
+bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Dekodier-Fehler
+zur Laufzeit = fail fast, keine stille degradierte UI.
 
-MVP-Zielbild des Users: **polished** — Autostart, effizienter funktionierender Upload
-(Event-Watcher + Stat-Check + Wasserzeichen, siehe unten) und echte Tray-/Logo-Assets.
+MVP-Zielbild des Users: **polished** — Autostart (Default **an**, siehe §Autostart), effizienter
+funktionierender Upload (Event-Watcher + Stat-Check + Wasserzeichen) und echte Tray-/Logo-Assets.
+
+## Autostart (User-Entscheidung 2026-10-14) — Default **an**
+
+Der Login-Item-Schalter „Nach dem Anmelden starten" ist bei erster Nutzung **ein** (PORT-4 baute
+nur den Schalter, Default aus). Begründung: ohne Login-Item läuft nach Neustart/Ausloggen **kein
+Watcher** — die Event-Erkennung würde schlafen (Wasserscan ist nur Sicherheitsnetz). Das Original
+schaltet Autostart beim Onboarding ebenfalls selbst ein (`docs/SPEC_OS_INTEGRATION.md` §3.6).
+Umsetzungs-Vorgabe: `Config.autostart_enabled: Option<bool>` (`None` = nie entschieden ⇒
+registrieren + `Some(true)` speichern; `Some(false)` = bleibt aus; `Some(true)` ⇒ fehlendes
+Login-Item wird repariert). Der OS-Zustand bleibt die operative Wahrheit, `Config` speichert nur
+die Absicht. Details + Status: `AGENTS.todo.md` → „Zurückgestellt" #2. **Nicht umgesetzt.**
 
 ## Geplante Implementierungs-Wellen (User-Auswahl 2026-10-14) — dokumentiert, **nicht gestartet**
 
@@ -93,7 +107,7 @@ Der User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Start
 3. **About / Third-Party-Lizenzen** — Voraussetzung für ein öffentliches Release.
 
 Weitere offene Punkte (Queue-Paginierung, Fehlerfenster, Pause pro Ordner, Sortierung/Filter,
-Tray-Status-Popup, Autostart-Default, Pro-Ziel-Limit, Drosselung, Logout im Upload) sind im Ledger
+Tray-Status-Popup, Pro-Ziel-Limit, Drosselung, Logout im Upload) sind im Ledger
 dokumentiert, aber **nicht** eingeplant. Regel bleibt: „Anlegen bleibt Pflicht — Abarbeiten nicht";
 ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
 

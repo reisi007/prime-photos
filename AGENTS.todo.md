@@ -164,6 +164,7 @@ Pakete (Reihenfolge, jedes mit Build → Verify → Commit):
   **Residuum (MINOR, Win/Linux):** ohne sichtbares Tray-Icon gäbe es dort keinen In-App-Ausweg
   (macOS ist safe: ⌘Q terminiert). Fix wäre ein In-App-„Beenden" — offen.
 - [x] **PORT-4 – Optionaler Autostart** (`auto-launch`). Erledigt, Commit `c8e1448`: Schalter „Nach dem Anmelden starten“ in den Einstellungen, cfg-freier `Autostart`-Wrapper (nicht unterstützte Plattform = dauerhaft aus, keine Panics), Wunsch wird sofort wirksam. **Runtime-only**, nicht in `Config` persistiert — der Login-Item-Zustand des Betriebssystems ist die Quelle der Wahrheit. Verify: Build grün, 7 Warnungen, keine Clippy-Neuzugänge.
+*(Ergänzung 2026-10-14: Der **Default ist jetzt „an"** — dafür braucht es eine persistierte Absicht, siehe „Zurückgestellt" #2. Nicht umgesetzt.)*
 - [x] **PORT-5 – Hintergrund-Sync**. Erledigt, Commit `8a461a6`: ein Supervisor-Task (erster Tick nach 15 min, dann alle 90 min — beides bewusst hart-kodiert; der Takt ist „Zurückgestellt“ #3), pro Tick neues Config/Store-Lesen und alle Guards (Schalter an, angemeldet, nicht pausiert, nicht bereits aktiv); ein manueller Upload resettet den Intervall. Gemeinsamer Startpfad für manuell/Hintergrund (`UploadPlan::build` + `publish_state`/`publish_plan`). Schalter „Hintergrund-Synchronisierung“ in den Einstellungen (persistiert via `background_sync`, serde-default true, lädt also eine alte `config.toml`). `was_active` wird jetzt auch für Hintergrund-Läufe gelatcht ⇒ die Abschluss-Benachrichtigung greift dort ebenfalls. Verify: Build grün, 7 Warnungen, `cargo test` 2/2.
 - [x] **PORT-6 – Paketierung (macOS-Teil).** Erledigt, Commit `7c0d10c`: `packaging/Info.plist`
   (Bundle-ID `de.reisinger.prime-photos`, Executable `prime-photos`) + `packaging/make-app.sh`
@@ -309,9 +310,12 @@ einplanen, damit „MVP polished" inkl. Autostart und effizientem Upload erreich
   bereits vorhandene `image`-Crate → `tray_icon::Icon::from_rgba` bzw. eframe-Viewport-Icon.
   Damit keine neue Dependency, keine Pfadauflösung im `.app`-Bündel, Binary bleibt
   self-contained.
-- Fehlt oder ist ein Asset kaputt: **Fallback auf die heutige gezeichnete Variante**
-  (`src/icons.rs` `upload_logo`, Tray-Glyph) — die App darf nie wegen eines Assets crashen
-  oder ein leeres Tray zeigen.
+**Kein Fallback (User-Vorgabe 2026-10-14):** fehlt ein Asset, ist das ein **Compile-Fehler** —
+`include_bytes!` bricht den Build von selbst. Kein `Option`, keine `path.exists()`-Prüfung, kein
+Rückfall auf die gezeichnete Variante (`src/icons.rs` bleibt nur für die Vektor-Glyphen im UI selbst:
+Navigation, Status-Punkt, Flagge). Ein Dekodier-Fehler zur Laufzeit ist ebenfalls hart (fail fast,
+klare Meldung) — eine stille degradierte UI ist ausdrücklich **nicht** gewollt. Da noch nichts
+implementiert ist, wirkt sich das erst aus, wenn die Dateien in `assets/` eingebunden werden.
 
 **Vom User vorzubereitende Dateien** (Name = Dateiname, wird exakt so eingebunden):
 
@@ -382,7 +386,7 @@ Auswahl des Users als „Sonst noch offene Punkte"; bewusst **ohne** Starttermin
 - Pause **pro Ordner** (Zeilen-Symbol) — im Original vorhanden, bei uns Post-MVP.
 - Sortierung/Filter der Tabelle; Spalte „Größe" + relative Zeit (`datetimeago_*`).
 - Tray-Status-Popup mit Statistiken (`statuspopup_stats_*`).
-- Autostart-Default an/aus; Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte
+- Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte
   Drosselung; Logout während laufendem Upload; Nav-Accessibility; `.app`-Icon.
 - **Nicht** eingeplant (bewusst Out of Scope, siehe Scope-Inventar): Sync, Downloads/Restore,
   Datei-Management, Apple-Photos-Import, Videos, Autoplay, Upsell-/Quota-Banner, Auto-Update,
@@ -526,8 +530,21 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
    Datei erneut komplett gesendet); F2 = der „nicht noch einmal fragen"-Override überlebte den
    Lauf und konnte später Dateien still überschreiben. Dazu F3 (ETA-Rate jetzt Wanduhr statt
    Worker-Summe) und F4 (defensive Ask-Normalisierung).
-2. **Autostart-Default.** PORT-4 liefert den Schalter; ob er bei Installation **an** oder **aus**
-   sein soll, ist eine Produktentscheidung (Default bisher: aus).
+2. ✅ **ENTSCHEIDET (User 2026-10-14: „autostart an bei default")** — **Autostart-Default = an.**
+   Der Login-Item-Schalter ist bei der ersten Nutzung **ein** (Default aus PORT-4 obsolet).
+   Begründung: ohne Login-Item startet nach einem Neustart/ausgeloggtem User **kein Watcher** —
+   die Event-Erkennung würde schlafen (der Start-Wasserscan fängt es als Sicherheitsnetz, aber
+   „sofort hochladen" wäre hin). Passend dazu: das Original schaltet Autostart beim Onboarding
+   selbst ein (`docs/SPEC_OS_INTEGRATION.md` §3.6, belegt).
+   **Umsetzungs-Vorgabe (nötig, weil PORT-4 runtime-only war):** der Default „an" braucht eine
+   *Absicht*, sonst ist ein bewusstes „aus" des Users beim nächsten Start wieder weg. Geforderte
+   Form: `Config.autostart_enabled: Option<bool>` (serde-Default `None` = noch nie entschieden).
+   - `None` ⇒ beim Start registrieren und `Some(true)` speichern (Default an).
+   - `Some(false)` ⇒ bleibt aus (vetrgt; OS bleibt operative Wahrheit).
+   - `Some(true)` ⇒ Login-Item fehlt (plist gelöscht/App verschoben) ⇒ erneut registrieren
+     (Reparatur statt Drift).
+   Checkbox liest weiterhin primär den OS-Zustand; `Config` speichert nur die Absicht.
+   Nicht umgesetzt (wartet auf Auftrag).
 3. ~~**Hintergrund-Sync-Takt (PORT-5-Detail).**~~ **Größtenteils erledigt/obsolet (2026-10-14):**
    Event-driven ist umgesetzt (`notify`-Watcher, siehe Abschnitt „Erkennung neuer/geänderter
    Dateien"); der frühere 15/90-Minuten-Takt ist entfernt. **Offen bleibt nur:** (a) ob nach einem
