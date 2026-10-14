@@ -433,7 +433,25 @@ antwortet mit **HTTP 200** auf **genau unseren** Cookie-Satz (`session-id`, `x-a
 Die in `docs/SPEC_ACCOUNT_BILLING.md` §9 geführte UNKNOWN („akzeptiert der Endpunkt unsere
 Cookie-Session?") ist damit **beantwortet: ja**. Getestet ohne Diagnose-Code (kein Code geändert,
 kein Probing im Produkt), nur lokal mit den Cookies aus `config.toml`; **keine** Cookie-Werte oder
-Namensinhalte protokolliert. **Route-Befunde aus dem Live-Test (belegt 2026-10-14, nur Status/Typen protokolliert, keine Werte):**
+Namensinhalte protokolliert. **Thumbnail-Route (Stand 2026-10-14):** Der nötige Dienst ist **schon dokumentiert** — `docs/PROTOCOL.md`
+§2.4 enthält die Endpoint-Discovery mit `thumbnailServiceUrl: https://thumbnails-photos.amazon.de/`
+(daneben `metadataUrl: https://cdws.eu-west-1.amazonaws.com/drive/v1/`, `downloadServiceUrl`,
+`photosBFFUrl`, `uploadServiceUrl`). Die Erwartung „das Original lädt einen Thumb, nicht das RAW" ist
+damit bestätigt; das 13,5-MB-RAW kam nur über meinen `tempLink`-Pfad (Originaldatei). Live-Probe:
+`GET`/`POST`/`HEAD`/`OPTIONS` auf `<thumbnailServiceUrl>/{nodeId}` sowie die Varianten
+`?width=60&height=60`, `/IMAGE_THUMBNAIL`, `?transform=IMAGE_THUMBNAIL`, `?size=60`, `?tempLink=true`
+antworten **alle** mit `405 Not allowed` + Body „Invalid request" → die Anfrage braucht eine
+**Signatur/Autorisierung**, ein reiner Cookie-Aufruf genügt nicht. Deshalb: IL-Recherche in
+`GetSmartCroppedThumbnail`/`GetThumbnailUrl` (Clean-Room, `docs/SPEC_ACCOUNT_BILLING.md` §3.4/§9).
+
+**Blocker Hinweis (2026-10-14): `/Applications/Amazon Photos.app` existiert nicht mehr** — der User hat
+die App in den Papierkorb gelegt. Konsequenzen: (a) die beiden laufenden Recon-Aufträge, die auf diesen
+Pfad zeigen (`docs/SPEC_ABOUT.md`, Thumbnail-Route), zielen ins Leere und müssen **nach dem Zurücklegen
+neu gestartet** werden; (b) der Papierkorb ist für den Shell-Prozess **nicht lesbar und nicht
+auflistbar** (macOS-TCC, `Operation not permitted` — `mv` scheitert; `ls ~/.Trash` zeigt nichts, obwohl
+Spotlight die Pfade kennt). Restore nur über Finder („Zurücklegen") oder mit Vollzugriff.
+
+
 - **Funktioniert:** `GET /drive/v1/nodes/{avatarNodeId}?tempLink=true` → JSON mit `tempLink` auf den Host
   `content-eu.drive.amazonaws.com`. Der `tempLink` braucht **unsere Cookies** (ohne: HTTP 401).
 - **Der Avatar-Quellknoten dieses Kontos ist ein RAW:** Canon CR3, 6024×4020, `size` 13 475 387 Bytes,

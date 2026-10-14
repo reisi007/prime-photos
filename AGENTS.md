@@ -330,7 +330,9 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
     (sonst SmartScreen-Hinweis); Linux: keine Signatur. Details: `docs/RELEASE.md`.
 - **Spec-first pro Feature (User-Entscheidung 2026-10-13):** Vor jeder Implementierung wird das
   Original-Binary (`/Applications/Amazon Photos.app`: .NET-DLL + Ressourcen, nur lesend) zum
-  jeweiligen Feature untersucht; das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten
+  jeweiligen Feature untersucht — **Achtung (2026-10-14): liegt derzeit im Papierkorb** (der Shell
+  kann ihn nicht lesen, macOS-TCC); vor jedem Recon zurücklegen, sonst laufen die Aufträge ins Leere.
+  Das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten
   (beobachtetes Verhalten in eigenen Worten/Tabellen, keine verbatimen Code-Auszüge, keine
   Personendaten) — analog zu `docs/UI_FLOWS.md` / `docs/UI_STATES.md`. Erst danach Umsetzer-Briefing.
 - **Build-Verify ist nur grobe Basis:** Bauen → prüfen → committen gilt; Förmlichkeit
