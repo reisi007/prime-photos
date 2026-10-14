@@ -589,16 +589,17 @@ Our committed state, read directly → **belegt**:
 | Aspect | Our code | Location |
 |---|---|---|
 | Folder scan | `walkdir::WalkDir`, `filter_map(Result::ok)` — unreadable entries **silently dropped**; `file_type().is_file()`; then `is_supported_image` (extension sets, `.xmp` rejected) | `src/folders.rs` |
-| Metadata | `note_size` reads `fs::metadata().len()` only for the ETA byte total; **no mtime collected** in the scan | `src/backup.rs` (`UploadPlan::note_size`) |
-| Dedup identity | table `uploads(path, md5, size, mtime, uploaded_at)`; `should_skip(path, md5, …)` = path **+ MD5 only**; `size`/`mtime` stored but not part of the decision | `src/dedup.rs` |
+| Metadata | `note_size` reads `fs::metadata().len()` only for the ETA byte total; **mtime is now collected in a scan** — the start-time watermark walk (`max_mtime`) and `scan_new_since` stat every file (no read, no hash) | `src/backup.rs` (`UploadPlan::note_size`), `src/folders.rs` |
+| Dedup identity | table `uploads(path, md5, size, mtime, uploaded_at)`; `should_skip(path, md5, …)` = path **+ MD5 only** — the *upload* decision never looks at `size`/`mtime` (the fast-path row below does) | `src/dedup.rs` |
+| Folder watermark | second table `folder_scan(path, max_mtime, scanned_at)` in the same SQLite; `folder_max_mtime(path)` / `record_folder_scan(path, max_mtime)` (upsert). Rule: current `max_mtime` **not greater** ⇒ folder unchanged ⇒ **no hash, no per-file DB query, no upload plan**; only changed folders are walked, and only for files newer than the watermark (`scan_new_since`). Advancing happens **only after a clean run**, with the value read at decision time (files arriving mid-upload are not swallowed). A folder whose max_mtime cannot be computed (gone/ejected/no access) answers `None` ⇒ **left alone**, watermark untouched — never counted as "unchanged"; an unknown per-file mtime never counts as a watermark hit (`file_mtime` has no `0` fallback). Runs once per process after login (`background_sync_pass`, idempotent via `BG_SYNC_STARTED`), before the watchers arm | `src/dedup.rs`, `src/folders.rs`, `src/backup.rs` |
 | Fast path | `stat_matches(path, size, mtime)` — same path **and** size **and** mtime → skip without reading/hashing; `mtime == 0` never hits; MD5 remains the identity | `src/dedup.rs`, wired in `src/upload.rs` before `fs::read` |
-| Change trigger | **polling**: `BG_SYNC_FIRST_TICK` 15 min, then `BG_SYNC_INTERVAL` 90 min, re-scanning **every enabled folder** per tick; no filesystem events | `src/backup.rs` (`background_sync_loop` / `background_sync_tick`) |
-| OS watcher | **none** — no `notify`/FSEvents/inotify dependency | `Cargo.toml` |
-| Granularity | the tick re-walks the folder and re-plans every file; only the *upload* stage consults the index | `src/backup.rs` (`UploadPlan::build` → `scan_images`) |
+| Change trigger | **OS filesystem events, not polling**: `notify` 8.2.0 (`RecommendedWatcher` → macOS FSEvents / Windows `ReadDirectoryChangesW` / Linux inotify), one recursive watcher per enabled folder (`sync_watchers`), supervised by `watch_loop`: debounce `WATCH_DEBOUNCE` 5 s per burst, watcher set re-synced/re-armed every `WATCH_POLL` 30 s, remembered files bounded by `WATCH_PENDING_MAX` 500. The periodic 15/90-min tick is **discarded** — no timer re-scans the folders | `src/backup.rs` (`watch_loop`, `sync_watchers`), `Cargo.toml` |
+| OS watcher | **`notify` 8.2.0** (`Cargo.toml`); per event only the affected file is checked — `collect_event_paths` keeps supported image **files** (a directory is not a photo, a path that no longer exists is a deletion — both dropped, like the original's event type gate, §4.3), `map_to_folders` attaches each path to its enabled backup folder, `handle_files` starts a run for exactly those files | `src/backup.rs`, `Cargo.toml` |
+| Granularity | per event: one run for exactly the reported files (`UploadPlan::build_from_events`) — no folder re-walk, no re-hash of everything; the per-file stat check still gates `fs::read`. At start: the watermark decides per folder (`build_since` → `scan_new_since`) | `src/backup.rs` |
 | Deletions | not modelled; nothing removes a path from the index | `src/dedup.rs` |
 | Read errors | `fs::read` failure → `failed += 1`, row `FileState::Failed`, folder finalised `Error` | `src/upload.rs` |
 | Retry | none — one attempt per run; a failure is final for that run | `src/upload.rs` |
-| Pause | global `watch::Sender<bool>`; the background tick is skipped while paused; a running worker parks after the current file | `src/backup.rs`, `src/upload.rs` |
+| Pause | global `watch::Sender<bool>`; while paused (or a run is busy, nobody is signed in, the switch is off) events are **parked** — `handle_files` keeps a bounded, de-duplicated pending list that the next `WATCH_POLL` retries — instead of dropped; no detached run starts without `can_start` (switch + sign-in + no pause + no active run); a running worker still parks after the current file | `src/backup.rs`, `src/upload.rs` |
 
 ### 7.1 Indicator model
 
@@ -610,17 +611,19 @@ Our committed state, read directly → **belegt**:
 
 ### 7.2 Watcher / trigger model
 
-| Original | Us (today) | Our direction (`AGENTS.md`, 2026-10-14) |
+| Original | Us (today) | Remaining distance (`AGENTS.md`, 2026-10-14) |
 |---|---|---|
-| FSEvents per folder, 3 s latency, 100 ms per-path throttle, 5 s folder debounce, 30 s queue poll, re-arm on completion/error, paused folders get no watcher | 15/90 min polling over all enabled folders | OS filesystem events per watched folder via a cross-platform crate (FSEvents / `ReadDirectoryChangesW` / inotify); **the 15/90-min poll is discarded** as the primary path |
-| file event → single-path handling; folder event → debounced scan request | tick → whole-folder re-scan | per event, check only the affected file ("file add / edit per event"), no full folder walk, no re-hash of everything |
-| cold boot: one periodic check per 24 h (plus 336 h / 168 h staleness) | first background run after 15 min | one enumeration per folder at start/after login, decided by stat — **no timer** |
-| safety net for missed events | none | optional, still open: a per-folder `max mtime` watermark in SQLite, compared at start; a metadata-only `walkdir` (no reads) that produces **no hash, no per-file DB query, no upload plan** when unchanged. *Inherent limit, same as the original:* a copy that preserves mtime does not raise the watermark |
-| pause blocks events (paused schedules get no watcher) | the background tick is skipped while paused | pause blocks events too |
+| FSEvents per folder, 3 s latency, 100 ms per-path throttle, 5 s folder debounce, 30 s queue poll, re-arm on completion/error, paused folders get no watcher | **implemented** — `notify` 8.2.0 `RecommendedWatcher`, one recursive watcher per enabled folder (`sync_watchers`), re-synced every `WATCH_POLL` 30 s (which also re-arms the set after a watcher error); `WATCH_DEBOUNCE` 5 s per burst; pending files bounded (`WATCH_PENDING_MAX` 500) | no per-path 100 ms throttle and no 3 s latency — a burst is de-duplicated inside `collect_event_paths` and handled once after the 5 s debounce (*inferred*: same coalescing purpose, coarser values); the original gives a *paused* schedule no watcher, ours keeps watching and **parks** the events |
+| file event → single-path handling; folder event → debounced scan request | **implemented** — per event only the affected file is checked (`collect_event_paths` → `map_to_folders` → `handle_files`), one run for exactly those files (`build_from_events`); no full folder walk, no re-hash of everything (stat check → `should_skip`) | folder-level debounce not modelled: the original turns a folder event into one queued scan request; ours treats a folder change as the individual file events it produces (*inferred*: equivalent for flat copies, noisier for a folder rename) |
+| cold boot: one periodic check per 24 h (plus 336 h / 168 h staleness) | **implemented** — one `background_sync_pass` per process, after login, deciding per folder by stat — **no timer** | the 24 h / 336 h / 168 h cadence has no counterpart, by decision |
+| safety net for missed events | **start-time watermark** — `folder_scan` table, read via `folder_max_mtime`, written via `record_folder_scan`; a metadata-only `walkdir` (`max_mtime`) produces **no hash, no per-file DB query, no upload plan** when unchanged, changed folders are scanned via `scan_new_since`. *Inherent limit, same as the original:* a copy that preserves mtime does not raise the watermark | a net for *missed* events (watcher limit, ejected volume, network mount) stays **open** — optional switch, not decided (`AGENTS.md`); at start the watermark covers them whenever mtime grew |
+| pause blocks events (paused schedules get no watcher) | pause **parks** events (bounded, de-duplicated, retried on the next `WATCH_POLL`) and blocks every run start (`can_start`); the watchers stay armed | same intent (a paused app uploads nothing), different mechanism |
 
 *Inferred:* the original has the same blind spot elsewhere — 3 s latency + 100 ms
 throttle mean an event can be missed (sleep/wake, ejected volume), and its only fallback
-is the 336 h / 168 h staleness scan.
+is the 336 h / 168 h staleness scan. Ours has the same shape: `watch_loop` re-arms only on
+error, so an event lost while the process was asleep or the volume was gone is caught by
+the start watermark only when it also raised `max_mtime`.
 
 ### 7.3 File locks / half-written files — the main gap
 
@@ -701,15 +704,18 @@ deliberate divergence — the `uploads` table grows monotonically with renamed f
   classified), `docs/SPEC_NOTIFICATIONS.md` (status icon; no "backup finished" toast).
 - `docs/UI_FLOWS.md` §4.5–4.7 (backup configuration, auto-upload toggle),
   `docs/UI_STATES.md` §3/§4 (row states).
-- Our code: `src/folders.rs` (`scan_images`, `is_supported_image`), `src/dedup.rs`
-  (`should_skip`, `stat_matches`, `record_upload`), `src/upload.rs` (stat short-circuit,
-  read, MD5, one-attempt error handling), `src/backup.rs` (`UploadPlan::build`,
-  `background_sync_loop`, `background_sync_tick`, `BG_SYNC_FIRST_TICK` /
-  `BG_SYNC_INTERVAL`), `Cargo.toml` (no watcher dependency).
+- Our code: `src/folders.rs` (`scan_images`, `scan_new_since`, `max_mtime`,
+  `is_supported_image`), `src/dedup.rs` (`should_skip`, `stat_matches`,
+  `record_upload`, `folder_max_mtime`, `record_folder_scan`), `src/upload.rs`
+  (stat short-circuit, read, MD5, one-attempt error handling), `src/backup.rs`
+  (`UploadPlan::build` / `build_since` / `build_from_events`, `can_start`,
+  `background_sync_pass`, `sync_watchers`, `watch_loop`, `handle_files`,
+  `WATCH_DEBOUNCE` / `WATCH_POLL` / `WATCH_PENDING_MAX`), `Cargo.toml`
+  (`notify` 8.2.0).
 - `AGENTS.md` → "Erkennung neuer/geänderter Dateien (User-Entscheidung 2026-10-14)":
   OS events instead of polling, per-event file check, stat check before hash, cold-start
-  enumeration, pause blocks events, optional `max mtime` watermark, 15/90-min poll
-  discarded.
+  enumeration via the `max mtime` watermark, pause parks events, an optional net for
+  missed events still open, 15/90-min poll discarded.
 
 ---
 

@@ -298,6 +298,67 @@ per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
   Cold-Boot-Scan, halb geschriebene Dateien. Nachtrag: Gap-Analyse nach PKG-2a auf den
   neuen Port-Stand aktualisiert (läuft).
 
+## Implementierungs-Wellen (User-Auswahl 2026-10-14) — **NUR DOKUMENTIERT, NICHT GESTARTET**
+
+User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Startauftrag** erteilt
+(„nur dokumentieren, aber nicht starten"). Diese Liste ist damit ein **Plan**, kein Arbeitsauftrag;
+gestartet wird erst auf ausdrücklichen Auftrag. Auftragsbeginn je Welle wird mit Datum + Commit
+hier ergänzt.
+
+### Welle 2 — P2 + P3 (die zwei offenen, bereits entschiedenen Punkte)
+
+- **P2 – One-Time-Queue temporär in SQLite.** Abgelegte Drag&Drop-Dateien kommen in eine
+  temporäre Tabelle **derselben SQLite**, in der MD5-Index und `folder_scan` liegen; **nach
+  vollständig abgeschlossenem Upload wird gelöscht**. Nach Neustart steht die Zeile „Einmalige
+  Sicherung" wieder und der Lauf wird fortgesetzt (Guards wie Kaltstart: Hauptschalter an,
+  angemeldet, nicht pausiert, nicht beschäftigt). Kein Watch, kein Wasserzeichen für diesen Pfad
+  (User-Klarstellung: Drag&Drop ist ein einmaliger Upload).
+- **P3 – Gesamt-Fortschritt über alle Uploads.** Genau **eine** aggregierte Anzeige über alle
+  Backup-Ziele inkl. One-Time-Zeile (Summe), sichtbar auch im Leerlauf und außerhalb der
+  Backup-Seite (Fußzeile), statt nur der Balken des gerade laufenden Laufs. Manuelle Läufe
+  starten weiterhin pro Ordner.
+
+### Welle 3 — echter Name + Profilbild im Account-Block
+
+- Voraussetzung (nicht recherchierbar, nur testbar): akzeptiert unser Cookie-Pfad
+  (`session-id` + `x-acb`/`at-acb`/`ubid-acb`) den belegten Endpunkt
+  `GET <metadataUrl>/drive/v1/account/preferences` (`docs/SPEC_ACCOUNT_BILLING.md`,
+  `CloudDriveAccountRefreshWorker.UpdatePreferences()`)? Felder `name` + `avatarNodeId`,
+  Avatar = 60×60 smart-crop, Cache `ThumbnailsPath/<nodeId>_60_60.jpeg`, Placeholder-Fallback,
+  Refresh beim Start + alle 24 h + on demand, nicht persistiert.
+- Bei Ja: Name als Titel des Account-Blocks (Original-Verhalten) + Avatar; bei Nein: Block
+  bleibt wie heute (Marktplatz + Presence-Dot + „Abmelden").
+- Quota ebenfalls belegt (`/drive/v2/account/quota?customerId=UNNEEDED`, Roh-Bytes) — separater,
+  eigener Punkt, nicht Teil dieser Welle.
+
+### Welle 4 — Release-Pflicht: About / Third-Party-Lizenzen
+
+- About-Fenster mit Version, Kurzhinweis, Datenschutz/ToS-Hinweis und Third-Party-Lizenzen
+  (`notify`, `reqwest`, `egui`/`eframe`, `rusqlite`, `wry`, `md5`, `image`, `kamadak-exif`,
+  `walkdir`, `chrono`, `tokio`, `tray-icon`, `auto-launch`, `rfd`, `clap`, `serde`/`toml`,
+  `futures`, `indicatif`, `dirs`, `log`/`env_logger`, `dispatch2`/`objc2` — macOS-Zweig).
+- In `AGENTS.md` als Voraussetzung für ein öffentliches Release vermerkt; neue Strings
+  zweisprachig (i18n-Regel).
+
+### Weitere offene Punkte (Bild-/Upload-/Sync-nah, dokumentiert, nicht eingeplant)
+
+Auswahl des Users als „Sonst noch offene Punkte"; bewusst **ohne** Starttermin:
+- Queue-Paginierung (heute bricht das Panel bei 300 Zeilen ab, Original lädt seitenweise 1000).
+- Fehlerfenster mit `readdtoqueue`/`retryall`; Semantik laut `SPEC_STATUS_DETAIL.md` (§3).
+- Pause **pro Ordner** (Zeilen-Symbol) — im Original vorhanden, bei uns Post-MVP.
+- Sortierung/Filter der Tabelle; Spalte „Größe" + relative Zeit (`datetimeago_*`).
+- Tray-Status-Popup mit Statistiken (`statuspopup_stats_*`).
+- Autostart-Default an/aus; Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte
+  Drosselung; Logout während laufendem Upload; Nav-Accessibility; `.app`-Icon.
+- **Nicht** eingeplant (bewusst Out of Scope, siehe Scope-Inventar): Sync, Downloads/Restore,
+  Datei-Management, Apple-Photos-Import, Videos, Autoplay, Upsell-/Quota-Banner, Auto-Update,
+  Proxy, ausgeblendete Dateien, iOS-Dedupe-Prompt, Crash-Relaunch.
+
+### Referenz: was in diesen Wellen **nicht** neu erfunden werden darf
+
+Alle Rechte-/Verhaltensfragen sind entweder aus den acht Clean-Room-Specs belegt oder als
+UNKNOWN markiert. Wo eine Spec einen Original-Wert nennt, gilt er als Vorgabe, nicht als Ratewert.
+
 ## Doku-Auftrag „Rest-Specs" (User-Wunsch 2026-10-14) — ERLEDIGT
 
 Alle acht beauftragten Clean-Room-Specs sind geschrieben, after-verify-round-korrigiert und

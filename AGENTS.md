@@ -65,6 +65,27 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   für den aktuellen Lauf `concurrency = 1` erzwingt; bei App-Neustart zurückgesetzt. Automatische
   Drosselung anhand des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs, Post-MVP).
 
+## Geplante Implementierungs-Wellen (User-Auswahl 2026-10-14) — dokumentiert, **nicht gestartet**
+
+Der User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Startauftrag** erteilt
+(„nur dokumentieren, aber nicht starten"). Details und Begründungen je Punkt stehen im Ledger
+(`AGENTS.todo.md` → „Implementierungs-Wellen"). Reihenfolge bei Start:
+
+1. **P2 + P3** — Drag&Drop-Dateien temporär in der SQLite (Überleben Neustart, Löschen nach
+   vollständigem Upload; kein Watch, kein Wasserzeichen) + **eine** aggregierte Fortschrittsanzeige
+   über **alle** Backup-Ziele inkl. One-Time-Zeile (Fußzeile, auch im Leerlauf).
+2. **Echter Name + Profilbild** im Account-Block — Endpunkt belegt
+   (`GET <metadataUrl>/drive/v1/account/preferences` → `name` + `avatarNodeId`, 60×60-Crop,
+   Cache `ThumbnailsPath/<nodeId>_60_60.jpeg`, Refresh Start + 24 h + on demand). Harte
+   Voraussetzung: ein Test muss zeigen, dass unser Cookie-Pfad dort akzeptiert wird; sonst bleibt
+   der Block wie heute.
+3. **About / Third-Party-Lizenzen** — Voraussetzung für ein öffentliches Release.
+
+Weitere offene Punkte (Queue-Paginierung, Fehlerfenster, Pause pro Ordner, Sortierung/Filter,
+Tray-Status-Popup, Autostart-Default, Pro-Ziel-Limit, Drosselung, Logout im Upload) sind im Ledger
+dokumentiert, aber **nicht** eingeplant. Regel bleibt: „Anlegen bleibt Pflicht — Abarbeiten nicht";
+ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
+
 ## Erkennung neuer/geänderter Dateien (User-Entscheidung 2026-10-14)
 
 - **Primärer Mechanismus: OS-Dateisystem-Events, kein Polling.** Die 15/90-Minuten-Runde
