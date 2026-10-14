@@ -25,6 +25,41 @@ pub struct DedupIndex {
     conn: Option<Connection>,
 }
 
+/// Why a path is present in the index — the outcome of the run that recorded it.
+///
+/// The distinction matters at skip time (user decision 2026-10-14): a path whose
+/// **content** was already in the account under another path (`ContentSkip`,
+/// renamed/moved) must keep counting as "bereits im Konto" in *every* run, while
+/// a path that itself was uploaded stays "unverändert".
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Origin {
+    /// The file itself was uploaded (or a server 409 accepted it as present).
+    Uploaded,
+    /// The content was already in the account under a different path; nothing
+    /// was sent (local cross-path content dedup).
+    ContentSkip,
+}
+
+impl Origin {
+    /// The value stored in `uploads.origin`.
+    fn as_db(self) -> &'static str {
+        match self {
+            Origin::Uploaded => "uploaded",
+            Origin::ContentSkip => "content_skip",
+        }
+    }
+
+    /// Map a stored value back; anything unknown (a legacy row written before
+    /// the column existed, or a future value) counts as a real upload — the
+    /// conservative default.
+    fn from_db(s: &str) -> Self {
+        match s {
+            "content_skip" => Origin::ContentSkip,
+            _ => Origin::Uploaded,
+        }
+    }
+}
+
 impl DedupIndex {
     /// Open (creating if needed) the persistent index. Falls back to an
     /// in-memory database and then to a no-op on any error.
@@ -58,7 +93,8 @@ impl DedupIndex {
                      md5         TEXT NOT NULL,
                      size        INTEGER NOT NULL,
                      mtime       INTEGER NOT NULL,
-                     uploaded_at TEXT NOT NULL
+                     uploaded_at TEXT NOT NULL,
+                     origin      TEXT NOT NULL DEFAULT 'uploaded'
                  );
                  CREATE INDEX IF NOT EXISTS ix_uploads_md5 ON uploads(md5);
                  CREATE TABLE IF NOT EXISTS folder_scan (
@@ -81,9 +117,34 @@ impl DedupIndex {
                  );",
             )
             .is_ok();
-        Self {
-            conn: if ok { Some(conn) } else { None },
+        if !ok {
+            return Self { conn: None };
         }
+        // Databases created before 2026-10-14 lack the `origin` column: the
+        // `CREATE TABLE IF NOT EXISTS` above leaves an existing table untouched,
+        // so the column is added explicitly. Best effort — a failed migration
+        // only costs the origin distinction, never correctness.
+        let _ = Self::ensure_origin_column(&conn);
+        Self { conn: Some(conn) }
+    }
+
+    /// Add the `origin` column to an `uploads` table that predates it (user
+    /// decision 2026-10-14). A fresh table already carries it, so this is a
+    /// no-op there; an existing table is migrated in place, with the `DEFAULT`
+    /// making every legacy row count as `'uploaded'` (nothing changes for it).
+    fn ensure_origin_column(conn: &Connection) -> rusqlite::Result<()> {
+        let has_origin = {
+            let mut stmt = conn.prepare("PRAGMA table_info(uploads)")?;
+            let mut rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            rows.any(|name| name.map(|n| n == "origin").unwrap_or(false))
+        };
+        if !has_origin {
+            conn.execute(
+                "ALTER TABLE uploads ADD COLUMN origin TEXT NOT NULL DEFAULT 'uploaded'",
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     fn db_path() -> Option<PathBuf> {
@@ -95,24 +156,29 @@ impl DedupIndex {
         )
     }
 
-    /// Path-centric pre-upload check: `true` when this exact path was already
-    /// uploaded with the same MD5. `size`/`mtime` are recorded alongside but do
-    /// not take part in the decision (MD5 is the identity, see docs/SPEC_DEDUP §1).
-    pub fn should_skip(&self, path: &Path, md5: &str, size: u64, mtime: i64) -> bool {
+    /// Path-centric pre-upload check: `Some(origin)` when this exact path was
+    /// already recorded with the same MD5, `None` otherwise. `size`/`mtime` are
+    /// recorded alongside but do not take part in the decision (MD5 is the
+    /// identity, see docs/SPEC_DEDUP §1).
+    ///
+    /// The returned [`Origin`] tells the caller whether the path itself was
+    /// uploaded ("unverändert") or only marked as a content skip ("bereits im
+    /// Konto") — one query answers both.
+    pub fn should_skip(&self, path: &Path, md5: &str, size: u64, mtime: i64) -> Option<Origin> {
         let Some(conn) = self.conn.as_ref() else {
-            return false;
+            return None;
         };
         let path_str = path.to_string_lossy();
-        let stored: Option<String> = conn
+        let stored: Option<(String, String)> = conn
             .query_row(
-                "SELECT md5 FROM uploads WHERE path = ?1",
+                "SELECT md5, origin FROM uploads WHERE path = ?1",
                 [path_str.as_ref()],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .unwrap_or(None);
         match stored {
-            Some(prev) if prev == md5 => {
+            Some((prev, origin)) if prev == md5 => {
                 log::debug!(
                     "dedup: skip {} (md5 {}, size {}, mtime {})",
                     path.display(),
@@ -120,9 +186,9 @@ impl DedupIndex {
                     size,
                     mtime
                 );
-                true
+                Some(Origin::from_db(&origin))
             }
-            _ => false,
+            _ => None,
         }
     }
 
@@ -152,67 +218,96 @@ impl DedupIndex {
         exists.is_some()
     }
 
-    /// Cheap pre-read check: `true` only when this exact path is in the index
-    /// **and** the stored `size` **and** `mtime` match the given ones exactly.
+    /// Cheap pre-read check: `Some(origin)` only when this exact path is in the
+    /// index **and** the stored `size` **and** `mtime` match the given ones
+    /// exactly; `None` otherwise.
     ///
     /// A stat hit is only the fast path — the caller then skips reading and
     /// hashing the file. The MD5 remains the duplicate identity
     /// (`docs/SPEC_DEDUP.md` §1): this check never replaces `should_skip`, it
     /// only avoids reading a file that provably did not change since it was
-    /// recorded. A missing entry, a different size or a different mtime answer
-    /// `false`, and the caller reads and hashes exactly as before.
+    /// recorded. The returned [`Origin`] carries the same distinction as
+    /// [`DedupIndex::should_skip`] ("unverändert" vs. "bereits im Konto").
+    /// A missing entry, a different size or a different mtime answer `None`,
+    /// and the caller reads and hashes exactly as before.
     ///
     /// Safety rule: an **unknown** mtime must never count as a hit. A caller
     /// whose `fs::metadata` failed passes `mtime = 0`; a stored `mtime = 0`
     /// (recorded without a readable timestamp) must not produce spuriously
-    /// lucky hits either — `0` on either side always answers `false`.
-    pub fn stat_matches(&self, path: &Path, size: u64, mtime: i64) -> bool {
+    /// lucky hits either — `0` on either side always answers `None`.
+    pub fn stat_matches(&self, path: &Path, size: u64, mtime: i64) -> Option<Origin> {
         let Some(conn) = self.conn.as_ref() else {
-            return false;
+            return None;
         };
         if mtime == 0 {
-            return false;
+            return None;
         }
         let path_str = path.to_string_lossy();
-        let stored: Option<(i64, i64)> = conn
+        let stored: Option<(i64, i64, String)> = conn
             .query_row(
-                "SELECT size, mtime FROM uploads WHERE path = ?1",
+                "SELECT size, mtime, origin FROM uploads WHERE path = ?1",
                 [path_str.as_ref()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()
             .unwrap_or(None);
         match stored {
-            Some((s, m)) if s == size as i64 && m == mtime => {
+            Some((s, m, origin)) if s == size as i64 && m == mtime => {
                 log::debug!(
                     "dedup: stat hit {} (size {}, mtime {})",
                     path.display(),
                     size,
                     mtime
                 );
-                true
+                Some(Origin::from_db(&origin))
             }
-            _ => false,
+            _ => None,
         }
     }
 
     /// Record a successful upload (or a 409 duplicate accepted as success) so the
-    /// next scan can skip it.
+    /// next scan can skip it. Always marks the row as [`Origin::Uploaded`], even
+    /// when the same path previously carried a content-skip marker — a real
+    /// upload of the path wins over the skip note.
     pub fn record_upload(&self, path: &Path, md5: &str, size: u64, mtime: i64) {
+        self.record(path, md5, size, mtime, Origin::Uploaded);
+    }
+
+    /// Remember a local **content skip** (user decision 2026-10-14): the file
+    /// was not sent because its content was already in the account under another
+    /// path. Recording it keeps the stat fast path alive on the next scan
+    /// (no re-read, no re-hash) and keeps the outcome reading "bereits im Konto"
+    /// instead of degrading to "unverändert".
+    pub fn record_content_skip(&self, path: &Path, md5: &str, size: u64, mtime: i64) {
+        self.record(path, md5, size, mtime, Origin::ContentSkip);
+    }
+
+    /// Shared upsert behind [`DedupIndex::record_upload`] and
+    /// [`DedupIndex::record_content_skip`]; `origin` is what the next scan reads
+    /// back. Same fallback contract: without a usable connection a silent no-op.
+    fn record(&self, path: &Path, md5: &str, size: u64, mtime: i64, origin: Origin) {
         let Some(conn) = self.conn.as_ref() else {
             return;
         };
         let path_str = path.to_string_lossy();
         let uploaded_at = chrono::Utc::now().to_rfc3339();
         let _ = conn.execute(
-            "INSERT INTO uploads (path, md5, size, mtime, uploaded_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO uploads (path, md5, size, mtime, uploaded_at, origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(path) DO UPDATE SET
                  md5 = excluded.md5,
                  size = excluded.size,
                  mtime = excluded.mtime,
-                 uploaded_at = excluded.uploaded_at",
-            rusqlite::params![path_str.as_ref(), md5, size as i64, mtime, uploaded_at],
+                 uploaded_at = excluded.uploaded_at,
+                 origin = excluded.origin",
+            rusqlite::params![
+                path_str.as_ref(),
+                md5,
+                size as i64,
+                mtime,
+                uploaded_at,
+                origin.as_db()
+            ],
         );
     }
 
@@ -366,17 +461,17 @@ mod tests {
         let p = Path::new("/photos/a.jpg");
 
         // Unknown path → upload.
-        assert!(!idx.should_skip(p, "aaaa", 10, 1));
+        assert_eq!(idx.should_skip(p, "aaaa", 10, 1), None);
 
-        // Recorded, same md5 → skip.
+        // Recorded, same md5 → skip, and it was a real upload.
         idx.record_upload(p, "aaaa", 10, 1);
-        assert!(idx.should_skip(p, "aaaa", 10, 1));
+        assert_eq!(idx.should_skip(p, "aaaa", 10, 1), Some(Origin::Uploaded));
 
         // Same path, different md5 → re-upload.
-        assert!(!idx.should_skip(p, "bbbb", 20, 2));
+        assert_eq!(idx.should_skip(p, "bbbb", 20, 2), None);
 
         // Different path, same md5 → upload (path-centric rule).
-        assert!(!idx.should_skip(Path::new("/photos/b.jpg"), "aaaa", 10, 1));
+        assert_eq!(idx.should_skip(Path::new("/photos/b.jpg"), "aaaa", 10, 1), None);
     }
 
     #[test]
@@ -399,7 +494,7 @@ mod tests {
         // The path-centric rule and the content rule disagree on `b` by design:
         // `should_skip` says "upload" (this path was never recorded), while
         // `content_seen` already knows the content is in the account.
-        assert!(!idx.should_skip(b, "aaaa", 10, 1));
+        assert_eq!(idx.should_skip(b, "aaaa", 10, 1), None);
         assert!(idx.content_seen("aaaa"));
     }
 
@@ -409,8 +504,8 @@ mod tests {
         let p = Path::new("/photos/a.jpg");
         idx.record_upload(p, "aaaa", 10, 1);
         idx.record_upload(p, "cccc", 30, 3);
-        assert!(idx.should_skip(p, "cccc", 30, 3));
-        assert!(!idx.should_skip(p, "aaaa", 10, 1));
+        assert_eq!(idx.should_skip(p, "cccc", 30, 3), Some(Origin::Uploaded));
+        assert_eq!(idx.should_skip(p, "aaaa", 10, 1), None);
     }
 
     #[test]
@@ -419,25 +514,91 @@ mod tests {
         let p = Path::new("/photos/a.jpg");
 
         // Unknown path → no stat hit.
-        assert!(!idx.stat_matches(p, 10, 1));
+        assert_eq!(idx.stat_matches(p, 10, 1), None);
 
         idx.record_upload(p, "aaaa", 10, 1);
 
-        // Recorded with the very same size + mtime → hit.
-        assert!(idx.stat_matches(p, 10, 1));
+        // Recorded with the very same size + mtime → hit, origin is the upload.
+        assert_eq!(idx.stat_matches(p, 10, 1), Some(Origin::Uploaded));
 
         // Different size → no hit (re-read and hash).
-        assert!(!idx.stat_matches(p, 20, 1));
+        assert_eq!(idx.stat_matches(p, 20, 1), None);
 
         // Different mtime → no hit.
-        assert!(!idx.stat_matches(p, 10, 2));
+        assert_eq!(idx.stat_matches(p, 10, 2), None);
 
         // Unknown mtime (0, e.g. `fs::metadata` failed) → never a hit, not
         // even when the size matches.
-        assert!(!idx.stat_matches(p, 10, 0));
+        assert_eq!(idx.stat_matches(p, 10, 0), None);
 
         // Different path → no hit (path-centric rule).
-        assert!(!idx.stat_matches(Path::new("/photos/b.jpg"), 10, 1));
+        assert_eq!(idx.stat_matches(Path::new("/photos/b.jpg"), 10, 1), None);
+    }
+
+    #[test]
+    fn content_skip_is_remembered_and_overwritten_by_a_real_upload() {
+        let idx = index();
+        let p = Path::new("/photos/renamed.jpg");
+
+        // A content skip is remembered with its own origin, so both fast paths
+        // keep answering "bereits im Konto" on every later scan.
+        idx.record_content_skip(p, "aaaa", 10, 1);
+        assert_eq!(idx.should_skip(p, "aaaa", 10, 1), Some(Origin::ContentSkip));
+        assert_eq!(idx.stat_matches(p, 10, 1), Some(Origin::ContentSkip));
+
+        // A later real upload of the same path wins and flips the origin back.
+        idx.record_upload(p, "aaaa", 10, 1);
+        assert_eq!(idx.should_skip(p, "aaaa", 10, 1), Some(Origin::Uploaded));
+        assert_eq!(idx.stat_matches(p, 10, 1), Some(Origin::Uploaded));
+    }
+
+    #[test]
+    fn migration_adds_origin_and_legacy_rows_count_as_uploaded() {
+        // A database written before the `origin` column existed.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE uploads (
+                 path        TEXT PRIMARY KEY,
+                 md5         TEXT NOT NULL,
+                 size        INTEGER NOT NULL,
+                 mtime       INTEGER NOT NULL,
+                 uploaded_at TEXT NOT NULL
+             );
+             INSERT INTO uploads (path, md5, size, mtime, uploaded_at)
+             VALUES ('/photos/legacy.jpg', 'aaaa', 10, 1, '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+
+        // Opening it runs the migration in place.
+        let idx = DedupIndex::from_conn(conn);
+
+        // The legacy row still matches (the column exists and its DEFAULT made
+        // the old row count as a real upload — nothing changes for it).
+        assert_eq!(
+            idx.should_skip(Path::new("/photos/legacy.jpg"), "aaaa", 10, 1),
+            Some(Origin::Uploaded)
+        );
+        assert_eq!(
+            idx.stat_matches(Path::new("/photos/legacy.jpg"), 10, 1),
+            Some(Origin::Uploaded)
+        );
+
+        // The migrated table accepts new origins too.
+        let p = Path::new("/photos/new.jpg");
+        idx.record_content_skip(p, "bbbb", 20, 2);
+        assert_eq!(idx.should_skip(p, "bbbb", 20, 2), Some(Origin::ContentSkip));
+    }
+
+    #[test]
+    fn content_seen_and_origin_checks_degrade_without_db() {
+        let idx = DedupIndex { conn: None };
+        // No connection: nothing seen, nothing matched, nothing recorded — and
+        // no panic (same contract as `record_upload`).
+        assert!(!idx.content_seen("aaaa"));
+        assert_eq!(idx.should_skip(Path::new("/photos/a.jpg"), "aaaa", 10, 1), None);
+        assert_eq!(idx.stat_matches(Path::new("/photos/a.jpg"), 10, 1), None);
+        idx.record_content_skip(Path::new("/photos/a.jpg"), "aaaa", 10, 1);
+        assert!(!idx.content_seen("aaaa"));
     }
 
     #[test]

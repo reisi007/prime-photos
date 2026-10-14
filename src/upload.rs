@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::dedup::DedupIndex;
+use crate::dedup::{DedupIndex, Origin};
 use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
 use crate::prime_photos::PrimePhotos;
@@ -412,13 +412,29 @@ pub(crate) async fn upload_worker(
         // Local pre-upload check (path + stat): same path, same size, same
         // mtime as recorded — the file is provably the one that was uploaded.
         // Treated exactly like the `should_skip` branch below, minus the read
-        // and the hash: done for this folder, no network, no throttle.
-        if dedup_on && dedup.lock().unwrap().stat_matches(&path, size, mtime) {
+        // and the hash: done for this folder, no network, no throttle. The
+        // recorded **origin** decides the counter and the wording: a path that
+        // was uploaded itself stays "unverändert", a recorded content skip keeps
+        // reporting "bereits im Konto" in every run.
+        let stat_origin = if dedup_on {
+            dedup.lock().unwrap().stat_matches(&path, size, mtime)
+        } else {
+            None
+        };
+        if let Some(origin) = stat_origin {
             let mut s = shared.lock().unwrap();
             s.done += 1;
-            s.unchanged_skipped += 1;
             *s.folder_done.entry(idx).or_insert(0) += 1;
-            *s.folder_unchanged.entry(idx).or_insert(0) += 1;
+            match origin {
+                Origin::ContentSkip => {
+                    s.conflict_skipped += 1;
+                    *s.folder_conflict.entry(idx).or_insert(0) += 1;
+                }
+                Origin::Uploaded => {
+                    s.unchanged_skipped += 1;
+                    *s.folder_unchanged.entry(idx).or_insert(0) += 1;
+                }
+            }
             if let Some(en) = s.queue.get_mut(row) {
                 en.state = FileState::Skipped;
             }
@@ -426,10 +442,16 @@ pub(crate) async fn upload_worker(
             // measured byte rate.
             s.bytes_done = s.bytes_done.saturating_add(size);
             s.touch_queue();
-            s.log(tr1(
-                "UEBERSPRUNGEN {}: bereits hochgeladen",
-                crate::text::nfc(&path.display().to_string()),
-            ));
+            s.log(match origin {
+                Origin::ContentSkip => tr1(
+                    "Bereits im Konto, nur umbenannt: {}",
+                    crate::text::nfc(&path.display().to_string()),
+                ),
+                Origin::Uploaded => tr1(
+                    "UEBERSPRUNGEN {}: bereits hochgeladen",
+                    crate::text::nfc(&path.display().to_string()),
+                ),
+            });
             continue;
         }
 
@@ -464,12 +486,28 @@ pub(crate) async fn upload_worker(
 
         // Local pre-upload check (path + md5). A skip is a finished item: it is
         // counted as done for this folder and consumes no network and no throttle.
-        if dedup_on && dedup.lock().unwrap().should_skip(&path, &md5sum, size, mtime) {
+        // The recorded **origin** distinguishes "unverändert" (this path was
+        // uploaded) from "bereits im Konto" (this path only remembers a content
+        // skip), so the wording stays stable across runs.
+        let skip_origin = if dedup_on {
+            dedup.lock().unwrap().should_skip(&path, &md5sum, size, mtime)
+        } else {
+            None
+        };
+        if let Some(origin) = skip_origin {
             let mut s = shared.lock().unwrap();
             s.done += 1;
-            s.unchanged_skipped += 1;
             *s.folder_done.entry(idx).or_insert(0) += 1;
-            *s.folder_unchanged.entry(idx).or_insert(0) += 1;
+            match origin {
+                Origin::ContentSkip => {
+                    s.conflict_skipped += 1;
+                    *s.folder_conflict.entry(idx).or_insert(0) += 1;
+                }
+                Origin::Uploaded => {
+                    s.unchanged_skipped += 1;
+                    *s.folder_unchanged.entry(idx).or_insert(0) += 1;
+                }
+            }
             if let Some(en) = s.queue.get_mut(row) {
                 en.state = FileState::Skipped;
             }
@@ -477,10 +515,16 @@ pub(crate) async fn upload_worker(
             // measured byte rate.
             s.bytes_done = s.bytes_done.saturating_add(size);
             s.touch_queue();
-            s.log(tr1(
-                "UEBERSPRUNGEN {}: bereits hochgeladen",
-                crate::text::nfc(&path.display().to_string()),
-            ));
+            s.log(match origin {
+                Origin::ContentSkip => tr1(
+                    "Bereits im Konto, nur umbenannt: {}",
+                    crate::text::nfc(&path.display().to_string()),
+                ),
+                Origin::Uploaded => tr1(
+                    "UEBERSPRUNGEN {}: bereits hochgeladen",
+                    crate::text::nfc(&path.display().to_string()),
+                ),
+            });
             continue;
         }
 
@@ -491,6 +535,13 @@ pub(crate) async fn upload_worker(
         // means the content is already in the account — counted like the
         // server's 409.
         if dedup_on && dedup.lock().unwrap().content_seen(&md5sum) {
+            // Remember the skip so the next scan takes the cheap stat path and
+            // keeps reporting "bereits im Konto" (user decision 2026-10-14) —
+            // without this, the file would be read and hashed again every run.
+            dedup
+                .lock()
+                .unwrap()
+                .record_content_skip(&path, &md5sum, size, mtime);
             let mut s = shared.lock().unwrap();
             s.done += 1;
             s.conflict_skipped += 1;
