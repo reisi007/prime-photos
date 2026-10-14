@@ -428,7 +428,7 @@ pub(crate) async fn upload_worker(
             s.touch_queue();
             s.log(tr1(
                 "UEBERSPRUNGEN {}: bereits hochgeladen",
-                path.display(),
+                crate::text::nfc(&path.display().to_string()),
             ));
             continue;
         }
@@ -446,7 +446,7 @@ pub(crate) async fn upload_worker(
                     en.state = FileState::Failed;
                 }
                 s.touch_queue();
-                s.log(tr2("FEHLER {}: {}", path.display(), e));
+                s.log(tr2("FEHLER {}: {}", crate::text::nfc(&path.display().to_string()), e));
                 continue;
             }
         };
@@ -455,7 +455,7 @@ pub(crate) async fn upload_worker(
 
         {
             let mut s = shared.lock().unwrap();
-            s.current = path.display().to_string();
+            s.current = crate::text::nfc(&path.display().to_string());
         }
 
         // Local pre-upload check (path + md5). A skip is a finished item: it is
@@ -475,7 +475,7 @@ pub(crate) async fn upload_worker(
             s.touch_queue();
             s.log(tr1(
                 "UEBERSPRUNGEN {}: bereits hochgeladen",
-                path.display(),
+                crate::text::nfc(&path.display().to_string()),
             ));
             continue;
         }
@@ -513,10 +513,12 @@ pub(crate) async fn upload_worker(
                         existing_conflict_id = Some(existing.to_string());
                         break FileOutcome::ConflictSkipped;
                     }
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
+                    let name = crate::text::nfc(
+                        &path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                    );
                     let answer = match resolve_conflict(&shared, &name).await {
                         // The prompt can only answer with a concrete policy;
                         // normalise defensively so `Ask` can never bounce the
@@ -556,7 +558,10 @@ pub(crate) async fn upload_worker(
                 let first = *s.net_started.get_or_insert_with(Instant::now);
                 s.upload_secs = first.elapsed().as_secs_f64();
                 s.touch_queue();
-                s.log(format!("OK    {}", path.display()));
+                s.log(format!(
+                    "OK    {}",
+                    crate::text::nfc(&path.display().to_string())
+                ));
             }
             FileOutcome::Failed(e) => {
                 // Expired session: retry this one file once after the token
@@ -572,7 +577,7 @@ pub(crate) async fn upload_worker(
                     s.touch_queue();
                     s.log(tr1(
                         "Anmeldung abgelaufen, {} wird erneut versucht.",
-                        path.display(),
+                        crate::text::nfc(&path.display().to_string()),
                     ));
                     requeued = true;
                 } else {
@@ -583,7 +588,7 @@ pub(crate) async fn upload_worker(
                         en.state = FileState::Failed;
                     }
                     s.touch_queue();
-                    s.log(tr2("FEHLER {}: {}", path.display(), e));
+                    s.log(tr2("FEHLER {}: {}", crate::text::nfc(&path.display().to_string()), e));
                 }
             }
             FileOutcome::ConflictSkipped => {
@@ -613,7 +618,10 @@ pub(crate) async fn upload_worker(
                 }
                 s.bytes_done = s.bytes_done.saturating_add(size);
                 s.touch_queue();
-                s.log(tr1("Vorhanden, übersprungen: {}", path.display()));
+                s.log(tr1(
+                    "Vorhanden, übersprungen: {}",
+                    crate::text::nfc(&path.display().to_string()),
+                ));
             }
         }
         if requeued {

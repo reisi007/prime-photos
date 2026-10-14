@@ -1328,7 +1328,7 @@ impl PrimePhotoApp {
                         self.store
                             .folders
                             .get(e.folder)
-                            .map(|f| f.name.clone())
+                            .map(|f| crate::text::nfc(&f.name))
                             .unwrap_or_default()
                     };
                     let idx = match slot.get(&e.folder).copied() {
@@ -1339,7 +1339,7 @@ impl PrimePhotoApp {
                             groups.len() - 1
                         }
                     };
-                    groups[idx].1.push((e.name.clone(), e.state));
+                    groups[idx].1.push((crate::text::nfc(&e.name), e.state));
                 }
                 groups
             };
@@ -1498,7 +1498,7 @@ impl PrimePhotoApp {
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
-                                    ui.label(RichText::new(&r.name).strong().size(15.0));
+                                    ui.label(RichText::new(crate::text::nfc(&r.name)).strong().size(15.0));
                                     ui.label(
                                         RichText::new(tr1(
                                             "{}% hochgeladen",
@@ -1525,7 +1525,10 @@ impl PrimePhotoApp {
                                         );
                                     } else {
                                         ui.label(
-                                            theme::muted(&r.path.display().to_string()).size(11.0),
+                                            theme::muted(crate::text::nfc(
+                                                &r.path.display().to_string(),
+                                            ))
+                                            .size(11.0),
                                         );
                                     }
                                 });

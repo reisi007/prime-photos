@@ -110,7 +110,10 @@ impl PrimePhotoApp {
 
         ui.separator();
         ui.collapsing(tr("Erweitert (Konto)"), |ui| {
-            ui.label(theme::muted(tr1("Konfiguration: {}", &self.config_path)));
+            ui.label(theme::muted(tr1(
+                "Konfiguration: {}",
+                crate::text::nfc(&self.config_path),
+            )));
             egui::Grid::new("cfg").num_columns(2).show(ui, |ui| {
                 ui.label(tr("Amazon-Marktplatz"));
                 let current = self.config.country.clone();

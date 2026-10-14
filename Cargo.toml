@@ -29,6 +29,7 @@ image = "0.25"
 wry = "0.57.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tray-icon = "0.26"
+unicode-normalization = "0.1.25"
 
 [build-dependencies]
 # Rasterises `assets/*.svg` into PNGs inside `OUT_DIR` (see `build.rs`).

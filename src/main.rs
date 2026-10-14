@@ -10,6 +10,7 @@ mod login;
 mod logging;
 mod notify;
 mod platform;
+mod text;
 mod theme;
 mod tray;
 mod upload;

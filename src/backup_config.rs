@@ -53,7 +53,7 @@ impl PrimePhotoApp {
         // (original `CanChangeSource`); "Ändern …" only in Create mode.
         ui.label(tr("Gesicherter Ordner:"));
         ui.horizontal(|ui| {
-            ui.label(theme::muted(form.path.display().to_string()));
+            ui.label(theme::muted(crate::text::nfc(&form.path.display().to_string())));
             let change = ui.add_enabled(!editing, theme::secondary_button(tr("Ändern …")));
             if change.clicked() {
                 if let Some(p) = FileDialog::new().pick_folder() {
@@ -203,7 +203,10 @@ impl PrimePhotoApp {
                             f.conflict_resolution = conflict;
                         }
                         let _ = self.store.save();
-                        self.log(tr1("Ordner hinzugefügt: {}", path.display()));
+                        self.log(tr1(
+                            "Ordner hinzugefügt: {}",
+                            crate::text::nfc(&path.display().to_string()),
+                        ));
                         self.config_form = None;
                         self.start_folder_upload(vec![idx]);
                     }

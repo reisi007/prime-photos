@@ -139,8 +139,11 @@ pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
 
 /// `POST content-<zone>.drive.amazonaws.com/v2/upload` with the query in the
 /// order the desktop client uses (`conflictResolution`, `fileSize`, `name`,
-/// `parentNodeId`, `contentDate`). `name` is passed through exactly as the
-/// caller supplies it (the original does not pre-encode it either).
+/// `parentNodeId`, `contentDate`). `name` is normalised to Unicode **NFC**
+/// before it enters the query ([`crate::text::nfc`]): macOS hands out NFD names
+/// and the server compares names exactly, so an unnormalised NFD name would not
+/// match a node created from Windows (see `text::nfc`). Nothing is encoded — the
+/// original does not pre-encode the name either.
 pub(crate) fn upload_url(
     zone: &str,
     conflict_resolution: &str,
@@ -149,6 +152,7 @@ pub(crate) fn upload_url(
     parent_node_id: &str,
     content_date: &str,
 ) -> String {
+    let name = crate::text::nfc(name);
     format!(
         "https://content-{zone}.drive.amazonaws.com/v2/upload?conflictResolution={}&fileSize={}&name={}&parentNodeId={}&contentDate={}",
         conflict_resolution, file_size, name, parent_node_id, content_date
@@ -320,5 +324,19 @@ mod tests {
             upload_url("na", "OVERWRITE", 5, "a b.jpg", "P", "d"),
             "https://content-na.drive.amazonaws.com/v2/upload?conflictResolution=OVERWRITE&fileSize=5&name=a b.jpg&parentNodeId=P&contentDate=d"
         );
+    }
+
+    #[test]
+    fn upload_url_normalises_nfd_names_to_nfc() {
+        // macOS hands out NFD ("O" + combining diaeresis); the server compares
+        // names exactly, so the request must carry the single NFC codepoint or a
+        // name written from Windows would not match.
+        let nfd = "O\u{308}FB-Reisinger_01.dng";
+        let url = upload_url("eu", "OVERWRITE", 7, nfd, "NODE", "2026-09-28T00:00:00.000Z");
+        assert!(url.contains("name=\u{D6}FB-Reisinger_01.dng"));
+        assert!(!url.contains('\u{308}'));
+        // An already-NFC name is passed through unchanged.
+        let url = upload_url("eu", "NONE", 7, "\u{D6}FB.dng", "NODE", "d");
+        assert!(url.contains("name=\u{D6}FB.dng"));
     }
 }
