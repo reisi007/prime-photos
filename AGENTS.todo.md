@@ -885,6 +885,18 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       Inhalt ist da, egal ob der Server es gemeldet hat oder wir es lokal erkennen. „unverändert"
       bleibt dem **gleichen Pfad** vorbehalten; gleicher Pfad + anderer MD5 wird hochgeladen.
       **Status: umgesetzt, Verify läuft** (inkl. der zwei offenen NFC-Anzeige-Lücken).
+- [ ] **Markierung im Index für übersprungene Inhalte** (User-Entscheidung 2026-10-14). Heute wird
+      der Pfad in dem neuen Inhalts-Skip-Zweig **nicht** vermerkt, damit der Fall in jedem Lauf als
+      „bereits im Konto" zählt — Folge: die Datei wird in **jedem** weiteren Scan **erneut gelesen
+      und gehasht** (der Stat-Schnellpfad kennt den Pfad nicht), beim Ziel „Sport" also ~3,6 GB pro
+      Scan. Soll: den Pfad **mit dem MD5 und einer Markierung** (`origin = 'content_skip'` neben den
+      echten Uploads) in `uploads` schreiben; dann greift `stat_matches`/`should_skip` **ohne Lesen**,
+      und die Anzeige bleibt trotzdem in **jedem** Lauf „bereits im Konto" (nicht „unverändert").
+      Bewusste **Schemaänderung** (eine Spalte + Migration für bestehende `dedup.sqlite3`); das
+      Original hat in seiner `uploads`-Tabelle ebenfalls eine `status`-Spalte. Abnahme: (a) erster
+      Lauf ⇒ „bereits im Konto", (b) zweiter Lauf ⇒ **weiterhin** „bereits im Konto", aber **ohne**
+      Datei-Lesung (per Test belegbar), (c) ändert sich der Inhalt später, wird hochgeladen und die
+      Markierung verschwindet.
 - [ ] **409-Ursache trennen** — das Original unterscheidet Inhaltsduplikat (⇒ wie ignoriert) von
       Namenskonflikt (⇒ Fehler); wir machen aus jedem 409 „bereits im Konto".
       **Beide Gründe sind jetzt live belegt (2026-10-14), mit exakter Schreibweise:**
