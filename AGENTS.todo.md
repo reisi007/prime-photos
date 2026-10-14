@@ -841,6 +841,40 @@ Binary (per Terminal gestartet, ohne `Info.plist`). `packaging/Info.plist` enth�
 Sichtprüfungen/Screenshots künftig das Bundle bauen (`packaging/make-app.sh`), nicht die nackte
 Binary starten.
 
+## Erster echter Upload: ERFOLGREICH (2026-10-14) + Absturz am Laufende (behoben)
+
+**Der Lauf ist vollständig durchgelaufen:** `~/Pictures/Sport`, **480 von 480 Dateien**,
+`status = "done"`, `last_updated 14.10.2026 21:13`, **480 Zeilen im MD5-Index** (vorher leer), ~3,6 GB.
+Gegen die Server-Sicht geprüft: die neuesten Einträge im Konto tragen das Datum des Laufs
+(`2026-10-14T19:07…` UTC = 21:07 lokal) mit den echten Dateinamen. Der frühere Lauf hatte dort nur
+Einträge vom Vortag — die 409-Phase („zuvor hochgeladen") lief also durch und danach ging es **neu**
+hoch. Mittel: lokaler MD5-Index (`dedup.sqlite3`), `folders.toml`-Zähler, Konto-Suche über die
+dokumentierten Routen.
+
+**Absturz (`SIGABRT`) direkt nach dem Lauf — Ursache belegt.** Der User klickte aufs Tray; der Stack
+zeigt aber, dass es kein Tray-Problem war, sondern das **Laufende**:
+
+```
+PrimePhotoApp::update (app.rs:871) → notify::run_finished (notify.rs:34)
+ → notify_rust::…::NotificationHandle::drop → mac_notification_sys::send_notification
+   → -[NSRunLoop runUntilDate:]            ← dreht die Main-RunLoop
+     → winit::…::ApplicationDelegate::maybe_queue_event   ← queued closure läuft RE-ENTRANT
+       → panic → panic_cannot_unwind → abort()
+```
+
+`notify-rust` sendet die macOS-Mitteilung **synchron** und **pumpt dabei die RunLoop**; wir rufen das
+**innerhalb von `update`** auf. Die verschachtelte RunLoop führt eine winit-Closure aus (re-entranter
+egui-Zustand), die paniked — und in einem ObjC-Callback ist Unwinding verboten, also `abort()`.
+**Dieselbe Falle war im Projekt schon gelöst** (Cookie-Probe in `src/login.rs`: „`WebView::cookies` ist
+synchron und dreht die macOS-RunLoop … deshalb auf die Main-Queue dispatchen"). Die Benachrichtigung
+wurde jetzt genauso auf die Main-Queue verlagert (`dispatch2`, Muster wie `login.rs`) — **Regel daraus:
+keine synchrone AppKit-/RunLoop-API direkt aus `update`.** Kandidaten, die noch zu prüfen sind, wurden
+im Fix-Bericht erfasst.
+
+**Zweiter Fehler, gleiche Stelle:** `folders.toml` trug nach dem Lauf `total_files = 150` bei
+`uploaded_files = 480` (die Zeile hätte „480 von 150" gezeigt) — beim Abschluss wurde nur
+`uploaded_files` fortgeschrieben, nicht `total_files`. Wird im selben Paket mitrepariert.
+
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
 Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
