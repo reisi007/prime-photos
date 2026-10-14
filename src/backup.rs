@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::dedup::DedupIndex;
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
 use crate::i18n::{tr, tr1, tr2, tr3};
+use crate::icons;
 use crate::theme;
 use crate::upload::{run_upload, status_text, upload_progress_text, FileState, QueueEntry, UploadShared};
 use eframe::egui::{self, RichText};
@@ -1418,8 +1419,9 @@ impl PrimePhotoApp {
                 })
                 .collect();
             // The transient one-time target is a single extra row after the
-            // persisted folders — same chrome, but it has no ⋯ menu and no
-            // pause toggle (nothing to configure, nothing to stop).
+            // persisted folders — same chrome, but it has no row-action icons
+            // (kebab/refresh) and no pause toggle (nothing to configure,
+            // nothing to stop).
             if let Some(one) = self.one_time.as_ref() {
                 let total = s
                     .folder_total
@@ -1495,32 +1497,69 @@ impl PrimePhotoApp {
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         // The one-time target is transient:
-                                        // no ⋯ menu (nothing to edit, reveal or
-                                        // stop) and no pause toggle.
+                                        // no kebab/refresh action icons (nothing
+                                        // to edit, reveal or stop) and no pause
+                                        // toggle.
                                         if r.idx != ONE_TIME_IDX {
-                                            ui.menu_button("⋯", |ui| {
-                                                if ui.button(tr("Jetzt scannen und hochladen")).clicked() {
-                                                    actions.push(FolderAction::Upload(r.idx));
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button(tr("Im Dateimanager anzeigen")).clicked() {
-                                                    actions.push(FolderAction::OpenFinder(r.idx));
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button(tr("Wiederholen")).clicked() {
-                                                    actions.push(FolderAction::Retry(r.idx));
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button(tr("Bearbeiten")).clicked() {
-                                                    actions.push(FolderAction::Edit(r.idx));
-                                                    ui.close_menu();
-                                                }
-                                                ui.separator();
-                                                if ui.button(tr("Datensicherung stoppen")).clicked() {
-                                                    actions.push(FolderAction::Remove(r.idx));
-                                                    ui.close_menu();
-                                                }
-                                            });
+                                            // Row actions. `egui::menu_button`
+                                            // cannot carry an image (0.31 has no
+                                            // `From<Image> for WidgetText`), so
+                                            // the kebab is a `Button::image` and
+                                            // the popup is driven by hand via
+                                            // `toggle_popup` + `popup_below_widget`.
+                                            // The tint follows the theme text
+                                            // colour (the raster is white).
+                                            let kebab = ui
+                                                .add(
+                                                    egui::Button::image(icons::kebab_icon(ui))
+                                                        .image_tint_follows_text_color(true),
+                                                )
+                                                .on_hover_text(tr("Aktionen"));
+                                            let popup_id =
+                                                ui.make_persistent_id(("folder_row_actions", r.idx));
+                                            if kebab.clicked() {
+                                                ui.memory_mut(|m| m.toggle_popup(popup_id));
+                                            }
+                                            egui::popup::popup_below_widget(
+                                                ui,
+                                                popup_id,
+                                                &kebab,
+                                                egui::popup::PopupCloseBehavior::CloseOnClick,
+                                                |ui| {
+                                                    if ui
+                                                        .button(tr("Im Dateimanager anzeigen"))
+                                                        .clicked()
+                                                    {
+                                                        actions.push(FolderAction::OpenFinder(r.idx));
+                                                    }
+                                                    if ui.button(tr("Wiederholen")).clicked() {
+                                                        actions.push(FolderAction::Retry(r.idx));
+                                                    }
+                                                    if ui.button(tr("Bearbeiten")).clicked() {
+                                                        actions.push(FolderAction::Edit(r.idx));
+                                                    }
+                                                    ui.separator();
+                                                    if ui
+                                                        .button(tr("Datensicherung stoppen"))
+                                                        .clicked()
+                                                    {
+                                                        actions.push(FolderAction::Remove(r.idx));
+                                                    }
+                                                },
+                                            );
+                                            // The rescan is its own, always
+                                            // visible button — no longer hidden
+                                            // inside the popup.
+                                            if ui
+                                                .add(
+                                                    egui::Button::image(icons::refresh_icon(ui))
+                                                        .image_tint_follows_text_color(true),
+                                                )
+                                                .on_hover_text(tr("Jetzt scannen und hochladen"))
+                                                .clicked()
+                                            {
+                                                actions.push(FolderAction::Upload(r.idx));
+                                            }
                                             let running = self.upload.lock().unwrap().active;
                                             if ui
                                                 .add_enabled(

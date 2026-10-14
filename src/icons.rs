@@ -1,3 +1,14 @@
+//! UI icons.
+//!
+//! Two kinds live here:
+//!
+//! * Hand-drawn vector glyphs for the app chrome (`nav_icon`, `upload_logo`,
+//!   `draw_flag_badge` and the flag painters). These stay as they are.
+//! * The backup row actions ([`kebab_icon`], [`refresh_icon`]). These are
+//!   **not** drawn here: they are Material Symbols SVGs (Apache-2.0, see
+//!   `docs/THIRD_PARTY.md`) rastered to white PNGs by `build.rs` and tinted to
+//!   the current theme text colour at run time.
+
 use crate::theme;
 use eframe::egui::{self, Color32};
 
@@ -93,6 +104,70 @@ pub(crate) fn upload_logo(ui: &mut egui::Ui, diameter: f32) {
         ],
         egui::Stroke::new(w, white),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Backup row-action icons (Material Symbols, rastered by build.rs)
+// ---------------------------------------------------------------------------
+//
+// Coupling contract with `build.rs` (the other half of the pair):
+//   assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
+//   assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
+// The rasters are deliberately white: the buttons tint them to the theme text
+// colour, so one raster per icon covers light and dark themes.
+
+/// The vertical-kebab ("more") row-action icon, as a build-time PNG.
+const MORE_VERT_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-more-vert.png"));
+/// The refresh ("scan and upload now") row-action icon, as a build-time PNG.
+const REFRESH_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-refresh.png"));
+
+/// Logical display size of a row-action icon, in points. The 64-px sources keep
+/// it crisp up to ~3.5× DPI.
+const ROW_ICON_PX: f32 = 17.0;
+
+/// The vertical-kebab icon for the backup row's action menu.
+pub(crate) fn kebab_icon(ui: &egui::Ui) -> egui::Image<'static> {
+    row_icon(ui, "more-vert", MORE_VERT_PNG)
+}
+
+/// The refresh icon for the visible "scan and upload now" row button.
+pub(crate) fn refresh_icon(ui: &egui::Ui) -> egui::Image<'static> {
+    row_icon(ui, "refresh", REFRESH_PNG)
+}
+
+/// Build an [`egui::Image`] for one row-action icon at [`ROW_ICON_PX`].
+fn row_icon(ui: &egui::Ui, name: &'static str, png: &'static [u8]) -> egui::Image<'static> {
+    let texture = icon_texture(ui.ctx(), name, png);
+    egui::Image::new(egui::load::SizedTexture::from_handle(&texture))
+        .fit_to_exact_size(egui::vec2(ROW_ICON_PX, ROW_ICON_PX))
+}
+
+/// Decode an embedded icon PNG into an egui texture, cached in the context's
+/// temporary data so it is decoded and uploaded **once** per app run instead of
+/// once per frame.
+///
+/// The cache lives in egui memory rather than in `PrimePhotoApp` because the
+/// icons are stateless, shared by every screen and used from free functions
+/// that only receive a `&Ui`. egui's temp data is cleared only when the context
+/// is dropped (`util/id_type_map.rs`: "temporary (cleared when egui is shut
+/// down)"), so the handle — and with it the GPU texture — stays alive.
+fn icon_texture(ctx: &egui::Context, name: &'static str, png: &'static [u8]) -> egui::TextureHandle {
+    let id = egui::Id::new(("prime_photos_row_icon", name));
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_insert_with(id, || {
+            let image = image::load_from_memory(png)
+                .expect("Prime Photos: eingebettetes Icon-PNG konnte nicht dekodiert werden")
+                .to_rgba8();
+            let size = [image.width() as usize, image.height() as usize];
+            let color = egui::ColorImage::from_rgba_unmultiplied(size, &image.into_raw());
+            ctx.load_texture(
+                format!("prime_photos_row_icon_{name}"),
+                color,
+                egui::TextureOptions::LINEAR,
+            )
+        })
+        .clone()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -342,4 +417,46 @@ fn draw_code_badge(painter: &egui::Painter, c: egui::Pos2, r: f32, country: &str
         egui::FontId::proportional(r * 0.85),
         Color32::WHITE,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The raster pipeline really produces a white, covered glyph for both row
+    /// icons — the proof that `build.rs`'s `path { fill: … }` override reaches
+    /// the shape (a `color` override would leave the bare `<path>` black), which
+    /// is what makes the run-time tint to the theme colour possible.
+    ///
+    /// Anti-aliased edge pixels are written by tiny-skia as *straight* RGBA
+    /// (`PixmapRef::encode_png` demultiplies), so every covered pixel — opaque
+    /// or not — must be white.
+    #[test]
+    fn icon_rasters_are_white_and_covered() {
+        for (name, png) in [
+            ("icon-more-vert", MORE_VERT_PNG),
+            ("icon-refresh", REFRESH_PNG),
+        ] {
+            let image = image::load_from_memory(png)
+                .unwrap_or_else(|e| panic!("{name}: eingebettetes PNG nicht dekodierbar: {e}"))
+                .to_rgba8();
+            let mut covered = 0usize;
+            for px in image.pixels() {
+                let [r, g, b, a] = px.0;
+                if a == 0 {
+                    continue;
+                }
+                covered += 1;
+                assert_eq!(
+                    [r, g, b],
+                    [255, 255, 255],
+                    "{name}: gedecktes Pixel (alpha {a}) ist nicht weiß"
+                );
+            }
+            assert!(
+                covered > 0,
+                "{name}: kein gedecktes Pixel — fill-Override wirkungslos?"
+            );
+        }
+    }
 }

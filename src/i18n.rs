@@ -150,6 +150,7 @@ const EN: &[(&str, &str)] = &[
     ("Nicht angemeldet", "Not signed in"),
     ("Upload läuft: {} · {} · {}", "Upload running: {} · {} · {}"),
     // -- backup list ----------------------------------------------------
+    ("Aktionen", "Actions"),
     ("Alle Sicherungsvorgänge anhalten", "Pause all backups"),
     ("Alle Sicherungsvorgänge fortsetzen", "Resume all backups"),
     ("Alles aktuell", "Everything up to date"),
