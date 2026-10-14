@@ -343,7 +343,10 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
 6. **Öffentliches Remote/Push** (Repo ist public-zielend, aber noch kein Remote konfiguriert).
 7. **Nav-Accessibility + Icon-Ausrichtung** (`nav_item`, Status-/Upload-Icons): brauchen die
    Doku-Maßwerte/Design-Abmachung, kein Rate-Wert.
-8. **Echtes Profilbild** im Account-Block: keine API identifiziert.
+8. **Echter Name/Profilbild** im Account-Block: keine API identifiziert (das Original holt
+   `AccountInfo`/`RefreshAccountInfo`; Endpunkt im Cookie-Pfad nicht belegt). Bis dahin zeigt der
+   Block bewusst **nur** Marktplatz (`amazon.<domain>`), Flaggen-Badge mit Presence-Dot und
+   „Abmelden" — kein geratener Name (User-Entscheidung 2026-10-14, Commit `0d66e05`).
 9. **Logout während laufendem Upload:** `logout()` löscht die Auth-Cookies, stoppt aber den laufenden Lauf nicht. Soll der Upload stoppen/pausieren oder weiterlaufen und mit 401 scheitern? (Eine saubere Antwort bräuchte einen Abbruch-Kanal in der Upload-Pipeline.)
 10. ✅ **ERLEDIGT (User-Entscheidung 2026-10-13: „erst Datei fertig, dann pausieren")** — Commit
    `0fd04dd`. **F-3 – Pause/Abbruch verwirft gesendete Bytes.** Ein Abbruch im laufenden Upload startet die
