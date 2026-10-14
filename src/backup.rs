@@ -910,11 +910,15 @@ impl PrimePhotoApp {
     ///
     /// Same guards, same worker spawn as the manual path; the difference is the
     /// target: the dropped files are an explicit list, not a scanned folder,
-    /// and the run lives on `self.one_time` — **never** persisted and never
-    /// inserted into `self.store.folders` (a drop must not create a permanent
-    /// backup target). Files are uploaded as-is: a dropped file passes through,
-    /// a dropped directory is scanned recursively, unsupported entries are
-    /// ignored silently (same contract as `scan_images`).
+    /// and the run lives on `self.one_time` — never inserted into
+    /// `self.store.folders` (a drop must not create a permanent backup target).
+    /// Files are uploaded as-is: a dropped file passes through, a dropped
+    /// directory is scanned recursively, unsupported entries are ignored
+    /// silently (same contract as `scan_images`).
+    ///
+    /// The **resolved** queue is persisted to the shared SQLite before the run
+    /// starts (user decision 2026-10-14), so a restart resumes the row; it is
+    /// dropped again once the run finished clean (`finalize_upload`).
     pub(crate) fn start_one_time_upload(&mut self, paths: Vec<PathBuf>) {
         if self.upload_busy() {
             self.log(tr("Es läuft bereits ein Upload."));
@@ -950,6 +954,54 @@ impl PrimePhotoApp {
             common_parent(&paths).unwrap_or_default()
         };
 
+        // Persist the resolved queue (user decision 2026-10-14) *before* the run
+        // starts: the file list, not the raw drop paths (so a restart never
+        // walks a dropped directory again), plus the row's display path. The
+        // guards and the empty check above already returned, so a rejected drop
+        // writes nothing.
+        DedupIndex::open().set_one_time_queue(&display_path, &files);
+
+        self.begin_one_time_run(display_path, files);
+    }
+
+    /// Resume the persisted one-time queue after a restart (user decision
+    /// 2026-10-14): the row was already restored in `new`, this starts its run
+    /// as soon as the **same guards as the folder cold start** allow it — the
+    /// `background_sync` switch, a live sign-in, no pause, no active run.
+    ///
+    /// Called every frame from `update`. It is a no-op until a queue was
+    /// restored and **one-shot**: once the run is started the flag is cleared,
+    /// so a run that fails afterwards is only retried by the next app start
+    /// (per the decision, not by a timer).
+    pub(crate) fn resume_one_time(&mut self) {
+        if !self.one_time_resume {
+            return;
+        }
+        if self.upload_busy()
+            || !self.is_logged_in()
+            || !self.config.background_sync
+            || *self.paused.borrow()
+        {
+            return;
+        }
+        // Re-read the queue: it is the persisted truth and may already have
+        // been cleared by a cleanly finished run.
+        let Some((display_path, files)) = DedupIndex::open().one_time_queue() else {
+            self.one_time_resume = false;
+            return;
+        };
+        if files.is_empty() {
+            self.one_time_resume = false;
+            return;
+        }
+        self.one_time_resume = false;
+        self.begin_one_time_run(display_path, files);
+    }
+
+    /// The shared tail of a one-time drop and of the resume-after-restart path:
+    /// set the transient target, publish the plan and spawn the run. The queue
+    /// is **not** written here — the caller owns persistence.
+    fn begin_one_time_run(&mut self, display_path: PathBuf, files: Vec<PathBuf>) {
         // The transient target itself: the stored name stays the plain German
         // key, `tr` is applied at render time. Dedup and conflict handling keep
         // the folder defaults (docs/SPEC_ONE_TIME_UPLOAD.md §10.5).
@@ -1116,6 +1168,19 @@ impl PrimePhotoApp {
             let s = self.upload.lock().unwrap();
             (s.folder_done.clone(), s.folder_failed.clone())
         };
+        // Whether the run that just finished was the one-time run, plus its
+        // global counters. `folder_total` gets its `ONE_TIME_IDX` key only from
+        // a one-time plan and `publish_state` clears it at the start of every
+        // run, so the key is a reliable "this finished run was a one-time run".
+        let (run_total, run_done, run_failed, was_one_time) = {
+            let s = self.upload.lock().unwrap();
+            (
+                s.total,
+                s.done,
+                s.failed,
+                s.folder_total.contains_key(&ONE_TIME_IDX),
+            )
+        };
         let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
         for (i, f) in self.store.folders.iter_mut().enumerate() {
             if let Some(&done) = folder_done.get(&i) {
@@ -1142,6 +1207,14 @@ impl PrimePhotoApp {
                     FolderStatus::Done
                 };
             }
+        }
+        // A cleanly finished one-time run drops its persisted queue (user
+        // decision 2026-10-14): every file settled (`done + failed = total`) and
+        // no failure left over. Anything else — failures, an aborted/quit run,
+        // a run that never covered all files — keeps the rows, so the next start
+        // resumes. Only the SQLite rows go; the row itself stays for display.
+        if was_one_time && run_failed == 0 && run_done + run_failed >= run_total {
+            DedupIndex::open().clear_one_time_queue();
         }
     }
 

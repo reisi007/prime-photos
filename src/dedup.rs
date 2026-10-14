@@ -65,6 +65,19 @@ impl DedupIndex {
                      path       TEXT PRIMARY KEY,
                      max_mtime  INTEGER NOT NULL,
                      scanned_at TEXT NOT NULL
+                 );
+                 -- Persisted one-time (drag & drop) queue (user decision
+                 -- 2026-10-14): one row per already-resolved file, ordered by
+                 -- `position`. The table holds at most ONE queue — a new drop
+                 -- replaces every row. `position` is the primary key, so the
+                 -- order is fixed and reproducible across a restart. The row's
+                 -- `display_path` is stored on every row (denormalised): the
+                 -- spec mandates one row per file, and the value is identical
+                 -- for all rows of a queue.
+                 CREATE TABLE IF NOT EXISTS one_time_queue (
+                     position     INTEGER PRIMARY KEY,
+                     display_path TEXT NOT NULL,
+                     path         TEXT NOT NULL
                  );",
             )
             .is_ok();
@@ -219,6 +232,98 @@ impl DedupIndex {
             rusqlite::params![path_str.as_ref(), max_mtime, scanned_at],
         );
     }
+
+    /// Replace the persisted **one-time** (drag & drop) queue with `files`,
+    /// tagged with the Backup row's `display_path`.
+    ///
+    /// What is stored is the **resolved file list** (a dropped directory was
+    /// already walked by the caller), not the raw dropped paths — so a restart
+    /// never walks a directory again. One row per file, `position` = the order
+    /// in the queue; the method atomically drops the previous content, so the
+    /// table holds at most one queue and a half-written state is never visible.
+    ///
+    /// Same fallback contract as [`DedupIndex::record_upload`]: without a usable
+    /// connection this is a silent no-op, so a lost queue only costs a repeat
+    /// drop, it never breaks anything.
+    pub fn set_one_time_queue(&self, display_path: &Path, files: &[PathBuf]) {
+        let Some(conn) = self.conn.as_ref() else {
+            return;
+        };
+        // `unchecked_transaction` borrows `&self` (the connection is behind a
+        // shared reference here) and is rolled back if we return before commit.
+        let Ok(tx) = conn.unchecked_transaction() else {
+            return;
+        };
+        if tx.execute("DELETE FROM one_time_queue", []).is_err() {
+            return; // drop of `tx` rolls the DELETE back
+        }
+        let display = display_path.to_string_lossy();
+        {
+            let Ok(mut stmt) =
+                tx.prepare("INSERT INTO one_time_queue (position, display_path, path) VALUES (?1, ?2, ?3)")
+            else {
+                return; // `tx` dropped ⇒ rollback, previous queue untouched
+            };
+            for (position, file) in files.iter().enumerate() {
+                let path = file.to_string_lossy();
+                // A failing row aborts the whole write (rollback) rather than
+                // committing a truncated queue.
+                if stmt
+                    .execute(rusqlite::params![
+                        position as i64,
+                        display.as_ref(),
+                        path.as_ref()
+                    ])
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+        let _ = tx.commit();
+    }
+
+    /// The persisted one-time queue as `(display_path, files)` in its original
+    /// order, or `None` when empty (or the index is unavailable).
+    ///
+    /// A set-but-empty queue never exists (`set_one_time_queue` with no files
+    /// deletes everything), so `None` is unambiguous.
+    pub fn one_time_queue(&self) -> Option<(PathBuf, Vec<PathBuf>)> {
+        let conn = self.conn.as_ref()?;
+        let mut stmt = conn
+            .prepare("SELECT display_path, path FROM one_time_queue ORDER BY position ASC")
+            .ok()?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .ok()?;
+        let mut display: Option<PathBuf> = None;
+        let mut files: Vec<PathBuf> = Vec::new();
+        for row in rows {
+            let Ok((d, p)) = row else {
+                return None;
+            };
+            if display.is_none() {
+                display = Some(PathBuf::from(d));
+            }
+            files.push(PathBuf::from(p));
+        }
+        let display = display?;
+        if files.is_empty() {
+            return None;
+        }
+        Some((display, files))
+    }
+
+    /// Drop the persisted one-time queue (after a cleanly finished run). A
+    /// no-op without a usable connection or with nothing stored.
+    pub fn clear_one_time_queue(&self) {
+        let Some(conn) = self.conn.as_ref() else {
+            return;
+        };
+        let _ = conn.execute("DELETE FROM one_time_queue", []);
+    }
 }
 
 #[cfg(test)]
@@ -316,5 +421,67 @@ mod tests {
         assert_eq!(idx.folder_max_mtime(p), None);
         idx.record_folder_scan(p, 100);
         assert_eq!(idx.folder_max_mtime(p), None);
+    }
+
+    #[test]
+    fn one_time_queue_round_trips_with_order_and_special_chars() {
+        let idx = index();
+        let display = Path::new("/photos/Urlaub & Café");
+        let files = vec![
+            PathBuf::from("/photos/Urlaub & Café/b).jpg"),
+            PathBuf::from("/photos/Urlaub & Café/a #1.jpg"),
+            PathBuf::from("/photos/Urlaub & Café/ünïcode – 2.jpeg"),
+        ];
+
+        // Nothing stored yet.
+        assert_eq!(idx.one_time_queue(), None);
+
+        idx.set_one_time_queue(display, &files);
+        let (got_display, got_files) = idx.one_time_queue().unwrap();
+        assert_eq!(got_display, display);
+        // Same order as handed in (`position`), not insertion/rowid order.
+        assert_eq!(got_files, files);
+    }
+
+    #[test]
+    fn one_time_queue_replacement_leaves_no_rest_of_the_old_one() {
+        let idx = index();
+        idx.set_one_time_queue(
+            Path::new("/photos/old"),
+            &[PathBuf::from("/photos/old/x.jpg"), PathBuf::from("/photos/old/y.jpg")],
+        );
+        idx.set_one_time_queue(
+            Path::new("/photos/new"),
+            &[PathBuf::from("/photos/new/z.jpg")],
+        );
+
+        let (display, files) = idx.one_time_queue().unwrap();
+        assert_eq!(display, Path::new("/photos/new"));
+        assert_eq!(files, vec![PathBuf::from("/photos/new/z.jpg")]);
+    }
+
+    #[test]
+    fn one_time_queue_clear_and_empty_set_answer_none() {
+        let idx = index();
+        idx.set_one_time_queue(Path::new("/photos/a"), &[PathBuf::from("/photos/a/x.jpg")]);
+        assert!(idx.one_time_queue().is_some());
+
+        idx.clear_one_time_queue();
+        assert_eq!(idx.one_time_queue(), None);
+
+        // Setting a queue and then an empty list leaves nothing behind.
+        idx.set_one_time_queue(Path::new("/photos/a"), &[PathBuf::from("/photos/a/x.jpg")]);
+        idx.set_one_time_queue(Path::new("/photos/a"), &[]);
+        assert_eq!(idx.one_time_queue(), None);
+    }
+
+    #[test]
+    fn one_time_queue_degrades_without_db() {
+        let idx = DedupIndex { conn: None };
+        // No connection: nothing written, nothing read, no panic.
+        idx.set_one_time_queue(Path::new("/photos/a"), &[PathBuf::from("/photos/a/x.jpg")]);
+        assert_eq!(idx.one_time_queue(), None);
+        idx.clear_one_time_queue();
+        assert_eq!(idx.one_time_queue(), None);
     }
 }

@@ -2,7 +2,8 @@ use crate::app_menu;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
-use crate::folders::{BackupFolder, FolderStore};
+use crate::dedup::DedupIndex;
+use crate::folders::{BackupFolder, ConflictResolution, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
 use crate::icons::{draw_flag_badge, nav_icon, NavIcon};
 use crate::login;
@@ -182,10 +183,17 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) queue_cache: (u64, Vec<(String, Vec<(String, FileState)>)>),
     /// The `revision` the cache was built from (`u64::MAX` = never built).
     pub(crate) queue_cache_rev: u64,
-    /// Transient one-time (drag & drop) upload target: never persisted, lives
-    /// only for the length of the run and then keeps its settled counters so
-    /// the Backup page can show the finished row. `None` until the first drop.
+    /// Transient one-time (drag & drop) upload target: the row is never saved
+    /// into `folders.toml`, lives only for the length of the run and then keeps
+    /// its settled counters so the Backup page can show the finished row. Its
+    /// **resolved file queue** is persisted separately (SQLite, see
+    /// `DedupIndex::set_one_time_queue`) and restored here at start via
+    /// `one_time_queue()`. `None` until the first drop (or when none restored).
     pub(crate) one_time: Option<BackupFolder>,
+    /// A one-time queue was restored from the SQLite at start (user decision
+    /// 2026-10-14) and its run has not been started yet. `resume_one_time`
+    /// clears it as soon as it starts the run, so it is one-shot per app start.
+    pub(crate) one_time_resume: bool,
 }
 
 impl PrimePhotoApp {
@@ -264,6 +272,28 @@ impl PrimePhotoApp {
         // 2026-10-14): seed the sender from the config we just loaded instead
         // of always starting unpaused.
         let paused = watch::Sender::new(config.paused);
+        // Restore a persisted one-time (drag & drop) queue (user decision
+        // 2026-10-14): the "Einmalige Sicherung" row is visible right away with
+        // `total_files` = the stored file count, status "läuft" and 0 done.
+        // Already-uploaded files are skipped by the MD5 index anyway, and
+        // `resume_one_time` starts the run once the usual guards allow it.
+        let (one_time, one_time_resume) = match DedupIndex::open().one_time_queue() {
+            Some((display_path, files)) if !files.is_empty() => (
+                Some(BackupFolder {
+                    path: display_path,
+                    name: "Einmalige Sicherung".to_string(),
+                    enabled: true,
+                    dedup: true,
+                    conflict_resolution: ConflictResolution::Ignore,
+                    total_files: files.len(),
+                    uploaded_files: 0,
+                    last_updated: String::new(),
+                    status: FolderStatus::Uploading,
+                }),
+                true,
+            ),
+            _ => (None, false),
+        };
         Self {
             rt,
             config,
@@ -292,7 +322,8 @@ impl PrimePhotoApp {
             autostart,
             autostart_enabled,
             dropping_files: false,
-            one_time: None,
+            one_time,
+            one_time_resume,
             queue_cache: (0, Vec::new()),
             queue_cache_rev: u64::MAX,
         }
@@ -584,6 +615,10 @@ impl eframe::App for PrimePhotoApp {
         if self.login.running || !self.is_logged_in() {
             self.login_ui(ctx);
         } else {
+            // Start a one-time queue restored from the DB at app start (user
+            // decision 2026-10-14) once the folder-cold-start guards allow it.
+            // Cheap per frame: it is a no-op unless a queue was restored.
+            self.resume_one_time();
             egui::SidePanel::left("nav")
                 .exact_width(220.0)
                 .resizable(false)
