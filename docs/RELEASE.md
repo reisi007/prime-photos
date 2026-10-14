@@ -174,7 +174,26 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
 
 ---
 
-## 10. Referenzen
+## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
+
+GitHub/Dependabot meldet auf `main` eine **moderate** Schwachstelle in **`glib`**: „Unsoundness in
+den `Iterator`/`DoubleEndedIterator`-Impls für `glib::VariantStr`" — betroffen `>= 0.15.0, < 0.20.0`,
+Fix wäre `0.20.0`; im Lock steht `glib 0.18.5`.
+
+| Punkt | Stand |
+|---|---|
+| Herkunft | ausschließlich der **gtk-rs-0.18-Stack im Linux-Backend** (`tray-icon` → `libappindicator 0.9.0`, `muda 0.21.2`, `wry 0.57.0` → `webkit2gtk =2.0.2`) |
+| macOS | **nicht betroffen** — diese Crates werden dort nicht kompiliert |
+| Fix | derzeit **nicht möglich**: die jeweils neuesten Versionen dieser Crates verlangen weiterhin gtk-rs 0.18, und `gtk 0.18` pinnt `glib ^0.18` — ein isolierter Bump ist damit ausgeschlossen |
+| Dependabot-Auto-Update | scheitert deshalb erwartungsgemäß (Job „cargo in `/\.` for glib – Update", Lauf `38542163059`) — kein Konfigurationsfehler |
+| Auswirkung | die betroffenen Iterator-APIs ruft die App nicht auf; auflösbar erst, wenn `tray-icon`/`wry`/`muda` auf gtk-rs 0.20 wechseln |
+
+**Regel:** Nicht eigenmächtig patchen. Vendoring oder ein `[patch]` wäre ein neuer, ungeprüfter
+Eingriff und auf dem Entwicklungsrechner (macOS) nicht testbar.
+
+---
+
+## 11. Referenzen
 
 - `docs/BUILD.md` — System-Voraussetzungen macOS/Windows/Linux.
 - `packaging/README.md` — `make-app.sh`, `Info.plist`, ad-hoc vs. eigene Identität.
