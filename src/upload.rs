@@ -323,72 +323,59 @@ pub(crate) async fn upload_worker(
 
         let started = Instant::now();
 
-        let upload_fut = uploader.upload_picture(&path, Some(&bytes), Some(&md5sum), conflict);
-        tokio::pin!(upload_fut);
+        // Pause policy (F-3 decision): the *current* file always finishes, only
+        // the next one waits. Aborting mid-request would discard the bytes
+        // already sent and could leave a `RENAME` duplicate on the server behind
+        // — both contradict "never waste bandwidth". The pause check therefore
+        // happens at the top of the loop only, not by racing this future.
+        let res = uploader
+            .upload_picture(&path, Some(&bytes), Some(&md5sum), conflict)
+            .await;
         let mut requeued = false;
-        tokio::select! {
-            biased;
-            changed = pause_rx.changed() => {
-                let _ = changed;
-                queue.lock().unwrap().push_front((row, idx, path.clone()));
-                {
+        match res {
+            Ok(id) => {
+                // Remember the upload (also for the server-side 409 case, which
+                // upload_picture returns as Ok) so the next scan skips it.
+                dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
+                let mut s = shared.lock().unwrap();
+                s.done += 1;
+                *s.folder_done.entry(idx).or_insert(0) += 1;
+                s.uploaded_ids.push(id);
+                if let Some(en) = s.queue.get_mut(row) {
+                    en.state = FileState::Done;
+                }
+                s.bytes_done = s.bytes_done.saturating_add(size);
+                s.net_bytes = s.net_bytes.saturating_add(size);
+                s.upload_secs += started.elapsed().as_secs_f64();
+                s.touch_queue();
+                s.log(format!("OK    {}", path.display()));
+            }
+            Err(e) => {
+                // Expired session: retry this one file once after the token
+                // renewal (never counted as a failure). Only once per run, so a
+                // persistently bad session cannot spin.
+                if !token_renewed_once && e.contains("Authentication failed") {
+                    need_token_renew = true;
+                    queue.lock().unwrap().push_front((row, idx, path.clone()));
                     let mut s = shared.lock().unwrap();
-                    if let Some(e) = s.queue.get_mut(row) {
-                        e.state = FileState::Waiting;
+                    if let Some(en) = s.queue.get_mut(row) {
+                        en.state = FileState::Waiting;
                     }
                     s.touch_queue();
-                }
-                requeued = true;
-            }
-            res = &mut upload_fut => {
-                match res {
-                    Ok(id) => {
-                        // Remember the upload (also for the server-side 409 case,
-                        // which upload_picture returns as Ok) so the next scan skips it.
-                        dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
-                        let mut s = shared.lock().unwrap();
-                        s.done += 1;
-                        *s.folder_done.entry(idx).or_insert(0) += 1;
-                        s.uploaded_ids.push(id);
-                        if let Some(en) = s.queue.get_mut(row) {
-                            en.state = FileState::Done;
-                        }
-                        s.bytes_done = s.bytes_done.saturating_add(size);
-                        s.net_bytes = s.net_bytes.saturating_add(size);
-                        s.upload_secs += started.elapsed().as_secs_f64();
-                        s.touch_queue();
-                        s.log(format!("OK    {}", path.display()));
+                    s.log(tr1(
+                        "Anmeldung abgelaufen, {} wird erneut versucht.",
+                        path.display(),
+                    ));
+                    requeued = true;
+                } else {
+                    let mut s = shared.lock().unwrap();
+                    s.failed += 1;
+                    *s.folder_failed.entry(idx).or_insert(0) += 1;
+                    if let Some(en) = s.queue.get_mut(row) {
+                        en.state = FileState::Failed;
                     }
-                    Err(e) => {
-                        // Expired session: retry this one file once after the
-                        // token renewal (never counted as a failure). Only once
-                        // per run, so a persistently bad session cannot spin.
-                        if !token_renewed_once && e.contains("Authentication failed") {
-                            need_token_renew = true;
-                            queue.lock().unwrap().push_front((row, idx, path.clone()));
-                            {
-                                let mut s = shared.lock().unwrap();
-                                if let Some(en) = s.queue.get_mut(row) {
-                                    en.state = FileState::Waiting;
-                                }
-                                s.touch_queue();
-                                s.log(tr1(
-                                    "Anmeldung abgelaufen, {} wird erneut versucht.",
-                                    path.display(),
-                                ));
-                            }
-                            requeued = true;
-                        } else {
-                            let mut s = shared.lock().unwrap();
-                            s.failed += 1;
-                            *s.folder_failed.entry(idx).or_insert(0) += 1;
-                            if let Some(en) = s.queue.get_mut(row) {
-                                en.state = FileState::Failed;
-                            }
-                            s.touch_queue();
-                            s.log(tr2("FEHLER {}: {}", path.display(), e));
-                        }
-                    }
+                    s.touch_queue();
+                    s.log(tr2("FEHLER {}: {}", path.display(), e));
                 }
             }
         }
