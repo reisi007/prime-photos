@@ -946,6 +946,13 @@ Cookie-Upload sendet **kein** `Content-MD5` (base64), nur `x-amzn-file-md5` (hex
 nicht die Upload-Zeit), ein `createdDate`-Filter gibt es nicht, und `parents:`+`name:` kombiniert
 der Server nicht.
 
+**Doku-Korrektur (offen).** `docs/SPEC_DUPLICATES.md` behauptet an drei Stellen, `SaveAsNew`
+erzeuge „nie" einen 409 (§2.2/§5; `:222-223`, `:231`) und nennt unseren Default noch `Ignore`
+(`:240`/`:250`). Das beschreibt den **Original-Client** (der clientseitig per MD5 vorprüft) und ist
+für **unseren** servergetriebenen Pfad irreführend: ein Inhaltsduplikat liefert auch bei `RENAME`
+einen 409 (`DuplicatesConflictError`) — das ist unser Sicherheitsnetz. Nachziehen, wenn das nächste
+Paket die Datei ohnehin anfasst.
+
 **Verworfen:** beim rein pfadbasierten Index bleiben (er erkennt den NFD/NFC-Zwilling nicht, und
 genau der entsteht zwischen macOS und Windows).
 
