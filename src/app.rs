@@ -133,6 +133,44 @@ fn autostart_action(intent: Option<bool>, os_enabled: bool) -> AutostartAction {
     }
 }
 
+/// Payload of the background account fetch: the display name plus, when it
+/// could be obtained, the avatar JPEG bytes.
+pub(crate) struct AvatarResult {
+    pub(crate) name: String,
+    pub(crate) jpeg: Option<Vec<u8>>,
+}
+
+/// Shared slot between the background avatar fetch and the UI thread. The UI
+/// takes the value (leaving `None`) once per published intermediate/final
+/// result, so a cached image shows immediately and a refreshed one replaces it
+/// on a later frame.
+#[derive(Default)]
+pub(crate) struct AvatarFetch {
+    pub(crate) result: Option<AvatarResult>,
+    /// Set by the background fetch when an attempt ended **without** a usable
+    /// result (neither name nor image). Consumed by `poll_avatar`; together with
+    /// the attempt counter it drives the single allowed retry, see
+    /// [`should_fetch_avatar`].
+    pub(crate) failed: bool,
+}
+
+/// Whether another account fetch (name + avatar) may be started. The fetch gets
+/// **exactly one** retry after a failed attempt — at most 2 attempts in total:
+///
+/// * no attempt yet ⇒ start;
+/// * one attempt done and it **failed** ⇒ one retry;
+/// * one attempt done and it succeeded (name **or** image arrived) ⇒ done;
+/// * two attempts done ⇒ give up until the next app start.
+///
+/// Pure, so the retry policy is unit-testable without any network.
+pub(crate) fn should_fetch_avatar(attempts: u8, last_failed: bool) -> bool {
+    match attempts {
+        0 => true,
+        1 => last_failed,
+        _ => false,
+    }
+}
+
 pub(crate) struct PrimePhotoApp {
     pub(crate) rt: Arc<Runtime>,
     pub(crate) config: Config,
@@ -194,6 +232,20 @@ pub(crate) struct PrimePhotoApp {
     /// 2026-10-14) and its run has not been started yet. `resume_one_time`
     /// clears it as soon as it starts the run, so it is one-shot per app start.
     pub(crate) one_time_resume: bool,
+    /// Account fetch (name + avatar) attempts started this session. Capped at
+    /// two by [`should_fetch_avatar`]: one initial try plus at most one retry
+    /// after a failure.
+    pub(crate) avatar_attempts: u8,
+    /// Set when the last account fetch attempt failed (no name and no image), so
+    /// the single retry in [`should_fetch_avatar`] is allowed.
+    pub(crate) avatar_failed: bool,
+    /// Real display name from the account preferences, once fetched.
+    pub(crate) avatar_name: Option<String>,
+    /// Decoded avatar picture, once fetched; until then the sidebar keeps the
+    /// drawn marketplace badge as the placeholder.
+    pub(crate) avatar_texture: Option<egui::TextureHandle>,
+    /// Shared slot written by the background account fetch, polled in `update`.
+    pub(crate) avatar_fetch: Arc<Mutex<AvatarFetch>>,
 }
 
 impl PrimePhotoApp {
@@ -328,6 +380,11 @@ impl PrimePhotoApp {
             dropping_files: false,
             one_time,
             one_time_resume,
+            avatar_attempts: 0,
+            avatar_failed: false,
+            avatar_name: None,
+            avatar_texture: None,
+            avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
             queue_cache: (0, Vec::new()),
             queue_cache_rev: u64::MAX,
         }
@@ -392,6 +449,45 @@ impl PrimePhotoApp {
             }
             Err(e) => {
                 log::warn!("Autostart (Login-Item) konnte nicht geändert werden: {e}");
+            }
+        }
+    }
+
+    // -- account fetch (name + avatar) --------------------------------------
+
+    /// Kick off the one-shot account fetch (name + avatar), unless it already
+    /// ran this session. Triggered once after a successful sign-in, or at start
+    /// when a session already exists. Never blocks a frame: the network + disk
+    /// work runs on the tokio runtime and reports back through `avatar_fetch`.
+    pub(crate) fn spawn_avatar_fetch(&self, ctx: &egui::Context) {
+        let cfg = self.config.clone();
+        let shared = self.avatar_fetch.clone();
+        let ctx = ctx.clone();
+        self.rt
+            .spawn(async move { fetch_account_avatar(cfg, shared, ctx).await });
+    }
+
+    /// Pick up a published account-fetch result and turn the JPEG bytes into an
+    /// egui texture. Called every frame; cheap while nothing was published.
+    pub(crate) fn poll_avatar(&mut self, ctx: &egui::Context) {
+        let (result, failed) = {
+            let mut slot = self.avatar_fetch.lock().unwrap();
+            (slot.result.take(), std::mem::take(&mut slot.failed))
+        };
+        if failed {
+            // The attempt produced no name and no image: allow the one retry,
+            // decided on a later frame via `should_fetch_avatar`.
+            self.avatar_failed = true;
+        }
+        let Some(result) = result else {
+            return;
+        };
+        if !result.name.is_empty() {
+            self.avatar_name = Some(result.name);
+        }
+        if let Some(bytes) = result.jpeg {
+            if let Some(tex) = decode_avatar_texture(ctx, &bytes) {
+                self.avatar_texture = Some(tex);
             }
         }
     }
@@ -505,20 +601,35 @@ impl PrimePhotoApp {
             ui.add_space(4.0);
         }
         let logged_in = self.is_logged_in();
-        // Flag badge (with the presence dot) + the marketplace. Deliberately no
-        // account name: we cannot fetch the real one yet, and a stand-in would be
-        // wrong (AGENTS.todo.md „Zurückgestellt" #8). The sign-in state is the
-        // dot on the badge, not a coloured word — this view is normally only
-        // reached while signed in.
+        // Account block: the marketplace flag badge is the drawn placeholder
+        // until the real avatar has been fetched (one-shot per session, see
+        // `spawn_avatar_fetch`). Once it is there, the round picture replaces
+        // the badge but keeps the same presence dot + tooltip. The real name
+        // appears behind "Angemeldet" as soon as the preferences call answered;
+        // until then (or on any failure) no name line is shown. The marketplace
+        // line stays unchanged.
         ui.horizontal(|ui| {
             let tip = if logged_in {
                 tr("Angemeldet")
             } else {
                 tr("Nicht angemeldet")
             };
-            draw_flag_badge(ui, 30.0, &self.config.country, logged_in, tip);
+            match (logged_in, self.avatar_texture.as_ref()) {
+                (true, Some(tex)) => draw_avatar_image(ui, 30.0, tex, tip),
+                _ => draw_flag_badge(ui, 30.0, &self.config.country, logged_in, tip),
+            }
             ui.add_space(10.0);
             ui.vertical(|ui| {
+                if logged_in {
+                    ui.label(
+                        RichText::new(tr("Angemeldet als:"))
+                            .size(11.0)
+                            .color(theme::MUTED),
+                    );
+                    if let Some(name) = &self.avatar_name {
+                        ui.label(RichText::new(name).size(13.0).strong());
+                    }
+                }
                 ui.label(
                     RichText::new(tr("Marktplatz"))
                         .size(11.0)
@@ -613,6 +724,18 @@ impl eframe::App for PrimePhotoApp {
         }
 
         self.poll_login();
+
+        // Account fetch (name + avatar): first attempt after a successful
+        // sign-in or at start when a session already exists, with **exactly one**
+        // retry after a failed attempt (see `should_fetch_avatar`). A success is
+        // final, so there is no loop and no endless retry. The actual work
+        // happens on the tokio runtime (`spawn_avatar_fetch`); here we only
+        // decide to start it and pick up its results.
+        if self.is_logged_in() && should_fetch_avatar(self.avatar_attempts, self.avatar_failed) {
+            self.avatar_attempts += 1;
+            self.spawn_avatar_fetch(ctx);
+        }
+        self.poll_avatar(ctx);
 
         // Onboarding: until the user is signed in (or while the sign-in page is
         // open) show the login flow in this same window.
@@ -753,6 +876,112 @@ impl eframe::App for PrimePhotoApp {
     }
 }
 
+/// Draw the fetched avatar as a round 30 px badge with the same presence dot as
+/// the flag badge it replaces. The corners are rounded with `Image::corner_radius`
+/// (half the side), matching the round marketplace badge's visual language.
+fn draw_avatar_image(ui: &mut egui::Ui, diameter: f32, tex: &egui::TextureHandle, tooltip: &str) {
+    let image = egui::Image::new(egui::load::SizedTexture::from_handle(tex))
+        .fit_to_exact_size(egui::vec2(diameter, diameter))
+        .corner_radius(egui::CornerRadius::same((diameter / 2.0).round() as u8));
+    let resp = ui.add(image).on_hover_text(tooltip);
+    let rect = resp.rect;
+    // Presence dot in the lower-right, exactly like `draw_flag_badge`.
+    let dot = diameter * 0.17;
+    let c = egui::pos2(rect.right() - dot * 0.9, rect.bottom() - dot * 0.9);
+    let painter = ui.painter();
+    painter.circle_filled(c, dot + 1.6, Color32::WHITE);
+    painter.circle_filled(c, dot, theme::GREEN);
+}
+
+/// Decode avatar JPEG/PNG bytes into an egui texture. `None` on any decode
+/// error so the caller keeps the drawn placeholder (no panic, no empty image).
+fn decode_avatar_texture(ctx: &egui::Context, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let pixels = img.into_raw();
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+    Some(ctx.load_texture("account_avatar", color, egui::TextureOptions::LINEAR))
+}
+
+/// Publish one intermediate/final account-fetch result and nudge the UI to
+/// repaint so the value is picked up on the next frame.
+fn publish_avatar(shared: &Arc<Mutex<AvatarFetch>>, ctx: &egui::Context, result: AvatarResult) {
+    shared.lock().unwrap().result = Some(result);
+    ctx.request_repaint();
+}
+
+/// Mark an account-fetch attempt as **failed** (neither name nor image arrived)
+/// and nudge the UI to repaint, so it can decide on the single allowed retry
+/// (`should_fetch_avatar`) on a later frame.
+fn mark_avatar_failed(shared: &Arc<Mutex<AvatarFetch>>, ctx: &egui::Context) {
+    shared.lock().unwrap().failed = true;
+    ctx.request_repaint();
+}
+
+/// Background account fetch: preferences (name + avatar node id), then the
+/// 60×60 thumbnail. A valid on-disk cache is preferred for the image and
+/// published first; the fresh image is fetched afterwards and published as a
+/// second result. Any failure only logs a warning **without values** and leaves
+/// the UI on the drawn placeholder.
+async fn fetch_account_avatar(cfg: Config, shared: Arc<Mutex<AvatarFetch>>, ctx: egui::Context) {
+    let photo = crate::prime_photos::PrimePhotos::new(&cfg, false);
+    let pair = match photo.fetch_account_name().await {
+        Ok(Some(pair)) => pair,
+        Ok(None) => {
+            log::warn!("Kontoname/Profilbild: Antwort ohne verwertbare Felder.");
+            mark_avatar_failed(&shared, &ctx);
+            return;
+        }
+        Err(_) => {
+            log::warn!("Kontoname/Profilbild: Abruf der Kontoeinstellungen fehlgeschlagen.");
+            mark_avatar_failed(&shared, &ctx);
+            return;
+        }
+    };
+    let (name, node) = pair;
+
+    // Read the cache (if any) up front: a present, valid file is used right
+    // away, so the picture is on screen without waiting for the network.
+    let cache = crate::prime_photos::avatar_cache_path(&node);
+    let cached = cache
+        .as_ref()
+        .and_then(|p| std::fs::read(p).ok())
+        .filter(|b| crate::prime_photos::looks_like_image(b));
+    publish_avatar(
+        &shared,
+        &ctx,
+        AvatarResult {
+            name: name.clone(),
+            jpeg: cached,
+        },
+    );
+
+    // Refresh from the service and fill the cache. A response that is not a
+    // valid image is discarded (the cached/placeholder picture stays).
+    match photo.fetch_avatar_jpeg(&node).await {
+        Ok(bytes) if crate::prime_photos::looks_like_image(&bytes) => {
+            if let Some(path) = &cache {
+                if let Some(dir) = path.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                if let Err(e) = std::fs::write(path, &bytes) {
+                    log::warn!("Profilbild-Cache konnte nicht geschrieben werden: {e}");
+                }
+            }
+            publish_avatar(
+                &shared,
+                &ctx,
+                AvatarResult {
+                    name,
+                    jpeg: Some(bytes),
+                },
+            );
+        }
+        Ok(_) => log::warn!("Profilbild: Antwort ist kein gültiges Bild."),
+        Err(_) => log::warn!("Profilbild: Abruf fehlgeschlagen."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -792,5 +1021,25 @@ mod tests {
             autostart_action(Some(false), true),
             AutostartAction::Nothing
         );
+    }
+
+    #[test]
+    fn should_fetch_avatar_allows_first_try_and_one_retry_after_failure() {
+        // Nothing started yet: the first attempt always runs, whatever the
+        // (irrelevant) previous outcome flag says.
+        assert!(should_fetch_avatar(0, false));
+        assert!(should_fetch_avatar(0, true));
+        // One attempt done and it failed: exactly one retry.
+        assert!(should_fetch_avatar(1, true));
+        // One attempt done and it succeeded: done, no retry.
+        assert!(!should_fetch_avatar(1, false));
+    }
+
+    #[test]
+    fn should_fetch_avatar_gives_up_after_two_attempts() {
+        // Two attempts (initial + retry) used up, regardless of the outcome.
+        assert!(!should_fetch_avatar(2, false));
+        assert!(!should_fetch_avatar(2, true));
+        assert!(!should_fetch_avatar(3, true));
     }
 }

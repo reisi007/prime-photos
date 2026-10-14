@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
     io::Read,
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -349,6 +349,74 @@ fn upload_retry_delay(attempt: u32, headers: Option<&HeaderMap>) -> Duration {
         .min(UPLOAD_BACKOFF_MAX_MS);
     let jittered = (base_ms + jitter_millis(base_ms / 4 + 1)).min(UPLOAD_BACKOFF_MAX_MS);
     Duration::from_millis(jittered)
+}
+
+/// Account preferences as answered by `GET /drive/v1/account/preferences`.
+/// Only the two fields this feature needs; every other field is ignored, and a
+/// missing/absent field deserialises to the empty/`None` default instead of
+/// failing the whole parse.
+#[derive(Debug, Deserialize, Serialize)]
+struct ResponsePreferences {
+    #[serde(default)]
+    name: String,
+    #[serde(default, rename(deserialize = "avatarNodeId"))]
+    avatar_node_id: Option<String>,
+}
+
+/// Host prefix of Amazon's thumbnail service (`docs/PROTOCOL.md` §2.4,
+/// `thumbnailServiceUrl`). The marketplace domain follows
+/// (`thumbnails-photos.amazon.<domain>`), so one host exists per marketplace —
+/// `.de`, `.com`, `.co.uk`, `.fr`, `.it`, `.es`, `.ca`, `.co.jp` were all
+/// verified live (2026-10-14). The avatar picture is served here, **not** under
+/// `/drive/v1`.
+const THUMBNAIL_HOST_PREFIX: &str = "https://thumbnails-photos.amazon.";
+
+/// Avatar view box in pixels (the original's `AvatarViewBoxSize = 60`, see
+/// `docs/SPEC_ACCOUNT_BILLING.md` §3.4).
+pub(crate) const AVATAR_VIEW_BOX: u32 = 60;
+
+/// `GET` URL for the account preferences (`name` + `avatarNodeId`).
+pub(crate) fn preferences_url(country: &str) -> String {
+    format!("https://www.amazon.{country}/drive/v1/account/preferences")
+}
+
+/// `GET` URL for the 60×60 avatar thumbnail on the **marketplace's** thumbnail
+/// host (derived from the shared `login::amazon_domain` helper, so there is no
+/// second country table). `viewBox` is percent-encoded (`60%2C60`), exactly as
+/// the original sends it.
+pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
+    let domain = crate::login::amazon_domain(country);
+    format!(
+        "{THUMBNAIL_HOST_PREFIX}{domain}/v1/thumbnail/{node_id}?viewBox={v}%2C{v}&fit=clip&encoding=jpeg",
+        v = AVATAR_VIEW_BOX
+    )
+}
+
+/// Local cache file name for an avatar thumbnail: `<nodeId>_60_60.jpeg`
+/// (the original's `ThumbnailPath/<nodeId>_60_60.jpeg`).
+pub(crate) fn avatar_cache_file_name(node_id: &str) -> String {
+    format!("{node_id}_{}_{}.jpeg", AVATAR_VIEW_BOX, AVATAR_VIEW_BOX)
+}
+
+/// Cache path for an avatar thumbnail inside a given base directory (`thumbnails/`).
+/// Pure, so the layout is unit-testable without touching the real app dir.
+pub(crate) fn avatar_cache_path_in(base: &Path, node_id: &str) -> PathBuf {
+    base.join("thumbnails")
+        .join(avatar_cache_file_name(node_id))
+}
+
+/// Cache path under the app data dir — the same directory that holds
+/// `config.toml` / `dedup.sqlite3`. `None` when no config dir is available.
+pub(crate) fn avatar_cache_path(node_id: &str) -> Option<PathBuf> {
+    let base = dirs::config_dir()?.join("prime_photos");
+    Some(avatar_cache_path_in(&base, node_id))
+}
+
+/// True when `bytes` begin with a JPEG or PNG signature. A cached file is only
+/// trusted when it does; anything else counts as corrupt and is refetched.
+pub(crate) fn looks_like_image(bytes: &[u8]) -> bool {
+    const PNG: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    bytes.starts_with(&[0xFF, 0xD8, 0xFF]) || bytes.starts_with(&PNG)
 }
 
 #[derive(Debug)]
@@ -1080,5 +1148,138 @@ impl PrimePhotos {
             Self::check_auth_error(status_code);
             Err(response.error_for_status().err().unwrap())
         }
+    }
+
+    /// Fetch the signed-in customer's display name and avatar node id from the
+    /// account preferences endpoint (`docs/SPEC_ACCOUNT_BILLING.md` §3.4).
+    ///
+    /// `Ok(None)` when the response carries no usable name **or** no avatar
+    /// node id (missing, empty, whitespace-only) — never panics, and a missing
+    /// field does not fail the parse. Uses the same cookie headers as the other
+    /// drive calls (`build_common_headers`).
+    pub async fn fetch_account_name(&self) -> Result<Option<(String, String)>, reqwest::Error> {
+        let url = Url::parse(&preferences_url(&self.conf.country))
+            .expect("Can't parse the preferences URL");
+        let headers = self.build_common_headers();
+
+        if self.dry_run {
+            return Ok(None);
+        }
+
+        let response = self.client.get(url).headers(headers).send().await?;
+
+        if response.status().is_success() {
+            let body = response.json::<ResponsePreferences>().await?;
+            let name = body.name.trim().to_string();
+            let avatar = body.avatar_node_id.unwrap_or_default().trim().to_string();
+            if name.is_empty() || avatar.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some((name, avatar)))
+            }
+        } else {
+            let status_code = response.status().as_u16();
+            debug!("Preferences request failed with status: {}", status_code);
+            Self::check_auth_error(status_code);
+            Err(response.error_for_status().err().unwrap())
+        }
+    }
+
+    /// Download the 60×60 avatar thumbnail as **direct JPEG bytes** from the
+    /// thumbnail service (`docs/SPEC_ACCOUNT_BILLING.md` §3.4). The
+    /// device-specific `x-amz-access-token` the original sends is deliberately
+    /// **not** used — our cookie headers are sufficient here and the token
+    /// would make the request fail with 401.
+    pub async fn fetch_avatar_jpeg(&self, avatar_node_id: &str) -> Result<Vec<u8>, reqwest::Error> {
+        let url = Url::parse(&thumbnail_url(avatar_node_id, &self.conf.country))
+            .expect("Can't parse the thumbnail URL");
+        let headers = self.build_common_headers();
+
+        if self.dry_run {
+            return Ok(Vec::new());
+        }
+
+        let response = self.client.get(url).headers(headers).send().await?;
+
+        if response.status().is_success() {
+            Ok(response.bytes().await?.to_vec())
+        } else {
+            let status_code = response.status().as_u16();
+            debug!("Thumbnail request failed with status: {}", status_code);
+            Self::check_auth_error(status_code);
+            Err(response.error_for_status().err().unwrap())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preferences_url_uses_marketplace_country() {
+        assert_eq!(
+            preferences_url("de"),
+            "https://www.amazon.de/drive/v1/account/preferences"
+        );
+        assert_eq!(
+            preferences_url("fr"),
+            "https://www.amazon.fr/drive/v1/account/preferences"
+        );
+    }
+
+    #[test]
+    fn thumbnail_url_encodes_viewbox_and_node() {
+        assert_eq!(
+            thumbnail_url("B0ABCDEF123", "de"),
+            "https://thumbnails-photos.amazon.de/v1/thumbnail/B0ABCDEF123\
+             ?viewBox=60%2C60&fit=clip&encoding=jpeg"
+        );
+        // The comma must be percent-encoded, exactly as the original sends it.
+        let url = thumbnail_url("NODE", "de");
+        assert!(url.contains("viewBox=60%2C60"));
+        assert!(!url.contains("viewBox=60,60"));
+    }
+
+    #[test]
+    fn thumbnail_url_uses_the_marketplace_host() {
+        // The host follows the shared `login::amazon_domain` mapping, so a
+        // non-German marketplace no longer hits `thumbnails-photos.amazon.de`.
+        assert!(thumbnail_url("NODE", "us").starts_with("https://thumbnails-photos.amazon.com/"));
+        assert!(thumbnail_url("NODE", "uk").starts_with("https://thumbnails-photos.amazon.co.uk/"));
+        assert!(thumbnail_url("NODE", "fr").starts_with("https://thumbnails-photos.amazon.fr/"));
+        // "at"/"ch" map to the German marketplace, hence the `.de` host.
+        assert!(thumbnail_url("NODE", "at").starts_with("https://thumbnails-photos.amazon.de/"));
+        // The path/query is unchanged by the marketplace.
+        assert!(
+            thumbnail_url("NODE", "us")
+                .ends_with("/v1/thumbnail/NODE?viewBox=60%2C60&fit=clip&encoding=jpeg")
+        );
+    }
+
+    #[test]
+    fn avatar_cache_file_name_is_node_and_viewbox() {
+        assert_eq!(avatar_cache_file_name("NODE123"), "NODE123_60_60.jpeg");
+    }
+
+    #[test]
+    fn avatar_cache_path_lives_under_thumbnails() {
+        let p = avatar_cache_path_in(Path::new("/base/prime_photos"), "NODE123");
+        assert_eq!(
+            p,
+            Path::new("/base/prime_photos/thumbnails/NODE123_60_60.jpeg")
+        );
+    }
+
+    #[test]
+    fn looks_like_image_accepts_jpeg_and_png_rejects_junk() {
+        // JPEG SOI + marker.
+        assert!(looks_like_image(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00]));
+        // PNG signature.
+        assert!(looks_like_image(&[
+            0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00
+        ]));
+        assert!(!looks_like_image(b"not an image"));
+        assert!(!looks_like_image(&[]));
     }
 }

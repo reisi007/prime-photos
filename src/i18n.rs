@@ -141,6 +141,7 @@ const EN: &[(&str, &str)] = &[
     // -- app shell / navigation -----------------------------------------
     ("Abmelden", "Sign out"),
     ("Angemeldet", "Signed in"),
+    ("Angemeldet als:", "Signed in as:"),
     ("Bereit", "Ready"),
     ("Einstellungen", "Settings"),
     ("Einstellungen gespeichert.", "Settings saved."),
