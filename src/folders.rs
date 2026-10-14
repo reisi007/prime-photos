@@ -123,6 +123,12 @@ pub enum FolderStatus {
 
 /// How a name conflict in the destination folder is resolved on upload.
 ///
+/// A file's identity is its **content** (user decision 2026-10-14): the same
+/// content is skipped — the server rejects an MD5 duplicate with HTTP 409 and
+/// `errorCode = "DuplicatesConflictError"` — while different content is
+/// uploaded, renamed when the name is already taken. The default is therefore
+/// `SaveAsNew`.
+///
 /// Mirrors the original client's four options ("Umgang mit Dateinamenkonflikten",
 /// `docs/SPEC_DEDUP.md` §4.1) and maps onto the wire parameter `conflictResolution`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -132,12 +138,18 @@ pub enum ConflictResolution {
     /// the conflict (HTTP 409), which the upload worker turns into a per-file
     /// prompt (Ignorieren / Als neue Datei speichern / Ersetzen).
     Ask,
-    /// "Ignorieren" — the dedup-friendly default (`conflictResolution=NONE`).
-    #[default]
+    /// "Ignorieren" — keeps the existing file (`conflictResolution=NONE`) and
+    /// drops the new one. Not the default: a file whose content differs is meant
+    /// to be uploaded, not silently skipped.
     Ignore,
-    /// "Als neue Dateien speichern" (`conflictResolution=RENAME`).
+    /// "Als neue Dateien speichern" (`conflictResolution=RENAME`) — the default:
+    /// different content is uploaded, renamed when the name is already taken.
+    #[default]
     SaveAsNew,
-    /// "Ersetzen" (`conflictResolution=OVERWRITE`).
+    /// "Ersetzen" — **heute nicht funktionsfähig**: the host rejects
+    /// `conflictResolution=OVERWRITE` (`POST` ⇒ 404, empty body); the correct
+    /// path would be `PUT /v2/upload/<nodeId>` (see the ledger, not implemented
+    /// here).
     Replace,
 }
 
@@ -331,5 +343,27 @@ mod tests {
         // must be able to tell the two apart.
         assert_eq!(max_mtime(&missing), None);
         assert_eq!(max_mtime(Path::new("/definitely/not/here")), None);
+    }
+
+    #[test]
+    fn conflict_resolution_defaults_to_save_as_new() {
+        // A file's identity is its content (user decision 2026-10-14): the
+        // default must upload content that differs, renamed when the name is
+        // taken — never silently skip it.
+        assert_eq!(ConflictResolution::default(), ConflictResolution::SaveAsNew);
+    }
+
+    #[test]
+    fn old_store_without_conflict_resolution_gets_the_new_default() {
+        // An existing `folders.toml` predates the field; deserializing it must
+        // land on the new default, not on `Ignore`.
+        let folder: BackupFolder = toml::from_str(
+            r#"
+path = "/tmp/photos"
+name = "Fotos"
+"#,
+        )
+        .unwrap();
+        assert_eq!(folder.conflict_resolution, ConflictResolution::SaveAsNew);
     }
 }
