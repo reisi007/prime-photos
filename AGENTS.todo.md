@@ -794,6 +794,43 @@ Prüfen: `RUST_LOG=info` muss dann echte Zeilen liefern (z. B. den Autostart-/Av
 Belastbarste Quelle — er bekommt pro hochgeladener Datei eine Zeile; dazu `folders.toml`
 (Zähler/Status) und die Server-Sicht über die dokumentierten Routen.
 
+## UI-Befunde aus dem ersten echten Upload (User-Meldung 2026-10-14) — Fix-Paket offen
+
+Beobachtet während des echten 3,8-GB-Laufs (`~/Pictures/Sport`, 480 Dateien) am **ungebündelten
+Debug-Binary**. Vier Befunde, zwei davon mit User-Entscheidung:
+
+1. **Umlaute werden als Kasten gerendert** (`O□FB`). **Ursache belegt:** macOS legt Dateinamen in
+   **NFD** ab — `Ö` im Pfad ist `4f cc 88` („O" + U+0308 KOMBIERENDES TREMA), nicht `c3 96`. Die
+   eingebettete egui-Schrift (Ubuntu-Light/Hack) hat für das kombinierende Zeichen kein Glyph, und
+   egui positioniert Kombinationszeichen ohnehin nicht. Betrifft jeden Pfad/jede Datei mit Umlaut in
+   der Anzeige (deutsche App!).
+   **Entscheidung (User 2026-10-14): `unicode-normalization` als Abhängigkeit, NFC-Normalisierung
+   NUR für den Anzeigetext.** Daten, Pfade und der MD5-Index bleiben **unverändert** — die
+   Dedup-Schlüssel sind Pfade, die dürfen sich nicht verschieben. Verworfen: eine eigene
+   Mini-Tabelle (handgepflegt, unvollständig) und „andere Schrift einbetten" (löst das
+   Kombinationszeichen-Problem nicht).
+2. **Fortschritt doppelt angezeigt:** die Seiten-Fußzeile (P3, mit Spinner + „Gesamt: x von y · z % ·
+   noch …") **und** die untere Statusleiste (`TopBottomPanel::bottom("log")`, `src/app.rs:808`,
+   „Upload läuft: n/total · <Datei> · ETA").
+   **Entscheidung (User 2026-10-14): genau EINE Fußzeile ganz unten, app-weit** — Spinner +
+   Fortschrittsbalken + „Gesamt: x von y · z % · noch …" + aktuelle Datei/ETA in einer (etwas
+   höheren) Zeile; die Seiten-Fußzeile aus P3 entfällt damit. Verworfen: „Seiten-Fußzeile behalten,
+   unten nur Log" (dann fehlt Datei/ETA) und „zwei Zeilen unten" (mehr Höhe).
+3. **Zeile zeigt „Fehler" statt „Upload läuft …".** Die Zeile rendert den **persistierten** Status
+   (`Row.status ← f.status`, `src/backup.rs:1399`) aus dem letzten fehlgeschlagenen Lauf; der
+   laufende Upload setzt ihn nicht. Fix: Status **live** ableiten — enthält `folder_total` das Ziel,
+   läuft dieser Ordner (⇒ „Upload läuft …").
+4. **Aufklappen hält nicht.** Die Klapp-Überschrift heißt `tr1("Warteschlange ({})", remaining)`;
+   ihr Text ändert sich mit jedem Zähler-Update, und egui leitet die Widget-ID aus dem Label ab ⇒
+   neue ID pro Update ⇒ der Auf-/Zu-Zustand wird jedes Mal zurückgesetzt. Fix: feste ID
+   (`CollapsingHeader::id_salt`).
+
+**Kein** App-Fehler (aufgeklärt): der **pixelige** Font in den Screenshots kam vom **ungebündelten**
+Binary (per Terminal gestartet, ohne `Info.plist`). `packaging/Info.plist` enthält
+`NSHighResolutionCapable = true`, das gebaute `.app` ist also retina-scharf. **Konsequenz:** für
+Sichtprüfungen/Screenshots künftig das Bundle bauen (`packaging/make-app.sh`), nicht die nackte
+Binary starten.
+
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
 Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
