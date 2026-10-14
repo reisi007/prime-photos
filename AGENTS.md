@@ -241,6 +241,11 @@ Linksklick; außerdem zweifelte er die Zahl „480 fertig" an („passt die Anza
   Skip) — die Ausgänge liegen dort schon getrennt vor und werden nur nicht berichtet.
   **Konsequenz für die Regel „eine aggregierte Anzeige":** das bleibt für den *Fortschritt* eines
   laufenden Uploads richtig, gilt aber nicht für das *Ergebnis* — das Ergebnis wird aufgeschlüsselt.
+  **Speicherung: nur flüchtig** (User-Entscheidung 2026-10-14) — die Aufschlüsselung lebt im Speicher
+  für den Lauf/die Sitzung, `folders.toml` wird **nicht** erweitert (keine Schemaänderung); nach einem
+  Neustart steht dort weiterhin nur die Gesamtzahl. **Ort (User-Entscheidung 2026-10-14):** die
+  **Fußzeile aggregiert** über alle Ziele **und** die **einzelne Ordner-Zeile** zeigt ihre eigenen drei
+  Zahlen; das Datei-Detail bleibt wie heute (beide Skip-Fälle teilen sich dort einen Zustand).
 
 ## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
 

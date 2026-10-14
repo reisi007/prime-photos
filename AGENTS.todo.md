@@ -922,6 +922,9 @@ umgesetzt:
 - [ ] **Ergebnis aufschlüsseln: neu / bereits im Konto / unverändert / Fehler.** Belegte Ursache:
   `src/upload.rs` zählt alle drei Ausgänge als `s.done += 1` (`:496`, `:552`, `:376`/`:421`) ⇒ die
   Zahl „480 fertig" war nicht als „480 neu" lesbar. Die Ausgänge liegen bereits getrennt vor.
+  **Speicherung: nur flüchtig** (User-Entscheidung 2026-10-14) — `folders.toml` wird **nicht**
+  erweitert, nach einem Neustart steht dort nur die Gesamtzahl. **Ort:** Fußzeile aggregiert **und**
+  die einzelne Ordner-Zeile (User-Entscheidung 2026-10-14); das Datei-Detail bleibt wie heute.
 - [x] **Icon-Herkunft entschieden (User 2026-10-14):** Material Symbols (Apache-2.0) als SVG durch die
   vorhandene resvg-Pipeline, Raster + Laufzeit-Tint, **kein** Icon-Font, keine neue Abhängigkeit.
   Attribution sammelt `docs/THIRD_PARTY.md` (Eingang für die About-/Lizenzseite, Welle 4).
