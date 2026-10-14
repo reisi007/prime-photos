@@ -584,6 +584,9 @@ impl eframe::App for PrimePhotoApp {
             }
         }
 
+        // Name-conflict prompt (`ConflictResolution::Ask`).
+        self.conflict_dialog(ctx);
+
         // Deferred login start: creating the webview needs the window handle.
         if self.pending_login {
             self.pending_login = false;

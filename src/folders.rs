@@ -60,7 +60,9 @@ pub enum FolderStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ConflictResolution {
-    /// "Jedes Mal nachfragen" — no server-side policy yet; behaves like `Ignore`.
+    /// "Jedes Mal nachfragen" — the server keeps the existing file and reports
+    /// the conflict (HTTP 409), which the upload worker turns into a per-file
+    /// prompt (Ignorieren / Als neue Datei speichern / Ersetzen).
     Ask,
     /// "Ignorieren" — the dedup-friendly default (`conflictResolution=NONE`).
     #[default]
@@ -72,8 +74,9 @@ pub enum ConflictResolution {
 }
 
 impl ConflictResolution {
-    /// Wire value for the `conflictResolution` upload parameter.
-    /// `Ask` falls back to `NONE` until an interactive prompt exists (Paket B).
+    /// Wire value for the `conflictResolution` upload parameter. `Ask` and
+    /// `Ignore` both send `NONE` — the server keeps the existing file and reports
+    /// the conflict; the worker decides whether to skip it or ask the user.
     pub fn wire_value(self) -> &'static str {
         match self {
             ConflictResolution::Ask | ConflictResolution::Ignore => "NONE",

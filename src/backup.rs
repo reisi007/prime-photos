@@ -627,6 +627,54 @@ impl PrimePhotoApp {
         });
     }
 
+    /// Modal prompt for a name conflict (`ConflictResolution::Ask`,
+    /// docs/SPEC_DEDUP.md §4.1). Rendered from `update` independently of the
+    /// current page; the answer is written into the shared state, where the
+    /// waiting worker picks it up. Drawn only while a conflict is pending.
+    pub(crate) fn conflict_dialog(&mut self, ctx: &egui::Context) {
+        let pending = { self.upload.lock().unwrap().pending_conflict.clone() };
+        let Some(file_name) = pending else {
+            return;
+        };
+        // The worker only polls the shared state; it does not paint frames, so
+        // keep the dialog (and the repaint that shows it) alive from here.
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+
+        let mut remember = self.upload.lock().unwrap().conflict_remember;
+        let mut answer: Option<ConflictResolution> = None;
+        egui::Window::new(tr("Dateiname-Konflikt"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(tr1(
+                    "„{}“ existiert bereits in Amazon Photos.",
+                    &file_name,
+                ));
+                ui.checkbox(&mut remember, tr("Nicht noch einmal fragen"));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.add(theme::primary_button(tr("Ignorieren"))).clicked() {
+                        answer = Some(ConflictResolution::Ignore);
+                    }
+                    if ui.button(tr("Als neue Datei speichern")).clicked() {
+                        answer = Some(ConflictResolution::SaveAsNew);
+                    }
+                    if ui.button(tr("Ersetzen")).clicked() {
+                        answer = Some(ConflictResolution::Replace);
+                    }
+                });
+            });
+        if let Some(a) = answer {
+            let mut s = self.upload.lock().unwrap();
+            s.conflict_remember = remember;
+            s.conflict_answer = Some(a);
+        } else {
+            // Remember the checkbox even before the user commits to an option.
+            self.upload.lock().unwrap().conflict_remember = remember;
+        }
+    }
+
     // -- background sync (PORT-5) -------------------------------------------
 
     /// Spawn the single supervising background-sync task — once per process,

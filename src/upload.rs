@@ -69,6 +69,17 @@ pub(crate) struct UploadShared {
     /// Seconds spent actually transferring (dedup skips are excluded, they would
     /// otherwise report an infinite rate).
     pub(crate) upload_secs: f64,
+    /// Interactive name-conflict prompt (docs/SPEC_DEDUP.md §4.1): the file name
+    /// the user must decide on. `Some` while the run is waiting for the answer.
+    pub(crate) pending_conflict: Option<String>,
+    /// The user's answer to `pending_conflict` (`Ignore` / `SaveAsNew` /
+    /// `Replace`; never `Ask`). The worker takes it and clears it.
+    pub(crate) conflict_answer: Option<ConflictResolution>,
+    /// "Nicht noch einmal fragen": apply the answer to every further conflict of
+    /// this run without asking again.
+    pub(crate) conflict_remember: bool,
+    /// Per-run override set by `conflict_remember`; wins over the folder policy.
+    pub(crate) conflict_override: Option<ConflictResolution>,
 }
 
 impl UploadShared {
@@ -217,6 +228,73 @@ pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
 // Async upload machinery
 // ---------------------------------------------------------------------------
 
+/// Outcome of one file's upload attempt, after the conflict policy has been
+/// applied (`Ignore`/`Ask→Ignore` become `ConflictSkipped`, everything else is
+/// an upload or a real failure).
+enum FileOutcome {
+    Uploaded(String),
+    /// A name conflict the policy resolved as "keep the existing file".
+    ConflictSkipped,
+    Failed(String),
+}
+
+/// Ask the user about one name conflict (`Ask` policy) and return the decision.
+///
+/// Prompts are serialized: only one is on screen at a time. Other workers that
+/// hit a conflict wait here and pick up the run-wide override if the user chose
+/// "nicht noch einmal fragen". A hard timeout guarantees a hidden window can
+/// never stall the whole run — the dedup-friendly `Ignore` is the fallback.
+async fn resolve_conflict(
+    shared: &Arc<Mutex<UploadShared>>,
+    file_name: &str,
+) -> ConflictResolution {
+    const POLL: Duration = Duration::from_millis(150);
+    const TIMEOUT: Duration = Duration::from_secs(60);
+    loop {
+        // A run-wide decision (or a previous answer) needs no prompt.
+        let ask_now = {
+            let mut s = shared.lock().unwrap();
+            if let Some(o) = s.conflict_override {
+                return o;
+            }
+            if s.pending_conflict.is_none() {
+                s.pending_conflict = Some(file_name.to_string());
+                s.conflict_answer = None;
+                s.touch_queue();
+                s.log(tr1("Dateiname-Konflikt: {}", file_name));
+                true
+            } else {
+                false
+            }
+        };
+        if !ask_now {
+            // Another worker is already asking; wait until it is answered and
+            // then re-check for a run-wide override.
+            tokio::time::sleep(POLL).await;
+            continue;
+        }
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            tokio::time::sleep(POLL).await;
+            let mut s = shared.lock().unwrap();
+            if let Some(answer) = s.conflict_answer.take() {
+                s.pending_conflict = None;
+                if s.conflict_remember {
+                    s.conflict_override = Some(answer);
+                }
+                s.touch_queue();
+                return answer;
+            }
+            if Instant::now() >= deadline {
+                s.pending_conflict = None;
+                s.touch_queue();
+                s.log(tr("Keine Antwort auf den Konflikt — wird übersprungen."));
+                return ConflictResolution::Ignore;
+            }
+        }
+    }
+}
+
 pub(crate) async fn upload_worker(
     queue: Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>,
     shared: Arc<Mutex<UploadShared>>,
@@ -328,12 +406,49 @@ pub(crate) async fn upload_worker(
         // already sent and could leave a `RENAME` duplicate on the server behind
         // — both contradict "never waste bandwidth". The pause check therefore
         // happens at the top of the loop only, not by racing this future.
-        let res = uploader
-            .upload_picture(&path, Some(&bytes), Some(&md5sum), conflict)
-            .await;
+        //
+        // Conflict policy (docs/SPEC_DEDUP.md §4.1): a 409 is reported by the
+        // engine. `Ignore` maps it to "already there" (finished, no bytes); `Ask`
+        // waits for one user decision per file (with an optional "don't ask
+        // again" for the rest of the run); `SaveAsNew`/`Replace` are plain wire
+        // values and never produce a 409.
+        let mut resolution = {
+            let s = shared.lock().unwrap();
+            s.conflict_override.unwrap_or(conflict)
+        };
+        let mut existing_conflict_id: Option<String> = None;
+        let outcome = loop {
+            match uploader
+                .upload_picture(&path, Some(&bytes), Some(&md5sum), resolution)
+                .await
+            {
+                Ok(id) => break FileOutcome::Uploaded(id),
+                Err(e) => {
+                    let Some(existing) = crate::prime_photos::conflict_node_id(&e) else {
+                        break FileOutcome::Failed(e);
+                    };
+                    if resolution != ConflictResolution::Ask {
+                        // "Ignorieren": the file is already on the server.
+                        existing_conflict_id = Some(existing.to_string());
+                        break FileOutcome::ConflictSkipped;
+                    }
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let answer = resolve_conflict(&shared, &name).await;
+                    if answer == ConflictResolution::Ignore {
+                        existing_conflict_id = Some(existing.to_string());
+                        break FileOutcome::ConflictSkipped;
+                    }
+                    // Re-upload the same file with the chosen policy.
+                    resolution = answer;
+                }
+            }
+        };
         let mut requeued = false;
-        match res {
-            Ok(id) => {
+        match outcome {
+            FileOutcome::Uploaded(id) => {
                 // Remember the upload (also for the server-side 409 case, which
                 // upload_picture returns as Ok) so the next scan skips it.
                 dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
@@ -350,7 +465,7 @@ pub(crate) async fn upload_worker(
                 s.touch_queue();
                 s.log(format!("OK    {}", path.display()));
             }
-            Err(e) => {
+            FileOutcome::Failed(e) => {
                 // Expired session: retry this one file once after the token
                 // renewal (never counted as a failure). Only once per run, so a
                 // persistently bad session cannot spin.
@@ -377,6 +492,27 @@ pub(crate) async fn upload_worker(
                     s.touch_queue();
                     s.log(tr2("FEHLER {}: {}", path.display(), e));
                 }
+            }
+            FileOutcome::ConflictSkipped => {
+                // 409 with `Ignore` (or an `Ask` answered with "Ignorieren"):
+                // the file is already on the server. Finished and dedup-friendly
+                // — not an error, and no bytes were transferred.
+                let mut s = shared.lock().unwrap();
+                s.done += 1;
+                *s.folder_done.entry(idx).or_insert(0) += 1;
+                if let Some(id) = existing_conflict_id.take() {
+                    if !id.is_empty() {
+                        // Keep the existing node in the album list, exactly as
+                        // the previous 409-as-Ok path did.
+                        s.uploaded_ids.push(id);
+                    }
+                }
+                if let Some(en) = s.queue.get_mut(row) {
+                    en.state = FileState::Skipped;
+                }
+                s.bytes_done = s.bytes_done.saturating_add(size);
+                s.touch_queue();
+                s.log(tr1("Vorhanden, übersprungen: {}", path.display()));
             }
         }
         if requeued {

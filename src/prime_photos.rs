@@ -274,6 +274,21 @@ const UPLOAD_BACKOFF_BASE_MS: u64 = 500;
 /// Upper bound for any single backoff / `Retry-After` sleep.
 const UPLOAD_BACKOFF_MAX_MS: u64 = 8_000;
 
+/// Marker prefix for a name conflict reported by the upload endpoint (HTTP 409,
+/// `docs/SPEC_DEDUP.md` §4.1). The upload worker resolves it per the folder's
+/// policy — skip for `Ignore`, ask the user per file for `Ask`.
+pub(crate) const CONFLICT_PREFIX: &str = "\u{1}conflict\u{1}";
+
+/// Build the conflict marker carrying the id of the node already on the server.
+pub(crate) fn conflict_error(existing_node_id: &str) -> String {
+    format!("{CONFLICT_PREFIX}{existing_node_id}")
+}
+
+/// `Some(existing_node_id)` when `err` is a conflict marker, else `None`.
+pub(crate) fn conflict_node_id(err: &str) -> Option<&str> {
+    err.strip_prefix(CONFLICT_PREFIX)
+}
+
 /// Flatten an error together with its whole `source()` chain into one line, so
 /// the underlying cause (DNS failure, connection reset, body stream, timeout)
 /// is not swallowed behind reqwest's generic "error sending request for url".
@@ -966,18 +981,22 @@ impl PrimePhotos {
             let status_code = response.status().as_u16();
             debug!("Upload failed on status code {}", status_code);
             match status_code {
-                // Ignore double-uploads
+                // A name conflict. Who resolves it is the caller's business:
+                // `upload_worker` treats it as "already there" for `Ignore`, or
+                // asks the user per file for `Ask` (docs/SPEC_DEDUP.md §4.1).
+                // The marker carries the existing node id.
                 409 => {
                     let body = match response.json::<ResponseUploadFail>().await {
                         Ok(v) => v,
                         Err(e) => return Err(error_chain(&e)),
                     };
-                    Ok(body
+                    let existing = body
                         .error_details
                         .conflict_node_ids
                         .first()
                         .cloned()
-                        .unwrap_or_default())
+                        .unwrap_or_default();
+                    return Err(conflict_error(&existing));
                 }
                 _ => {
                     // Check for authentication errors
