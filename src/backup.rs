@@ -1,18 +1,23 @@
 use crate::app::{Page, ONE_TIME_IDX, PrimePhotoApp};
 use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::config::Config;
+use crate::dedup::DedupIndex;
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
 use crate::i18n::{tr, tr1};
 use crate::theme;
 use crate::upload::{run_upload, status_text, upload_progress_text, FileState, QueueEntry, UploadShared};
 use eframe::egui::{self, RichText};
+// NOTE: `notify` is the filesystem-event crate — not `crate::notify`, the
+// desktop-notification module (they are unrelated and both stay).
+use notify;
+use notify::Watcher;
 use rfd::FileDialog;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{watch, Notify};
+use tokio::sync::watch;
 
 pub(crate) enum FolderAction {
     Upload(usize),
@@ -77,12 +82,25 @@ impl UploadPlan {
     }
 
     fn build(store: &FolderStore, indices: &[usize]) -> Option<Self> {
+        // A manual run takes every supported file: no folder has a watermark.
+        let wanted: Vec<(usize, Option<i64>)> = indices.iter().map(|&i| (i, None)).collect();
+        Self::build_since(store, &wanted)
+    }
+
+    /// Build a plan from a **watermark** selection: `wanted` pairs a store index
+    /// with the watermark its files must beat (`None` = take everything).
+    ///
+    /// Same walk, same order and same counters as [`UploadPlan::build`], so a
+    /// manual run is exactly `build` with every watermark `None`. Used by the
+    /// cold-start safety net (user decision 2026-10-14): an unchanged folder
+    /// never even reaches a plan.
+    fn build_since(store: &FolderStore, wanted: &[(usize, Option<i64>)]) -> Option<Self> {
         let mut plan = Self::empty();
-        for &i in indices {
+        for &(i, watermark) in wanted {
             let Some(f) = store.folders.get(i) else {
                 continue;
             };
-            let imgs = folders::scan_images(&f.path);
+            let imgs = folders::scan_new_since(&f.path, watermark);
             plan.per_folder.insert(i, imgs.len());
             plan.folder_opts.insert(i, (f.dedup, f.conflict_resolution));
             for p in imgs {
@@ -137,6 +155,39 @@ impl UploadPlan {
             plan.items.push((row, idx, p));
         }
         plan
+    }
+
+    /// Build a plan from an explicit **per-folder** file list (the watcher
+    /// path): every file keeps its own backup-folder index, so the run looks
+    /// exactly like a manual folder run to `run_upload` — same counters, same
+    /// `folder_opts`, same queue grouping — while only the files the OS actually
+    /// named are uploaded. No folder is walked.
+    fn build_from_events(store: &FolderStore, files: &[(usize, PathBuf)]) -> Option<Self> {
+        let mut plan = Self::empty();
+        for (i, p) in files {
+            let Some(f) = store.folders.get(*i) else {
+                continue;
+            };
+            *plan.per_folder.entry(*i).or_insert(0) += 1;
+            plan.folder_opts.insert(*i, (f.dedup, f.conflict_resolution));
+            let row = plan.items.len();
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            plan.queue.push(QueueEntry {
+                folder: *i,
+                name,
+                state: FileState::Waiting,
+            });
+            plan.note_size(p);
+            plan.items.push((row, *i, p.clone()));
+        }
+        if plan.items.is_empty() {
+            None
+        } else {
+            Some(plan)
+        }
     }
 
     /// Number of files this run would upload (before per-file dedup skips).
@@ -236,27 +287,30 @@ fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// Background sync (PORT-5): one supervising timer task
+// Background sync (PORT-5) + change detection (user decision 2026-10-14):
+// one supervising task per process
 // ---------------------------------------------------------------------------
 
-/// Cadence of the background sync. Both values are hard-coded on purpose:
-/// whether the user may change them is an open decision (AGENTS.todo.md,
-/// "Zurückgestellt" #3), so nothing is wired to a setting.
-/// First automatic run — deliberately conservative, so right after signing in
-/// the user has room for a manual run before anything starts on its own.
-const BG_SYNC_FIRST_TICK: Duration = Duration::from_secs(15 * 60);
-/// After that: one re-scan every 90 minutes.
-const BG_SYNC_INTERVAL: Duration = Duration::from_secs(90 * 60);
+/// Debounce for filesystem events: a burst (a camera import, a folder copy) is
+/// collected and handled once instead of once per file. Mirrors the original's
+/// 5 s folder debounce (`docs/SPEC_CHANGE_DETECTION.md` §4.3).
+const WATCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
-/// Set once the supervising background-sync task has been spawned for this
-/// process — `ensure_background_sync` is idempotent through it.
+/// How often the watcher supervisor re-syncs its watcher set with the persisted
+/// store (a folder added/enabled/disabled/removed, the `background_sync`
+/// switch) and retries the files it remembered while a run was busy or paused.
+/// Same value the original uses for its watcher run-loop poll
+/// (`BackupWatcherPollIntervalInSeconds` = 30 s, §4.3).
+const WATCH_POLL: Duration = Duration::from_secs(30);
+
+/// Upper bound for the "seen while a run was busy or paused" file list: a folder
+/// that changes faster than the uploads drain it must not grow the list without
+/// limit.
+const WATCH_PENDING_MAX: usize = 500;
+
+/// Set once the supervising background task has been spawned for this process —
+/// `ensure_background_sync` is idempotent through it.
 static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
-
-/// Reset signal for the background-sync interval: every manual upload bumps it,
-/// so the periodic run does not start a second time right behind a manual one.
-/// `Notify` keeps one permit, so a bump that lands between two ticks is never
-/// lost.
-static BG_SYNC_RESET: LazyLock<Notify> = LazyLock::new(Notify::new);
 
 /// Persist the counters of a finished **background** run. `finalize_upload` is
 /// only reached through the UI hook for manual runs (`was_active` in `update`),
@@ -282,55 +336,54 @@ fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
     let _ = store.save();
 }
 
-/// One background-sync tick: re-scan every enabled folder and start a run for
-/// the ones with files. Runs detached from the UI struct (the supervisor owns
-/// its own clones), so every guard is re-checked here — it never panics into
-/// the app and never touches the UI thread.
-async fn background_sync_tick(
+/// One enabled backup folder the start-time watermark pass decided to scan.
+struct FolderScan {
+    /// Store index at decision time. Only read back to look up this run's
+    /// per-folder failure counters in the shared state.
+    idx: usize,
+    /// Folder path at decision time — never re-resolved from the store: while a
+    /// run uploads, the user may add or remove folders and shift the indices.
+    path: PathBuf,
+    /// Maximum mtime the decision was based on. Written back once the run has
+    /// finished (and only for a folder that came through clean).
+    scanned_max: i64,
+}
+
+/// Whether a detached run may start right now — the same four guards the old
+/// periodic tick checked: the `background_sync` switch, a live sign-in, no pause
+/// and no active run. Neither the start-time watermark pass nor a filesystem
+/// event may bypass them.
+fn can_start(cfg: &Config, paused: &watch::Sender<bool>, shared: &Arc<Mutex<UploadShared>>) -> bool {
+    if *paused.borrow() {
+        return false;
+    }
+    cfg.background_sync
+        // Same predicate as `PrimePhotoApp::is_logged_in` (session + acb cookie).
+        && !cfg.session_id.is_empty()
+        && !cfg.cookie_x_acb.is_empty()
+        && !shared.lock().unwrap().active
+}
+
+/// Publish a plan and spawn its worker — the shared tail of every detached run
+/// (the start-time watermark pass and the watcher path), so both look and behave
+/// identically. Takes the live queue out of `plan`; the worker gets the items
+/// and the per-folder options.
+fn start_background_run(
+    mut plan: UploadPlan,
+    store: &mut FolderStore,
     shared: Arc<Mutex<UploadShared>>,
+    cfg: Config,
     paused: watch::Sender<bool>,
-    last_config: Config,
     concurrency: usize,
     limit_kbps: u32,
     album: String,
+    msg: String,
+    scans: Vec<FolderScan>,
 ) {
-    // Freshest settings first: the supervisor is detached from the UI struct, so
-    // the persisted config is the only source that reflects changes made after
-    // it was spawned (login/logout, the `background_sync` toggle).
-    let cfg = Config::load().unwrap_or(last_config);
-    if !cfg.background_sync {
-        return;
-    }
-    // Same predicate as `PrimePhotoApp::is_logged_in` (session + acb cookie).
-    if cfg.session_id.is_empty() || cfg.cookie_x_acb.is_empty() {
-        return;
-    }
-    if *paused.borrow() {
-        return;
-    }
-    if shared.lock().unwrap().active {
-        return;
-    }
+    publish_plan(&mut plan, store, &shared, msg);
 
-    // Enabled folders come from the persisted store (saved on every change).
-    let mut store = FolderStore::load();
-    let indices = store.enabled_indices();
-    if indices.is_empty() {
-        return;
-    }
-    let Some(mut plan) = UploadPlan::build(&store, &indices) else {
-        return;
-    };
-    let count = plan.count();
-    publish_plan(
-        &mut plan,
-        &mut store,
-        &shared,
-        format!("Hintergrund-Sync: {count} Datei(en) werden hochgeladen …"),
-    );
-
-    // Spawned, not awaited: the supervisor must keep ticking while the run
-    // uploads (the `active` guard above already prevents a second run).
+    // Spawned, not awaited: the supervisor must keep watching while the run
+    // uploads (the `active` guard in `can_start` already prevents a second one).
     tokio::spawn(async move {
         let after = shared.clone();
         run_upload(
@@ -345,12 +398,36 @@ async fn background_sync_tick(
         )
         .await;
         finalize_background_store(&after);
+        // Advance the watermark of every folder this pass scanned — but not of
+        // one that failed: leaving it at its old value makes the next start
+        // re-scan those files instead of walking past them.
+        if scans.is_empty() {
+            return;
+        }
+        let failed: Vec<usize> = {
+            let s = after.lock().unwrap();
+            s.folder_failed.keys().copied().collect()
+        };
+        let index = DedupIndex::open();
+        for scan in scans {
+            if failed.contains(&scan.idx) {
+                continue;
+            }
+            index.record_folder_scan(&scan.path, scan.scanned_max);
+        }
     });
 }
 
-/// The supervising task: one conservative first tick, then one run every 90
-/// minutes, for the rest of the process. A manual upload resets the interval.
-async fn background_sync_loop(
+/// The start-time safety net (user decision 2026-10-14): one **metadata-only**
+/// walk per enabled folder decides whether anything changed since the last run.
+/// A folder whose maximum mtime did not grow costs no hash, no per-file DB query
+/// and no upload plan; only the changed folders are scanned — and only for the
+/// files newer than their watermark.
+///
+/// Runs detached from the UI struct (the supervisor owns its own clones), so
+/// every guard is re-checked here — it never panics into the app and never
+/// touches the UI thread.
+async fn background_sync_pass(
     shared: Arc<Mutex<UploadShared>>,
     paused: watch::Sender<bool>,
     last_config: Config,
@@ -358,33 +435,306 @@ async fn background_sync_loop(
     limit_kbps: u32,
     album: String,
 ) {
-    let mut interval = tokio::time::interval_at(
-        tokio::time::Instant::now() + BG_SYNC_FIRST_TICK,
-        BG_SYNC_INTERVAL,
+    // Freshest settings first: the supervisor is detached from the UI struct, so
+    // the persisted config is the only source that reflects changes made after
+    // it was spawned (login/logout, the `background_sync` toggle).
+    let cfg = Config::load().unwrap_or(last_config);
+    if !can_start(&cfg, &paused, &shared) {
+        return;
+    }
+
+    // Enabled folders come from the persisted store (saved on every change).
+    let mut store = FolderStore::load();
+    let indices = store.enabled_indices();
+    if indices.is_empty() {
+        return;
+    }
+
+    // Same SQLite, same connection style as the MD5 index (`src/dedup.rs`).
+    let index = DedupIndex::open();
+    let mut wanted: Vec<(usize, Option<i64>)> = Vec::new();
+    let mut scans: Vec<FolderScan> = Vec::new();
+    for i in indices {
+        let Some(f) = store.folders.get(i) else {
+            continue;
+        };
+        let watermark = index.folder_max_mtime(&f.path);
+        // A folder we cannot even stat (gone, ejected, no access) answers
+        // `None`: it is left alone rather than treated as "unchanged", and
+        // scanning it would find nothing anyway.
+        let Some(current) = folders::max_mtime(&f.path) else {
+            continue;
+        };
+        // "Not greater" is unchanged — nothing to hash, nothing to record.
+        if current <= watermark.unwrap_or(i64::MIN) {
+            continue;
+        }
+        wanted.push((i, watermark));
+        scans.push(FolderScan {
+            idx: i,
+            path: f.path.clone(),
+            scanned_max: current,
+        });
+    }
+    if wanted.is_empty() {
+        return;
+    }
+    let Some(plan) = UploadPlan::build_since(&store, &wanted) else {
+        return;
+    };
+    let count = plan.count();
+    start_background_run(
+        plan,
+        &mut store,
+        shared.clone(),
+        cfg,
+        paused,
+        concurrency,
+        limit_kbps,
+        album,
+        format!("Hintergrund-Sync: {count} Datei(en) werden hochgeladen …"),
+        scans,
     );
-    loop {
-        tokio::select! {
-            _ = interval.tick() => {
-                // Run the tick as its own task and wait for it: if it ever
-                // panicked, the supervisor — the only thing keeping the sync
-                // alive in this session — must survive.
-                let (shared, paused, cfg, album) = (
-                    shared.clone(),
-                    paused.clone(),
-                    last_config.clone(),
-                    album.clone(),
-                );
-                if let Err(e) = tokio::spawn(background_sync_tick(
-                    shared, paused, cfg, concurrency, limit_kbps, album,
-                ))
-                .await
-                {
-                    log::warn!("Hintergrund-Sync: Tick fehlgeschlagen: {e}");
+}
+
+/// Fold one watcher event into `paths`: only supported image **files** survive.
+/// A directory is not a photo, and a path that no longer exists is a deletion —
+/// both are ignored, exactly like the original's event type gate
+/// (`docs/SPEC_CHANGE_DETECTION.md` §4.3). Returns `false` on a watcher error so
+/// the caller can re-arm the set.
+fn collect_event_paths(res: notify::Result<notify::Event>, paths: &mut Vec<PathBuf>) -> bool {
+    match res {
+        Ok(ev) => {
+            for p in ev.paths {
+                if paths.len() >= WATCH_PENDING_MAX {
+                    log::warn!(
+                        "Ordner-Wächter: Event-Puffer voll ({WATCH_PENDING_MAX}), weitere Events dieser Runde verworfen"
+                    );
+                    break;
+                }
+                if p.is_file() && folders::is_supported_image(&p) && !paths.iter().any(|q| *q == p) {
+                    paths.push(p);
                 }
             }
-            // A manual upload just started: restart the 90-minute cadence so
-            // the periodic run does not double-run behind it.
-            _ = BG_SYNC_RESET.notified() => interval.reset(),
+            true
+        }
+        Err(e) => {
+            log::warn!("Ordner-Wächter: {e}");
+            false
+        }
+    }
+}
+
+/// Attach each event path to its backup folder. The watchers are recursive, so a
+/// file deep in the tree reports its full path and is matched against the folder
+/// roots; a path under no *enabled* folder is dropped (the folder was disabled
+/// or removed while the event was in flight).
+fn map_to_folders(store: &FolderStore, paths: &[PathBuf]) -> Vec<(usize, PathBuf)> {
+    let roots: Vec<(usize, &Path)> = store
+        .enabled_indices()
+        .into_iter()
+        .filter_map(|i| store.folders.get(i).map(|f| (i, f.path.as_path())))
+        .collect();
+    paths
+        .iter()
+        .filter_map(|p| {
+            roots
+                .iter()
+                .find(|(_, root)| p.starts_with(root))
+                .map(|(i, _)| (*i, p.clone()))
+        })
+        .collect()
+}
+
+/// Start a run for exactly `files`, or park them when no run may start right now
+/// (busy, paused, signed out, switch off). Returns what is still waiting.
+///
+/// The running `run_upload` owns a fixed item list, so a burst that arrives
+/// mid-run is never written into it — it is remembered here and picked up by the
+/// next pass. The list is bounded and de-duplicated.
+fn handle_files(
+    files: Vec<(usize, PathBuf)>,
+    store: &mut FolderStore,
+    shared: &Arc<Mutex<UploadShared>>,
+    paused: &watch::Sender<bool>,
+    cfg: &Config,
+    concurrency: usize,
+    limit_kbps: u32,
+    album: &str,
+) -> Vec<(usize, PathBuf)> {
+    if files.is_empty() {
+        return Vec::new();
+    }
+    if !can_start(cfg, paused, shared) {
+        let total = files.len();
+        let mut rest: Vec<(usize, PathBuf)> = Vec::new();
+        for (i, f) in files.into_iter().enumerate() {
+            if rest.len() >= WATCH_PENDING_MAX {
+                log::warn!(
+                    "Ordner-Wächter: Event-Puffer voll ({WATCH_PENDING_MAX}), {} Pfad(e) dieser Runde verworfen",
+                    total - i
+                );
+                break;
+            }
+            if !rest.iter().any(|(_, p)| *p == f.1) {
+                rest.push(f);
+            }
+        }
+        return rest;
+    }
+    let Some(plan) = UploadPlan::build_from_events(store, &files) else {
+        return Vec::new();
+    };
+    let count = plan.count();
+    start_background_run(
+        plan,
+        store,
+        shared.clone(),
+        cfg.clone(),
+        paused.clone(),
+        concurrency,
+        limit_kbps,
+        album.to_string(),
+        tr1("{} Datei(en) werden hochgeladen …", count),
+        // An event run never advances a folder watermark: the watermark is the
+        // *start-time* safety net. The files it did upload sit in the MD5 index
+        // and are skipped cheaply by the stat check, while a run that failed is
+        // still caught by the next start.
+        Vec::new(),
+    );
+    Vec::new()
+}
+
+/// One watcher per enabled backup folder, re-synced with the persisted store on
+/// every pass: a folder that was added, enabled, disabled or removed (and the
+/// `background_sync` switch) is reflected within `WATCH_POLL`. A folder we
+/// cannot watch (gone, ejected) is logged and simply absent until the next pass.
+fn sync_watchers(
+    watchers: &mut HashMap<PathBuf, notify::RecommendedWatcher>,
+    tx: &tokio::sync::mpsc::UnboundedSender<notify::Result<notify::Event>>,
+    cfg: &Config,
+) {
+    // No switch or no sign-in → no watcher at all (the same guard that keeps a
+    // run from starting).
+    let store = if cfg.background_sync
+        && !cfg.session_id.is_empty()
+        && !cfg.cookie_x_acb.is_empty()
+    {
+        Some(FolderStore::load())
+    } else {
+        None
+    };
+    let desired: Vec<PathBuf> = store
+        .as_ref()
+        .map(|s| {
+            s.enabled_indices()
+                .iter()
+                .filter_map(|&i| s.folders.get(i).map(|f| f.path.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    watchers.retain(|p, _| desired.contains(p));
+    for path in desired {
+        if watchers.contains_key(&path) {
+            continue;
+        }
+        let tx = tx.clone();
+        let watched = path.clone();
+        let made = notify::RecommendedWatcher::new(
+            move |res| {
+                let _ = tx.send(res);
+            },
+            notify::Config::default(),
+        )
+        .and_then(|mut w| {
+            w.watch(&watched, notify::RecursiveMode::Recursive)?;
+            Ok(w)
+        });
+        match made {
+            Ok(w) => {
+                watchers.insert(path, w);
+            }
+            Err(e) => log::warn!(
+                "Ordner-Wächter für {} konnte nicht eingerichtet werden: {e}",
+                path.display()
+            ),
+        }
+    }
+}
+
+/// The supervising watcher task, for the rest of the process: one watcher per
+/// enabled backup folder, a debounce per burst, and a bounded "seen while busy"
+/// list. Detached from the UI struct — every guard is re-checked here, it never
+/// panics into the app and never touches the UI thread.
+async fn watch_loop(
+    shared: Arc<Mutex<UploadShared>>,
+    paused: watch::Sender<bool>,
+    last_config: Config,
+    concurrency: usize,
+    limit_kbps: u32,
+    album: String,
+) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<notify::Result<notify::Event>>();
+    let mut watchers: HashMap<PathBuf, notify::RecommendedWatcher> = HashMap::new();
+    let mut pending: Vec<(usize, PathBuf)> = Vec::new();
+    loop {
+        // Freshest settings + store on every pass (the supervisor is detached
+        // from the UI struct, so the persisted files are its only source).
+        let cfg = Config::load().unwrap_or(last_config.clone());
+        sync_watchers(&mut watchers, &tx, &cfg);
+
+        // Retry what was remembered while a run was busy or paused.
+        if !pending.is_empty() {
+            let mut store = FolderStore::load();
+            let files = std::mem::take(&mut pending);
+            pending = handle_files(
+                files,
+                &mut store,
+                &shared,
+                &paused,
+                &cfg,
+                concurrency,
+                limit_kbps,
+                &album,
+            );
+        }
+
+        // Wait for the next event — or just for the poll tick, which is what
+        // keeps the watcher set and the pending list moving while nothing
+        // changes.
+        let first = match tokio::time::timeout(WATCH_POLL, rx.recv()).await {
+            Ok(Some(ev)) => ev,
+            // `Ok(None)`: every sender is gone, so every watcher is, too.
+            Ok(None) => break,
+            Err(_) => continue,
+        };
+        // Debounce: give the burst time to land, then take all of it at once.
+        tokio::time::sleep(WATCH_DEBOUNCE).await;
+        let mut paths: Vec<PathBuf> = Vec::new();
+        let rest = std::iter::from_fn(|| rx.try_recv().ok());
+        for res in std::iter::once(first).chain(rest) {
+            if !collect_event_paths(res, &mut paths) {
+                // A watcher error (ejected volume, watch limit): drop the whole
+                // set and let the next pass re-arm it — that poll is the
+                // backoff, the app keeps running either way.
+                watchers.clear();
+            }
+        }
+        let mut store = FolderStore::load();
+        let files = map_to_folders(&store, &paths);
+        // An empty batch (only directories, only deletions) must not drop what
+        // is still parked from earlier.
+        if !files.is_empty() {
+            pending = handle_files(
+                files,
+                &mut store,
+                &shared,
+                &paused,
+                &cfg,
+                concurrency,
+                limit_kbps,
+                &album,
+            );
         }
     }
 }
@@ -505,9 +855,6 @@ impl PrimePhotoApp {
         self.config.paused = false;
         self.save_config();
         self.was_active = true;
-        // Manual run: restart the background-sync cadence, so its next tick does
-        // not start a second run right behind this one.
-        BG_SYNC_RESET.notify_one();
 
         let cfg = self.config.clone();
         let shared = self.upload.clone();
@@ -621,9 +968,6 @@ impl PrimePhotoApp {
         self.config.paused = false;
         self.save_config();
         self.was_active = true;
-        // Manual run: restart the background-sync cadence, so its next tick does
-        // not start a second run right behind this one.
-        BG_SYNC_RESET.notify_one();
 
         let cfg = self.config.clone();
         let shared = self.upload.clone();
@@ -697,9 +1041,15 @@ impl PrimePhotoApp {
 
     // -- background sync (PORT-5) -------------------------------------------
 
-    /// Spawn the single supervising background-sync task — once per process,
-    /// as soon as the app is signed in and `config.background_sync` is on.
-    /// Idempotent; the task itself re-checks every guard on every tick.
+    /// Spawn the single supervising background task — once per process, as soon
+    /// as the app is signed in and `config.background_sync` is on. Idempotent;
+    /// the task itself re-checks every guard.
+    ///
+    /// Its first action is the start-time safety net (user decision 2026-10-14):
+    /// a metadata-only walk per enabled folder, so a folder that did not change
+    /// since the last run costs no hash and no DB query. Only then does it arm
+    /// the OS filesystem watchers — and it does so from the same task, so the
+    /// watchers can never race the pass above into a second run.
     fn ensure_background_sync(&mut self) {
         if !self.config.background_sync || !self.is_logged_in() {
             return;
@@ -718,7 +1068,17 @@ impl PrimePhotoApp {
         };
         let album = self.album_name.clone();
         self.rt.spawn(async move {
-            background_sync_loop(shared, paused, cfg, concurrency, limit, album).await;
+            background_sync_pass(
+                shared.clone(),
+                paused.clone(),
+                cfg.clone(),
+                concurrency,
+                limit,
+                album.clone(),
+            )
+            .await;
+            // From then on the OS events decide.
+            watch_loop(shared, paused, cfg, concurrency, limit, album).await;
         });
     }
 

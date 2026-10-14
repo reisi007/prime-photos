@@ -60,7 +60,12 @@ impl DedupIndex {
                      mtime       INTEGER NOT NULL,
                      uploaded_at TEXT NOT NULL
                  );
-                 CREATE INDEX IF NOT EXISTS ix_uploads_md5 ON uploads(md5);",
+                 CREATE INDEX IF NOT EXISTS ix_uploads_md5 ON uploads(md5);
+                 CREATE TABLE IF NOT EXISTS folder_scan (
+                     path       TEXT PRIMARY KEY,
+                     max_mtime  INTEGER NOT NULL,
+                     scanned_at TEXT NOT NULL
+                 );",
             )
             .is_ok();
         Self {
@@ -171,6 +176,49 @@ impl DedupIndex {
             rusqlite::params![path_str.as_ref(), md5, size as i64, mtime, uploaded_at],
         );
     }
+
+    /// Largest modification time (Unix seconds) recorded for a **backup folder**
+    /// the last time it was scanned, or `None` when it was never scanned (or the
+    /// index is unavailable).
+    ///
+    /// This is the cold-start watermark (user decision 2026-10-14): it answers
+    /// "did anything in this folder change since we last looked?" without
+    /// hashing or even reading a single file. It says nothing about individual
+    /// files — that stays the `uploads` table's job.
+    pub fn folder_max_mtime(&self, path: &Path) -> Option<i64> {
+        let conn = self.conn.as_ref()?;
+        let path_str = path.to_string_lossy();
+        conn.query_row(
+            "SELECT max_mtime FROM folder_scan WHERE path = ?1",
+            [path_str.as_ref()],
+            |row| row.get(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    }
+
+    /// Remember the watermark of a scanned backup folder (upsert), so the next
+    /// start can tell an unchanged folder from a changed one.
+    ///
+    /// Same fallback contract as [`DedupIndex::record_upload`]: without a usable
+    /// connection this is a silent no-op — a lost watermark only costs a scan,
+    /// it never breaks anything.
+    pub fn record_folder_scan(&self, path: &Path, max_mtime: i64) {
+        let Some(conn) = self.conn.as_ref() else {
+            return;
+        };
+        let path_str = path.to_string_lossy();
+        let scanned_at = chrono::Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "INSERT INTO folder_scan (path, max_mtime, scanned_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(path) DO UPDATE SET
+                 max_mtime = excluded.max_mtime,
+                 scanned_at = excluded.scanned_at",
+            rusqlite::params![path_str.as_ref(), max_mtime, scanned_at],
+        );
+    }
 }
 
 #[cfg(test)]
@@ -235,5 +283,38 @@ mod tests {
 
         // Different path → no hit (path-centric rule).
         assert!(!idx.stat_matches(Path::new("/photos/b.jpg"), 10, 1));
+    }
+
+    #[test]
+    fn folder_watermark_round_trips_and_updates() {
+        let idx = index();
+        let p = Path::new("/photos/album");
+
+        // Never scanned → no watermark.
+        assert_eq!(idx.folder_max_mtime(p), None);
+
+        idx.record_folder_scan(p, 100);
+        assert_eq!(idx.folder_max_mtime(p), Some(100));
+
+        // A newer scan overwrites the older value (upsert).
+        idx.record_folder_scan(p, 250);
+        assert_eq!(idx.folder_max_mtime(p), Some(250));
+
+        // A second folder is tracked independently.
+        let other = Path::new("/photos/other");
+        assert_eq!(idx.folder_max_mtime(other), None);
+        idx.record_folder_scan(other, 5);
+        assert_eq!(idx.folder_max_mtime(p), Some(250));
+        assert_eq!(idx.folder_max_mtime(other), Some(5));
+    }
+
+    #[test]
+    fn folder_watermark_degrades_without_db() {
+        let idx = DedupIndex { conn: None };
+        let p = Path::new("/photos/album");
+        // No connection: nothing recorded, nothing read, no panic.
+        assert_eq!(idx.folder_max_mtime(p), None);
+        idx.record_folder_scan(p, 100);
+        assert_eq!(idx.folder_max_mtime(p), None);
     }
 }
