@@ -1177,9 +1177,13 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn finalize_upload(&mut self) {
-        let (folder_done, folder_failed) = {
+        let (folder_done, folder_failed, folder_total) = {
             let s = self.upload.lock().unwrap();
-            (s.folder_done.clone(), s.folder_failed.clone())
+            (
+                s.folder_done.clone(),
+                s.folder_failed.clone(),
+                s.folder_total.clone(),
+            )
         };
         // Whether the run that just finished was the one-time run, plus its
         // global counters. `folder_total` gets its `ONE_TIME_IDX` key only from
@@ -1197,6 +1201,13 @@ impl PrimePhotoApp {
         let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
         for (i, f) in self.store.folders.iter_mut().enumerate() {
             if let Some(&done) = folder_done.get(&i) {
+                // The run's own file count goes with it: `uploaded_files` alone
+                // was written back, which left `total_files` from an earlier scan
+                // or run and made the row read "480 von 150". Only targets that
+                // really took part in the run are touched.
+                if let Some(&total) = folder_total.get(&i) {
+                    f.total_files = total;
+                }
                 f.uploaded_files = done;
                 f.last_updated = now.clone();
                 f.status = if folder_failed.get(&i).copied().unwrap_or(0) > 0 {
@@ -1212,6 +1223,9 @@ impl PrimePhotoApp {
         // is written back to the store here.
         if let Some(one) = self.one_time.as_mut() {
             if let Some(&done) = folder_done.get(&ONE_TIME_IDX) {
+                if let Some(&total) = folder_total.get(&ONE_TIME_IDX) {
+                    one.total_files = total;
+                }
                 one.uploaded_files = done;
                 one.last_updated = now.clone();
                 one.status = if folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0) > 0 {
