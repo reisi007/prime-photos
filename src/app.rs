@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::countries::system_country;
 use crate::folders::{BackupFolder, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
-use crate::icons::{draw_avatar, nav_icon, status_dot, NavIcon};
+use crate::icons::{draw_flag_badge, nav_icon, NavIcon};
 use crate::login;
 use crate::notify;
 use crate::theme;
@@ -375,48 +375,59 @@ impl PrimePhotoApp {
             NavIcon::Settings,
         );
 
-        // Account block pinned to the bottom of the sidebar.
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-            ui.add_space(10.0);
-            if let Some(e) = &self.config_error {
-                ui.label(RichText::new(e).color(theme::RED).size(11.0));
-            }
-            let logged_in = self.is_logged_in();
-            if logged_in && ui.add(theme::secondary_button(tr("Abmelden"))).clicked() {
-                self.logout();
-            }
+        // Account block at the bottom of the sidebar. A fixed reserve plus a
+        // plain top-down layout is far more predictable than `bottom_up`, which
+        // mis-places a nested `vertical` and let the logout button collide with
+        // the status line.
+        const ACCOUNT_BLOCK_H: f32 = 104.0;
+        let free = ui.available_height() - ACCOUNT_BLOCK_H;
+        if free > 0.0 {
+            ui.add_space(free);
+        }
+        if let Some(e) = &self.config_error {
+            ui.label(RichText::new(e).color(theme::RED).size(11.0));
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                status_dot(ui, if logged_in { theme::GREEN } else { theme::RED });
+        }
+        let logged_in = self.is_logged_in();
+        // Flag badge (with the presence dot) + the marketplace. Deliberately no
+        // account name: we cannot fetch the real one yet, and a stand-in would be
+        // wrong (AGENTS.todo.md „Zurückgestellt" #8). The sign-in state is the
+        // dot on the badge, not a coloured word — this view is normally only
+        // reached while signed in.
+        ui.horizontal(|ui| {
+            let tip = if logged_in {
+                tr("Angemeldet")
+            } else {
+                tr("Nicht angemeldet")
+            };
+            draw_flag_badge(ui, 30.0, &self.config.country, logged_in, tip);
+            ui.add_space(10.0);
+            ui.vertical(|ui| {
                 ui.label(
-                    RichText::new(if logged_in {
-                        tr("Angemeldet")
-                    } else {
-                        tr("Nicht angemeldet")
-                    })
-                    .size(12.0)
-                    .color(if logged_in { theme::GREEN } else { theme::RED }),
+                    RichText::new(tr("Marktplatz"))
+                        .size(11.0)
+                        .color(theme::MUTED),
                 );
-            });
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                draw_avatar(ui, 30.0, theme::TEAL);
-                ui.add_space(8.0);
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(tr("Angemeldet als:"))
-                            .size(11.0)
-                            .color(theme::MUTED),
-                    );
-                    ui.label(RichText::new(tr("Amazon Photos")).size(13.0).strong());
-                    ui.label(theme::muted(format!(
+                ui.label(
+                    RichText::new(format!(
                         "amazon.{}",
                         login::amazon_domain(&self.config.country)
-                    )));
-                });
+                    ))
+                    .size(13.0)
+                    .strong(),
+                );
             });
-            ui.add_space(8.0);
         });
+        ui.add_space(10.0);
+        if logged_in {
+            let w = ui.available_width();
+            if ui
+                .add_sized([w, 26.0], theme::secondary_button(tr("Abmelden")))
+                .clicked()
+            {
+                self.logout();
+            }
+        }
     }
 }
 

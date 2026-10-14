@@ -132,7 +132,6 @@ pub(crate) fn system_lang() -> Lang {
 const EN: &[(&str, &str)] = &[
     // -- common / shared ------------------------------------------------
     ("Abbrechen", "Cancel"),
-    ("Amazon Photos", "Amazon Photos"),
     ("Ändern …", "Change …"),
     ("Datensicherung", "Backup"),
     ("Datensicherungseinstellungen", "Backup settings"),
@@ -142,7 +141,6 @@ const EN: &[(&str, &str)] = &[
     // -- app shell / navigation -----------------------------------------
     ("Abmelden", "Sign out"),
     ("Angemeldet", "Signed in"),
-    ("Angemeldet als:", "Signed in as:"),
     ("Bereit", "Ready"),
     ("Einstellungen", "Settings"),
     ("Einstellungen gespeichert.", "Settings saved."),
@@ -304,6 +302,7 @@ const EN: &[(&str, &str)] = &[
     ("1 Datei", "1 file"),
     ("100% hochgeladen", "100% uploaded"),
     ("Abgeschlossen", "Completed"),
+    ("Marktplatz", "Marketplace"),
     ("Als neue Datei speichern", "Save as new file"),
     ("Dateiname-Konflikt", "File name conflict"),
     ("Dateiname-Konflikt: {}", "File name conflict: {}"),
