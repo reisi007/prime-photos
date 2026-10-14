@@ -67,26 +67,22 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 
 ## Assets: Tray-Icons + Logo (User 2026-10-14) — geplant, **nicht** implementiert
 
-Eigene Assets des Users liegen künftig in **`assets/`** (PNG mit Alpha) und werden per
-`include_bytes!` + die vorhandene `image`-Crate eingebunden (keine neue Dependency, kein
-Laufzeit-Pfad, self-contained Binary). Konkrete Dateiliste + Formatvorgaben steht im Ledger
-(`AGENTS.todo.md` → „Assets"). **Geliefert (2026-10-14):** vollständiger Tray-Satz
-(`tray`/`tray-active`/`tray-paused`/`tray-done`/`tray-error`, je 32 px + `@2x`, monochrom + Alpha
-= macOS-Template) und Logo (`logo.png` 1024², `logo-small*.png`). Nur die Laufzeit-Dateien werden
-eingebettet; die QA-Artefakte in `assets/` (`chk-logo-*`, `contact-sheet`, `zoom-corners`,
-`debug-mask-*`, `preview-tray`) gehören nicht in den Git-Bestand. Einbindungspunkte existieren
-bereits (`src/tray.rs`: `with_icon_templated` auf macOS, `with_icon` sonst, `ICON_SIZE = 32`).
-**Windows/Linux-Tray (User-Entscheidung 2026-10-14): weiße Varianten + Theme-Erkennung.** Der User
-liefert die fünf Zustände zusätzlich in weiß (`tray-*-white.png` + `@2x`, gleiche Maße); die App
-wählt per Theme-Erkennung (Windows `AppsUseLightTheme`, Linux GTK `color-scheme`) weiß bei dunklem,
-schwarz bei hellem Theme — **Fallback bei fehlgeschlagener Erkennung: das farbige `logo.png`**, das
-auf jedem Hintergrund sichtbar ist. macOS bleibt Template (System invertiert selbst). Verworfen:
-farbiges Logo generell (verliert die Zustände) und „bewusst akzeptieren". Umsetzung erst, wenn die
-weißen Dateien vorliegen — Assets sind per Vorgabe compile-pflichtig.
-**Kein Fallback (User 2026-10-14):** fehlt ein Asset, ist das ein **Compile-Fehler** — ohne
-`Option`, ohne `exists()`-Prüfung, ohne Rückfall auf die gezeichnete Variante (`src/icons.rs`
-bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Dekodier-Fehler
-zur Laufzeit = fail fast, keine stille degradierte UI.
+Eigene Assets des Users liegen in **`assets/`** — als **SVG-Quellen** (eine Quelle der Wahrheit).
+**User-Entscheidung 2026-10-14: im Build entstehen daraus PNGs, die mit ausgeliefert werden.** Umsetzung:
+`build.rs` rastert sie mit **`resvg`** (reine Rust-Bibliothek, `default-features = false` ⇒ 53 Crates,
+**nur** `[build-dependencies]`, keine Laufzeit-Abhängigkeit, Binary bleibt unverändert klein) nach
+`OUT_DIR`, eingebettet per `include_bytes!(concat!(env!("OUT_DIR"), …))` und dekodiert mit der
+vorhandenen `image`-Crate. **Warum resvg:** `sips`/`qlmanage` liefern auf dem Mac gute Qualität, bauen
+aber nur dort — unser **CI und die Release-Matrix sind Linux/Windows**; ImageMagicks interner Renderer
+(`rsvg-convert` fehlt) malt die Striche nachweislich nicht. resvg-Qualität wurde an genau diesen SVGs
+gesichtet (alle fünf Tray-Zustände + beide Logos, schwarz/weiß, Farbverlauf korrekt).
+**Theme ohne neue Abhängigkeit:** `egui::Context::system_theme()` (in 0.31 vorhanden) — dunkel ⇒ weiße
+Tray-Varianten, hell ⇒ schwarze; `None` (unbekannt) ⇒ das farbige Logo, das auf jedem Hintergrund
+sichtbar ist. macOS bleibt beim schwarzen Template-Satz.
+**Kein Fallback (User 2026-10-14):** fehlt ein SVG, bricht `build.rs` den Build (Compile-Fehler) —
+kein `Option`, keine `exists()`-Prüfung, kein Rückfall auf die gezeichnete Variante (`src/icons.rs`
+bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Dekodier-Fehler zur
+Laufzeit = fail fast.
 
 MVP-Zielbild des Users: **polished** — Autostart (Default **an**, siehe §Autostart), effizienter
 funktionierender Upload (Event-Watcher + Stat-Check + Wasserzeichen) und echte Tray-/Logo-Assets.

@@ -334,18 +334,28 @@ Navigation, Status-Punkt, Flagge). Ein Dekodier-Fehler zur Laufzeit ist ebenfall
 klare Meldung) — eine stille degradierte UI ist ausdrücklich **nicht** gewollt. Da noch nichts
 implementiert ist, wirkt sich das erst aus, wenn die Dateien in `assets/` eingebunden werden.
 
-**Geliefert (Stand 2026-10-14) — der Satz ist vollständig, gemessen mit `sips`:**
+**Geliefert (Stand 2026-10-14) — Quellen sind SVGs in `assets/`:**
 
-| Datei | px | Alpha | Zweck |
-|---|---|---|---|
-| `assets/tray.png` + `tray@2x.png` | 32 / 64 | ja | Tray-Basis (Leerlauf: Upload-Pfeil) |
-| `assets/tray-active.png` + `@2x` | 32 / 64 | ja | „Upload läuft" (Pfeil mit Bewegungslinien) |
-| `assets/tray-paused.png` + `@2x` | 32 / 64 | ja | „Angehalten" (zwei Balken) |
-| `assets/tray-done.png` + `@2x` | 32 / 64 | ja | „Fertig" (Haken) |
-| `assets/tray-error.png` + `@2x` | 32 / 64 | ja | „Fehler" (Ausrufezeichen) |
-| `assets/logo.png` | 1024 | ja | Dock-/Fenster-Icon, About, ggf. Login-Header (orange, Upload-Pfeil + Fotostapel) |
-| `assets/logo-small.png` | 256 | ja | kleine Logo-Variante |
-| `assets/logo-small-black.png` | 256 | ja | schwarze Variante (dunkler Hintergrund) |
+| Datei | viewBox | Zweck |
+|---|---|---|
+| `tray.svg` | 84×84 | Tray-Basis (Leerlauf: Upload-Pfeil) |
+| `tray-active.svg` | 84×84 | „Upload läuft" (Pfeil mit Bewegungslinien) |
+| `tray-paused.svg` | 84×84 | „Angehalten" (zwei Balken) |
+| `tray-done.svg` | 84×84 | „Fertig" (Haken) |
+| `tray-error.svg` | 84×84 | „Fehler" (Ausrufezeichen) |
+| `logo.svg` | 256×256 | App-Logo (orange, Upload-Pfeil + Fotostapel) |
+| `logo-small.svg` | 256×256 | kleine farbige Variante |
+| `logo-small-black.svg` | 256×256 | schwarze Variante (dunkler Hintergrund) |
+
+Die Tray-Zustände sind **monochrom über `stroke="currentColor"`** — die Farbe entscheidet der Renderer,
+deshalb ergibt sich schwarz/weiß ohne zweite Datei. **Entschieden (User 2026-10-14): die PNGs entstehen
+im Build** — `build.rs` + `resvg` als `[build-dependencies]` (`default-features = false`, 53 Crates,
+keine Laufzeit-Abhängigkeit), Ausgabe nach `OUT_DIR`, Einbettung per `include_bytes!`. Verworfen wurden
+(mit Beleg): `sips`/`qlmanage` im Build (gute Qualität, aber macOS-only ⇒ CI/Release-Matrix bricht),
+ImageMagicks interner Renderer (malt die Striche nicht, `rsvg-convert` fehlt), und „einmalig rendern und
+committen" (zwei Quellen, die auseinanderlaufen). **Theme:** `egui::Context::system_theme()` — dunkel ⇒
+weiß, hell ⇒ schwarz, `None` ⇒ farbiges Logo (immer sichtbar). **Zu erzeugende PNGs:** fünf Zustände ×
+{schwarz, weiß} × {32, 64} + `logo` 1024 + `logo-small` 256 + `logo-small-black` 256.
 
 Der Tray-Satz ist durchgängig **monochrom schwarz auf transparent** — genau die macOS-Template-
 Semantik (die Vorschau `preview-tray.png` zeigt alle fünf Zustände invertiert auf dunklem Grund).
