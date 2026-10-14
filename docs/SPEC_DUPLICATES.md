@@ -222,13 +222,22 @@ A 409 that is a genuine name conflict is a separate error and goes through
 `ConflictResolution`. Because `Replace`/`SaveAsNew` overwrite/rename, they normally do
 not produce a 409 at all.
 
+> **Clarification for *our* path (not the original's):** the paragraph and table above
+> describe the **original client**, which pre-checks the MD5 client-side against its
+> `cloud.db` and therefore never reaches the server with a content duplicate. **Our**
+> path is server-driven: a **content** duplicate (`errorCode = "DuplicatesConflictError"`)
+> yields a **409 even with `RENAME`** (live proven) — `SaveAsNew` avoids a *name* clash,
+> not a *content* duplicate. Our default is now **`SaveAsNew`** (was `Ignore`). The
+> local cross-path MD5 check (`DedupIndex::content_seen`) demotes that 409 to a safety
+> net. See AGENTS.md.
+
 **Per conflict option:**
 
 | Option | Sends | 409 result |
 |---|---|---|
 | `None` (ask) | `NONE`, existing node kept | 409 MD5-match → `Ignored`; 409 name-conflict → `FileConflict` → modal |
 | `Ignore` | `NONE`, existing node kept | same as `None`; a name conflict becomes `Skipped`/`Ignored` |
-| `SaveAsNew` | `RENAME` | no 409 — server stores a renamed copy |
+| `SaveAsNew` | `RENAME` | no 409 — server stores a renamed copy (original client; on our server-driven path a *content* duplicate still returns 409, see the note above) |
 | `Replace` | `overwrite = true` + existing `nodeId` | no 409 — server replaces the node |
 
 ---
@@ -237,7 +246,8 @@ not produce a 409 at all.
 
 Our current state (read-only): persistent MD5 index **per path** (`src/dedup.rs`,
 `uploads` table with `ix_uploads_md5`), skip rule = same path + same MD5; four
-conflict options per target (`src/folders.rs` `ConflictResolution`, default `Ignore`);
+conflict options per target (`src/folders.rs` `ConflictResolution`, default `SaveAsNew`
+since 2026-10-14 — was `Ignore`);
 server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSkipped`,
 `src/prime_photos.rs::conflict_node_id`); interactive per-file prompt with a run-wide
 "don't ask again" (`resolve_conflict`); dialog in `src/backup_config.rs`.
@@ -247,7 +257,7 @@ server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSki
 | **Cross-path content dedup** (different path, same MD5) | Wired: `GetNodeByMd5` over `cloud.db`; the identity is content, not path | **Missing** — `should_skip`/`stat_matches` are path-only; `ix_uploads_md5` exists but is unused | **S** | Add a `should_skip_by_md5` query on the existing index and use it when `dedup` is on. Cheap (index already there), high user value ("I moved the folder"). |
 | **Dedup option granularity** | `DeduplicateOptions` flags exist, UI only boolean | Boolean `dedup` per folder — same practical surface | — | **No change.** The flags are dead weight in the original too. |
 | **Dedup default** | Onboarding → on; post-onboarding → off (global default) | `default_true()` → **on** | — | **Keep.** Our default is the friendlier one; documented in AGENTS.md. |
-| **Conflict default** | `None` = "Jedes Mal nachfragen" | `Ignore` (deliberate, AGENTS.md) | — | **Keep** (deliberate). Note the divergence so nobody "fixes" it to Ask. |
+| **Conflict default** | `None` = "Jedes Mal nachfragen" | `SaveAsNew` (was `Ignore`; changed 2026-10-14, AGENTS.md) | — | **Keep.** A file's identity is its content; `SaveAsNew` + `dedup` is the deliberate default. Note the divergence so nobody "fixes" it to Ask. |
 | **Global dedup default setting** | `EnableDeduplicationForPhotosAndVideos` in preferences, seeds new backups | **Missing** — each new folder starts `dedup = true` hard-coded | **S** | Optional. Only worth it if a preferences screen lands; a single config field + default for new folders. |
 | **Global conflict setting** | **Does not exist** | We also have none | — | **No change** — parity already. |
 | **Name conflict detected client-side** | Via `cloud.db` name+parent lookup, before upload | **Missing** — we only learn of it from the server 409 | **L** | Not worth it without a local node cache (we have none by design, AGENTS.md). Our 409-driven path is the pragmatic equivalent. |

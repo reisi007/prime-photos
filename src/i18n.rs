@@ -319,6 +319,10 @@ const EN: &[(&str, &str)] = &[
     ("Keine Antwort auf den Konflikt — wird übersprungen.", "No answer to the conflict — skipping."),
     ("Nicht noch einmal fragen", "Don't ask again"),
     ("Vorhanden, übersprungen: {}", "Already there, skipped: {}"),
+    (
+        "Bereits im Konto, nur umbenannt: {}",
+        "Already in your account, only renamed: {}",
+    ),
     ("„{}“ existiert bereits in Amazon Photos.", "“{}” already exists in Amazon Photos."),
     ("Anmeldung abgelaufen, {} wird erneut versucht.", "Sign-in expired, retrying {}."),
     ("Auth-Token wurde erneuert.", "Auth token renewed."),

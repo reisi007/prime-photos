@@ -446,7 +446,11 @@ pub(crate) async fn upload_worker(
                     en.state = FileState::Failed;
                 }
                 s.touch_queue();
-                s.log(tr2("FEHLER {}: {}", crate::text::nfc(&path.display().to_string()), e));
+                s.log(tr2(
+                    "FEHLER {}: {}",
+                    crate::text::nfc(&path.display().to_string()),
+                    crate::text::nfc(&e.to_string()),
+                ));
                 continue;
             }
         };
@@ -475,6 +479,32 @@ pub(crate) async fn upload_worker(
             s.touch_queue();
             s.log(tr1(
                 "UEBERSPRUNGEN {}: bereits hochgeladen",
+                crate::text::nfc(&path.display().to_string()),
+            ));
+            continue;
+        }
+
+        // Cross-path content dedup (user decision 2026-10-14): the MD5 is the
+        // file's identity, so a file whose content was already uploaded under a
+        // *different* path (renamed/moved) is skipped locally, before the
+        // network. The same-path case above stays "unverändert"; this branch
+        // means the content is already in the account — counted like the
+        // server's 409.
+        if dedup_on && dedup.lock().unwrap().content_seen(&md5sum) {
+            let mut s = shared.lock().unwrap();
+            s.done += 1;
+            s.conflict_skipped += 1;
+            *s.folder_done.entry(idx).or_insert(0) += 1;
+            *s.folder_conflict.entry(idx).or_insert(0) += 1;
+            if let Some(en) = s.queue.get_mut(row) {
+                en.state = FileState::Skipped;
+            }
+            // Settled for progress, but not transferred: it must not raise the
+            // measured byte rate.
+            s.bytes_done = s.bytes_done.saturating_add(size);
+            s.touch_queue();
+            s.log(tr1(
+                "Bereits im Konto, nur umbenannt: {}",
                 crate::text::nfc(&path.display().to_string()),
             ));
             continue;
@@ -589,7 +619,11 @@ pub(crate) async fn upload_worker(
                         en.state = FileState::Failed;
                     }
                     s.touch_queue();
-                    s.log(tr2("FEHLER {}: {}", crate::text::nfc(&path.display().to_string()), e));
+                    s.log(tr2(
+                        "FEHLER {}: {}",
+                        crate::text::nfc(&path.display().to_string()),
+                        crate::text::nfc(&e),
+                    ));
                 }
             }
             FileOutcome::ConflictSkipped => {

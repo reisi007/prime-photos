@@ -126,6 +126,32 @@ impl DedupIndex {
         }
     }
 
+    /// Cross-path content check: `true` when this MD5 is already in the index
+    /// under **any** path.
+    ///
+    /// Content identity rule (user decision 2026-10-14): a file's identity is
+    /// its **content**, not its path. A file whose content was already uploaded
+    /// under a *different* path (renamed/moved) must be skipped locally, before
+    /// the network call, instead of being re-sent only to be rejected by the
+    /// server's `DuplicatesConflictError`. This answers exactly "does this
+    /// content exist anywhere in the index?" and never takes a path — the
+    /// same-path case ("unverändert") stays [`DedupIndex::should_skip`]'s job.
+    /// Uses the existing `ix_uploads_md5` index; no schema change.
+    pub fn content_seen(&self, md5: &str) -> bool {
+        let Some(conn) = self.conn.as_ref() else {
+            return false;
+        };
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM uploads WHERE md5 = ?1 LIMIT 1",
+                [md5],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap_or(None);
+        exists.is_some()
+    }
+
     /// Cheap pre-read check: `true` only when this exact path is in the index
     /// **and** the stored `size` **and** `mtime` match the given ones exactly.
     ///
@@ -351,6 +377,30 @@ mod tests {
 
         // Different path, same md5 → upload (path-centric rule).
         assert!(!idx.should_skip(Path::new("/photos/b.jpg"), "aaaa", 10, 1));
+    }
+
+    #[test]
+    fn content_seen_is_path_independent() {
+        let idx = index();
+        let a = Path::new("/photos/a.jpg");
+        let b = Path::new("/photos/renamed.jpg");
+
+        // Empty index → nothing seen.
+        assert!(!idx.content_seen("aaaa"));
+
+        // Recorded under `a`; the lookup never names a path, so the same
+        // content under a *different* path (`b`, renamed/moved) is found too.
+        idx.record_upload(a, "aaaa", 10, 1);
+        assert!(idx.content_seen("aaaa"));
+
+        // Unknown content → never seen.
+        assert!(!idx.content_seen("bbbb"));
+
+        // The path-centric rule and the content rule disagree on `b` by design:
+        // `should_skip` says "upload" (this path was never recorded), while
+        // `content_seen` already knows the content is in the account.
+        assert!(!idx.should_skip(b, "aaaa", 10, 1));
+        assert!(idx.content_seen("aaaa"));
     }
 
     #[test]

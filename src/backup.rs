@@ -827,7 +827,10 @@ impl PrimePhotoApp {
                 if i < self.store.folders.len() {
                     let f = self.store.folders.remove(i);
                     let _ = self.store.save();
-                    self.log(tr1("Datensicherung gestoppt: {}", &f.name));
+                    self.log(tr1(
+                        "Datensicherung gestoppt: {}",
+                        crate::text::nfc(&f.name),
+                    ));
                 }
             }
             FolderAction::OpenFinder(i) => {
