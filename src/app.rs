@@ -13,7 +13,7 @@ use crate::tray;
 use crate::upload::{eta_suffix, FileState, UploadShared};
 use eframe::egui::{self, Color32, RichText};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::watch;
 
@@ -205,6 +205,14 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) quitting: bool,
     /// Last pause state pushed to the tray label, to update it only on change.
     pub(crate) tray_paused: bool,
+    /// Last tray glyph state (plus the OS theme it was drawn for), so the icon
+    /// is only re-set on an actual change — see [`Self::update_tray_icon`].
+    pub(crate) tray_icon_state: Option<(tray::TrayState, Option<egui::Theme>)>,
+    /// Whether the last finished upload run had failures (drives the "error"
+    /// glyph until the next run).
+    pub(crate) tray_last_run_failed: bool,
+    /// When the last run finished (drives the short-lived "done" glyph).
+    pub(crate) tray_done_at: Option<Instant>,
     /// Auto-launch (login item) registration; `inner` is `None` when the
     /// platform does not support it.
     pub(crate) autostart: Autostart,
@@ -375,6 +383,9 @@ impl PrimePhotoApp {
             tray: tray::build(cc.egui_ctx.clone()),
             quitting: false,
             tray_paused: false,
+            tray_icon_state: None,
+            tray_last_run_failed: false,
+            tray_done_at: None,
             autostart,
             autostart_enabled,
             dropping_files: false,
@@ -416,6 +427,38 @@ impl PrimePhotoApp {
     pub(crate) fn apply_tray_labels(&self) {
         if let Some(tray) = self.tray.as_ref() {
             tray.set_labels(*self.paused.borrow());
+        }
+    }
+
+    /// Derive the tray glyph state from the current app state and apply it —
+    /// only when the state (or the OS theme it is drawn for) actually changed,
+    /// so the menu-bar icon is not touched every frame. Also schedules the one
+    /// repaint that turns the "done" glyph back into "idle" when its window
+    /// expires (no polling/busy loop).
+    pub(crate) fn update_tray_icon(&mut self, ctx: &egui::Context) {
+        if self.tray.is_none() {
+            return;
+        }
+        let paused = *self.paused.borrow();
+        let busy = self.upload.lock().unwrap().active;
+        let since_done = self.tray_done_at.map(|t| t.elapsed());
+        let state = tray::tray_state(paused, busy, self.tray_last_run_failed, since_done);
+        let theme = ctx.system_theme();
+        if self.tray_icon_state != Some((state, theme)) {
+            self.tray_icon_state = Some((state, theme));
+            if let Some(tray) = self.tray.as_ref() {
+                tray.set_state(state, theme);
+            }
+        }
+        // Wake up exactly when the "done" window ends so the glyph flips to
+        // "idle"; a plain state change repaints from its own cause.
+        if state == tray::TrayState::Done {
+            if let Some(remaining) = self
+                .tray_done_at
+                .and_then(|t| tray::DONE_WINDOW.checked_sub(t.elapsed()))
+            {
+                ctx.request_repaint_after(remaining);
+            }
         }
     }
 
@@ -820,6 +863,10 @@ impl eframe::App for PrimePhotoApp {
                         let s = self.upload.lock().unwrap();
                         (s.done, s.failed, s.total)
                     };
+                    // Tray: remember how the run ended so the glyph can show
+                    // "error" (sticky until the next run) or "done" (briefly).
+                    self.tray_last_run_failed = failed > 0;
+                    self.tray_done_at = Some(Instant::now());
                     if self.config.notifications {
                         notify::run_finished(done, failed, total);
                     }
@@ -843,6 +890,11 @@ impl eframe::App for PrimePhotoApp {
                 self.handle_config_form_action(action);
             }
         }
+
+        // Tray glyph (idle/active/paused/done/error). Runs on every frame —
+        // also before sign-in and while the window is hidden — but re-sets the
+        // icon only on change.
+        self.update_tray_icon(ctx);
 
         // Name-conflict prompt (`ConflictResolution::Ask`).
         self.conflict_dialog(ctx);

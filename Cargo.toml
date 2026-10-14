@@ -30,6 +30,14 @@ wry = "0.57.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tray-icon = "0.26"
 
+[build-dependencies]
+# Rasterises `assets/*.svg` into PNGs inside `OUT_DIR` (see `build.rs`).
+# Pure Rust so the Linux/Windows CI can build the assets too; `default-features
+# = false` drops the text/font and raster-image stacks (the sources have no
+# text and no embedded images). Build-time only — the shipped binary carries no
+# resvg code and no SVG parsing, just the embedded PNG bytes.
+resvg = { version = "0.48", default-features = false }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3"
 objc2 = "0.6"

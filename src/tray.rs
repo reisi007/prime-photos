@@ -24,6 +24,7 @@
 //! is correct.
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::i18n::tr;
 use eframe::egui;
@@ -41,10 +42,9 @@ pub struct Tray {
     pub show_item: tray_icon::menu::MenuItem,
     pub pause_item: tray_icon::menu::MenuItem,
     pub quit_item: tray_icon::menu::MenuItem,
+    /// Decoded build-time glyphs, keyed by [`TrayState::index`].
+    icons: TrayIcons,
 }
-
-/// Side of the generated RGBA icon in pixels.
-const ICON_SIZE: u32 = 32;
 
 /// Build the tray icon and menu, wiring menu/tray events so the given egui
 /// context repaints when they arrive.
@@ -62,24 +62,13 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
         return None;
     }
 
-    let icon = match tray_icon::Icon::from_rgba(upload_glyph_rgba(), ICON_SIZE, ICON_SIZE) {
-        Ok(icon) => icon,
-        Err(e) => {
-            log::error!("tray: Icon konnte nicht erzeugt werden: {e}");
-            return None;
-        }
-    };
+    // The icon is applied after the tray exists (see `set_state` below); the
+    // OS appearance is read once here for that initial idle glyph.
+    let theme = ctx.system_theme();
 
     let builder = tray_icon::TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip(tr("Prime Photos"));
-    // `with_icon_templated` is the non-deprecated replacement for
-    // `with_icon_as_template(true)`. It takes the icon itself and exists on
-    // macOS only, so the icon is set per-platform here.
-    #[cfg(target_os = "macos")]
-    let builder = builder.with_icon_templated(icon);
-    #[cfg(not(target_os = "macos"))]
-    let builder = builder.with_icon(icon);
     let tray = match builder.build() {
         Ok(tray) => tray,
         Err(e) => {
@@ -98,12 +87,16 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
     // Wake the UI on tray-icon interaction (click/enter/leave…).
     tray_icon::TrayIconEvent::set_event_handler(Some(move |_| ctx.request_repaint()));
 
-    Some(Tray {
+    let tray = Tray {
         _tray: tray,
         show_item,
         pause_item,
         quit_item,
-    })
+        icons: TrayIcons::build(),
+    };
+    // Show the idle glyph right away; later frames re-apply only on change.
+    tray.set_state(TrayState::Idle, theme);
+    Some(tray)
 }
 
 /// Take all menu events collected since the previous call.
@@ -126,81 +119,283 @@ impl Tray {
         self.set_paused(paused);
         self.quit_item.set_text(tr("Beenden"));
     }
-}
 
-// ---------------------------------------------------------------------------
-// Icon generation (no asset file)
-// ---------------------------------------------------------------------------
-
-/// Draw the app's upload glyph — a teal disc with a white up-arrow and tray
-/// bar — as a `ICON_SIZE`×`ICON_SIZE` RGBA image with a transparent
-/// background.
-///
-/// The arrow/tray are punched out (alpha 0) rather than painted white so the
-/// icon also reads correctly as a macOS menu-bar template (which uses only the
-/// alpha channel) while keeping the teal shape on Windows/Linux.
-fn upload_glyph_rgba() -> Vec<u8> {
-    let size = ICON_SIZE as f32;
-    // Same 84-unit reference geometry as the in-app `upload_logo`.
-    let s = size / 84.0;
-    let stroke = 4.0 * s;
-    let cx = size / 2.0;
-    let cy = size / 2.0;
-    let radius = size / 2.0 - 1.0; // 1 px margin so the disc is not clipped
-    let arrow_top = cy - 16.0 * s;
-    let arrow_bottom = cy + 6.0 * s;
-    let tray_y = cy + 19.0 * s;
-
-    let stroke_segments: [((f32, f32), (f32, f32)); 4] = [
-        ((cx, arrow_bottom), (cx, arrow_top)),
-        ((cx, arrow_top), (cx - 11.0 * s, arrow_top + 11.0 * s)),
-        ((cx, arrow_top), (cx + 11.0 * s, arrow_top + 11.0 * s)),
-        ((cx - 18.0 * s, tray_y), (cx + 18.0 * s, tray_y)),
-    ];
-
-    const TEAL: [u8; 3] = [0x00, 0x71, 0x85];
-    const SUB: u32 = 2; // 2×2 supersampling for smooth edges
-
-    let mut rgba = vec![0u8; (ICON_SIZE * ICON_SIZE * 4) as usize];
-    for py in 0..ICON_SIZE {
-        for px in 0..ICON_SIZE {
-            let mut hits = 0u32;
-            for sy in 0..SUB {
-                for sx in 0..SUB {
-                    let x = px as f32 + (sx as f32 + 0.5) / SUB as f32;
-                    let y = py as f32 + (sy as f32 + 0.5) / SUB as f32;
-                    let inside = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt() <= radius;
-                    let on_stroke = stroke_segments
-                        .iter()
-                        .any(|&(a, b)| dist_to_segment((x, y), a, b) <= stroke / 2.0);
-                    if inside && !on_stroke {
-                        hits += 1;
-                    }
-                }
-            }
-            let alpha = (hits * 255 / (SUB * SUB)) as u8;
-            let i = ((py * ICON_SIZE + px) * 4) as usize;
-            rgba[i] = TEAL[0];
-            rgba[i + 1] = TEAL[1];
-            rgba[i + 2] = TEAL[2];
-            rgba[i + 3] = alpha;
+    /// Apply the glyph for `state`. Callers re-apply only when the state (or
+    /// the OS theme) actually changed — see `PrimePhotoApp::update_tray_icon`.
+    ///
+    /// **macOS** draws a *template* image (alpha only, recoloured by the
+    /// system), so the black 64-px ("@2x") source is used there — more bitmap
+    /// per point keeps the menu-bar glyph retina-sharp. Everywhere else the
+    /// glyph follows the OS appearance: dark ⇒ white, light ⇒ black, unknown
+    /// ⇒ the coloured logo, which stays legible on any background.
+    pub(crate) fn set_state(&self, state: TrayState, theme: Option<egui::Theme>) {
+        let idx = state.index();
+        #[cfg(target_os = "macos")]
+        {
+            let _ = theme;
+            let _ = self
+                ._tray
+                .set_icon_templated(Some(self.icons.black[idx].clone()));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let icon = match theme {
+                Some(egui::Theme::Dark) => self.icons.white[idx].clone(),
+                Some(egui::Theme::Light) => self.icons.black[idx].clone(),
+                None => self.icons.logo.clone(),
+            };
+            let _ = self._tray.set_icon(Some(icon));
         }
     }
-    rgba
 }
 
-/// Distance from point `p` to the segment `a`–`b`.
-fn dist_to_segment(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
-    let (px, py) = p;
-    let (ax, ay) = a;
-    let (bx, by) = b;
-    let (dx, dy) = (bx - ax, by - ay);
-    let len2 = dx * dx + dy * dy;
-    let t = if len2 > 0.0 {
-        (((px - ax) * dx + (py - ay) * dy) / len2).clamp(0.0, 1.0)
+// ---------------------------------------------------------------------------
+// State glyphs (build-time PNGs; nothing is drawn any more)
+// ---------------------------------------------------------------------------
+//
+// Coupling contract with `build.rs` — the file names, colours and sizes live in
+// exactly one place per side and must be changed together:
+//   assets/<stem>.svg  ⇒  $OUT_DIR/<stem>-<colour>-<size>.png
+//   stems, in `TrayState::index()` order: tray, tray-active, tray-paused,
+//     tray-done, tray-error   (all `currentColor`, so black/white is a raster
+//     override the build injects — there are no coloured SVG files)
+//   colours: black (#000000) / white (#ffffff)
+//   sizes:   32 (1×) / 64 ("@2x") — macOS takes the 64-px source, the other
+//     platforms the 32-px one (the tray scales to the menu-bar height).
+// The coloured `logo.png` (from `assets/logo.svg`, 1024 px) is the fallback
+// glyph for an unknown OS theme.
+
+/// Visual state of the tray icon, derived by the pure [`tray_state`] function.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrayState {
+    /// Nothing running, no recent outcome — the neutral upload glyph.
+    Idle,
+    /// An upload run is live.
+    Active,
+    /// All backup activity is paused (global pause).
+    Paused,
+    /// The last run finished without errors (shown for [`DONE_WINDOW`]).
+    Done,
+    /// The last run finished with at least one failure.
+    Error,
+}
+
+impl TrayState {
+    /// Index into the embedded glyph arrays. Matches the row order of
+    /// `build.rs`'s `TRAY_STEMS`.
+    const fn index(self) -> usize {
+        match self {
+            TrayState::Idle => 0,
+            TrayState::Active => 1,
+            TrayState::Paused => 2,
+            TrayState::Done => 3,
+            TrayState::Error => 4,
+        }
+    }
+}
+
+/// How long a finished, error-free run keeps the "done" glyph before the tray
+/// falls back to "idle" (user decision 2026-10-14).
+pub(crate) const DONE_WINDOW: Duration = Duration::from_secs(5);
+
+/// Pure derivation of the tray glyph state (no I/O, so unit-testable).
+///
+/// Priority: a deliberate global pause wins, then a live run, then the outcome
+/// of the last finished run — a failure sticks until the next run, a success
+/// only shows for [`DONE_WINDOW`] — otherwise idle.
+pub(crate) fn tray_state(
+    paused: bool,
+    busy: bool,
+    last_run_failed: bool,
+    since_done: Option<Duration>,
+) -> TrayState {
+    if paused {
+        TrayState::Paused
+    } else if busy {
+        TrayState::Active
+    } else if last_run_failed {
+        TrayState::Error
+    } else if since_done.is_some_and(|d| d < DONE_WINDOW) {
+        TrayState::Done
     } else {
-        0.0
-    };
-    let (qx, qy) = (ax + t * dx, ay + t * dy);
-    ((px - qx).powi(2) + (py - qy).powi(2)).sqrt()
+        TrayState::Idle
+    }
+}
+
+/// macOS template source: the 64-px ("@2x") black raster, `TrayState`-ordered.
+#[cfg(target_os = "macos")]
+const BLACK_PNGS_64: [&[u8]; 5] = [
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-black-64.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-black-64.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-paused-black-64.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-done-black-64.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-error-black-64.png")),
+];
+
+/// Non-macOS black + white 32-px rasters, `TrayState`-ordered. `cfg`-gated (as
+/// is the coloured logo below) so the macOS build has no unused items.
+#[cfg(not(target_os = "macos"))]
+const BLACK_PNGS_32: [&[u8]; 5] = [
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-black-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-black-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-paused-black-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-done-black-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-error-black-32.png")),
+];
+
+#[cfg(not(target_os = "macos"))]
+const WHITE_PNGS_32: [&[u8]; 5] = [
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-white-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-white-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-paused-white-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-done-white-32.png")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/tray-error-white-32.png")),
+];
+
+#[cfg(not(target_os = "macos"))]
+const LOGO_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo.png"));
+
+/// Decoded glyphs, keyed by [`TrayState::index`].
+struct TrayIcons {
+    black: [tray_icon::Icon; 5],
+    #[cfg(not(target_os = "macos"))]
+    white: [tray_icon::Icon; 5],
+    #[cfg(not(target_os = "macos"))]
+    logo: tray_icon::Icon,
+}
+
+impl TrayIcons {
+    fn build() -> Self {
+        #[cfg(target_os = "macos")]
+        let black = BLACK_PNGS_64.map(decode_icon);
+        #[cfg(not(target_os = "macos"))]
+        let black = BLACK_PNGS_32.map(decode_icon);
+        #[cfg(target_os = "macos")]
+        let icons = Self { black };
+        #[cfg(not(target_os = "macos"))]
+        let icons = Self {
+            black,
+            white: WHITE_PNGS_32.map(decode_icon),
+            logo: decode_icon(LOGO_PNG),
+        };
+        icons
+    }
+}
+
+/// Decode an embedded PNG into a `tray_icon::Icon`. `build.rs` already guards
+/// the sources, so a decode failure here is a programming error — fail fast
+/// rather than ship a silently missing icon.
+fn decode_icon(png: &[u8]) -> tray_icon::Icon {
+    let image = image::load_from_memory(png)
+        .expect("Prime Photos: eingebettetes Tray-PNG konnte nicht dekodiert werden")
+        .to_rgba8();
+    let (width, height) = (image.width(), image.height());
+    tray_icon::Icon::from_rgba(image.into_raw(), width, height)
+        .expect("Prime Photos: eingebettetes Tray-PNG hat ungültige Maße")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tray_state_paused_wins_over_everything() {
+        assert_eq!(
+            tray_state(true, true, true, Some(Duration::ZERO)),
+            TrayState::Paused
+        );
+        assert_eq!(tray_state(true, false, true, None), TrayState::Paused);
+        assert_eq!(
+            tray_state(true, false, false, Some(Duration::from_secs(1))),
+            TrayState::Paused
+        );
+    }
+
+    #[test]
+    fn tray_state_busy_is_active() {
+        assert_eq!(tray_state(false, true, false, None), TrayState::Active);
+        assert_eq!(
+            tray_state(false, true, true, Some(Duration::ZERO)),
+            TrayState::Active
+        );
+    }
+
+    #[test]
+    fn tray_state_error_persists_past_the_done_window() {
+        // A failed last run keeps the error glyph until the next run — long
+        // after the "done" window would have expired.
+        assert_eq!(
+            tray_state(false, false, true, Some(Duration::ZERO)),
+            TrayState::Error
+        );
+        assert_eq!(
+            tray_state(false, false, true, Some(DONE_WINDOW * 10)),
+            TrayState::Error
+        );
+        assert_eq!(tray_state(false, false, true, None), TrayState::Error);
+    }
+
+    #[test]
+    fn tray_state_done_only_inside_the_window() {
+        assert_eq!(
+            tray_state(false, false, false, Some(Duration::ZERO)),
+            TrayState::Done
+        );
+        assert_eq!(
+            tray_state(
+                false,
+                false,
+                false,
+                Some(DONE_WINDOW - Duration::from_millis(1))
+            ),
+            TrayState::Done
+        );
+    }
+
+    #[test]
+    fn tray_state_idle_at_and_after_the_window_boundary() {
+        assert_eq!(
+            tray_state(false, false, false, Some(DONE_WINDOW)),
+            TrayState::Idle
+        );
+        assert_eq!(
+            tray_state(false, false, false, Some(DONE_WINDOW + Duration::from_secs(1))),
+            TrayState::Idle
+        );
+    }
+
+    #[test]
+    fn tray_state_idle_when_nothing_ever_ran() {
+        assert_eq!(tray_state(false, false, false, None), TrayState::Idle);
+    }
+
+    /// The build-time `* { color: … }` override really lands in the raster: the
+    /// painted pixels of the white source are white, of the black source black.
+    /// Reads the `OUT_DIR` artifacts at run time (they exist once the crate has
+    /// been built), so this also holds in the macOS build, where the white set
+    /// is `cfg`-ed out of the binary.
+    #[test]
+    fn build_rasters_carry_the_injected_colour() {
+        assert_eq!(strongest_pixel_rgb(&read_out_png("tray-white-32.png")), [255, 255, 255]);
+        assert_eq!(strongest_pixel_rgb(&read_out_png("tray-black-32.png")), [0, 0, 0]);
+    }
+
+    fn read_out_png(name: &str) -> Vec<u8> {
+        let path = std::path::Path::new(env!("OUT_DIR")).join(name);
+        std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    }
+
+    /// RGB of the most opaque pixel — the glyph's stroke colour (anti-aliased
+    /// edge pixels are less opaque).
+    fn strongest_pixel_rgb(png: &[u8]) -> [u8; 3] {
+        let image = image::load_from_memory(png).unwrap().to_rgba8();
+        let mut best = ([0u8, 0, 0], 0u8);
+        for px in image.pixels() {
+            let [r, g, b, a] = px.0;
+            if a > best.1 {
+                best = ([r, g, b], a);
+            }
+        }
+        best.0
+    }
 }

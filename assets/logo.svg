@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Prime Photos">
+  <!-- reconstruction of the source icon 1099x1158px, stretched horizontally to a square -->
+  <defs>
+    <linearGradient id="sq" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F89925"/>
+      <stop offset="0.5" stop-color="#F38F1F"/>
+      <stop offset="1" stop-color="#EC7608"/>
+    </linearGradient>
+    <linearGradient id="winB" x1="0" y1="0" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#B9641B"/><stop offset="1" stop-color="#C87A2C"/>
+    </linearGradient>
+    <linearGradient id="winF" x1="0" y1="0" x2="0.15" y2="1">
+      <stop offset="0" stop-color="#C4701F"/><stop offset="1" stop-color="#D98A3A"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#FBDBB8"/><stop offset="1" stop-color="#F7C99C"/>
+    </linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="1.4" dy="2.2" stdDeviation="2.4" flood-color="#8A3F00" flood-opacity="0.40"/>
+    </filter>
+    <clipPath id="clipF"><rect x="153.00" y="169.00" width="51.00" height="42.00" rx="5.50" fill="none" transform="rotate(1.5 178.5 193.5)"/></clipPath>
+  </defs>
+  <path d="M 50.78 0 H 205.22 A 50.78 48.19 0 0 1 256.00 48.19 V 207.81 A 50.78 48.19 0 0 1 205.22 256.00 H 50.78 A 50.78 48.19 0 0 1 0 207.81 V 48.19 A 50.78 48.19 0 0 1 50.78 0 Z" fill="url(#sq)"/>
+  <path d="M 54.04 203.94 L 44.72 203.72 L 42.51 201.84 L 42.51 199.41 L 44.96 197.31 C 47.46 196.37 53.61 195.28 57.54 193.77 C 61.46 192.26 65.34 190.08 68.48 188.24 C 71.63 186.40 73.78 184.83 76.40 182.72 C 79.02 180.60 81.55 178.42 84.21 175.53 C 86.87 172.64 90.11 168.60 92.36 165.36 C 94.61 162.12 96.16 159.21 97.72 156.08 C 99.27 152.94 100.47 150.22 101.68 146.57 C 102.88 142.92 104.16 137.95 104.94 134.19 C 105.72 130.43 106.06 127.67 106.34 124.02 L 106.57 112.30 L 78.73 111.53 C 73.63 111.14 76.89 110.85 75.94 109.98 L 73.03 106.34 L 73.03 99.70 L 120.20 48.30 C 129.03 39.22 124.43 45.72 126.02 45.21 C 127.61 44.69 128.62 45.02 129.75 45.21 C 130.87 45.39 124.25 37.67 132.78 46.31 C 141.30 54.95 172.51 87.93 180.88 97.05 L 182.97 101.03 L 182.51 106.34 L 179.36 110.20 L 175.17 111.97 L 149.43 112.30 L 146.87 131.09 C 145.35 137.28 142.44 144.58 140.35 149.44 C 138.25 154.31 136.31 157.11 134.29 160.28 C 132.27 163.45 131.79 164.64 128.23 168.46 C 124.68 172.27 117.69 179.31 112.98 183.16 C 108.26 187.01 104.63 189.05 99.93 191.56 C 95.23 194.06 90.03 196.38 84.79 198.19 C 79.55 200.00 73.61 201.43 68.48 202.39 C 63.36 203.35 58.00 203.72 54.04 203.94 Z" fill="#1E1E1D" filter="url(#sh)"/>
+  <g filter="url(#sh)">
+    <rect x="173.00" y="155.00" width="60.00" height="54.00" rx="9.00" fill="#FED8B7" transform="rotate(14.0 203.0 182.0)"/>
+    <rect x="179.00" y="161.00" width="48.00" height="42.00" rx="4.95" fill="url(#winB)" transform="rotate(14.0 203.0 182.0)"/>
+  </g>
+  <g filter="url(#sh)">
+    <rect x="146.00" y="162.00" width="65.00" height="63.00" rx="10.00" fill="#FED8B7" transform="rotate(1.5 178.5 193.5)"/>
+    <rect x="153.00" y="169.00" width="51.00" height="42.00" rx="5.50" fill="url(#winF)" transform="rotate(1.5 178.5 190.0)"/>
+    <g clip-path="url(#clipF)">
+      <circle cx="194.00" cy="206.00" r="18.50" fill="url(#sun)"/>
+    </g>
+  </g>
+</svg>
