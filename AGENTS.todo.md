@@ -277,22 +277,49 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
 Anlass: „periodic background scan is not mvp ready ... hard requirement OS-level file locks" →
 per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
 
-- [ ] **D1 – OS-Event-Watcher statt Polling.** Der Hintergrund-Sync (PORT-5, `background_sync_loop`:
-  erster Tick 15 min, dann alle 90 min) ist als Erkennungsmechanismus verworfen. Ersatz: ein Watch
-  pro aktiviertem Backup-Ordner über eine plattformneutrale Crate (macOS FSEvents / Windows
-  `ReadDirectoryChangesW` / Linux inotify), Debounce ~5 s, Re-arm bei Fehler, global pausiert →
-  keine Scans. **Neue Dependency nötig** (User-Vorgabe; dokumentiert, weil die Projektregel
-  „keine zusätzlichen Abhängigkeiten" hier vom User ausdrücklich aufgehoben wird).
-- [ ] **D2 – Reaktion pro Event:** nur die betroffene Datei prüfen (add/edit) — kein kompletter
-  Ordner-Durchlauf.
-- [ ] **D3 – Stat-Check vor dem Hash** (`src/dedup.rs`): Skip-Entscheidung zuerst über
-  (path, size, mtime) gegen den Index; nur unbekannte/geänderte Dateien lesen + MD5. `size`/`mtime`
-  sind bereits Spalten, blieben aber ungenutzt. Das MD5 bleibt Identität (`docs/SPEC_DEDUP.md` §1).
-- [ ] **D4 – Kaltstart:** beim Start/nach Anmeldung einmal pro Ordner enumerieren und per Stat-Check
-  entscheiden, was fehlt (fängt ab, was passierte, während die App aus war). Kein Timer.
-- [ ] **D5 – Clean-Room-Doku** `docs/SPEC_CHANGE_DETECTION.md` (Watcher-Mechanik, Indikatoren,
-  halb geschriebene Dateien, Cold-Boot-Scan) — Start vor der Umsetzung, damit bekannt ist, ob das
-  Original halb geschriebene Dateien erkennt.
+- [x] **D1 – OS-Event-Watcher statt Polling.** Umgesetzt (PKG-2a, uncommittet, in Verifikation):
+  `notify` 8.2.0 (User-Vorgabe, dokumentiert, weil die Projektregel „keine zusätzlichen
+  Abhängigkeiten" hier vom User ausdrücklich aufgehoben wird), Watcher pro aktiviertem
+  Backup-Ordner in `src/backup.rs` (`sync_watchers`, `watch_loop`), `WATCH_DEBOUNCE` 5 s,
+  Re-Arm/Set-Sync `WATCH_POLL` 30 s. Der 15/90-Minuten-Timer ist entfernt.
+- [x] **D2 – Reaktion pro Event:** implementiert (`collect_event_paths`, `map_to_folders`,
+  `handle_files`) — nur die betroffene Datei prüfen, kein kompletter Ordner-Durchlauf.
+- [x] **D3 – Stat-Check vor dem Hash** (`src/dedup.rs`): umgesetzt und **committet**
+  (`488d1e4`). Treffer nur bei path+size+mtime; unbekannte mtime (0) erg nie einen Treffer.
+  Das MD5 bleibt Identität (`docs/SPEC_DEDUP.md` §1).
+- [x] **D4 – Kaltstart-Sicherheitsnetz (Wasserzeichen):** implementiert (PKG-2a, uncommittet,
+  in Verifikation): Tabelle `folder_scan(path, max_mtime, scanned_at)` in derselben SQLite,
+  `folder_max_mtime`/`record_folder_scan`, `folders::max_mtime()` (reiner Metadaten-Durchlauf),
+  `scan_new_since()`. Fortschreiben nur nach fehlerfreiem Lauf, mit dem zum
+  Entscheidungszeitpunkt gelesenen Wert (während des Uploads dazugekommene Dateien werden
+  nicht verschluckt). Kein Wasserzeichen ⇒ voller Stat-Durchlauf.
+- [x] **D5 – Clean-Room-Doku** `docs/SPEC_CHANGE_DETECTION.md`: **erledigt** (Commit
+  `4ca98b2`) — Watcher-Mechanik, Indikatoren (QuickScan braucht Stat-Kombination),
+  Cold-Boot-Scan, halb geschriebene Dateien. Nachtrag: Gap-Analyse nach PKG-2a auf den
+  neuen Port-Stand aktualisiert (läuft).
+
+## Doku-Auftrag „Rest-Specs" (User-Wunsch 2026-10-14) — ERLEDIGT
+
+Alle acht beauftragten Clean-Room-Specs sind geschrieben, after-verify-round-korrigiert und
+committet (5× `docs:`-Commits: `4ca98b2`, `a105faa`, `a638d0f`, `952f81b`, plus Folge-Fix).
+Quelle war durchgehend nur lesend `/Applications/Amazon Photos.app` + `ilspycmd`
+(v11.1.0.9782, Dump 175 559 Zeilen / 2 486 Typen) + `de.lproj/Localizable.strings`.
+
+| Spec | Commit | Kern |
+|---|---|---|
+| `SPEC_CHANGE_DETECTION.md` | `4ca98b2` | DetectChanges = Size+ModifiedDate+Device/FileId; **Original prüft keine Datei-Locks**; Löschungen nur aus Walk-vs-DB |
+| `SPEC_OS_INTEGRATION.md` | `4ca98b2` | Finder-Dienst legt geplante Sicherung an; LaunchAgent-Crash-Relaunch; LSUIElement |
+| `SPEC_MEDIA_IMPORT.md` | `4ca98b2` | Media-Import in diesem Build praktisch tot; bearbeitete statt Original-Datei |
+| `SPEC_PREFERENCES.md` | `4ca98b2` | vollständiges Settings-Inventar inkl. Customer-Settings-Keys |
+| `SPEC_LIBRARY.md` | `a105faa` | Download ist Default-Screen; Bibliothek fast nur API; Verw-Verben DELETE/PATCH/PUT |
+| `SPEC_ACCOUNT_BILLING.md` | `a105faa` | **`/drive/v1/account/preferences` → `name` + `avatarNodeId`** |
+| `SPEC_SYNC.md` | `a638d0f` | Sync ist eigenes Modus-Subsystem; 120 s = Health-Metric; Sync-Ende im Original angekündigt |
+| `SPEC_STATUS_DETAIL.md` | `952f81b` | „Letzte Aktualisierung" = StatusChanged, nicht mtime; „Alle Aktivitäten anhalten" ≠ Aktivitätsfenster |
+
+**User-Vorgabe dazu:** dokumentieren, aber **keine** konkreten TODOs aus den Specs ableiten
+(gilt besonders für den Löschen/Patch-Befund — Uploader-Scope bleibt).
+**Alle Specs sind damit app-unabhängig dokumentiert** — die Deinstallation der Original-App
+kann erfolgen, ohne dass Recon-Wissen verloren geht.
 
 ## Paritätspaket Pause / One-Time-Queue / Gesamt-Fortschritt (User-Entscheidung 2026-10-14)
 
@@ -325,12 +352,9 @@ Anlass: User-Fragen „haben wir wie im Original einen alle-stoppen/alle-fortset
   (`start_folder_upload(vec![i])`, kein „Alle starten"). Auftrag: **eine** aggregierte Anzeige
   über **alle** Uploads (Summe über alle Backup-Ziele inkl. One-Time-Zeile), sichtbar auch im
   Leerlauf und außerhalb der Backup-Seite.
-- [ ] **Clean-Room-Doku-Rest (User-Wunsch 2026-10-14, bevor die Original-App deinstalliert wird).**
-  Verbleibende Specs inkl. Post-MVP-Themen werden parallel geschrieben (Modell
-  `opencode-go/step-5-preview-free`): `docs/SPEC_SYNC.md`, `docs/SPEC_LIBRARY.md`,
-  `docs/SPEC_MEDIA_IMPORT.md`, `docs/SPEC_PREFERENCES.md`, `docs/SPEC_ACCOUNT_BILLING.md`,
-  `docs/SPEC_STATUS_DETAIL.md`, `docs/SPEC_OS_INTEGRATION.md`. Quelle (nur lesend):
-  `/Applications/Amazon Photos.app` + `ilspycmd`. Nicht Teil der Umsetzung — reine Doku.
+- [x] **Clean-Room-Doku-Rest (User-Wunsch 2026-10-14) — ERLEDIGT**, siehe Abschnitt
+  „Doku-Auftrag Rest-Specs" unten. Acht Specs geschrieben und committed; die Original-App
+  kann jetzt deinstalliert werden, ohne Recon-Wissen zu verlieren.
 ### Recon-Notiz (nur Doku, bewusst **keine** TODO daraus)
 
 **„Löschen / Patchen" — direkt am DLL belegt (2026-10-14).** Antwort: das Original kann **alles
