@@ -397,16 +397,27 @@ hier ergänzt.
 
 ### Welle 2 — P2 + P3 (die zwei offenen, bereits entschiedenen Punkte)
 
-- **P2 – One-Time-Queue temporär in SQLite.** Abgelegte Drag&Drop-Dateien kommen in eine
-  temporäre Tabelle **derselben SQLite**, in der MD5-Index und `folder_scan` liegen; **nach
-  vollständig abgeschlossenem Upload wird gelöscht**. Nach Neustart steht die Zeile „Einmalige
-  Sicherung" wieder und der Lauf wird fortgesetzt (Guards wie Kaltstart: Hauptschalter an,
-  angemeldet, nicht pausiert, nicht beschäftigt). Kein Watch, kein Wasserzeichen für diesen Pfad
-  (User-Klarstellung: Drag&Drop ist ein einmaliger Upload).
+- ✅ **P2 – One-Time-Queue in SQLite: ERLEDIGT** (`00bc338`, Verify Runde 1 **APPROVE**). Abgelegte
+  Drag&Drop-Dateien liegen temporär in derselben SQLite wie MD5-Index und `folder_scan`
+  (`one_time_queue(position PK, display_path, path)`, API `set_one_time_queue` / `one_time_queue` /
+  `clear_one_time_queue`), werden **nur** bei vollständigem, fehlerfreiem Lauf gelöscht
+  (`done + failed >= total` ∧ `failed == 0`) und beim Start wiederhergestellt; der Lauf wird unter
+  denselben Guards wie der Kaltstart einmalig angestoßen (Frame-Loop, kein Timer). Kein Watch, kein
+  Wasserzeichen. **4 akzeptierte nits, alle fail-safe (kein Datenverlust):** (a) die
+  wiederhergestellte Zeile zeigt „Uploading 0 %", solange die Guards blockieren → wird in P3
+  adressiert; (b) startet zwischen Laufende und `finalize_upload` ein Hintergrund-Lauf, bleibt die
+  Queue stehen (nächster Start leert sie; die Dateien sind ohnehin im MD5-Index); (c) ein
+  abgelehnter Drop lässt eine wartende Queue stehen (bewusst: kein stilles Verwerfen); (d)
+  `save_config` im Resume-Pfad loggt einmalig.
 - **P3 – Gesamt-Fortschritt über alle Uploads.** Genau **eine** aggregierte Anzeige über alle
-  Backup-Ziele inkl. One-Time-Zeile (Summe), sichtbar auch im Leerlauf und außerhalb der
-  Backup-Seite (Fußzeile), statt nur der Balken des gerade laufenden Laufs. Manuelle Läufe
-  starten weiterhin pro Ordner.
+  Backup-Ziele inkl. One-Time-Zeile (Summe), sichtbar **auch im Leerlauf**, als **Fußzeile**.
+  **User-Entscheidung 2026-10-14: die Fußzeile ERSETZT die heutige Live-Leiste oben** — es bleibt bei
+  genau einer Anzeige, der Balken in der Kopfzeile entfällt. Datenquelle ist die bereits gebaute
+  `rows`-Liste (`total`/`done` je Ziel; die Live-Zähler `folder_total`/`folder_done` überschreiben
+  die persistierten Werte). Während eines Laufs darf die Byte-/ETA-Information
+  (`upload_progress_text`) **nicht** verloren gehen. Dazu der nit (a): die wiederhergestellte
+  Einmal-Zeile darf nicht „Uploading" behaupten, wenn kein Lauf läuft.
+  Manuelle Läufe starten weiterhin pro Ordner.
 
 ### Welle 3 — echter Name + Profilbild im Account-Block
 
