@@ -34,6 +34,13 @@ pub struct Config {
     /// `config.toml` without this key still loads — with the feature active.
     #[serde(default = "default_background_sync")]
     pub background_sync: bool,
+    /// Global pause state (user decision 2026-10-14): while paused, no upload
+    /// run starts — neither the background sync nor a queued one. The toggle
+    /// also works in the idle state, and the value is persisted, so the pause
+    /// survives a restart (like the original). `#[serde(default)]` (false) so an
+    /// existing `config.toml` without this key still loads — unpaused.
+    #[serde(default)]
+    pub paused: bool,
 }
 
 impl Config {
@@ -98,6 +105,7 @@ impl Config {
             notifications: true,
             language: None,
             background_sync: true,
+            paused: false,
         }
     }
 }

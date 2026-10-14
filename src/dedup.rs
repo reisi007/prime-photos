@@ -108,6 +108,50 @@ impl DedupIndex {
         }
     }
 
+    /// Cheap pre-read check: `true` only when this exact path is in the index
+    /// **and** the stored `size` **and** `mtime` match the given ones exactly.
+    ///
+    /// A stat hit is only the fast path — the caller then skips reading and
+    /// hashing the file. The MD5 remains the duplicate identity
+    /// (`docs/SPEC_DEDUP.md` §1): this check never replaces `should_skip`, it
+    /// only avoids reading a file that provably did not change since it was
+    /// recorded. A missing entry, a different size or a different mtime answer
+    /// `false`, and the caller reads and hashes exactly as before.
+    ///
+    /// Safety rule: an **unknown** mtime must never count as a hit. A caller
+    /// whose `fs::metadata` failed passes `mtime = 0`; a stored `mtime = 0`
+    /// (recorded without a readable timestamp) must not produce spuriously
+    /// lucky hits either — `0` on either side always answers `false`.
+    pub fn stat_matches(&self, path: &Path, size: u64, mtime: i64) -> bool {
+        let Some(conn) = self.conn.as_ref() else {
+            return false;
+        };
+        if mtime == 0 {
+            return false;
+        }
+        let path_str = path.to_string_lossy();
+        let stored: Option<(i64, i64)> = conn
+            .query_row(
+                "SELECT size, mtime FROM uploads WHERE path = ?1",
+                [path_str.as_ref()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .unwrap_or(None);
+        match stored {
+            Some((s, m)) if s == size as i64 && m == mtime => {
+                log::debug!(
+                    "dedup: stat hit {} (size {}, mtime {})",
+                    path.display(),
+                    size,
+                    mtime
+                );
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Record a successful upload (or a 409 duplicate accepted as success) so the
     /// next scan can skip it.
     pub fn record_upload(&self, path: &Path, md5: &str, size: u64, mtime: i64) {
@@ -164,5 +208,32 @@ mod tests {
         idx.record_upload(p, "cccc", 30, 3);
         assert!(idx.should_skip(p, "cccc", 30, 3));
         assert!(!idx.should_skip(p, "aaaa", 10, 1));
+    }
+
+    #[test]
+    fn stat_matches_needs_same_path_size_and_mtime() {
+        let idx = index();
+        let p = Path::new("/photos/a.jpg");
+
+        // Unknown path → no stat hit.
+        assert!(!idx.stat_matches(p, 10, 1));
+
+        idx.record_upload(p, "aaaa", 10, 1);
+
+        // Recorded with the very same size + mtime → hit.
+        assert!(idx.stat_matches(p, 10, 1));
+
+        // Different size → no hit (re-read and hash).
+        assert!(!idx.stat_matches(p, 20, 1));
+
+        // Different mtime → no hit.
+        assert!(!idx.stat_matches(p, 10, 2));
+
+        // Unknown mtime (0, e.g. `fs::metadata` failed) → never a hit, not
+        // even when the size matches.
+        assert!(!idx.stat_matches(p, 10, 0));
+
+        // Different path → no hit (path-centric rule).
+        assert!(!idx.stat_matches(Path::new("/photos/b.jpg"), 10, 1));
     }
 }

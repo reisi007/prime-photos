@@ -499,6 +499,11 @@ impl PrimePhotoApp {
             self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
         }
         self.paused.send_replace(false);
+        // Persist the lifted pause (user decision 2026-10-14): the start paths
+        // have no pause guard, so without this the runtime is unpaused while
+        // `config.toml` still says otherwise and the next restart resumes it.
+        self.config.paused = false;
+        self.save_config();
         self.was_active = true;
         // Manual run: restart the background-sync cadence, so its next tick does
         // not start a second run right behind this one.
@@ -610,6 +615,11 @@ impl PrimePhotoApp {
             self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
         }
         self.paused.send_replace(false);
+        // Persist the lifted pause (user decision 2026-10-14): the start paths
+        // have no pause guard, so without this the runtime is unpaused while
+        // `config.toml` still says otherwise and the next restart resumes it.
+        self.config.paused = false;
+        self.save_config();
         self.was_active = true;
         // Manual run: restart the background-sync cadence, so its next tick does
         // not start a second run right behind this one.
@@ -776,12 +786,21 @@ impl PrimePhotoApp {
             };
             if ui
                 .add_enabled(
-                    !self.store.folders.is_empty() && running,
+                    // Pausable in the idle state too (user decision 2026-10-14):
+                    // with no run active it blocks the background sync, and a
+                    // pure drag & drop run has no persisted folders either.
+                    !self.store.folders.is_empty() || running,
                     theme::secondary_button(label),
                 )
                 .clicked()
             {
-                self.paused.send_replace(!all_paused);
+                let next = !all_paused;
+                self.paused.send_replace(next);
+                // Persist the new state (user decision 2026-10-14): the pause
+                // survives a restart. `save_config` is the existing path — it
+                // reports a failure through `config_error` as usual.
+                self.config.paused = next;
+                self.save_config();
             }
             if running {
                 ui.spinner();

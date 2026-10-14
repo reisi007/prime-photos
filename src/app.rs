@@ -192,6 +192,10 @@ impl PrimePhotoApp {
         // Seed the checkbox from the OS state (is the login item already
         // registered?); `false` when unsupported or the state is unreadable.
         let autostart_enabled = autostart.is_enabled().unwrap_or(false);
+        // The persisted pause state survives a restart (user decision
+        // 2026-10-14): seed the sender from the config we just loaded instead
+        // of always starting unpaused.
+        let paused = watch::Sender::new(config.paused);
         Self {
             rt,
             config,
@@ -205,7 +209,7 @@ impl PrimePhotoApp {
             settings_tab: SettingsTab::General,
             store: FolderStore::load(),
             upload: Arc::new(Mutex::new(UploadShared::default())),
-            paused: watch::Sender::new(false),
+            paused,
             concurrency: 3,
             slow_mode: false,
             limit_enabled: false,
@@ -456,7 +460,13 @@ impl eframe::App for PrimePhotoApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             } else if ev.id == *tray.pause_item.id() {
-                self.paused.send_replace(!*self.paused.borrow());
+                let next = !*self.paused.borrow();
+                self.paused.send_replace(next);
+                // Persist the new state (user decision 2026-10-14): the pause
+                // survives a restart. `save_config` is the existing path — it
+                // reports a failure through `config_error` as usual.
+                self.config.paused = next;
+                self.save_config();
             } else if ev.id == *tray.quit_item.id() {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

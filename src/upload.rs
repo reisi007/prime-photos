@@ -351,6 +351,44 @@ pub(crate) async fn upload_worker(
             .copied()
             .unwrap_or((true, ConflictResolution::Ignore));
 
+        // Stat before reading (user decision 2026-10-14): the recorded
+        // `size`/`mtime` decide the cheap skip path, so an already-uploaded,
+        // unchanged file is never read or hashed at all. The MD5 stays the
+        // duplicate identity (docs/SPEC_DEDUP.md §1) — a stat hit only
+        // short-circuits files whose metadata matches exactly what was
+        // recorded for this path. An unknown mtime (0) never hits.
+        let meta = std::fs::metadata(&path);
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let mtime = meta
+            .as_ref()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        // Local pre-upload check (path + stat): same path, same size, same
+        // mtime as recorded — the file is provably the one that was uploaded.
+        // Treated exactly like the `should_skip` branch below, minus the read
+        // and the hash: done for this folder, no network, no throttle.
+        if dedup_on && dedup.lock().unwrap().stat_matches(&path, size, mtime) {
+            let mut s = shared.lock().unwrap();
+            s.done += 1;
+            *s.folder_done.entry(idx).or_insert(0) += 1;
+            if let Some(en) = s.queue.get_mut(row) {
+                en.state = FileState::Skipped;
+            }
+            // Settled for progress, but not transferred: it must not raise the
+            // measured byte rate.
+            s.bytes_done = s.bytes_done.saturating_add(size);
+            s.touch_queue();
+            s.log(tr1(
+                "UEBERSPRUNGEN {}: bereits hochgeladen",
+                path.display(),
+            ));
+            continue;
+        }
+
         // Read the file once and compute the MD5 up front: the MD5 is the
         // duplicate identity (docs/SPEC_DEDUP.md §1) and the bytes are handed to
         // upload_picture so the file is never read twice.
@@ -370,12 +408,6 @@ pub(crate) async fn upload_worker(
         };
         let md5sum = format!("{:x}", md5::compute(&bytes));
         let size = bytes.len() as u64;
-        let mtime = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
 
         {
             let mut s = shared.lock().unwrap();
