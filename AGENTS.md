@@ -97,10 +97,11 @@ Der Login-Item-Schalter „Nach dem Anmelden starten" ist bei erster Nutzung **e
 nur den Schalter, Default aus). Begründung: ohne Login-Item läuft nach Neustart/Ausloggen **kein
 Watcher** — die Event-Erkennung würde schlafen (Wasserscan ist nur Sicherheitsnetz). Das Original
 schaltet Autostart beim Onboarding ebenfalls selbst ein (`docs/SPEC_OS_INTEGRATION.md` §3.6).
-Umsetzungs-Vorgabe: `Config.autostart_enabled: Option<bool>` (`None` = nie entschieden ⇒
-registrieren + `Some(true)` speichern; `Some(false)` = bleibt aus; `Some(true)` ⇒ fehlendes
-Login-Item wird repariert). Der OS-Zustand bleibt die operative Wahrheit, `Config` speichert nur
-die Absicht. Details + Status: `AGENTS.todo.md` → „Zurückgestellt" #2. **Nicht umgesetzt.**
+Umsetzung (**erledigt**, Commit `7b8f3d1`, zwei Verify-Runden): `Config.autostart_enabled:
+Option<bool>` (`None` = nie entschieden ⇒ einmal registrieren + `Some(true)` speichern; `Some(false)`
+= Veto, nie einschalten, ein von Hand angelegter Eintrag wird nicht bekämpft; `Some(true)` ⇒
+fehlendes Login-Item wird repariert). Der OS-Zustand bleibt die operative Wahrheit, `Config`
+speichert nur die Absicht. Details: `AGENTS.todo.md` → „Zurückgestellt" #2.
 
 ## Geplante Implementierungs-Wellen (User-Auswahl 2026-10-14) — dokumentiert, **nicht gestartet**
 
@@ -206,8 +207,11 @@ steht im Ledger (`AGENTS.todo.md` → „Scope-Inventar: vergessene Features & b
   (Albums/Favoriten/Papierkorb/Teilen), Apple-Photos-/iPhoto-/Aperture-Import, Autoplay/Media-Player,
   Upsell-/Trial-/Overquota-/Outage-Banner, Auto-Update, Proxy- und „ausgeblendete Dateien"-Einstellungen,
   Crash-Relaunch-LaunchAgent, iOS-Dedupe-Prompt.
-- **Offene MVP-Lücke:** interaktiver Dateinamens-Konflikt-Dialog — die bereits vorhandene Option
-  „Nachfragen" ist ohne ihn wirkungslos.
+- **MVP-Lücke geschlossen (Korrektur 2026-10-14):** der interaktive Dateinamens-Konflikt-Dialog ist
+  **implementiert** (`81cd277`, verifiziert in `a3a3625`): bei 409 fragt `Ask` pro Datei
+  (Ignorieren / Als neue Datei speichern / Ersetzen) mit „Nicht noch einmal fragen" als run-weitem
+  Override und 60-s-Timeout ⇒ Ignore. Die frühere Notiz „die Option ‚Nachfragen' ist ohne ihn
+  wirkungslos" ist damit überholt.
 - **Für ein öffentliches Release relevant:** About / Third-Party-Lizenzen (Hinweispflicht).
 - **Concurrency-Cap „8":** kein technisches Limit, sondern die Obergrenze der kunden-/server-gelieferten
   Einstellung (`CustomerSettingsMaxSupportedUploadQueues = 8`); der **Geräte-Default** ist kleiner

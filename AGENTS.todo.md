@@ -582,21 +582,19 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
    Datei erneut komplett gesendet); F2 = der „nicht noch einmal fragen"-Override überlebte den
    Lauf und konnte später Dateien still überschreiben. Dazu F3 (ETA-Rate jetzt Wanduhr statt
    Worker-Summe) und F4 (defensive Ask-Normalisierung).
-2. ✅ **ENTSCHEIDET (User 2026-10-14: „autostart an bei default")** — **Autostart-Default = an.**
-   Der Login-Item-Schalter ist bei der ersten Nutzung **ein** (Default aus PORT-4 obsolet).
-   Begründung: ohne Login-Item startet nach einem Neustart/ausgeloggtem User **kein Watcher** —
-   die Event-Erkennung würde schlafen (der Start-Wasserscan fängt es als Sicherheitsnetz, aber
-   „sofort hochladen" wäre hin). Passend dazu: das Original schaltet Autostart beim Onboarding
-   selbst ein (`docs/SPEC_OS_INTEGRATION.md` §3.6, belegt).
-   **Umsetzungs-Vorgabe (nötig, weil PORT-4 runtime-only war):** der Default „an" braucht eine
-   *Absicht*, sonst ist ein bewusstes „aus" des Users beim nächsten Start wieder weg. Geforderte
-   Form: `Config.autostart_enabled: Option<bool>` (serde-Default `None` = noch nie entschieden).
-   - `None` ⇒ beim Start registrieren und `Some(true)` speichern (Default an).
-   - `Some(false)` ⇒ bleibt aus (vetrgt; OS bleibt operative Wahrheit).
-   - `Some(true)` ⇒ Login-Item fehlt (plist gelöscht/App verschoben) ⇒ erneut registrieren
-     (Reparatur statt Drift).
-   Checkbox liest weiterhin primär den OS-Zustand; `Config` speichert nur die Absicht.
-   Nicht umgesetzt (wartet auf Auftrag).
+2. ✅ **ERLEDIGT (User-Entscheidung 2026-10-14: „autostart (also os level autostart) an bei default")** —
+   **Autostart-Default = an**, Commit `7b8f3d1`, zwei Verify-Runden (Runde 1 APPROVE mit mittlerem
+   Finding „Startup-Save konnte eine korrupte `config.toml` überschreiben" → gefixt → Runde 2 APPROVE
+   ohne Findings). Umsetzung: `Config.autostart_enabled: Option<bool>` (serde-default, alte Config
+   lädt weiter ⇒ `None`), reine Funktion `autostart_action(intent, os_enabled)` mit
+   `EnableAndRecord` (`None` ⇒ einmal registrieren und `Some(true)` speichern), `Enable` (Reparatur
+   bei `Some(true)` und fehlendem Login-Item) und `Nothing` (`Some(false)` = **Veto**, nie
+   einschalten; ein von Hand angelegter Eintrag wird nicht bekämpft). `set_autostart` persistiert
+   die erreichte Absicht, damit ein bewusstes „aus" Neustarts überlebt; Fehler/nicht unterstützte
+   Plattform ⇒ kein Save + `log::warn!`. Der OS-Zustand bleibt die operative Wahrheit (Checkbox
+   liest ihn nach der Aktion), `Config` speichert nur die Absicht.
+   ~~Ursprüngliche Formulierung: „PORT-4 liefert den Schalter; ob er bei Installation an oder aus
+   sein soll, ist eine Produktentscheidung (Default bisher: aus)."~~
 3. ~~**Hintergrund-Sync-Takt (PORT-5-Detail).**~~ **Größtenteils erledigt/obsolet (2026-10-14):**
    Event-driven ist umgesetzt (`notify`-Watcher, siehe Abschnitt „Erkennung neuer/geänderter
    Dateien"); der frühere 15/90-Minuten-Takt ist entfernt. **Offen bleibt nur:** (a) ob nach einem
