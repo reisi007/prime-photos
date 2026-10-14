@@ -275,11 +275,12 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
-- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/step-5-preview-free` (User-Entscheidung
-  2026-10-13, ersetzt `opencode-go/deepseek-v4.1-flash#high`) — bekommt Ziel-Dateien und die
-  vollständige Spezifikation, frische Session pro Task. **Kein `#variant`-Suffix** (step-5-preview-free
-  wirbt low/medium/high; bewusst ungenutzt, siehe globale Modellvorgaben).
-- **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/step-5-preview-free`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
+- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash` (User-Entscheidung
+  2026-10-14; löst `opencode-go/step-5-preview-free` ab, das wiederum `opencode-go/deepseek-v4.1-flash#high`
+  ersetzt hatte) — bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
+  **Kein `#variant`-Suffix** (deepseek-v4.1-flash wirbt low/high/max; bewusst ungenutzt, siehe globale
+  Modellvorgaben).
+- **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
 - **CI/Release (User-Entscheidung 2026-10-13, hebt „Kein Push, kein CI" auf):** Ziel ist ein
   öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).

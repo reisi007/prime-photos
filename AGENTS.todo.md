@@ -251,9 +251,11 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
   Startpfad. Außerdem Maschinen-DNS prüfen (öffentliche Resolver 1.1.1.1/8.8.4.4/8.8.8.8 hinter dem
   10.x-LAN flackerten; ggf. Router-DNS statt Public-Resolvers).
 
-- [x] **Modellwechsel Implementierer/Verifier (User-Entscheidung 2026-10-13):** beide Rollen nutzen jetzt
-  `opencode-go/step-5-preview-free` (kein `#variant`). Ersetzt `opencode-go/deepseek-v4.1-flash#high`.
-  Der Twin `opencode/step-5-preview-free` bleibt bewusst ungenutzt (Namespace-Regel).
+- [x] **Modellwechsel Implementierer/Verifier (User-Entscheidung 2026-10-14):** beide Rollen nutzen jetzt
+  `opencode-go/deepseek-v4.1-flash` (kein `#variant`), frisch pro Task bzw. pro Verify-Runde. Ersetzt
+  `opencode-go/step-5-preview-free` (das seinerseits `opencode-go/deepseek-v4.1-flash#high` abgelöst
+  hatte). Belegter Registry-Stand: `status: active`, Kosten 0,15/0,60 $ je 1M Token, Varianten
+  low/high/max — bewusst ungenutzt.
 
 ## Upload-Queue (User-Entscheidung 2026-10-13)
 
