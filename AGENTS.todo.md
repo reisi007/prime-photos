@@ -820,7 +820,15 @@ Debug-Binary**. Vier Befunde, zwei davon mit User-Entscheidung:
    frühere Schluss „beide Formen derselben Datei im Konto" war **falsch** —
    `27_ÖFB-Reisinger_01.jpg` liegt dort zweimal als **verschiedene Fotos** (NFD 28.09., 6.274.270 B,
    MD5 `1d16ed8f…` = unsere Datei; NFC 28.03., 8.911.096 B, MD5 `c5f0f37e…` = anderes Bild). Pfad
-   und MD5-Index bleiben unverändert. **Status: entschieden, noch nicht umgesetzt.**
+   und MD5-Index bleiben unverändert. **Umgesetzt** (Commit `212f8e1`, Verify Runde 1 APPROVE):
+   eine Helferfunktion `nfc()` in `src/text.rs`, normalisiert wird der Name in `urls::upload_url`
+   (die eine Stelle, an der der Request-Name entsteht) und jeder gerenderte Pfad/Dateiname.
+   **Zwei kosmetische Anzeige-Lücken** hat der Verifier benannt; sie gehen ins nächste Paket (das
+   dieselben Dateien anfasst): (a) `src/backup.rs:830` — `self.log(tr1("Datensicherung gestoppt:
+   {}", &f.name))` rendert den Ordner-Namen **roh** (NFD ⇒ `O□FB`), obwohl dieselbe Zeile daneben
+   korrekt normalisiert ist; (b) der **Fehlerstring** `e` in `src/upload.rs:449`/`:591` kann einen
+   rohen NFD-Pfad enthalten (gebaut aus `pic_path.display()` in `src/prime_photos.rs:874-878`) —
+   Randfall: nur ohne EXIF **und** bei zu frischer Datei.
 2. **Fortschritt doppelt angezeigt:** die Seiten-Fußzeile (P3, mit Spinner + „Gesamt: x von y · z % ·
    noch …") **und** die untere Statusleiste (`TopBottomPanel::bottom("log")`, `src/app.rs:808`,
    „Upload läuft: n/total · <Datei> · ETA").
@@ -901,15 +909,25 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       nicht unser Cookie-Host.
 - [ ] **Alle Varianten laut Liste** (`docs/SPEC_CONFLICT_OPTIONS.md`) umsetzen, jede mit
       Abnahmekriterium.
-- [ ] **Code-Default auf `SaveAsNew` umstellen** (User-Entscheidung 2026-10-14: „wenn inhaltlich
-      anders hochladen, sonst überspringen wenn es nur umbenannt wurde"). Heute steht `#[default]`
-      auf `Ignore` (`src/folders.rs:136-137`); Ziel ist `SaveAsNew` (`RENAME`) bei `dedup = true`.
-      Eine Zeile plus ein Test, der den Default festnagelt, damit er nicht wieder driftet; die
-      Doc-Kommentare am Enum mitziehen. Die **lokale** Config des Ziels „Sport" ist bereits manuell
-      umgestellt (`conflict_resolution = "saveasnew"`; Serde-Name ist **lowercase**, nicht
-      `save_as_new`). **`RENAME` ist live bestätigt (2026-10-14):** ⇒ **201**, der Server legt eine
-      **umbenannte Kopie** an (`name (2026-10-14T20_22_13.091).ext` — Zeitstempel vor die Endung,
-      Doppelpunkte zu `_`), kein 409. Der neue Default ist auf unserem Host also tragfähig.
+- [x] **Code-Default auf `SaveAsNew` umstellen** — **umgesetzt** (`#[default]` verschoben, Kommentare
+      mitgezogen, zwei Tests; Verify Runde 1 APPROVE, 64 Tests). Der Serde-Vertrag ist extern
+      bewiesen: `conflict_resolution = "saveasnew"` (genau der Wert in der lokalen Config)
+      deserialisiert zu `SaveAsNew`. **`RENAME` ist live bestätigt:** ⇒ 201 und der Server legt eine
+      umbenannte Kopie an (`name (2026-10-14T20_22_13.091).ext`).
+      **Aber: der Default ist so noch WIRKUNGSLOS** — `backup.rs:814` legt die Create-Form mit
+      `ConflictResolution::Ignore` an, und `handle_config_form_action` (Create) kopiert diesen Wert
+      über den frisch angelegten Ordner (`backup_config.rs:203`) ⇒ ein **neu angelegtes** Ziel ist
+      weiterhin „Ignorieren". Der Typ-Default greift nur, wenn eine `folders.toml` das Feld gar nicht
+      enthält.
+- [ ] **Die fest verdrahteten `Ignore`-Stellen auf den Default ziehen** (Folgepaket aus dem Verify).
+      **Der wirksame Punkt ist `backup.rs:814`** (Create-Form). Dazu `app.rs:347` +
+      `backup.rs:1046/1058` (Einmal-/Drag&Drop-Queue — das Original wendet dort die
+      „Ordner-Defaults" an, `SPEC_ONE_TIME_UPLOAD.md` §10.5) und `upload.rs:394` (defensiver
+      Fallback). **Bewusst NICHT:** `backup.rs:1136` (Antwort aus dem Konflikt-Dialog — eine
+      Nutzerentscheidung) und `upload.rs:337` (60-s-Timeout **ohne** Antwort ⇒ überspringen und beim
+      nächsten Lauf erneut fragen). Außerdem ist der Kommentar `upload.rs:494-495` falsch: er
+      behauptet, `SaveAsNew`/`Replace` erzeugten „nie" einen 409 — für `SaveAsNew` stimmt das nicht
+      (ein Inhaltsduplikat liefert weiterhin `DuplicatesConflictError`).
 
 **Live-Beleg 2026-10-14 (genau ein Upload-Versuch, `.cr3`).** Verdacht: 121 der 480 Index-Zeilen
 seien nie im Konto angekommen (die Server-Suche fand sie nicht). Test: eine davon
