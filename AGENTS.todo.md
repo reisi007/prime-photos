@@ -272,6 +272,79 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
 - [x] **Drag & Drop One-Time-Upload (Spec `docs/SPEC_ONE_TIME_UPLOAD.md`).** Commit `51a5acc`: Drop-Overlay, transientes Ziel „Einmalige Sicherung“ (nie persistiert), rekursiver Verzeichnis-Drop, gemeinsamer Upload-Pfad, eigene Zeile in der Liste ohne Menü/Pause. Verify: Build grün, 7 Warnungen, `cargo test` 2/2. Full-Window-Drop-Zone, Scanning-Overlay, Ad-hoc-Queue-Zeile "Einmalige Sicherung", Cloud-Zielpfad (Default /All/{0}) und Upload-Lauf ohne persistiertes Backup-Ziel. Nutzt eframe/egui DroppedFiles + `folders::scan_images`.
 - [x] **Per-Datei-Warteschlange** (mit oder ohne byte-progress; je nachdem, ob der Cookie-Upload feingranulare Fortschritts-Events bietet).
 
+## Datei-Erkennung per OS-Event (User-Entscheidung 2026-10-14)
+
+Anlass: „periodic background scan is not mvp ready ... hard requirement OS-level file locks" →
+per Nachfrage geklärt: gemeint sind **Filesystem-Events**, keine Sperren.
+
+- [ ] **D1 – OS-Event-Watcher statt Polling.** Der Hintergrund-Sync (PORT-5, `background_sync_loop`:
+  erster Tick 15 min, dann alle 90 min) ist als Erkennungsmechanismus verworfen. Ersatz: ein Watch
+  pro aktiviertem Backup-Ordner über eine plattformneutrale Crate (macOS FSEvents / Windows
+  `ReadDirectoryChangesW` / Linux inotify), Debounce ~5 s, Re-arm bei Fehler, global pausiert →
+  keine Scans. **Neue Dependency nötig** (User-Vorgabe; dokumentiert, weil die Projektregel
+  „keine zusätzlichen Abhängigkeiten" hier vom User ausdrücklich aufgehoben wird).
+- [ ] **D2 – Reaktion pro Event:** nur die betroffene Datei prüfen (add/edit) — kein kompletter
+  Ordner-Durchlauf.
+- [ ] **D3 – Stat-Check vor dem Hash** (`src/dedup.rs`): Skip-Entscheidung zuerst über
+  (path, size, mtime) gegen den Index; nur unbekannte/geänderte Dateien lesen + MD5. `size`/`mtime`
+  sind bereits Spalten, blieben aber ungenutzt. Das MD5 bleibt Identität (`docs/SPEC_DEDUP.md` §1).
+- [ ] **D4 – Kaltstart:** beim Start/nach Anmeldung einmal pro Ordner enumerieren und per Stat-Check
+  entscheiden, was fehlt (fängt ab, was passierte, während die App aus war). Kein Timer.
+- [ ] **D5 – Clean-Room-Doku** `docs/SPEC_CHANGE_DETECTION.md` (Watcher-Mechanik, Indikatoren,
+  halb geschriebene Dateien, Cold-Boot-Scan) — Start vor der Umsetzung, damit bekannt ist, ob das
+  Original halb geschriebene Dateien erkennt.
+
+## Paritätspaket Pause / One-Time-Queue / Gesamt-Fortschritt (User-Entscheidung 2026-10-14)
+
+Anlass: User-Fragen „haben wir wie im Original einen alle-stoppen/alle-fortsetzen-Button" und
+„wie werden die Drag&Drop-Dateien gespeichert". Befunde im Code, Entscheidungen danach:
+
+- [ ] **P1 – Pause wie Original (User-Entscheidung 2026-10-14).** Ein Umschalt-Button existiert
+  bereits („Alle Sicherungsvorgänge anhalten" ↔ „… fortsetzen", `src/backup.rs` `backup_ui`, plus
+  Tray `src/tray.rs`); das Original hat **ebenfalls nur einen** Umschalter (`UI_STATES.md` §70),
+  nicht zwei Buttons. **Abweichungen vor dem Paket:** (a) Button nur während eines laufenden Laufs
+  aktiv (`add_enabled(!folders.is_empty() && running)`) — Original: schaltbar, solange überhaupt
+  ein Sicherungsziel existiert, also **auch im Leerlauf** (Pause blockt dann den Auto-Sync); (b)
+  Pause-Zustand **nicht persistent** (`watch::Sender`, startet immer `false`; `Config` hat kein
+  Feld) — Original schreibt `schedules.paused=1` und bleibt nach Neustart pausiert
+  (`SPEC_BACKGROUND_SYNC.md` §7); (c) ein **reiner Drop-Lauf ohne angelegte Ordner** sperrte den
+  Button, obwohl ein Lauf läuft; (d) **Pause pro Ordner** (Zeilen-Symbol) bleibt Post-MVP.
+  Auftrag: `paused` in `Config` persistieren (serde-default false), aus dem Config initialisieren,
+  Toggle speichert; Schalter aktiv, sobald ≥1 Sicherungsziel existiert **oder** ein Lauf läuft.
+- [ ] **P2 – One-Time-Queue temporär in SQLite (User-Entscheidung 2026-10-14).** Abweichung vom
+  Original aufgehoben: Original persistiert die Drop-Queue als DB-Zeilen
+  (`uploads`/`backup`, `schedule_id="ManualUpload"`, `SPEC_ONE_TIME_UPLOAD.md` §6 — **belegt**,
+  überlebt den Neustart); unser `one_time`-Ziel war absichtlich transient (`SPEC_ONE_TIME_UPLOAD.md`
+  §10.3). Auftrag: abgelegte Dateien **temporär in derselben SQLite** speichern, in der der
+  MD5-Dedup-Index liegt, und **nach vollständig abgeschlossenem Upload wieder entfernen**. Nach
+  Neustart steht die Zeile „Einmalige Sicherung" wieder und der Lauf wird fortgesetzt
+  (gleiche Guards wie der Hintergrund-Tick: Schalter/angemeldet/nicht pausiert/nicht aktiv).
+  Bandbreite bleibt sauber, weil der MD5-Index ohnehin persistent ist.
+- [ ] **P3 – Gesamt-Fortschritt über alle Uploads (User-Wunsch 2026-10-14).** Der Kopfzeilen-Balken
+  zeigt nur den **gerade laufenden** Lauf; manuelle Läufe starten pro Ordner
+  (`start_folder_upload(vec![i])`, kein „Alle starten"). Auftrag: **eine** aggregierte Anzeige
+  über **alle** Uploads (Summe über alle Backup-Ziele inkl. One-Time-Zeile), sichtbar auch im
+  Leerlauf und außerhalb der Backup-Seite.
+- [ ] **Clean-Room-Doku-Rest (User-Wunsch 2026-10-14, bevor die Original-App deinstalliert wird).**
+  Verbleibende Specs inkl. Post-MVP-Themen werden parallel geschrieben (Modell
+  `opencode-go/step-5-preview-free`): `docs/SPEC_SYNC.md`, `docs/SPEC_LIBRARY.md`,
+  `docs/SPEC_MEDIA_IMPORT.md`, `docs/SPEC_PREFERENCES.md`, `docs/SPEC_ACCOUNT_BILLING.md`,
+  `docs/SPEC_STATUS_DETAIL.md`, `docs/SPEC_OS_INTEGRATION.md`. Quelle (nur lesend):
+  `/Applications/Amazon Photos.app` + `ilspycmd`. Nicht Teil der Umsetzung — reine Doku.
+### Recon-Notiz (nur Doku, bewusst **keine** TODO daraus)
+
+**„Löschen / Patchen" — direkt am DLL belegt (2026-10-14).** Antwort: das Original kann **alles
+drei**. `CloudDriveService` baut neben dem Upload (`POST /v2/upload`, `PUT` bei `overwrite`) auch:
+`DELETE <metadata>/nodes/{id}` (optional `?recurse=true`, „DeleteNode"),
+`DELETE /v2/upload/multipart-upload/{id}` (Abbruch), `PUT <content>/nodes/{id}/content`
+(Inhalt ersetzen), **`PATCH <metadata>/nodes/{id}`** mit `nodeChanges`-JSON
+(`NullValueHandling.Ignore`, `HealthMetrics.Request.PatchNode`, für Umbenennen/Verschieben/
+Favorit/Album) sowie `trash/{id}` und `trash/{id}/restore` (Verben dafür noch offen).
+Nebenbefund: **unser `docs/PROTOCOL.md` enthält nur `POST`/`GET`**, weil ausschließlich
+Upload-Flows mitgeschnitten wurden — Grenze der Aufzeichnung, **nicht** das Verhalten der App.
+**Für unseren Port folgt daraus nichts:** Uploader-Scope, Löschen/Download/Papierkorb ist
+bewusst Out. User-Vorgabe 2026-10-14: dokumentieren, **keine** konkreten TODOs ableiten.
+
 ## Scope-Inventar: vergessene Features & bewusste In/Out-Grenzen (User-Wunsch 2026-10-13)
 
 Anlass: Beim Reverse-Engineering sind Features aufgetaucht, die in keiner TODO standen. Ziel ist eine

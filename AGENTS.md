@@ -65,6 +65,68 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   für den aktuellen Lauf `concurrency = 1` erzwingt; bei App-Neustart zurückgesetzt. Automatische
   Drosselung anhand des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs, Post-MVP).
 
+## Erkennung neuer/geänderter Dateien (User-Entscheidung 2026-10-14)
+
+- **Primärer Mechanismus: OS-Dateisystem-Events, kein Polling.** Die 15/90-Minuten-Runde
+  (`background_sync`: erster Tick 15 min, dann 90 min) ist **nicht** MVP-fertig und entfällt als
+  Hauptpfad. Pro überwachtem Backup-Ordner ein OS-Watch über eine plattformneutrale Crate
+  (macOS FSEvents / Windows ReadDirectoryChangesW / Linux inotify).
+  Original-Parameter (`docs/SPEC_BACKGROUND_SYNC.md` §6, belegt): FSEvents-Latenz 3 s, Throttle
+  100 ms, `Throttle(FiveSeconds)`-Debounce, Poll `BackupWatcherPollIntervalInSeconds` 30 s,
+  Re-arm bei Fehler, pausierte Ziele bekommen keinen Watcher.
+- **Reaktion pro Event: „file add / edit per Event abfragen"** (User-Vorgabe) — nur die betroffene
+  Datei prüfen, kein kompletter Ordner-Durchlauf und kein erneutes Hashen aller Dateien.
+- **Stat-Check vor dem Hash:** die Skip-Entscheidung fragt zuerst (path, size, mtime) gegen den
+  persistierten Index; nur unbekannte/geänderte Dateien werden gelesen und MD5-gehasht. `size` und
+  `mtime` stehen in der Tabelle bereits, blieben aber ungenutzt (`src/dedup.rs`). Das MD5 bleibt die
+  Identität (`docs/SPEC_DEDUP.md` §1); der Stat-Treffer ist nur der schnelle Pfad.
+- **Kaltstart (Event-Ersatz fürs Ausschalten):** beim Start bzw. nach Anmeldung wird **einmal** pro
+  Ordner enumeriert und per Stat-Check entschieden, was fehlt. Kein Timer.
+- **Sicherheitsnetz beim Start (User-Entscheidung 2026-10-14):** pro Backup-Ordner wird das
+  **größte Änderungsdatum** (`max mtime`) des letzten Durchlaufs **in der SQLite gespeichert**
+  (neue Tabelle, neben dem MD5-Index). Beim Start genügt ein **reiner Metadaten-Durchlauf**
+  (`walkdir` ohne Lesen der Dateien): ist das aktuelle `max mtime` **nicht größer** als das
+  gespeicherte, ist der Ordner nachweislich unverändert und es wird **nichts** gehasht, keine
+  DB-Abfrage pro Datei, kein Upload-Plan. Wird es größer, läuft nur für diesen Ordner der
+  Stat-Check-Pfad (und nur geänderte Dateien werden gelesen + gehasht).
+  **Angeborene Grenze (wie im Original, `SPEC_CHANGE_DETECTION.md`):** Kopien, die die mtime
+  erhalten (`rsync --times`, Finder-Import), erhöhen `max mtime` nicht. Wer das braucht, startet
+  manuell — der Wasserzeichen-Treffer ist der schnelle Pfad, keine Garantie.
+- **Drag & Drop ist ein einmaliger Upload** (User-Klarstellung 2026-10-14): kein Watch, kein
+  Wasserzeichen, keine dauerhafte Sicherung — nur die temporäre Queue bis zum Abschluss
+  (siehe unten).
+- **Pause blockt auch Events** (globale Pause, siehe oben).
+- **Verworfen:** der periodische Hintergrund-Scan als Erkennungsmechanismus (User 2026-10-14:
+  „file add / edit per event abfragen"); ein `BackupScanIntervalInHours`-Takt.
+- **Offen:** Sicherheitsnetz für verpasste Events (Watcher-Limit, ausgeworfenes Laufwerk,
+  Netzwerk-Mount) — als optionaler Schalter, noch nicht entschieden.
+- **Doku:** `docs/SPEC_CHANGE_DETECTION.md` (Clean-Room recon, in Arbeit).
+
+## Pause, One-Time-Queue & Gesamt-Fortschritt (User-Entscheidung 2026-10-14)
+
+- **Stoppen/Fortsetzenist ein Umschalter** (wie im Original, `UI_STATES.md` §70): „Alle
+  Sicherungsvorgänge anhalten" ↔ „… fortsetzen" in der Backup-Kopfzeile plus derselbe Eintrag im
+  Tray. Kein zweiter Button.
+- **Pause wie Original (Entscheidung 2026-10-14):** der Zustand wird in `config.toml` gespeichert
+  (`paused`, serde-default `false`, lädt also eine alte Config) und beim Start daraus
+  initialisiert. Der Button ist **immer** schaltbar, sobald mindestens ein Sicherungsziel existiert
+  **oder** ein Lauf läuft — früher nur während eines laufenden Laufs, was (a) Pause im Leerlauf
+  verhinderte und (b) einen reinen Drag&Drop-Lauf ohne angelegte Ordner sperrte. Eine gesetzte
+  Pause blockt auch den Hintergrund-Sync (Guard existierte bereits). **Pause pro Ordner** bleibt
+  Post-MVP (Original hat ein Zeilen-Symbol).
+- **One-Time-Queue (Drag&Drop) wird temporär in SQLite gespeichert** (Entscheidung 2026-10-14): die
+  abgelegten Dateien landen in derselben SQLite, in der der MD5-Dedup-Index liegt, und werden
+  **nach vollständig abgeschlossenem Upload wieder gelöscht**. Damit überlebt die Zeile „Einmalige
+  Sicherung" einen Neustart und der Lauf wird fortgesetzt (Guards wie Hintergrund-Sync). Das
+  entspricht dem Original, das die Drop-Queue persistiert
+  (`uploads`/`backup`, `schedule_id="ManualUpload"`, `docs/SPEC_ONE_TIME_UPLOAD.md` §6).
+  **Verworfen:** die alte Regel „Drop-Queue ist absichtlich transient/nie persistiert"
+  (`SPEC_ONE_TIME_UPLOAD.md` §10.3) — sie galt nur, bis der User die Parität verlangte.
+- **Gesamt-Fortschritt über alle Uploads** (Wunsch 2026-10-14): genau **eine** aggregierte Anzeige
+  über alle Uploads (Summe aller Backup-Ziele inkl. One-Time-Zeile), nicht nur über den gerade
+  laufenden Lauf. Manuelle Läufe starten weiterhin pro Ordner; die Anzeige summiert trotzdem über
+  alle.
+
 ## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
 
 Bewusste, absichtliche Abgrenzung. Die vollständige Feature-für-Feature-Liste mit Beleg-Keys/-Symbolen
