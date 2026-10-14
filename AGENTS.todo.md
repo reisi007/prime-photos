@@ -816,14 +816,24 @@ Debug-Binary**. Vier Befunde, zwei davon mit User-Entscheidung:
    Fortschrittsbalken + „Gesamt: x von y · z % · noch …" + aktuelle Datei/ETA in einer (etwas
    höheren) Zeile; die Seiten-Fußzeile aus P3 entfällt damit. Verworfen: „Seiten-Fußzeile behalten,
    unten nur Log" (dann fehlt Datei/ETA) und „zwei Zeilen unten" (mehr Höhe).
-3. **Zeile zeigt „Fehler" statt „Upload läuft …".** Die Zeile rendert den **persistierten** Status
-   (`Row.status ← f.status`, `src/backup.rs:1399`) aus dem letzten fehlgeschlagenen Lauf; der
-   laufende Upload setzt ihn nicht. Fix: Status **live** ableiten — enthält `folder_total` das Ziel,
-   läuft dieser Ordner (⇒ „Upload läuft …").
-4. **Aufklappen hält nicht.** Die Klapp-Überschrift heißt `tr1("Warteschlange ({})", remaining)`;
-   ihr Text ändert sich mit jedem Zähler-Update, und egui leitet die Widget-ID aus dem Label ab ⇒
-   neue ID pro Update ⇒ der Auf-/Zu-Zustand wird jedes Mal zurückgesetzt. Fix: feste ID
-   (`CollapsingHeader::id_salt`).
+3. **Zeile zeigt „Fehler" statt „Upload läuft …"** (`src/backup.rs:1399` für die Ordner-Zeilen, `:1425`
+   für die Einmal-Zeile). Die Zeile rendert den **persistierten** Status (`Row.status ← f.status`)
+   aus dem letzten fehlgeschlagenen Lauf; der laufende Upload setzt ihn nicht auf „läuft". Solange
+   das so ist, steht bei jedem neuen Lauf erst einmal wieder **„Fehler"** — für den Nutzer wertlos,
+   weil es den Zustand *vor* dem Lauf beschreibt. Fix: Status **live** ableiten — enthält
+   `folder_total` das Ziel, läuft dieser Ordner ⇒ „Upload läuft …"; erst nach `finalize` gilt der
+   persistierte Ausgang.
+4. **Aufklappen hält nicht (User: „bleibt nicht auf Dauer", `src/backup.rs:1327`).** Die
+   Klapp-Überschrift heißt `tr1("Warteschlange ({})", remaining)`; ihr Text ändert sich mit **jedem
+   Zähler-Update** (jede hochgeladene Datei). egui leitet die Widget-ID aus dem Label ab ⇒ neue ID
+   pro Update ⇒ der Auf-/Zu-Zustand wird jedes Mal zurückgesetzt, die Liste klappt von selbst wieder
+   zu. **Fix:** feste ID vergeben (`CollapsingHeader::id_salt("queue")` in egui 0.31) — dann bleibt
+   der Zustand über Updates und Frames erhalten. **Dieselbe Fehlerklasse** gilt für jedes
+   `CollapsingHeader`, dessen Label dynamische Zahlen enthält (beim Umbau mitprüfen).
+
+**Beide Punkte (3+4)** sind der Grund, warum sich die Anzeige im ersten echten Lauf als
+„dauerhaft Fehler + Liste klappt zu" zeigte. Sie gehen **zusammen mit dem Fortschritts-Umbau**
+(Recon zur Original-Darstellung läuft) und den Umlauten in **ein** UI-Paket.
 
 **Kein** App-Fehler (aufgeklärt): der **pixelige** Font in den Screenshots kam vom **ungebündelten**
 Binary (per Terminal gestartet, ohne `Info.plist`). `packaging/Info.plist` enthält
