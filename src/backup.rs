@@ -8,7 +8,7 @@ use crate::upload::{run_upload, status_text, upload_progress_text, FileState, Qu
 use eframe::egui::{self, RichText};
 use rfd::FileDialog;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -44,23 +44,40 @@ struct Row {
 struct UploadPlan {
     /// `(row, folder index, path)`; `row` is this entry's position in `queue`.
     items: Vec<(usize, usize, PathBuf)>,
+    /// Known total size of the run and the number of files it was measured
+    /// from. Drives the byte-based ETA (`UploadShared::bytes_total`); a file
+    /// whose size cannot be read simply contributes nothing.
+    bytes_total: u64,
+    sized_total: usize,
     queue: Vec<QueueEntry>,
     per_folder: HashMap<usize, usize>,
     folder_opts: HashMap<usize, (bool, ConflictResolution)>,
 }
 
 impl UploadPlan {
-    /// Recursively scan the supported images of the folders at `indices`
-    /// (indices that no longer exist are skipped, not an error). `None` when
-    /// nothing at all was found: the manual path then logs it, the background
-    /// tick stays silent.
-    fn build(store: &FolderStore, indices: &[usize]) -> Option<Self> {
-        let mut plan = UploadPlan {
+    fn empty() -> Self {
+        UploadPlan {
             items: Vec::new(),
+            bytes_total: 0,
+            sized_total: 0,
             queue: Vec::new(),
             per_folder: HashMap::new(),
             folder_opts: HashMap::new(),
-        };
+        }
+    }
+
+    /// File size of one entry, counted once into the run's byte total. Never
+    /// panics: unreadable files just do not contribute (the ETA then falls back
+    /// to the file-count rate).
+    fn note_size(&mut self, path: &Path) {
+        if let Ok(meta) = std::fs::metadata(path) {
+            self.bytes_total += meta.len();
+            self.sized_total += 1;
+        }
+    }
+
+    fn build(store: &FolderStore, indices: &[usize]) -> Option<Self> {
+        let mut plan = Self::empty();
         for &i in indices {
             let Some(f) = store.folders.get(i) else {
                 continue;
@@ -81,6 +98,7 @@ impl UploadPlan {
                     name,
                     state: FileState::Waiting,
                 });
+                plan.note_size(&p);
                 plan.items.push((row, i, p));
             }
         }
@@ -101,12 +119,7 @@ impl UploadPlan {
         conflict: ConflictResolution,
         files: Vec<PathBuf>,
     ) -> Self {
-        let mut plan = UploadPlan {
-            items: Vec::new(),
-            queue: Vec::new(),
-            per_folder: HashMap::new(),
-            folder_opts: HashMap::new(),
-        };
+        let mut plan = Self::empty();
         plan.per_folder.insert(idx, files.len());
         plan.folder_opts.insert(idx, (dedup, conflict));
         for p in files {
@@ -120,6 +133,7 @@ impl UploadPlan {
                 name,
                 state: FileState::Waiting,
             });
+            plan.note_size(&p);
             plan.items.push((row, idx, p));
         }
         plan
@@ -152,6 +166,22 @@ fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: 
     s.uploaded_ids.clear();
     s.total = plan.items.len();
     s.queue = std::mem::take(&mut plan.queue);
+    // A brand-new queue identity: bump the revision so the UI cache cannot keep
+    // showing the previous run's entries (`queue_cache_rev` would otherwise
+    // still match).
+    s.touch_queue();
+    // Byte-based ETA counters: the known run size up front, everything settled /
+    // transferred back to zero so the first rate sample is clean. The byte ETA
+    // is only meaningful when *every* file's size is known (`sized_total`),
+    // otherwise the file-count fallback in `eta_secs` takes over.
+    s.bytes_total = if plan.sized_total == plan.items.len() {
+        plan.bytes_total
+    } else {
+        0
+    };
+    s.bytes_done = 0;
+    s.net_bytes = 0;
+    s.upload_secs = 0.0;
     s.log(msg);
 }
 
@@ -676,9 +706,15 @@ impl PrimePhotoApp {
             } else {
                 tr("Alle Sicherungsvorgänge anhalten")
             };
-            let (running, done, total, started) = {
+            let (running, done, total) = {
                 let s = self.upload.lock().unwrap();
-                (s.active, s.done, s.total, s.started)
+                (s.active, s.done, s.total)
+            };
+            // Byte-based progress text (byte ETA when the run's sizes are known,
+            // else the old file-count estimate).
+            let progress_text = {
+                let s = self.upload.lock().unwrap();
+                upload_progress_text(&s)
             };
             if ui
                 .add_enabled(
@@ -699,45 +735,54 @@ impl PrimePhotoApp {
                 ui.add(
                     egui::ProgressBar::new(frac)
                         .desired_width(240.0)
-                        .text(upload_progress_text(done, total, started)),
+                        .text(progress_text),
                 );
             }
         });
 
         // Live per-file queue, grouped by backup folder
-        // (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). One snapshot under the upload
-        // lock; no lock is held across `.show`.
-        let queue_groups: Vec<(String, Vec<(String, FileState)>)> = {
-            let s = self.upload.lock().unwrap();
-            let mut groups: Vec<(String, Vec<(String, FileState)>)> = Vec::new();
-            // Folder index -> position in `groups` (keeps first-seen order).
-            let mut slot: HashMap<usize, usize> = HashMap::new();
-            for e in &s.queue {
-                let folder = if e.folder == ONE_TIME_IDX {
-                    // The transient one-time target is not in `store.folders`,
-                    // so its queue group is labelled directly.
-                    tr("Einmalige Sicherung").to_string()
-                } else {
-                    self.store
-                        .folders
-                        .get(e.folder)
-                        .map(|f| f.name.clone())
-                        .unwrap_or_default()
-                };
-                let idx = match slot.get(&e.folder).copied() {
-                    Some(i) => i,
-                    None => {
-                        groups.push((folder, Vec::new()));
-                        slot.insert(e.folder, groups.len() - 1);
-                        groups.len() - 1
-                    }
-                };
-                groups[idx].1.push((e.name.clone(), e.state));
-            }
-            groups
-        };
-        if !queue_groups.is_empty() {
-            let remaining: usize = queue_groups
+        // (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). The grouped structure is
+        // cached and only rebuilt when the run's *file states* changed
+        // (`UploadShared::rev`): a 5 000-file run otherwise cloned every file
+        // name on every frame, for nothing — only the counters move.
+        let rev = self.upload.lock().unwrap().rev;
+        if self.queue_cache_rev != rev || self.queue_cache.1.is_empty() {
+            let groups: Vec<(String, Vec<(String, FileState)>)> = {
+                let s = self.upload.lock().unwrap();
+                let mut groups: Vec<(String, Vec<(String, FileState)>)> = Vec::new();
+                // Folder index -> position in `groups` (keeps first-seen order).
+                let mut slot: HashMap<usize, usize> = HashMap::new();
+                for e in &s.queue {
+                    let folder = if e.folder == ONE_TIME_IDX {
+                        // The transient one-time target is not in `store.folders`,
+                        // so its queue group is labelled directly.
+                        tr("Einmalige Sicherung").to_string()
+                    } else {
+                        self.store
+                            .folders
+                            .get(e.folder)
+                            .map(|f| f.name.clone())
+                            .unwrap_or_default()
+                    };
+                    let idx = match slot.get(&e.folder).copied() {
+                        Some(i) => i,
+                        None => {
+                            groups.push((folder, Vec::new()));
+                            slot.insert(e.folder, groups.len() - 1);
+                            groups.len() - 1
+                        }
+                    };
+                    groups[idx].1.push((e.name.clone(), e.state));
+                }
+                groups
+            };
+            self.queue_cache = (rev, groups);
+            self.queue_cache_rev = rev;
+        }
+        if !self.queue_cache.1.is_empty() {
+            let remaining: usize = self
+                .queue_cache
+                .1
                 .iter()
                 .map(|(_, files)| {
                     files
@@ -752,7 +797,7 @@ impl PrimePhotoApp {
                     .show(ui, |ui| {
                         // Cap the rendered rows so a very large run stays cheap.
                         let mut shown = 0usize;
-                        for (folder, files) in &queue_groups {
+                        for (folder, files) in &self.queue_cache.1 {
                             if shown >= 300 {
                                 break;
                             }
@@ -770,6 +815,8 @@ impl PrimePhotoApp {
                             }
                             for (name, state) in files.iter().take(300 - shown) {
                                 shown += 1;
+                                // The state label is one of five fixed strings
+                                // (translated once per row, not allocated).
                                 let (txt, col) = match state {
                                     FileState::Waiting => (tr("Warten"), theme::MUTED),
                                     FileState::Uploading => (tr("In Bearbeitung"), theme::TEAL),

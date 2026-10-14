@@ -9,7 +9,7 @@ use crate::login;
 use crate::notify;
 use crate::theme;
 use crate::tray;
-use crate::upload::{eta_suffix, UploadShared};
+use crate::upload::{eta_suffix, FileState, UploadShared};
 use eframe::egui::{self, Color32, RichText};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -146,6 +146,12 @@ pub(crate) struct PrimePhotoApp {
     /// A file drag is currently hovering over the window (drop overlay on,
     /// backup-page interactions off).
     pub(crate) dropping_files: bool,
+    /// Cached grouped queue snapshot for the Backup page: `(revision, groups)`.
+    /// Rebuilt only when `UploadShared::rev` changed — the queued file names
+    /// otherwise get re-cloned on every frame for no visible change.
+    pub(crate) queue_cache: (u64, Vec<(String, Vec<(String, FileState)>)>),
+    /// The `revision` the cache was built from (`u64::MAX` = never built).
+    pub(crate) queue_cache_rev: u64,
     /// Transient one-time (drag & drop) upload target: never persisted, lives
     /// only for the length of the run and then keeps its settled counters so
     /// the Backup page can show the finished row. `None` until the first drop.
@@ -215,6 +221,8 @@ impl PrimePhotoApp {
             autostart_enabled,
             dropping_files: false,
             one_time: None,
+            queue_cache: (0, Vec::new()),
+            queue_cache_rev: u64::MAX,
         }
     }
 
@@ -505,7 +513,7 @@ impl eframe::App for PrimePhotoApp {
                         "Upload läuft: {} · {} · {}",
                         format!("{}/{}", s.done, s.total),
                         &s.current,
-                        eta_suffix(s.done, s.total, s.started),
+                        eta_suffix(&s),
                     )
                 } else if s.total > 0 {
                     tr1(
@@ -535,7 +543,17 @@ impl eframe::App for PrimePhotoApp {
                 self.was_active = true;
             }
             if active || self.was_active {
-                ctx.request_repaint_after(Duration::from_millis(250));
+                // Cheap while nothing is going on, responsive while it is: an
+                // unfocused/hidden window (tray-mode background upload) only
+                // needs the counter repaint, not 4 fps of full layout work.
+                // `focused` is `None` on platforms that do not report it —
+                // assume visible then (a repaint too many is harmless).
+                let focused = ctx.input(|i| i.viewport().focused).unwrap_or(true);
+                ctx.request_repaint_after(if focused {
+                    Duration::from_millis(250)
+                } else {
+                    Duration::from_secs(1)
+                });
                 if self.was_active && !active {
                     self.finalize_upload();
                     let (done, failed, total) = {

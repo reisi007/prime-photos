@@ -56,14 +56,38 @@ pub(crate) struct UploadShared {
     /// Live per-file queue for the current run, in `items` order. `QueueEntry.folder`
     /// is the folder index, the vector position is the row handed to the worker.
     pub(crate) queue: Vec<QueueEntry>,
+    /// Revision of the run's *file states*. Bumped on every queue mutation, so
+    /// the UI cache can skip rebuilding its (potentially thousands of entries)
+    /// snapshot while only the counters moved.
+    pub(crate) rev: u64,
+    /// Byte totals for the byte-based ETA: known size of the run, how much of it
+    /// is settled (uploaded **or** dedup-skipped) and how much went over the wire.
+    /// 0 while unknown — the ETA then falls back to the file-count rate.
+    pub(crate) bytes_total: u64,
+    pub(crate) bytes_done: u64,
+    pub(crate) net_bytes: u64,
+    /// Seconds spent actually transferring (dedup skips are excluded, they would
+    /// otherwise report an infinite rate).
+    pub(crate) upload_secs: f64,
 }
 
 impl UploadShared {
+    /// Append to the (bounded) run log. Old lines are dropped oldest-first, the
+    /// panel stays a scrolling tail.
     pub(crate) fn log(&mut self, s: impl Into<String>) {
         self.log.push(s.into());
         if self.log.len() > 500 {
             self.log.drain(0..100);
         }
+    }
+
+    /// Mark the queue as changed (the UI cache rebuilds its snapshot).
+    /// Mark the queue as changed (the UI cache rebuilds its snapshot). Also
+    /// call it when the queue is *replaced* wholesale (`publish_state`): the
+    /// revision is the cache's only signal, and a new run must never inherit
+    /// the previous run's rendered entries.
+    pub(crate) fn touch_queue(&mut self) {
+        self.rev = self.rev.wrapping_add(1);
     }
 }
 
@@ -93,15 +117,39 @@ pub(crate) fn status_text(status: FolderStatus, pct: f32, total: usize) -> (Stri
     }
 }
 
-/// ETA of the running upload in seconds, from the file-completion rate
+/// ETA of the running upload in seconds. Byte-based when the run's sizes are
+/// known (much more accurate than counting files: dedup skips are free and the
+/// files differ wildly in size), otherwise from the file-completion rate
 /// (`done / elapsed`). Returns `None` while the estimate is unreliable: no
 /// completed file yet, under a second elapsed, or a non-finite rate/result —
 /// so the UI never shows a bogus or NaN/inf figure.
-pub(crate) fn eta_secs(done: usize, total: usize, started: Option<Instant>) -> Option<f64> {
+pub(crate) fn eta_secs(
+    done: usize,
+    total: usize,
+    started: Option<Instant>,
+    bytes_total: u64,
+    bytes_done: u64,
+    net_bytes: u64,
+    upload_secs: f64,
+) -> Option<f64> {
     let started = started?;
     if done == 0 {
         return None;
     }
+
+    // Bytes: remaining unsettled bytes over the measured transfer rate.
+    if bytes_total > 0 && upload_secs >= 1.0 {
+        let bps = net_bytes as f64 / upload_secs;
+        if bps > 0.0 && bps.is_finite() {
+            let remaining = bytes_total.saturating_sub(bytes_done) as f64;
+            let eta = remaining / bps;
+            if eta.is_finite() && eta >= 0.0 {
+                return Some(eta);
+            }
+        }
+    }
+
+    // Fallback: completed files per wall-clock second.
     let elapsed = started.elapsed().as_secs_f64();
     if elapsed < 1.0 {
         return None;
@@ -131,15 +179,25 @@ pub(crate) fn format_eta(secs: f64) -> String {
 
 /// ETA fragment for the log summary, e.g. `"ca. 1:20"` — or `"Schätzung läuft …"`
 /// while the estimate is not yet reliable.
-pub(crate) fn eta_suffix(done: usize, total: usize, started: Option<Instant>) -> String {
-    match eta_secs(done, total, started) {
+pub(crate) fn eta_suffix(shared: &UploadShared) -> String {
+    let s = shared;
+    match eta_secs(
+        s.done,
+        s.total,
+        s.started,
+        s.bytes_total,
+        s.bytes_done,
+        s.net_bytes,
+        s.upload_secs,
+    ) {
         Some(eta) => tr1("ca. {}", format_eta(eta)),
         None => tr("Schätzung läuft …").to_string(),
     }
 }
 
 /// Status text for the progress bar, e.g. `"42% · noch 7 Dateien · ca. 1:20"`.
-pub(crate) fn upload_progress_text(done: usize, total: usize, started: Option<Instant>) -> String {
+pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
+    let (done, total) = (shared.done, shared.total);
     let pct = if total > 0 {
         (done as f32 / total as f32 * 100.0).clamp(0.0, 100.0)
     } else {
@@ -151,7 +209,7 @@ pub(crate) fn upload_progress_text(done: usize, total: usize, started: Option<In
         "{}% · noch {} · {}",
         format!("{pct:.0}"),
         files,
-        eta_suffix(done, total, started),
+        eta_suffix(shared),
     )
 }
 
@@ -199,8 +257,12 @@ pub(crate) async fn upload_worker(
 
         // Mark the file as being worked on (guarded so an out-of-range row can
         // never panic; the queue is only mutated while `shared` is held).
-        if let Some(e) = shared.lock().unwrap().queue.get_mut(row) {
-            e.state = FileState::Uploading;
+        {
+            let mut s = shared.lock().unwrap();
+            if let Some(e) = s.queue.get_mut(row) {
+                e.state = FileState::Uploading;
+            }
+            s.touch_queue();
         }
 
         let (dedup_on, conflict) = folder_opts
@@ -220,6 +282,7 @@ pub(crate) async fn upload_worker(
                 if let Some(en) = s.queue.get_mut(row) {
                     en.state = FileState::Failed;
                 }
+                s.touch_queue();
                 s.log(tr2("FEHLER {}: {}", path.display(), e));
                 continue;
             }
@@ -247,6 +310,10 @@ pub(crate) async fn upload_worker(
             if let Some(en) = s.queue.get_mut(row) {
                 en.state = FileState::Skipped;
             }
+            // Settled for progress, but not transferred: it must not raise the
+            // measured byte rate.
+            s.bytes_done = s.bytes_done.saturating_add(size);
+            s.touch_queue();
             s.log(tr1(
                 "UEBERSPRUNGEN {}: bereits hochgeladen",
                 path.display(),
@@ -264,8 +331,12 @@ pub(crate) async fn upload_worker(
             changed = pause_rx.changed() => {
                 let _ = changed;
                 queue.lock().unwrap().push_front((row, idx, path.clone()));
-                if let Some(e) = shared.lock().unwrap().queue.get_mut(row) {
-                    e.state = FileState::Waiting;
+                {
+                    let mut s = shared.lock().unwrap();
+                    if let Some(e) = s.queue.get_mut(row) {
+                        e.state = FileState::Waiting;
+                    }
+                    s.touch_queue();
                 }
                 requeued = true;
             }
@@ -282,6 +353,10 @@ pub(crate) async fn upload_worker(
                         if let Some(en) = s.queue.get_mut(row) {
                             en.state = FileState::Done;
                         }
+                        s.bytes_done = s.bytes_done.saturating_add(size);
+                        s.net_bytes = s.net_bytes.saturating_add(size);
+                        s.upload_secs += started.elapsed().as_secs_f64();
+                        s.touch_queue();
                         s.log(format!("OK    {}", path.display()));
                     }
                     Err(e) => {
@@ -296,6 +371,7 @@ pub(crate) async fn upload_worker(
                                 if let Some(en) = s.queue.get_mut(row) {
                                     en.state = FileState::Waiting;
                                 }
+                                s.touch_queue();
                                 s.log(tr1(
                                     "Anmeldung abgelaufen, {} wird erneut versucht.",
                                     path.display(),
@@ -309,6 +385,7 @@ pub(crate) async fn upload_worker(
                             if let Some(en) = s.queue.get_mut(row) {
                                 en.state = FileState::Failed;
                             }
+                            s.touch_queue();
                             s.log(tr2("FEHLER {}: {}", path.display(), e));
                         }
                     }
