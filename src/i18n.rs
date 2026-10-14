@@ -339,6 +339,11 @@ const EN: &[(&str, &str)] = &[
     ("ca. {}", "approx. {}"),
     ("{}% · noch {} · {}", "{}% · {} left · {}"),
     ("{n} Dateien", "{n} files"),
+    // -- run outcome breakdown (footer + folder row) ---------------------
+    ("{} neu hochgeladen", "{} newly uploaded"),
+    ("{} bereits im Konto", "{} already in your account"),
+    ("{} unverändert", "{} unchanged"),
+    ("{} Fehler", "{} error(s)"),
     // -- notifications --------------------------------------------------
     ("Upload abgeschlossen: {} Datei(en).", "Upload complete: {} file(s)."),
     (

@@ -52,6 +52,21 @@ pub(crate) struct UploadShared {
     pub(crate) folder_total: HashMap<usize, usize>,
     pub(crate) folder_done: HashMap<usize, usize>,
     pub(crate) folder_failed: HashMap<usize, usize>,
+    /// Run outcome breakdown (user decision 2026-10-14): the single `done`
+    /// counter used to mix three very different outcomes — a real upload, a 409
+    /// "already in the account" and a local dedup/stat skip that never touched
+    /// the network — so "480 fertig" was not readable as "480 new". These three
+    /// counters keep them apart; `done` itself stays the sum (progress and
+    /// persistence depend on it). Purely in-memory: no schema change.
+    pub(crate) uploaded_new: usize,
+    pub(crate) conflict_skipped: usize,
+    pub(crate) unchanged_skipped: usize,
+    /// Per-folder counterpart of the three counters above, so one folder row can
+    /// show its own numbers (analogous to `folder_done`). `folder_failed` stays
+    /// the failure side.
+    pub(crate) folder_new: HashMap<usize, usize>,
+    pub(crate) folder_conflict: HashMap<usize, usize>,
+    pub(crate) folder_unchanged: HashMap<usize, usize>,
     pub(crate) uploaded_ids: Vec<String>,
     /// Live per-file queue for the current run, in `items` order. `QueueEntry.folder`
     /// is the folder index, the vector position is the row handed to the worker.
@@ -227,6 +242,33 @@ pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
     )
 }
 
+/// The run's outcome breakdown as a single line: **only** the non-zero
+/// categories are shown, joined by ` · `. An all-zero result yields an empty
+/// string, so the caller can omit the line entirely (idle state, or a target
+/// this run never touched). Pure and side-effect free — no lock, no UI — and
+/// therefore cheap to test.
+pub(crate) fn outcome_text(
+    new: usize,
+    existing: usize,
+    unchanged: usize,
+    failed: usize,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if new > 0 {
+        parts.push(tr1("{} neu hochgeladen", new));
+    }
+    if existing > 0 {
+        parts.push(tr1("{} bereits im Konto", existing));
+    }
+    if unchanged > 0 {
+        parts.push(tr1("{} unverändert", unchanged));
+    }
+    if failed > 0 {
+        parts.push(tr1("{} Fehler", failed));
+    }
+    parts.join(" · ")
+}
+
 // ---------------------------------------------------------------------------
 // Async upload machinery
 // ---------------------------------------------------------------------------
@@ -374,7 +416,9 @@ pub(crate) async fn upload_worker(
         if dedup_on && dedup.lock().unwrap().stat_matches(&path, size, mtime) {
             let mut s = shared.lock().unwrap();
             s.done += 1;
+            s.unchanged_skipped += 1;
             *s.folder_done.entry(idx).or_insert(0) += 1;
+            *s.folder_unchanged.entry(idx).or_insert(0) += 1;
             if let Some(en) = s.queue.get_mut(row) {
                 en.state = FileState::Skipped;
             }
@@ -419,7 +463,9 @@ pub(crate) async fn upload_worker(
         if dedup_on && dedup.lock().unwrap().should_skip(&path, &md5sum, size, mtime) {
             let mut s = shared.lock().unwrap();
             s.done += 1;
+            s.unchanged_skipped += 1;
             *s.folder_done.entry(idx).or_insert(0) += 1;
+            *s.folder_unchanged.entry(idx).or_insert(0) += 1;
             if let Some(en) = s.queue.get_mut(row) {
                 en.state = FileState::Skipped;
             }
@@ -494,7 +540,9 @@ pub(crate) async fn upload_worker(
                 dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
                 let mut s = shared.lock().unwrap();
                 s.done += 1;
+                s.uploaded_new += 1;
                 *s.folder_done.entry(idx).or_insert(0) += 1;
+                *s.folder_new.entry(idx).or_insert(0) += 1;
                 s.uploaded_ids.push(id);
                 if let Some(en) = s.queue.get_mut(row) {
                     en.state = FileState::Done;
@@ -550,7 +598,9 @@ pub(crate) async fn upload_worker(
                 dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
                 let mut s = shared.lock().unwrap();
                 s.done += 1;
+                s.conflict_skipped += 1;
                 *s.folder_done.entry(idx).or_insert(0) += 1;
+                *s.folder_conflict.entry(idx).or_insert(0) += 1;
                 if let Some(id) = existing_conflict_id.take() {
                     if !id.is_empty() {
                         // Keep the existing node in the album list, exactly as
@@ -655,3 +705,57 @@ pub(crate) async fn run_upload(
         .unwrap()
         .log(tr2("Fertig: {} erfolgreich, {} fehlgeschlagen.", done, failed));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The assertions compare against the same `tr*` helpers the code under test
+    // uses, so they hold in either UI language without touching the global
+    // language (other tests run in parallel) — the pattern `src/notify.rs`
+    // already uses. Every branch and every substituted counter is pinned.
+
+    #[test]
+    fn outcome_is_empty_when_nothing_happened() {
+        // All-zero: the caller omits the line entirely (idle / untouched target).
+        assert_eq!(outcome_text(0, 0, 0, 0), "");
+    }
+
+    #[test]
+    fn outcome_reports_a_clean_success_run() {
+        // Only real uploads: exactly one category, no zero noise.
+        assert_eq!(outcome_text(5, 0, 0, 0), tr1("{} neu hochgeladen", 5));
+    }
+
+    #[test]
+    fn outcome_reports_a_mixed_run_with_every_category() {
+        let text = outcome_text(3, 2, 1, 4);
+        let expected = [
+            tr1("{} neu hochgeladen", 3),
+            tr1("{} bereits im Konto", 2),
+            tr1("{} unverändert", 1),
+            tr1("{} Fehler", 4),
+        ]
+        .join(" · ");
+        assert_eq!(text, expected);
+        for needle in ["3", "2", "1", "4"] {
+            assert!(text.contains(needle), "counter {needle} missing: {text}");
+        }
+    }
+
+    #[test]
+    fn outcome_reports_a_failure_only_run() {
+        assert_eq!(outcome_text(0, 0, 0, 2), tr1("{} Fehler", 2));
+    }
+
+    #[test]
+    fn outcome_omits_zero_categories() {
+        // A run that uploaded new files and skipped existing ones must not list
+        // "0 unverändert" / "0 Fehler".
+        let text = outcome_text(1, 1, 0, 0);
+        assert!(!text.contains("0"), "zero category leaked: {text}");
+        assert!(text.contains(tr1("{} neu hochgeladen", 1).as_str()));
+        assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
+    }
+}
+

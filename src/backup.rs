@@ -6,7 +6,10 @@ use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
 use crate::i18n::{tr, tr1, tr2, tr3};
 use crate::icons;
 use crate::theme;
-use crate::upload::{run_upload, status_text, upload_progress_text, FileState, QueueEntry, UploadShared};
+use crate::upload::{
+    outcome_text, run_upload, status_text, upload_progress_text, FileState, QueueEntry,
+    UploadShared,
+};
 use eframe::egui::{self, RichText};
 // NOTE: `notify` is the filesystem-event crate — not `crate::notify`, the
 // desktop-notification module (they are unrelated and both stay).
@@ -37,6 +40,13 @@ struct Row {
     status: FolderStatus,
     total: usize,
     done: usize,
+    /// Run outcome breakdown of **this** target (only in-memory, for the row's
+    /// own result line): real uploads, 409 "already in the account", local
+    /// dedup/stat skips and failures. All 0 for a target the run never touched.
+    new: usize,
+    existing: usize,
+    unchanged: usize,
+    failed: usize,
     last_updated: String,
 }
 
@@ -228,6 +238,15 @@ fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: 
     s.folder_total = plan.per_folder.clone();
     s.folder_done.clear();
     s.folder_failed.clear();
+    // The outcome breakdown is per run too (user decision 2026-10-14): the
+    // footer line and every folder row start from zero, so no previous run's
+    // numbers can survive into this one.
+    s.uploaded_new = 0;
+    s.conflict_skipped = 0;
+    s.unchanged_skipped = 0;
+    s.folder_new.clear();
+    s.folder_conflict.clear();
+    s.folder_unchanged.clear();
     s.uploaded_ids.clear();
     s.total = plan.items.len();
     s.queue = std::mem::take(&mut plan.queue);
@@ -1414,6 +1433,10 @@ impl PrimePhotoApp {
                         status: f.status,
                         total,
                         done,
+                        new: s.folder_new.get(&i).copied().unwrap_or(0),
+                        existing: s.folder_conflict.get(&i).copied().unwrap_or(0),
+                        unchanged: s.folder_unchanged.get(&i).copied().unwrap_or(0),
+                        failed: s.folder_failed.get(&i).copied().unwrap_or(0),
                         last_updated: f.last_updated.clone(),
                     }
                 })
@@ -1441,6 +1464,10 @@ impl PrimePhotoApp {
                     status: one.status,
                     total,
                     done,
+                    new: s.folder_new.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    existing: s.folder_conflict.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    unchanged: s.folder_unchanged.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    failed: s.folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0),
                     last_updated: one.last_updated.clone(),
                 });
             }
@@ -1479,6 +1506,15 @@ impl PrimePhotoApp {
                                         ))
                                         .size(12.0),
                                     );
+                                    // The target's own outcome breakdown (user
+                                    // decision 2026-10-14). Only shown when the
+                                    // run produced at least one result for it —
+                                    // an untouched row (all zero) stays quiet.
+                                    let outcome =
+                                        outcome_text(r.new, r.existing, r.unchanged, r.failed);
+                                    if !outcome.is_empty() {
+                                        ui.label(theme::muted(outcome).size(11.0));
+                                    }
                                     if !r.last_updated.is_empty() {
                                         ui.label(
                                             theme::muted(tr1(
@@ -1611,13 +1647,21 @@ impl PrimePhotoApp {
             };
             // The byte/ETA detail only exists for a live run; `rows` is a plain
             // snapshot, so the shared state is locked once more here (no guard
-            // is held at this point).
-            let (running, progress_text) = {
+            // is held at this point). The outcome counters are read here too —
+            // they are already the aggregate over every target (maintained
+            // directly by the workers, no second summation of the rows).
+            let (running, progress_text, outcome) = {
                 let s = self.upload.lock().unwrap();
+                let outcome = outcome_text(
+                    s.uploaded_new,
+                    s.conflict_skipped,
+                    s.unchanged_skipped,
+                    s.failed,
+                );
                 if s.active {
-                    (true, upload_progress_text(&s))
+                    (true, upload_progress_text(&s), outcome)
                 } else {
-                    (false, String::new())
+                    (false, String::new(), outcome)
                 }
             };
             ui.horizontal(|ui| {
@@ -1646,6 +1690,14 @@ impl PrimePhotoApp {
                         .text(text),
                 );
             });
+            // Extra result line (user decision 2026-10-14): the run's outcome
+            // breakdown over **all** targets. It is a result line, not a second
+            // progress bar, and it stays hidden while every counter is 0 (before
+            // any run, or freshly reset) — no empty or misleading line.
+            if !outcome.is_empty() {
+                ui.add_space(2.0);
+                ui.label(theme::muted(outcome).size(11.0));
+            }
         }
     }
 }
@@ -1671,6 +1723,10 @@ mod tests {
             status: FolderStatus::Idle,
             total,
             done,
+            new: 0,
+            existing: 0,
+            unchanged: 0,
+            failed: 0,
             last_updated: String::new(),
         }
     }
