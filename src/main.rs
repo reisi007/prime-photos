@@ -7,6 +7,7 @@ mod folders;
 mod i18n;
 mod icons;
 mod login;
+mod logging;
 mod notify;
 mod platform;
 mod theme;
@@ -38,6 +39,8 @@ fn window_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result<()> {
+    logging::init();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
