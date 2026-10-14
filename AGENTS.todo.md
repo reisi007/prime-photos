@@ -444,12 +444,22 @@ antworten **alle** mit `405 Not allowed` + Body „Invalid request" → die Anfr
 **Signatur/Autorisierung**, ein reiner Cookie-Aufruf genügt nicht. Deshalb: IL-Recherche in
 `GetSmartCroppedThumbnail`/`GetThumbnailUrl` (Clean-Room, `docs/SPEC_ACCOUNT_BILLING.md` §3.4/§9).
 
-**Blocker Hinweis (2026-10-14): `/Applications/Amazon Photos.app` existiert nicht mehr** — der User hat
-die App in den Papierkorb gelegt. Konsequenzen: (a) die beiden laufenden Recon-Aufträge, die auf diesen
-Pfad zeigen (`docs/SPEC_ABOUT.md`, Thumbnail-Route), zielen ins Leere und müssen **nach dem Zurücklegen
-neu gestartet** werden; (b) der Papierkorb ist für den Shell-Prozess **nicht lesbar und nicht
-auflistbar** (macOS-TCC, `Operation not permitted` — `mv` scheitert; `ls ~/.Trash` zeigt nichts, obwohl
-Spotlight die Pfade kennt). Restore nur über Finder („Zurücklegen") oder mit Vollzugriff.
+**Blocker Hinweis (2026-10-14): `/Applications/Amazon Photos.app` existierte nicht mehr** — der User hatte
+die App in den Papierkorb gelegt. Konsequenzen: (a) die beiden Recon-Aufträge, die auf diesen Pfad
+zeigen (`docs/SPEC_ABOUT.md`, Thumbnail-Route), zielen ins Leere und müssen **neu gestartet** werden;
+(b) der Papierkorb ist für den Shell-Prozess **nicht lesbar und nicht auflistbar** (macOS-TCC;
+`mv` scheitert mit `Operation not permitted`, `sandbox_extension_issue_file failed`; `ls ~/.Trash`
+zeigt nichts, obwohl Spotlight die Pfade kennt; auch der Finder-Weg per AppleScript läuft in einen
+AppleEvent-Timeout `-1712`). **Gelöst (2026-10-14):** die App wurde **offiziell neu geladen** und wieder
+nach `/Applications/Amazon Photos.app` installiert —
+`https://www.amazon.com/photos/download` → 302 →
+`https://d29x207vrinatv.cloudfront.net/mac/AmazonPhotosInstaller.dmg` (1 846 066 B, Stub) →
+dessen Payload `https://d29x207vrinatv.cloudfront.net/mac/AmazonPhotosApp.zip` (60 488 014 B) →
+`ditto -x -k` entpackt und per `ditto` nach `/Applications` kopiert (`/Applications` ist für den
+Shell-Prozess **beschreibbar**). **Versionstreue bestätigt:** `CFBundleShortVersionString = 11.3.0`,
+`CFBundleVersion = 36`, `com.amazon.clouddrive.mac`, TeamIdentifier `94KV3E626L` — identisch mit der
+Version, aus der `SPEC_FOLDERS`/`SPEC_MEDIA_IMPORT`/`SPEC_OS_INTEGRATION`/`SPEC_PREFERENCES` gebaut
+wurden (dort `11.3.0`/Build `36`). Die Specs bleiben also gültig; 202 DLLs im Bundle.
 
 
 - **Funktioniert:** `GET /drive/v1/nodes/{avatarNodeId}?tempLink=true` → JSON mit `tempLink` auf den Host
