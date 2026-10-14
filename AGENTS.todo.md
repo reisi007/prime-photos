@@ -341,7 +341,12 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
    Doku-Maßwerte/Design-Abmachung, kein Rate-Wert.
 8. **Echtes Profilbild** im Account-Block: keine API identifiziert.
 9. **Logout während laufendem Upload:** `logout()` löscht die Auth-Cookies, stoppt aber den laufenden Lauf nicht. Soll der Upload stoppen/pausieren oder weiterlaufen und mit 401 scheitern? (Eine saubere Antwort bräuchte einen Abbruch-Kanal in der Upload-Pipeline.)
-10. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung) — folgt
+10. **F-3 – Pause/Abbruch verwirft gesendete Bytes.** Ein Abbruch im laufenden Upload startet die
+   Datei später bei 0 (die bereits gesendeten Bytes sind verloren), und `conflictResolution=RENAME`
+   erzeugt bei Abbruch nach Server-Anlage ein Duplikat statt eines 409-Dedupe — beides widerspricht
+   dem Ziel „keine Bandbreite verschwenden". Entscheidung nötig: **„aktuelles Element fertig, dann
+   ruhen"** vs. sofortiger Abbruch; dazu, ob `RENAME` der richtige Wire-Wert ist.
+11. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung) — folgt
    aus Punkt 1/3.
 
 ## Offen (Backlog)
