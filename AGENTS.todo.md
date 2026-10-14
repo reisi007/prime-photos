@@ -405,7 +405,18 @@ ist das erst in der Verifikation. Der User: *„Können wir das URL-Bauen in ein
 und als Regel etablieren, dass über diese Util alle URLs auf Marktplatz-Basis individualisiert werden
 muss?"* → **Ja**, als Projektregel in `AGENTS.md` festgehalten.
 
-**Umfang (nächstes Paket, nach dem Commit von Welle 3 — dieselben Dateien):**
+**Befund (2026-10-14, beim Fix von Welle 3 aufgefallen): marktplatzabhängige URLs sind heute FALSCH
+für die meisten Marktplätze.** `config.country` ist ein **Code** (`de`, `uk`, `jp`, `au`, `br`, `mx`, …,
+so wie ihn `parse_cookie_string` aus dem Cookie-Namen `x-acb<code>` liest), aber die Drive-Aufrufe
+bauen den Host als `https://www.amazon.{country}` mit dem **rohen** Code. Für alles, wo Code ≠ Domain
+(`uk→co.uk`, `jp→co.jp`, `au→com.au`, `br→com.br`, `mx→com.mx`) läuft der Aufruf damit auf einen
+**nicht existierenden Host** — nur `de`/`fr`/`it`/`es`/`ca`/`cn`/`in` stimmen zufällig. Der **Login**
+nutzt dagegen korrekt `amazon_domain`. Folge: für UK/JP/AU/BR/MX-Konten scheitern `nodes`/`search`/
+`children` (also der gesamte Upload-Pfad); aufgefallen ist es nie, weil das Testkonto `de` ist. Dazu
+dupliziert `COUNTRIES` die Domain in ihrer **zweiten Spalte** und `amazon_domain` bildet sie **noch
+einmal** ab — zwei Wahrheiten für dieselbe Zuordnung.
+
+**Umfang (nächstes Paket, direkt nach dem Commit von Welle 3 — dieselben Dateien):**
 - Neue Datei **`src/urls.rs`** als einziger Ort für marktplatz- und zonenabhängige URLs. Die
   Land→Domain-Zuordnung **`amazon_domain`** (heute `src/login.rs:38`) **zieht dorthin um**; `login.rs`,
   `prime_photos.rs` und `app.rs` beziehen sie von dort (ein Pfad, keine zweite Tabelle).
@@ -418,7 +429,14 @@ muss?"* → **Ja**, als Projektregel in `AGENTS.md` festgehalten.
 - **Marktplatzneutral:** kein Literal-TLD; Ableitung nur über die Util. Belegter Stand: das Host-Muster
   `thumbnails-photos.amazon.<tld>` existiert für `.de/.com/.co.uk/.fr/.it/.es/.ca/.co.jp` (DNS +
   HTTP-Antwort geprüft); **inhaltlich** getestet ist nur `.de` (es gibt nur ein DE-Konto).
-- Reiner Refactor: die erzeugten URLs bleiben **byte-identisch** zu heute.
+- **Eine Zuordnung, nicht zwei:** `COUNTRIES` führt die Domain heute als **zweite Spalte**
+  (`("at","de","Österreich")`), `amazon_domain` bildet sie **erneut** ab. Ziel: die Domain-Abbildung
+  lebt **nur** in `urls.rs`; `countries.rs` behält Code + Anzeigename und holt das Domain-Label über
+  die Util (kein zweiter Wahrheitswert).
+- **Refactor + bewusste Korrektur:** für `de`/`fr`/`it`/`es`/`ca`/`cn`/`in` bleiben die erzeugten URLs
+  **byte-identisch**; für `uk`/`jp`/`au`/`br`/`mx` ändern sie sich **absichtlich** auf den korrekten
+  Host (und für `at`/`ch` auf `.de`). Genau das ist der Altbestands-Bug oben — deshalb je Marktplatz
+  mindestens ein Test und ein Vergleichstest „Code = Domain ⇒ unverändert".
 
 ## Implementierungs-Wellen (User-Auswahl 2026-10-14) — **NUR DOKUMENTIERT, NICHT GESTARTET**
 
@@ -457,6 +475,23 @@ hier ergänzt.
   zeigten kosmetisch „Gesamt: 0 von 0 Dateien" — im Leerlauf wird dann nichts gezeichnet.
 
 ### Welle 3 — echter Name + Profilbild im Account-Block
+
+✅ **ERLEDIGT (`f81c679`; Runde 1 APPROVE → drei beauftragte Fixes → Runde 2 APPROVE ohne neue
+Findings).** Umgesetzt: reine Helfer `preferences_url` / `thumbnail_url(node_id, country)` /
+`avatar_cache_file_name` / `avatar_cache_path` / `looks_like_image` (je mit Tests), Methoden
+`fetch_account_name` + `fetch_avatar_jpeg` (beide **nur** über `build_common_headers`, **kein**
+`x-amz-access-token` — das liefert 401), Abruf im Hintergrund-Task (`self.rt`, Rückkanal
+`Arc<Mutex<AvatarFetch>>` + `request_repaint`, **nie** im `update`-Frame), Cache unter
+`…/prime_photos/thumbnails/<nodeId>_60_60.jpeg` (gültige Datei wird **sofort** angezeigt, danach
+frisch geladen und geschrieben; kaputte Datei blockiert nie — `looks_like_image` beim Lesen **und**
+Schreiben), **genau ein** Wiederholungsversuch nach Fehler (`should_fetch_avatar`: 0 ⇒ ja, 1 ⇒ nur
+bei Fehler, ≥2 ⇒ nein), Anzeige als **einmal** dekodierte Textur mit runden Ecken + Presence-Dot,
+Platzhalter bis zum Eintreffen unverändert, Logs ohne Werte/URLs/Cookies, Beschriftung
+**„Angemeldet als:"** (neuer zweisprachiger Key). Gates: 7 Warnungen (Delta 0), **30/30** Tests.
+**Offen (Verifier-Fund, bewusst ins nächste Paket geschoben):** `preferences_url` baut den Host noch
+mit dem **rohen Ländercode** statt über `amazon_domain` — dieselbe Fehlerklasse wie der bereits
+gefixte Thumbnail-Host; wird zentral in `src/urls.rs` korrigiert (nächster Abschnitt).
+
 **VORAUSSETZUNG ERLEDIGT (2026-10-14, User-Erlaubnis: „Wir sind angemeldet, also sollte ein Start
 durch dich reichen"):** Der Live-Beweis ist erbracht — `GET https://www.amazon.de/drive/v1/account/preferences`
 antwortet mit **HTTP 200** auf **genau unseren** Cookie-Satz (`session-id`, `x-acb<cc>`, `at-acb<cc>`,
