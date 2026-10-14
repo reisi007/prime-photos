@@ -172,7 +172,8 @@ The status fetch picks the CDAS or the legacy `account/info` endpoint behind the
 This is the part our port is missing, and it **is** recoverable in the original
 (**belegt**, every step): (1) `GetPreferences` returns `avatarNodeId`, a cloud **node
 id**, not a URL; if `null`, the worker stops. (2) Otherwise `GetProfileImage(nodeId)`
-computes a local path `ThumbnailsPath/<nodeId>_60_60.jpeg` — a **60×60** view box.
+computes a local path `Constants.ThumbnailPath/<nodeId>_60_60.jpeg` — a **60×60** view box
+(the const `AvatarViewBoxSize = 60`).
 (3) If `IThumbnailService.IsThumbnailValid(path)` says the cached file is usable it is
 reused as-is. (4) Else `GetSmartCroppedThumbnail(nodeId, ownerId: null, 60, 60, path)`
 downloads the smart-cropped thumbnail into that path. (5) On success
@@ -185,6 +186,63 @@ Both UI consumers behave identically and defensively: `StatusPopupHeaderView` lo
 `ImageType.AvatarPlaceholder` whenever the value is `null` or loading throws — and
 `DriveAccountButton` additionally renders **`AccountName` as its button title**, so the
 account name is a first-class UI element, not an extra. → **belegt**
+
+**Thumbnail URL — traced end-to-end (belegt, 2026-10-14).** `GetThumbnailUrl(nodeId)`
+(`Services.CloudDrive.EndpointsProvider`) returns the concatenation
+**`thumbnailServiceUrl + "v1/thumbnail/" + nodeId`**, where `thumbnailServiceUrl` is the
+string the login `GET …/endpoints` call puts into `GetEndpointsResponse` (our capture in
+`docs/PROTOCOL.md` §2.x has `https://thumbnails-photos.amazon.de/`).
+`CloudDriveService.DownloadThumbnail` collects the parameters into a `NameValueCollection`
+and sets it as the URL query; every key/value is `WebUtility.UrlEncode`d
+(`Helpers.QueryExtensions.ToUrlEncodedQuery`), so a comma is sent as `%2C`. It is a plain
+**`GET`** on the shared CloudDrive client, and the response body is the **image itself** —
+no JSON wrapper, no `tempLink` (contrast the node path `…/nodes/{id}?tempLink=true`, which
+hands back the 13.5 MB CR3 raw, §9).
+
+| Query parameter | Value | When |
+|---|---|---|
+| `ownerId` | node owner id | only if non-empty — the **avatar passes `null`**, so it is absent |
+| `viewBox` | `"W,H"`; avatar `"60,60"` | always (passed by `ThumbnailWorker.GetThumbnail`) |
+| `fit` | `"clip"` (const `ThumbnailWorker.ThumbnailClipFit`) | always |
+| `cropOffset` | `"left,top"` | only on the smart-crop path (focal box computed) |
+| `cropSize` | `"w,h"` | only on the smart-crop path (focal box computed) |
+| `quality` | int | only if the caller passes one — `ThumbnailWorker.GetThumbnail` does **not** |
+| `encoding` | `"jpeg"` | always (added last) |
+
+So the avatar request is, in full (**belegt**):
+
+`GET https://thumbnails-photos.amazon.de/v1/thumbnail/<avatarNodeId>?viewBox=60%2C60&fit=clip[&cropOffset=…&cropSize=…]&encoding=jpeg`
+
+The crop pair only appears on the *smart* path: `GetSmartCroppedThumbnail` first calls
+`IPhotosService.CreateCollageNarrative(nodeId)` (`POST …/drive/v2/memories/v1/collage/
+narratives` on the photos-BFF url) to read a focal box and the image dimensions; if that
+yields usable geometry it derives the crop from the focal box, otherwise it falls back to
+`PerformMiracleCrop` (one uncropped request, then a centred crop). A bare thumbnail with no
+focal box is still just `viewBox` + `fit` + `encoding`.
+
+**Auth and content type (belegt).** The download goes through
+`Services.CloudDrive.CloudDriveHttpMessageHandler`, which stamps every CloudDrive request
+with `x-amz-access-token` (a device/refresh-token access token from `IAuthService`),
+`x-amz-clouddrive-appid` (base64 of the compiled-in OAuth app id, `=` padding stripped) and
+`x-amzn-clouddrive-source` (the persisted `CustomerSettings.DeviceSourceId`). **No cookies
+are used by the original** — that is its device flow. The expected payload is **JPEG**
+(`encoding=jpeg`); the cache validator `IsThumbnailValid` accepts a file only if it is
+≥ 8 bytes and either a JPEG (SOI header **and** EOI trailer) or a PNG signature, and
+`GetThumbnail` copies the raw response stream straight into the file.
+
+**Our port reaches the same image with cookies (belegt, 2026-10-14).** Live test: the URL
+above answers to our **cookie set alone** — HTTP 200, `Content-Type image/jpeg`, a JPEG at
+the requested 60×60 — so the port can load the avatar with the credentials it already holds,
+no device token. The `…/nodes/{id}?tempLink=true` detour is the **wrong** path: it hands back
+the **raw** file (a 13.5 MB CR3 for the tested account), not the cropped thumbnail.
+
+**Local filename (belegt).** `ThumbnailWorker.CreateDefaultPath(nodeId, viewBox)` combines
+`Constants.ThumbnailPath` with the `Constants.DefaultThumbnailFormat` `"{0}_{1}.jpeg"`
+(the `viewBox` string with `,` → `_`), and the directory is `Constants.ThumbnailPath` =
+`LocalStoragePath/Thumbnails` = `~/Library/Application Support/Amazon Cloud Drive/Thumbnails`
+(singular `ThumbnailPath` — the earlier note here wrote `ThumbnailsPath`). For the avatar
+the view box is 60×60, so the file is **`<nodeId>_60_60.jpeg`**; `ownerId` is **not** part
+of the name.
 
 ---
 
@@ -544,8 +602,8 @@ no real name is fetchable yet, and a stand-in would be wrong. The original's ans
 authenticated metadata call on the same `metadataUrl` we already resolve**. So the gap
 is not that the route is unknown; it is that our `PrimePhotos` client has no client for
 it, and our cookie session is the only credential we hold. Whether that endpoint
-answers to the same cookie set as `/drive/v1/nodes` is **not established by this doc**
-(§9). → **belegt** / **UNKNOWN**
+answers to the same cookie set as `/drive/v1/nodes` is **confirmed by live test (see
+change log / §9): yes**. → **belegt**
 
 **The storage-bar gap.** Our `AGENTS.md` records the decision as deliberate for MVP
 ("only applies to Prime members and needs a real quota fetch"). The reverse-engineered
@@ -559,14 +617,20 @@ switches from *percent used* to *bytes remaining* (default 10 GiB), so a port co
 
 ## 9. UNKNOWN (explicitly not determined)
 
-- **Does `/drive/v1/account/preferences` accept our cookie session?** The original
-  calls it with the same metadata host and the same auth as its other drive calls, but
-  this doc did not test it, and we have no capture of it in `docs/PROTOCOL.md` beyond
-  the already-recorded shape. This is the single blocking unknown for the name/avatar
-  feature. → **UNKNOWN**
-- **Where does the *avatar thumbnail* come from?** `GetSmartCroppedThumbnail` builds a
-  URL from `GetThumbnailUrl(nodeId)` with crop parameters and an `ownerId`; the exact
-  path/query and the required scopes were not traced far enough to reproduce. → **UNKNOWN**
+- **Does `/drive/v1/account/preferences` accept our cookie session?** **Resolved (live test
+  2026-10-14, belegt): yes** — it answered `name` and `avatarNodeId` to our cookie set, the
+  same auth we already use for `/drive/v1/nodes`. (Was listed here as the single blocking
+  unknown for the name/avatar feature; now established.)
+- **Where does the *avatar thumbnail* come from, and does our port reach it?** **Resolved
+  (2026-10-14, belegt — see §3.4):** the route is `GET <thumbnailServiceUrl>
+  v1/thumbnail/<avatarNodeId>?viewBox=60%2C60&fit=clip[&cropOffset=…&cropSize=…]&encoding=jpeg`
+  on host `thumbnails-photos.amazon.de`, direct JPEG body, crop pair only on the smart-crop
+  path. The **auth** on that host is now proven **for our cookies** by live test: with
+  **exactly** our `build_common_headers` cookie set (`session-id`, `x-acb<cc>`, `at-acb<cc>`,
+  `ubid-acb<cc>`, `x-amzn-SessionId`) and **no** `x-amz-access-token`, the request answered
+  **HTTP 200**, `Content-Type image/jpeg`, 2135 bytes, JPEG 60×60. The original's device
+  token is **not** our path — adding `x-amz-access-token` produced **HTTP 401**. → URL
+  **belegt**, cookie-auth on the thumbnail host **belegt**.
 - **Is `GetPreferences.name` the display name or the account holder's real name?** Only
   "the string the client shows" is documented here; no further semantics were derived and
   no sample value was inspected (clean-room: no personal data). → **UNKNOWN**
@@ -621,3 +685,32 @@ switches from *percent used* to *bytes remaining* (default 10 GiB), so a port co
 - `AGENTS.md` ("Speichernutzung"/storage bar is intentionally omitted) and
   `AGENTS.todo.md` scope-inventory rows 7, 12 and 19 ("Speicher-/Quota-Balken",
   "Upsell-/Trial-/Overquota-Banner", "Mehrere Konten").
+
+---
+
+## 11. Change log
+
+- **2026-10-14:** §3.4 — traced the avatar thumbnail end-to-end in `Amazon Photos.dll`: the
+  full URL form (`thumbnailServiceUrl + "v1/thumbnail/" + nodeId` plus the `viewBox`, `fit`,
+  `cropOffset`, `cropSize`, `encoding` query), the host `thumbnails-photos.amazon.de`, the
+  device-token headers (`x-amz-access-token` &c.), the direct-JPEG body (no `tempLink`), and
+  the exact local filename `<nodeId>_60_60.jpeg`. §9 — the "avatar thumbnail" entry is
+  resolved on the route; whether our **cookie** session is accepted on the thumbnail host was
+  still open here and is confirmed by live test in the entry below (as is the
+  `preferences`-cookie entry). Evidence came from the
+  read-only assemblies: `Services.CloudDrive.EndpointsProvider` (`GetThumbnailUrl`),
+  `Services.CloudDrive.CloudDriveService` (`DownloadThumbnail`),
+  `Services.Photos.ThumbnailWorker` (`GetSmartCroppedThumbnail`/`GetThumbnail`/
+  `CreateDefaultPath`/`IsThumbnailValid`), `Services.CloudDrive.CloudDriveHttpMessageHandler`,
+  `Workers.CloudDriveAccountRefreshWorker` (`GetProfileImage`, `AvatarViewBoxSize`),
+  `Helpers.QueryExtensions` (`ToUrlEncodedQuery`), `Constants`
+  (`ThumbnailPath`/`DefaultThumbnailFormat`).
+- **2026-10-14:** live proof of the **cookie** auth on the **thumbnail host**: `GET
+  https://thumbnails-photos.amazon.de/v1/thumbnail/<avatarNodeId>?viewBox=60%2C60&fit=clip
+  &encoding=jpeg` with exactly our `build_common_headers` cookie set (no
+  `x-amz-access-token`) → HTTP 200, `image/jpeg`, 2135 bytes, JPEG 60×60; the same call
+  **with** the stored `x-amz-access-token` → HTTP 401. Same cookie set also answers
+  `GET https://www.amazon.<cc>/drive/v1/account/preferences` (200, `name` +
+  `avatarNodeId`). §3.4 gains the port-facing line; §9's avatar-thumbnail entry drops its
+  auth caveat.
+
