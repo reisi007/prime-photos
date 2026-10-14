@@ -117,7 +117,7 @@ impl PrimePhotoApp {
                 egui::ComboBox::from_id_salt("settings-country")
                     .selected_text(country_label(&current))
                     .show_ui(ui, |ui| {
-                        for &(code, _, _) in COUNTRIES {
+                        for &(code, _) in COUNTRIES {
                             ui.selectable_value(
                                 &mut self.config.country,
                                 code.to_string(),

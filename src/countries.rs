@@ -71,30 +71,32 @@ pub(crate) fn parse_cookie_string(input: &str) -> ParsedCookies {
 // Country / marketplace selection
 // ---------------------------------------------------------------------------
 
-/// Marketplaces as `(country code, amazon domain suffix, name key)`. The name
-/// is a German source string resolved through [`tr`]; the domain stays literal.
-pub(crate) const COUNTRIES: &[(&str, &str, &str)] = &[
-    ("de", "de", "Deutschland"),
-    ("at", "de", "Österreich"),
-    ("ch", "de", "Schweiz"),
-    ("us", "com", "USA"),
-    ("uk", "co.uk", "Vereinigtes Königreich"),
-    ("fr", "fr", "Frankreich"),
-    ("it", "it", "Italien"),
-    ("es", "es", "Spanien"),
-    ("ca", "ca", "Kanada"),
-    ("jp", "co.jp", "Japan"),
-    ("in", "in", "Indien"),
-    ("au", "com.au", "Australien"),
-    ("br", "com.br", "Brasilien"),
-    ("mx", "com.mx", "Mexiko"),
+/// Marketplaces as `(country code, name key)`. The name is a German source
+/// string resolved through [`tr`]. The marketplace **domain** is deliberately
+/// not stored here: it is derived from the code via
+/// [`crate::urls::marketplace_domain`], so there is only one mapping.
+pub(crate) const COUNTRIES: &[(&str, &str)] = &[
+    ("de", "Deutschland"),
+    ("at", "Österreich"),
+    ("ch", "Schweiz"),
+    ("us", "USA"),
+    ("uk", "Vereinigtes Königreich"),
+    ("fr", "Frankreich"),
+    ("it", "Italien"),
+    ("es", "Spanien"),
+    ("ca", "Kanada"),
+    ("jp", "Japan"),
+    ("in", "Indien"),
+    ("au", "Australien"),
+    ("br", "Brasilien"),
+    ("mx", "Mexiko"),
 ];
 
 pub(crate) fn country_label(code: &str) -> String {
     COUNTRIES
         .iter()
-        .find(|&&(c, _, _)| c == code)
-        .map(|&(_, domain, name)| format!("{} · amazon.{}", tr(name), domain))
+        .find(|&&(c, _)| c == code)
+        .map(|&(_, name)| format!("{} · amazon.{}", tr(name), crate::urls::marketplace_domain(code)))
         .unwrap_or_else(|| code.to_string())
 }
 
@@ -108,7 +110,7 @@ pub(crate) fn system_country() -> Option<String> {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if let Some(region) = s.split(['_', '-']).nth(1) {
                 let code = region.to_lowercase();
-                if COUNTRIES.iter().any(|&(c, _, _)| c == code) {
+                if COUNTRIES.iter().any(|&(c, _)| c == code) {
                     return Some(code);
                 }
             }
@@ -117,7 +119,7 @@ pub(crate) fn system_country() -> Option<String> {
     if let Ok(lang) = std::env::var("LANG") {
         if let Some(region) = lang.split(['_', '.', '-']).nth(1) {
             let code = region.to_lowercase();
-            if COUNTRIES.iter().any(|&(c, _, _)| c == code) {
+            if COUNTRIES.iter().any(|&(c, _)| c == code) {
                 return Some(code);
             }
         }

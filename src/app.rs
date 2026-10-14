@@ -638,7 +638,7 @@ impl PrimePhotoApp {
                 ui.label(
                     RichText::new(format!(
                         "amazon.{}",
-                        login::amazon_domain(&self.config.country)
+                        crate::urls::marketplace_domain(&self.config.country)
                     ))
                     .size(13.0)
                     .strong(),

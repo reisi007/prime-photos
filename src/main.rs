@@ -12,6 +12,7 @@ mod platform;
 mod theme;
 mod tray;
 mod upload;
+mod urls;
 mod app;
 mod backup;
 mod backup_config;

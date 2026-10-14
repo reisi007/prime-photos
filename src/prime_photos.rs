@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::folders::ConflictResolution;
+use crate::urls;
 
 #[derive(Debug, Serialize)]
 struct QueryNodeCreateNode {
@@ -363,34 +364,10 @@ struct ResponsePreferences {
     avatar_node_id: Option<String>,
 }
 
-/// Host prefix of Amazon's thumbnail service (`docs/PROTOCOL.md` §2.4,
-/// `thumbnailServiceUrl`). The marketplace domain follows
-/// (`thumbnails-photos.amazon.<domain>`), so one host exists per marketplace —
-/// `.de`, `.com`, `.co.uk`, `.fr`, `.it`, `.es`, `.ca`, `.co.jp` were all
-/// verified live (2026-10-14). The avatar picture is served here, **not** under
-/// `/drive/v1`.
-const THUMBNAIL_HOST_PREFIX: &str = "https://thumbnails-photos.amazon.";
-
 /// Avatar view box in pixels (the original's `AvatarViewBoxSize = 60`, see
-/// `docs/SPEC_ACCOUNT_BILLING.md` §3.4).
+/// `docs/SPEC_ACCOUNT_BILLING.md` §3.4). Also used by
+/// [`crate::urls::thumbnail_url`].
 pub(crate) const AVATAR_VIEW_BOX: u32 = 60;
-
-/// `GET` URL for the account preferences (`name` + `avatarNodeId`).
-pub(crate) fn preferences_url(country: &str) -> String {
-    format!("https://www.amazon.{country}/drive/v1/account/preferences")
-}
-
-/// `GET` URL for the 60×60 avatar thumbnail on the **marketplace's** thumbnail
-/// host (derived from the shared `login::amazon_domain` helper, so there is no
-/// second country table). `viewBox` is percent-encoded (`60%2C60`), exactly as
-/// the original sends it.
-pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
-    let domain = crate::login::amazon_domain(country);
-    format!(
-        "{THUMBNAIL_HOST_PREFIX}{domain}/v1/thumbnail/{node_id}?viewBox={v}%2C{v}&fit=clip&encoding=jpeg",
-        v = AVATAR_VIEW_BOX
-    )
-}
 
 /// Local cache file name for an avatar thumbnail: `<nodeId>_60_60.jpeg`
 /// (the original's `ThumbnailPath/<nodeId>_60_60.jpeg`).
@@ -506,10 +483,8 @@ impl PrimePhotos {
     /// uploading. Called by the upload worker when a run hits a 401: the session
     /// cookies are still valid, only this token went stale.
     pub(crate) async fn renew_auth_token(&mut self) -> Result<&str, reqwest::Error> {
-        let url = Url::parse(
-            format!("https://www.amazon.{}/photos/auth/token", self.conf.country).as_str(),
-        )
-        .expect("Can't parse the token renewal URL");
+        let url = Url::parse(&urls::auth_token_url(&self.conf.country))
+            .expect("Can't parse the token renewal URL");
 
         // Provide timestamp as a parameter
         let params = [("_", PrimePhotos::get_epoch_millis())];
@@ -576,9 +551,8 @@ impl PrimePhotos {
     }
 
     async fn create_album(&self, name: &str) -> Result<ResponseSearchData, reqwest::Error> {
-        let url =
-            Url::parse(format!("https://www.amazon.{}/drive/v1/nodes", self.conf.country).as_str())
-                .expect("Can't parse the create album URL");
+        let url = Url::parse(&urls::nodes_url(&self.conf.country))
+            .expect("Can't parse the create album URL");
 
         let headers = self.build_common_headers();
         let payload = QueryNodeCreateNode {
@@ -630,14 +604,8 @@ impl PrimePhotos {
     }
 
     async fn search(&self, query: &str) -> Result<ResponseSearch, reqwest::Error> {
-        let url = Url::parse(
-            format!(
-                "https://www.amazon.{}/drive/v1/search{}",
-                self.conf.country, query
-            )
-            .as_str(),
-        )
-        .expect("Can't parse the search URL");
+        let url = Url::parse(&urls::search_url(&self.conf.country, query))
+            .expect("Can't parse the search URL");
 
         let headers = self.build_common_headers();
 
@@ -727,16 +695,20 @@ impl PrimePhotos {
         filter: &str,
         node_id: &str,
     ) -> Result<ResponseNodes, reqwest::Error> {
-        let url = Url::parse(format!("https://www.amazon.{}/drive/v1/nodes/{}/children?asset=ALL&filters={}&searchOnFamily=false&tempLink=false&offset=0&resourceVersion=V2&ContentType=JSON&_={}", self.conf.country, node_id, filter, PrimePhotos::get_epoch_millis()).as_str()).expect("Can't parse children nodes URL");
+        let url = Url::parse(&urls::children_nodes_url(
+            &self.conf.country,
+            node_id,
+            filter,
+            &PrimePhotos::get_epoch_millis(),
+        ))
+        .expect("Can't parse children nodes URL");
         let params = [];
         self.find_nodes_internal(url, &params).await
     }
 
     async fn find_nodes(&self, filter: &str) -> Result<ResponseNodes, reqwest::Error> {
-        let url = Url::parse(
-            format!("https://www.amazon.{}/drive/v1/nodes/", self.conf.country).as_str(),
-        )
-        .expect("Can't parse the find node URL");
+        let url = Url::parse(&urls::nodes_base_url(&self.conf.country))
+            .expect("Can't parse the find node URL");
         let epoch = PrimePhotos::get_epoch_millis();
         let params = [
             ("filters", filter),
@@ -918,23 +890,20 @@ impl PrimePhotos {
             true => "NONE",
         };
 
-        let url = Url::parse(
-            format!(
-                "https://content-{}.drive.amazonaws.com/v2/upload?conflictResolution={}&fileSize={}&name={}&parentNodeId={}&contentDate={}",
-                self.conf.zone,
-                conflict.wire_value(),
-                file_size,
-                // A file name is always the last path component; fall back to a
-                // lossy rendering instead of panicking on non-UTF-8 names.
-                pic_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default(),
-                parent_node,
-                &capture_date_str
-            )
-            .as_str(),
-        )
+        // A file name is always the last path component; fall back to a lossy
+        // rendering instead of panicking on non-UTF-8 names.
+        let file_name = pic_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let url = Url::parse(&urls::upload_url(
+            &self.conf.zone,
+            conflict.wire_value(),
+            file_size,
+            &file_name,
+            parent_node,
+            &capture_date_str,
+        ))
         .expect("Can't parse the upload URL");
 
         let mut headers = self.build_common_headers();
@@ -1098,14 +1067,8 @@ impl PrimePhotos {
         album_id: String,
         uploaded_ids: &[String],
     ) -> Result<(), reqwest::Error> {
-        let url = Url::parse(
-            format!(
-                "https://www.amazon.{}/drive/v1/nodes/{}/children",
-                self.conf.country, album_id
-            )
-            .as_str(),
-        )
-        .expect("Can't parse the add to album URL");
+        let url = Url::parse(&urls::add_to_album_url(&self.conf.country, &album_id))
+            .expect("Can't parse the add to album URL");
 
         let mut headers = self.build_common_headers();
         // Override Content-Type for this specific request
@@ -1158,7 +1121,7 @@ impl PrimePhotos {
     /// field does not fail the parse. Uses the same cookie headers as the other
     /// drive calls (`build_common_headers`).
     pub async fn fetch_account_name(&self) -> Result<Option<(String, String)>, reqwest::Error> {
-        let url = Url::parse(&preferences_url(&self.conf.country))
+        let url = Url::parse(&urls::preferences_url(&self.conf.country))
             .expect("Can't parse the preferences URL");
         let headers = self.build_common_headers();
 
@@ -1191,7 +1154,7 @@ impl PrimePhotos {
     /// **not** used — our cookie headers are sufficient here and the token
     /// would make the request fail with 401.
     pub async fn fetch_avatar_jpeg(&self, avatar_node_id: &str) -> Result<Vec<u8>, reqwest::Error> {
-        let url = Url::parse(&thumbnail_url(avatar_node_id, &self.conf.country))
+        let url = Url::parse(&urls::thumbnail_url(avatar_node_id, &self.conf.country))
             .expect("Can't parse the thumbnail URL");
         let headers = self.build_common_headers();
 
@@ -1215,47 +1178,6 @@ impl PrimePhotos {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn preferences_url_uses_marketplace_country() {
-        assert_eq!(
-            preferences_url("de"),
-            "https://www.amazon.de/drive/v1/account/preferences"
-        );
-        assert_eq!(
-            preferences_url("fr"),
-            "https://www.amazon.fr/drive/v1/account/preferences"
-        );
-    }
-
-    #[test]
-    fn thumbnail_url_encodes_viewbox_and_node() {
-        assert_eq!(
-            thumbnail_url("B0ABCDEF123", "de"),
-            "https://thumbnails-photos.amazon.de/v1/thumbnail/B0ABCDEF123\
-             ?viewBox=60%2C60&fit=clip&encoding=jpeg"
-        );
-        // The comma must be percent-encoded, exactly as the original sends it.
-        let url = thumbnail_url("NODE", "de");
-        assert!(url.contains("viewBox=60%2C60"));
-        assert!(!url.contains("viewBox=60,60"));
-    }
-
-    #[test]
-    fn thumbnail_url_uses_the_marketplace_host() {
-        // The host follows the shared `login::amazon_domain` mapping, so a
-        // non-German marketplace no longer hits `thumbnails-photos.amazon.de`.
-        assert!(thumbnail_url("NODE", "us").starts_with("https://thumbnails-photos.amazon.com/"));
-        assert!(thumbnail_url("NODE", "uk").starts_with("https://thumbnails-photos.amazon.co.uk/"));
-        assert!(thumbnail_url("NODE", "fr").starts_with("https://thumbnails-photos.amazon.fr/"));
-        // "at"/"ch" map to the German marketplace, hence the `.de` host.
-        assert!(thumbnail_url("NODE", "at").starts_with("https://thumbnails-photos.amazon.de/"));
-        // The path/query is unchanged by the marketplace.
-        assert!(
-            thumbnail_url("NODE", "us")
-                .ends_with("/v1/thumbnail/NODE?viewBox=60%2C60&fit=clip&encoding=jpeg")
-        );
-    }
 
     #[test]
     fn avatar_cache_file_name_is_node_and_viewbox() {

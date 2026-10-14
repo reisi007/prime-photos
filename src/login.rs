@@ -34,46 +34,6 @@ thread_local! {
 /// How often the cookie store is checked while the sign-in page is open.
 const PROBE_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Amazon marketplace domain for a country code.
-pub fn amazon_domain(country: &str) -> String {
-    match country {
-        "us" => "com".to_string(),
-        "uk" | "gb" => "co.uk".to_string(),
-        "at" | "ch" => "de".to_string(),
-        "jp" => "co.jp".to_string(),
-        "mx" => "com.mx".to_string(),
-        "br" => "com.br".to_string(),
-        "au" => "com.au".to_string(),
-        "cn" => "cn".to_string(),
-        "in" => "in".to_string(),
-        other => other.to_string(),
-    }
-}
-
-pub fn login_url(country: &str) -> String {
-    let domain = amazon_domain(country);
-    let cc = match country {
-        "at" | "ch" => "de",
-        other => other,
-    };
-    // Amazon's Photos sign-in (two-column layout). The marketplace is encoded
-    // in the domain + assoc handle (`amzn_photos_web_<cc>`).
-    let return_to = format!(
-        "https%3A%2F%2Fwww.amazon.{d}%2Fphotos%3Fsf%3D1%26ref_%3DAPH_D_PA1_{cc}",
-        d = domain,
-        cc = cc.to_uppercase()
-    );
-    format!(
-        "https://www.amazon.{domain}/ap/signin?openid.pape.max_auth_age=3600\
-&openid.return_to={return_to}\
-&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select\
-&openid.assoc_handle=amzn_photos_web_{cc}\
-&openid.mode=checkid_setup\
-&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select\
-&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
-    )
-}
-
 /// A rectangle in egui/logical points with a **top-left** origin, as wry wants.
 pub fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
     Rect {
@@ -281,7 +241,7 @@ impl PrimePhotoApp {
         if self.login.running {
             return;
         }
-        let url = login::login_url(&self.config.country);
+        let url = crate::urls::login_url(&self.config.country);
         let screen = ctx.screen_rect();
         // Start just below an estimated header; the exact bounds are corrected
         // on the next frame once the header has been measured.
@@ -386,7 +346,7 @@ impl PrimePhotoApp {
                 egui::ComboBox::from_id_salt("login-country")
                     .selected_text(country_label(&current))
                     .show_ui(ui, |ui| {
-                        for &(code, _, _) in COUNTRIES {
+                        for &(code, _) in COUNTRIES {
                             ui.selectable_value(
                                 &mut self.config.country,
                                 code.to_string(),
@@ -407,7 +367,7 @@ impl PrimePhotoApp {
 
             ui.add_space(16.0);
             if ui.link(tr("Amazon Photos im Browser öffnen")).clicked() {
-                let url = login::login_url(&self.config.country);
+                let url = crate::urls::login_url(&self.config.country);
                 let _ = crate::platform::open_url(&url);
             }
         });
