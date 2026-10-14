@@ -409,17 +409,46 @@ hier ergänzt.
   Queue stehen (nächster Start leert sie; die Dateien sind ohnehin im MD5-Index); (c) ein
   abgelehnter Drop lässt eine wartende Queue stehen (bewusst: kein stilles Verwerfen); (d)
   `save_config` im Resume-Pfad loggt einmalig.
-- **P3 – Gesamt-Fortschritt über alle Uploads.** Genau **eine** aggregierte Anzeige über alle
-  Backup-Ziele inkl. One-Time-Zeile (Summe), sichtbar **auch im Leerlauf**, als **Fußzeile**.
-  **User-Entscheidung 2026-10-14: die Fußzeile ERSETZT die heutige Live-Leiste oben** — es bleibt bei
-  genau einer Anzeige, der Balken in der Kopfzeile entfällt. Datenquelle ist die bereits gebaute
-  `rows`-Liste (`total`/`done` je Ziel; die Live-Zähler `folder_total`/`folder_done` überschreiben
-  die persistierten Werte). Während eines Laufs darf die Byte-/ETA-Information
-  (`upload_progress_text`) **nicht** verloren gehen. Dazu der nit (a): die wiederhergestellte
-  Einmal-Zeile darf nicht „Uploading" behaupten, wenn kein Lauf läuft.
-  Manuelle Läufe starten weiterhin pro Ordner.
+- ✅ **P3 – Gesamt-Fortschritt: ERLEDIGT** (`7c6f2b5`, Verify Runde 1 **APPROVE**). Der
+  `if running`-Block (Spinner + Balken + `progress_text`) ist aus der Kopfzeile entfernt; die neue
+  **Fußzeile** am Ende der Backup-Seite zeichnet **eine** Anzeige über `sum(done)/sum(total)` aller
+  Ziele inkl. `ONE_TIME_IDX` (Datenquelle: die bereits gebaute `rows`-Momentaufnahme), Spinner nur bei
+  aktivem Lauf, `total == 0 ⇒ frac 0.0`; im Lauf mit dem Byte-/ETA-Detail aus `upload_progress_text`,
+  im Leerlauf „Alles aktuell" bzw. „Gesamt: X von Y Dateien". Reiner Helfer `aggregate_progress` +
+  3 Tests; 3 neue i18n-Keys (de + en). Die wiederhergestellte Einmal-Zeile steht jetzt auf
+  `FolderStatus::Idle`. Nebenläufigkeit explizit geprüft: **kein** Mutex-Guard über `ui`-Aufrufe,
+  `rows`-Aufbau, `store.save()` oder `DedupIndex::open()`.
+  **3 nits** (im Folgepaket abgeräumt): (a) der `app.rs`-Kommentar überzeichnete die Wirkung — `Idle`
+  ändert die **Farbe** (Muted statt Teal), der Text „0% hochgeladen" kommt aus dem unveränderten
+  `status_text`/Label; (b) die Fußzeile hing an `!rows.is_empty()` — wurde während eines Laufs das
+  letzte Ziel entfernt, verschwand auch Balken + ETA; nun `|| running`; (c) Ziele ganz ohne Total
+  zeigten kosmetisch „Gesamt: 0 von 0 Dateien" — im Leerlauf wird dann nichts gezeichnet.
 
 ### Welle 3 — echter Name + Profilbild im Account-Block
+**VORAUSSETZUNG ERLEDIGT (2026-10-14, User-Erlaubnis: „Wir sind angemeldet, also sollte ein Start
+durch dich reichen"):** Der Live-Beweis ist erbracht — `GET https://www.amazon.de/drive/v1/account/preferences`
+antwortet mit **HTTP 200** auf **genau unseren** Cookie-Satz (`session-id`, `x-acb<cc>`, `at-acb<cc>`,
+`ubid-acb<cc>`, plus `x-amzn-SessionId`, denselben `Content-Type`/`Accept`/`User-Agent` wie
+`build_common_headers`) und liefert u. a. `name` (17 Zeichen) und `avatarNodeId` (22 Zeichen).
+Die in `docs/SPEC_ACCOUNT_BILLING.md` §9 geführte UNKNOWN („akzeptiert der Endpunkt unsere
+Cookie-Session?") ist damit **beantwortet: ja**. Getestet ohne Diagnose-Code (kein Code geändert,
+kein Probing im Produkt), nur lokal mit den Cookies aus `config.toml`; **keine** Cookie-Werte oder
+Namensinhalte protokolliert. **Route-Befunde aus dem Live-Test (belegt 2026-10-14, nur Status/Typen protokolliert, keine Werte):**
+- **Funktioniert:** `GET /drive/v1/nodes/{avatarNodeId}?tempLink=true` → JSON mit `tempLink` auf den Host
+  `content-eu.drive.amazonaws.com`. Der `tempLink` braucht **unsere Cookies** (ohne: HTTP 401).
+- **Der Avatar-Quellknoten dieses Kontos ist ein RAW:** Canon CR3, 6024×4020, `size` 13 475 387 Bytes,
+  `contentType image/x-canon-cr3` — der Download liefert byte-identisch 13 475 387 Bytes mit
+  ISO-BMFF-Kopf (`ftyp`/`crx `). Dreifach gegengeprüft (Metadaten, Byte-Zahl, Magic-Bytes). **Lokal
+  nicht dekodierbar** — die `image`-Crate kann kein CR3. Ohne Server-Crop ist das Profilbild also
+  nicht darstellbar.
+- **Deshalb nötig:** die **Server-Thumbnail-Route** (das Original: `GetSmartCroppedThumbnail(nodeId,
+  ownerId, 60, 60, path)`, `docs/SPEC_ACCOUNT_BILLING.md` §3.4) — Recon dazu läuft.
+- **Sackgassen (nicht erneut probieren, siehe „Verworfen"):** `/nodes/{id}/content` (mit/ohne
+  `tempLink=true`), `/nodes/{id}/thumbnail` (mit `width`/`height`/`transform`),
+  `/nodes/{id}/transforms/IMAGE_THUMBNAIL` (mit/ohne `tempLink`),
+  `/nodes/{id}/content?transform=IMAGE_THUMBNAIL&tempLink=true` — alle **404**. Der Parameter
+  `?transform=IMAGE_THUMBNAIL` wird **ignoriert** (liefert weiter die Rohdatei). Ein Suchtreffer trägt
+  `transforms: ["IMAGE_THUMBNAIL"]` als **Deklaration**, nicht als URL.
 
 - Voraussetzung (nicht recherchierbar, nur testbar): akzeptiert unser Cookie-Pfad
   (`session-id` + `x-acb`/`at-acb`/`ubid-acb`) den belegten Endpunkt
@@ -707,3 +736,5 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
 - mitmproxy live capture: kept only as a debugging tool; app uses the cookie upload path.
 - Device registration / OAuth from scratch: replaced by browser-cookie auth.
 - Standalone paste-only login: superseded by CDP browser login (paste stays as fallback).
+- **Avatar-Thumbnail per Raten/Probieren (2026-10-14, verworfen):** `/drive/v1/nodes/{id}/content` (mit und ohne `tempLink=true`), `/drive/v1/nodes/{id}/thumbnail` (mit `width`/`height`/`transform`), `/drive/v1/nodes/{id}/transforms/IMAGE_THUMBNAIL` (mit und ohne `?tempLink=true`) sowie `/drive/v1/nodes/{id}/content?transform=IMAGE_THUMBNAIL&tempLink=true` — **alle HTTP 404**. Der Parameter `?transform=IMAGE_THUMBNAIL` wird **ignoriert** (der `tempLink` liefert weiterhin die Rohdatei). Das `transforms: ["IMAGE_THUMBNAIL"]` eines Suchtreffers ist eine **Deklaration**, keine URL. Stattdessen belegbar über das Assembly (`GetSmartCroppedThumbnail`/`GetThumbnailUrl`) — Recon läuft, siehe Welle 3.
+- **Avatar lokal dekodieren/schneiden (2026-10-14, verworfen):** der Avatar-Quellknoten kann ein RAW sein (bei diesem Konto ein Canon CR3, 13,5 MB) — die `image`-Crate kann kein CR3. Der 60×60-Crop muss daher **serverseitig** passieren (wie im Original), nicht bei uns.
