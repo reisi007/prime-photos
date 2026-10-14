@@ -398,7 +398,22 @@ Template-Bilder plus eine farbige Ungelesen-Variante.
 das Dock-/Fenster-Icon ist davon unabhängig und kann allein kommen. Nicht Teil: das `.app`-Icon
 für das macOS-Bundle (`packaging/make-app.sh`) — eigener, bereits zurückgestellter Punkt.
 
-## URL-Util `src/urls.rs` (User-Entscheidung 2026-10-14) — beauftragt, **nicht** umgesetzt
+## URL-Util `src/urls.rs` (User-Entscheidung 2026-10-14) — ✅ **ERLEDIGT** (`791687d`, Verify Runde 1 APPROVE)
+
+**Ergebnis:** `src/urls.rs` ist der **einzige** Ort für marktplatz-/zonenabhängige URLs —
+`marketplace_domain` (die **einzige** Code→Domain-Abbildung; `login::amazon_domain` ist entfernt) plus
+Builder für alle Routen: `login_url`, `auth_token_url`, `nodes_url`, `nodes_base_url`, `search_url`,
+`children_nodes_url`, `add_to_album_url`, `preferences_url`, `thumbnail_url`, `upload_url`.
+`COUNTRIES` ist auf `(code, name)` reduziert (die Domain-Spalte war eine zweite Wahrheit),
+`country_label` holt die Domain aus der Util, Aufrufer umgestellt (`login.rs`, `prime_photos.rs`,
+`app.rs`, `settings.rs` nur Arity). **Der Bugfix wirkt für `us`, `uk`, `gb`, `jp`, `au`, `br`, `mx`
+(echte Domain statt nicht existierendem Host) und `at`/`ch` (auf `.de`)** — für
+`de/fr/it/es/ca/cn/in` bleiben alle URLs **byte-identisch**, unabhängig belegt: der Verifier hat
+HEAD-Builder und neue Builder für **10 Builder × 16 Codes** gegeneinander laufen lassen (inkl.
+Parameterreihenfolge, `%2C`, Slash, Upload-Query). Regel-Beleg: außerhalb `src/urls.rs` kein
+`https://www.amazon.`-, `thumbnails-photos.amazon.`- oder `content-<zone>`-Literal. Gates: 7 Warnungen
+(Delta 0, auch gegen eine HEAD-Kopie gegengeprüft), **39/39** Tests (30 − 3 verschoben + 12 neu).
+
 
 Anlass: Die Umsetzung des Profilbilds hatte den Thumbnail-Host **hartkodiert auf `.de`** — aufgefallen
 ist das erst in der Verifikation. Der User: *„Können wir das URL-Bauen in eine eigene Datei auslagern
