@@ -569,6 +569,30 @@ Belege: `Localizable.strings` (Keys) + `Amazon Photos.dll` (Symbole), `docs/*`.
 - **UNKNOWN:** eine inhaltliche Begründung der 8 gibt es im Code nicht — nur den gesetzten Wert.
   Unser Slider `1..=8` trifft die Obergrenze; unser Default 3 weicht vom Original-Default ab.
 
+## Bekannte Schwachstelle: `glib` (Dependabot, medium) — derzeit **nicht** fixbar (2026-10-14)
+
+- **Befund:** GitHub/Dependabot meldet auf `main` **1 moderate** Schwachstelle: `glib`
+  („Unsoundness in `Iterator`/`DoubleEndedIterator` impls für `glib::VariantStr`"), betroffen
+  `>= 0.15.0, < 0.20.0`, Fix wäre **0.20.0**. Im Lock steht `glib 0.18.5`.
+- **Herkunft (ausschließlich Linux-Backend, auf macOS nicht kompiliert):** `tray-icon` →
+  `libappindicator 0.9.0` → `glib/gtk ^0.18`; `muda 0.21.2` → `gtk ^0.18`; `wry 0.57.0` →
+  `webkit2gtk =2.0.2` → `glib/gtk ^0.18`. Damit hängt die komplette gtk-rs-0.18-Familie daran
+  (glib, gio, gdk, gtk, gtk-sys, pango, atk, gdk-pixbuf).
+- **Kein Upgrade-Pfad (belegt über die crates.io-API am 2026-10-14):** die jeweils **neuesten**
+  Versionen verlangen weiterhin gtk-rs 0.18 — `tray-icon 0.26.1` (`libappindicator ^0.9`),
+  `libappindicator 0.9.0` (`glib ^0.18`, `gtk ^0.18`), `muda 0.21.2` (`gtk ^0.18`), `wry 0.57.0`
+  (`gtk ^0.18`), `webkit2gtk 2.0.2` (`glib/gtk ^0.18`). Ein isolierter `glib`-Bump ist
+  ausgeschlossen, weil `gtk 0.18` `glib ^0.18` pinnt.
+- **Folge:** Die Dependabot-Auto-Updates **scheitern deshalb** (Job „cargo in /. for glib - Update",
+  Lauf `38542163059`, failure). Erwartbar — kein Config-Fehler, nicht „reparieren".
+- **Einordnung (bewusst akzeptiert):** die Unsoundness betrifft glib-Iterator-APIs, die wir nicht
+  aufrufen; sie liegt nur im Linux-Tray/WebView-Stack. Auflösbar erst, wenn `tray-icon`/`wry`/`muda`
+  auf gtk-rs 0.20 wechseln. **Nicht eigenmächtig patchen** (Vendoring oder `[patch]` wäre ein neuer,
+  ungeprüfter Eingriff und auf diesem Rechner nicht testbar). Beobachten: `cargo update` nach dem
+  nächsten Tray-Icon-/wry-Release.
+- **Fürs öffentliche Release:** als bekannte Einschränkung nennen — gehört zusätzlich in
+  `docs/RELEASE.md` (noch zu ergänzen).
+
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
 Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie eine Vorgabe brauchen.
