@@ -280,3 +280,183 @@ Retry-/Aktivfenster-Keys erst mit deren Feature aufnehmen.
   §5.7 (Fehlerkatalog).
 - `docs/SPEC_ONE_TIME_UPLOAD.md` (Ad-hoc-Upload in dieselbe Fortschrittsanzeige) sowie
   `src/upload.rs`, `src/backup.rs`, `src/folders.rs`, `src/i18n.rs`; Regeln in `AGENTS.md`.
+
+---
+
+## 7. Darstellung: Baum/Liste, Spalten, Platzausnutzung, Anti-Abschneiden (Recon 2026-10-14)
+
+**Nachträglich ergänzter Abschnitt**, aufgenommen, weil §1–§4 die *Texte/Byte-Semantik* beschreiben,
+aber die *Layout-Mechanik* (Baum vs. Liste, Spaltenbreiten, Truncation, Fill) offen ließen — genau der
+Punkt, an dem unser UI vom Original abweicht. Quellen wie §1: das gemanagte Original
+(`Amazon Photos.dll`, Version 11.3.0 / Build 36), **nur lesend** mit `ilspycmd` (11.1.0.9782,
+`DOTNET_ROOT=/opt/homebrew/Cellar/dotnet/10.0.401_1/libexec`) dekompiliert und in `Localizable.strings`
+(`de.lproj`) gegengelesen. Aussagen in **eigenen Worten**; Klassennamen/Feldnamen und UI-Strings als
+Beleg. Ergänzt (nicht dupliziert): `SPEC_STATUS_DETAIL.md` §3.1–§3.6 (Zeilenmodell, Statusvokabular,
+Fehlerflächen) und `UI_STATES.md` §3.6. **Widerspruch zum bestehenden Dokument: siehe §7.7.**
+
+### 7.1 Grundstruktur — Baum **und** Liste, umschaltbar
+
+| Frage | Befund | Einordnung |
+|---|---|---|
+| Baum oder Liste? | **Beides, umschaltbar.** `BackupItemsDisplayMode ∈ {List, DrillDown}` (persistiert als `CustomerSettings.BackupItemsDisplayMode`), zwei Icon-Buttons im Detail-Kopf („Verschachtelte Anzeige" / „Flache Listenanzeige"). | **belegt** (vgl. schon `SPEC_STATUS_DETAIL.md` §3.5) |
+| Baumform | **Breadcrumb-Drill-down**, kein aufklappbarer Inline-Baum: nur Ordnerzeilen (`TargetType == Folder`, `AutoSaveNode`) sind selektierbar; Klick läuft `NavigationCommand` → `Navigate(node)` setzt `DisplayNodes = node.Children`. Kopf zeigt Großeltern-Überlaufmenü + Eltern-Ordner + gewählten Ordner (Carets). | **belegt** |
+| Ebenen | beliebig tief (Pfad-Token-Baum `AutoSaveFolderNode`/`AutoSaveNodeManager`); sichtbar ist **jeweils eine Ebene** (`node.Children`). | **belegt** |
+| Liste | `List`-Modus = **flache** `AutoSaveNodeList` über alle Knoten (Ordner **und** Dateien), sortiert nach `(UserStatus, TargetType, SortDate)`. | **belegt** |
+| Gruppierung nach Backup-Ordner | im Detail-Baum: über die Drill-down-Navigation; in der **flachen** Backend-Liste gar nicht. Die **einzige** Status-Gruppierung im Original ist das Aktivitätsfenster („In Bearbeitung" / „Warten", nach Status-Bucket, **nicht** nach Ordner). Unsere Queue-Gruppierung nach Ordner ist **kein Port**, sondern unsere eigene Entscheidung. | **belegt** (Abwesenheit) |
+| CX-Zwang | Bei gesetztem Experiment `EnableCXUploadSimplification` (Behandlung `"T1"`) schaltet das Detail **automatisch in DrillDown**. | **belegt** |
+| Sammel-Knoten/Aggregat | Ja: Ordnerzeilen tragen im `Größe`-Feld **zwei Zeilen** — Gesamtgröße + „{n} Elemente" (Anzahl verschachtelter Items, `CountSizeOfNestedItems`). Fortschritt von Ordnern wird aus den Kindern aggregiert (`CalculateNestedCompleted`). | **belegt** |
+
+Ein **Inline-Baum mit Disclosure-Dreiecken** wurde im Upload-Detail **nicht** gefunden; die Spalte
+`uploads.is_expanded`/`is_visible` gehört zum Drill-down-Zustand, nicht zu einem Aufklapp-Dreieck.
+→ **inferred** (kein Fund).
+
+### 7.2 Spalten (nur `List`/Detail; Breiten in pt, inline = Mindestbreite)
+
+Zwei Detail-Layouts, gewählt über das Experiment `EnableCXUploadSimplification`:
+
+| Layout (Klasse) | Name | Letzte Änderung | Größe | Status | Zeilenhöhe / Extra |
+|---|---|---|---|---|---|
+| **CX** `DetailTableView` | 303 / min 275, Kopf mit **Sortier**-Icon | 95 / min 95 (Titel = „Letzte Aktualisierung" bis „:" gekürzt) | **87 / min 87** | min 150, Kopf mit **Filter**-Icon | **48**, 32-pt-Thumbnails, Auto-Upload-Toggle, Kopf 52 |
+| **non-CX** `BackupsDetailTableView` | 275 / min 275 | 100 / min 100 | **fehlt** | min 150, Kopf mit **Down-Caret** (Filtermenü) | **44**, Kopf 40, Fuß 56 mit „Wiederholen" |
+| Aktivitätsfenster | 270 / min 270 | – | 80 / min 80 | 200 / min 200 | 44 |
+| Sync-Tab | 400 | „Datum hochgeladen" 120 | 90 | min 160 | 44 |
+| Download-Tab | 400 | – | 90 | min 160 + Down-Caret | 44 |
+| Fehlerfenster | eine Spalte 275 (nur Name) | – | – | – | **75** |
+
+Gemeinsam (`BaseTransferItemsTableView.InitializeTableView`): `AllowsColumnResizing = true`,
+`AllowsColumnReordering = false` — **breitenverstellbar, nicht umsortierbar**. Jede Spalte hat eine
+`MinWidth`. **Sortieren** nur im CX-Name-Kopf (Klick = nach `FriendlyName`, Richtung schaltet um);
+**Filter** über das 7-Einträge-Menü am letzten Spaltenkopf (nur non-CX) bzw. den View-Model-Filter.
+→ **belegt** (Sortier-/Filterdetails: `SPEC_STATUS_DETAIL.md` §3.3).
+
+### 7.3 Anti-Abschneiden — der Kern
+
+Das Original **kürzt in der Mitte** und macht den vollen Pfad per Tooltip erreichbar:
+
+1. **Mittel-Ellipse statt Rand-Abschnitt (Standard):** Jede Namenszelle (`IconWithLabelTableCell`)
+   setzt `LineBreakMode = NSLineBreakMode.TruncatingMiddle`. Ebenso die Status-Zelle
+   (`TextLabelCell`/`TextTwoLinesLabelCell`/`TransferItemStatusTableCell`). Lange Namen werden also
+   **in der Mitte** gekürzt — Dateiende und -anfang bleiben sichtbar. → **belegt**
+2. **Tooltip mit vollem Pfad** (zwei Varianten):
+   - **CX (4 Spalten):** eigener **schwebender Tooltip** (`TooltipNameView`, Identifier
+     `BackupItem_PathTooltip`): voller Pfad (selbst mittel-gekürzt, Breite ≤ ~484 pt), Trennlinie und
+     ein anklickbarer Link **„Lokalen Ordner öffnen"** (öffnet den Finder). Anzeige über
+     `CustomTooltipView` mit Verzögerung **1000 ms** / Ausblenden **5000 ms**,
+     `AllowMouseOverTooltip = true` (Maus darf in den Tooltip wandern, um den Link zu klicken).
+   - **non-CX (3 Spalten):** nativer AppKit-Tooltip (String) = `FullPath` + Zeilenumbruch +
+     „Größe: {size}" (nur Dateien) + Zeilenumbruch + „Letzte Änderung: {age}". → **belegt**
+3. **Die Namensspalte ist die flexible Spalte:** das CX-Layout setzt
+   `ColumnAutoresizingStyle = FirstColumnOnly` — beim Fensterbreiter-Machen **wächst die Namensspalte**
+   (mehr Name sichtbar, weniger Kürzung), statt toten Raum zu lassen. `MinWidth 275` verhindert zu
+   starkes Schrumpfen. → **belegt**
+4. **Horizontaler Scrollbalken als letzte Reserve:** jede Detail-Tabelle liegt in einer `NSScrollView`
+   mit `HasHorizontalScroller = true`, `AutohidesScrollers = true` — wird der Inhalt trotzdem breiter,
+   ist er per Scrollen erreichbar (nichts wird unerreichbar). → **belegt**
+5. **Kein Umbruch/keine variable Zeilenhöhe für den Namen:** Der Name ist **einzeilig** mit Ellipse;
+   die einzige zweizeilige Zelle (`TextTwoLinesLabelCell`) ist die **Größe**-Spalte (Größe + „{n}
+   Elemente"). `MaximumNumberOfLines` kommt nur an drei anderen Stellen vor, nicht an der Namenszelle.
+   → **belegt**
+6. **Nebenbei:** die **Backup-Listenzeile links** (Ordnerliste, `BackupItemView`) kürzt non-CX in der
+   Mitte (Literal `5` = `TruncatingMiddle`), **CX aber am Kopf** (Literal `4` = `TruncatingHead`) und
+   hat ebenfalls einen (Zusammenfassungs-)Tooltip. → **belegt** (Literalwert) / *inferred* (Enum-Mapping)
+
+### 7.4 Platzausnutzung
+
+- **Die Tabelle füllt die Fläche vollständig.** Das Details-View ist vertikal
+  `Kopf (40 / 52)` + `NSScrollView` + `Fuß (56)` [+ optional 36-pt-Fehlerbanner zwischen Kopf und
+  Tabelle]; die Scrollview ist an **alle vier Kanten** des Content-Bereichs gepinnt
+  (`Leading/Trailing = this`, `Top = Kopfende`, `Bottom = Fußanfang`). Zwischen Liste und Fuß bleibt
+  **kein** toter Raum. → **belegt**
+- **Virtuelles, zeilen-recycelndes NSTableView** (`MakeView`/`GetViewForItem`): nur sichtbare Zeilen
+  werden materialisiert. Die einzige Obergrenze im Original ist die **View-Model-Paginierung
+  (1000 Items/Seite)** — **keine** Rendering-Kappung wie unsere 300-Zeilen-Grenze. → **belegt**
+- **Letzte Spalte streckt sich:** `ReloadData()` ruft nach jedem Neuaufbau `SizeLastColumnToFit()`; die
+  letzte Spalte füllt die Restbreite. Kombiniert mit der flexiblen ersten Spalte (7.3.3) gibt es
+  keinen horizontalen Leerraum. → **belegt**
+- **Leerzustand füllt ebenfalls:** die Datenquelle meldet **immer ≥ 1 Zeile**
+  (`GetRowCount = max(count, 1)`); diese eine Zeile ist eine zentrierte `TextLabelRowView` mit dem
+  filterabhängigen Leer-Text („Keine Dateien hochgeladen …", „Keine fehlgeschlagenen Uploads. (Puh!)"
+  …). → **belegt**
+- **Der ganze Backup-Screen** ist vertikal gefüllt: optionaler Kopf 65 + `PhotosSplitView` an
+  leading/trailing/bottom (CX ohne Kopf) → linke Liste + rechtes Detail nutzen die volle Fensterhöhe.
+  → **belegt**
+
+### 7.5 Aggregat / Fußzeile
+
+- **Global** (Hauptfenster-Fußzeile, 60 pt): „Elemente werden gesichert, ({0:n0} verbleibend)" +
+  Restzeit/Größe — siehe §2.1/§2.7; **keine** Fortschritts-**Leiste** in der Fußzeile, sondern Text.
+- **Pro Ziel** (Backup-Listenzeile): aggregierter Status + „Zuletzt aktualisiert: {0}" (§2.2).
+- **Pro Ordner** (nur CX-4-Spalten): Status spaltenweise aggregiert; `Größe` zweizeilig (Gesamtgröße +
+  „{n} Elemente"); Fortschritt „{n}% hochgeladen…" aus `CalculateNestedCompleted`. **Keine**
+  Pro-Ordner-Restzeit (→ §2.7).
+- **Pro Datei**: byte-basiert „{Restzeit} ({Progress:P0})" (§2.3).
+- **Aktivitätsfenster-Kopfzeile**: „{0:N0} Elemente ({1:N0}) verbleibend" — die einzige rein
+  aggregierte Fortschrittszeile über alle Quellen.
+- **Detail-Fußzeile** (non-CX): Nur der Button „Wiederholen", aktiv nur bei `FailedCount > 0`; im
+  CX-Layout entfällt die Fußzeile.
+
+### 7.6 Zustände, Zahlenformat, Zeilenhöhe/Hover
+
+- **Statusdarstellung je Zeile:** Icon + Text. Icon-Map (beide Status-Zellen, `UserStatus`):
+  `Completed` → success-Icon (16 pt), `Failed` → roter Fehlerkreis (Text in Fehlerfarbe),
+  `Processing` → rotierend animiertes Laden-Icon (CALayer-Rotation), `Waiting` → Warten-Icon,
+  `NeedsUserAttention` → „Achtung"-Icon (amber), `Canceled`/`Skipped` → Abbruch-Icon. Hover-Tooltip =
+  Status-Text. Vollständiges Vokabular/Fehlerfälle: `SPEC_STATUS_DETAIL.md` §3.5 + §2.4/§2.6.
+- **Fehlerzeile** bleibt in der Tabelle (Filter „Fehlgeschlagen"); Wiederholen über die Fußzeile
+  (non-CX), das Fehlerfenster oder die In-Zell-Links. → siehe `SPEC_STATUS_DETAIL.md` §3.6.
+- **Selektion/Hover:** Standard **nicht selektierbar**; nur Ordnerzeilen im Drill-down sind
+  selektierbar und bekommen Hover-Hintergrund + Zeiger-Cursor. Zeilentrennlinie 0,5 pt. **Kein**
+  Kontextmenü in der Datei-Tabelle (Aktionen sind In-Zell-Links + Fußzeile). → **belegt**
+- **Zeilenhöhe fix:** 44 (3-Spalten/Aktivität), 48 (CX-4-Spalten, 32-pt-Thumbnails), 75
+  (Fehlerfenster) — `GetRowHeight` liefert 48 nur für CX. **Nicht** variabel. → **belegt**
+- **Zahlen:** `HumanizedSize` = **binär** (÷1024) mit **einer** Nachkommastelle (abgerundet), Einheiten
+  kurz und unübersetzt: `B/KB/MB/GB/TB`. Zähler mit Tausendertrennung (`{0:N0}`). Item-Zeile
+  „{0} Elemente". Restzeit `datetimeleft_*` one/many, Prozent `{0:P0}`; relative Zeit 12-Zweig
+  `datetimeago_*`, ab einer Woche absolute `MMM d yyyy` / `MMM d` (englische Monatskürzel, nicht
+  lokalisiert). → **belegt** (Details: `SPEC_STATUS_DETAIL.md` §3.4) / **belegt** (`HumanizedSize`)
+
+### 7.7 Widerspruch zum bestehenden Dokument (benannt, nicht überschrieben)
+
+1. **`SPEC_STATUS_DETAIL.md` §3.2** nennt `BackupsDetailTableView` „(CX layout …)" und
+   `DetailTableView` „(legacy layout, thumbnails)" und folgert „CX details view has **three** …
+   legacy … **four**". Die Verdrahtung im Code ist **umgekehrt**: die **CX**-Variante
+   (`ScheduledBackupDetailsTableView`, gewählt bei `EnableCXUploadSimplification == "T1"`) nutzt
+   **`DetailTableView` = vier Spalten** (mit Größe/Thumbnails); die **non-CX**
+   `ScheduledBackupDetailsView` nutzt **`BackupsDetailTableView` = drei Spalten**. Die Spaltenmengen
+   *je Klasse* stimmen, die Labels **CX/legacy sind vertauscht**. → **belegt**
+   (`ScheduledBackupDetailsViewController`: CX ⇒ `new ScheduledBackupDetailsTableView()`, sonst
+   `new ScheduledBackupDetailsView()`; deren `AddTableView` wählen `DetailTableView` bzw.
+   `BackupsDetailTableView`.) Der Abschnitt bleibt stehen; diese Zeile korrigiert ihn.
+2. **§6 UNKNOWN „Which layout a real user sees"** ist damit **auflösbar**: der Schalter ist das
+   Remote-Experiment `EnableCXUploadSimplification` (Behandlung `"T1"` ⇒ CX = 4 Spalten, sonst
+   non-CX = 3 Spalten). *Welche* Behandlung ein konkreter Nutzer bekommt, bleibt UNKNOWN.
+3. **§5 UNKNOWN „Exakte Spaltenbreiten/Sortierung"** ist für die Upload-Tabellen **belegt** (§7.2).
+4. **Quirk (belegt):** `TooltipNameView` liefert für Datei **und** Ordner denselben Link-Text
+   („Lokalen Ordner öffnen") — die Datei-Variante ist im Code unerreichbar. Für den Port irrelevant,
+   aber nicht als Vorlage „Datei-Variante existiert" übernehmen.
+
+### 7.8 Gap-Tabelle: Original (belegt) | unser Stand heute | Empfehlung
+
+Unser Stand aus `src/backup.rs` (Queue-Panel `Warteschlange (n)`, Z. ~1327–1367), `src/upload.rs`,
+`src/folders.rs` gelesen. → **belegt**.
+
+| Thema | Original (belegt) | unser Stand heute | Empfehlung |
+|---|---|---|---|
+| Struktur | Baum (Drill-down + Breadcrumb) **und** flache Liste, umschaltbar | nur **flache** Liste je Lauf, nach Ordner gruppiert (unsere Idee), in einer Aufklappung | Liste behalten; **Ordnerzeilen** mit Zähler/Größe zu einem **Drill-down** ausbauen — in egui ohne echte Breadcrumb zunächst als „Ordner → Kinder" mit Zurück-Zeile |
+| Spalten | Name · Letzte Änderung · Größe · Status (Kopfzeile) | **keine** Kopfzeile; pro Zeile nur „Status + Dateiname" | Mindestens **Größe** und **Status als Spalte** (feste Spaltenköpfe, Name flexibel), statt Status als Präfix |
+| Abschneiden | **Mittel-Ellipse** + **Tooltip mit vollem Pfad**; Name-Spalte wächst mit | einzeiliges Label, am Rand gekürzt, **kein** Tooltip | egui-Label `truncate(true)` + **`on_hover_text(full path)`**; Pfad zusätzlich als zweite, gedämpfte Zeile ODER Tooltip |
+| Platzausnutzung | Scrollview füllt Content; virtuelle Zeilen; letzte Spalte `SizeLastColumnToFit`; Leerzustand zentriert | `ScrollArea::vertical().max_height(220.0)`, **Kappung auf 300 Zeilen**, Leerraum unter der Liste | `max_height` an die verfügbare Höhe binden (**füllen**), Kappung entfernen (egui virtualisiert bei `ScrollArea::show_rows`); Leerzustand als zentrierter Hinweis |
+| Aggregat | Fußzeile „(n verbleibend)" + Restzeit; Ordnerzeile „{n} Elemente + Größe"; Aktivitätskopf „{0:N0} Elemente ({1:N0}) verbleibend" | globale Leiste vorhanden; **kein** Ordner-Aggregat (Anzahl/Größe) | pro Ordner-Zeile „{offen}/{gesamt} · {Größe}" ergänzen (Daten in `UploadShared` teils vorhanden) |
+| Zahlenformat | binär (1024), 1 Dezimalstelle, `B/KB/MB/GB/TB`; `{0:N0}` | teils vorhanden (`tr1/tr2`), keine Tausender-Trennung | Byte-Formatierung zentral (`format_size`) + Tausender-Trennung für Zähler |
+| Zeilenhöhe/Hover | fix 44/48; Hover nur bei selektierbaren (Ordner-)Zeilen | fixe Zeilenhöhe; kein Hover-Stil | Hover-Highlight für Ordner-/ aufklappbare Zeilen; Datei-Zeilen flach |
+| Leerzustand | gefüllte Tabelle mit zentriertem Filtertext | Panel ist einfach leer/ausgeblendet | zentrierter Leertext („Keine Uploads in der Warteschlange") im gefüllten Bereich |
+
+### 7.9 UNKNOWN (dieser Abschnitt)
+
+- **Welche Experiment-Behandlung** (`T1` vs. Kontrolle) ein realer Nutzer bekommt → **UNKNOWN**
+  (nur der Mechanismus + die Folgen je Zweig sind belegt).
+- Ob die **Name-Spaltenbreite** beim Nutzer-Resize exakt so wächst, wie `FirstColumnOnly` es
+  vorsieht, wenn zuvor manuell resized wurde → **UNKNOWN** (Autoresizing-Kette nicht weiterverfolgt).
+- Ob es einen **„Alles aufklappen"**-Schalter im Drill-down gibt → **UNKNOWN** (kein Fund; die
+  Navigation ist klick-per-Ordner).
+- Exakter **Icon-Satz** je `UserStatus` (Dateinamen belegt, Pixel-Design nicht gelesen) → **UNKNOWN**.
