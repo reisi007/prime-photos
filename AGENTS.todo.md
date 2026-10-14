@@ -326,7 +326,8 @@ kann erfolgen, ohne dass Recon-Wissen verloren geht.
 Anlass: User-Fragen „haben wir wie im Original einen alle-stoppen/alle-fortsetzen-Button" und
 „wie werden die Drag&Drop-Dateien gespeichert". Befunde im Code, Entscheidungen danach:
 
-- [ ] **P1 – Pause wie Original (User-Entscheidung 2026-10-14).** Ein Umschalt-Button existiert
+- [x] **P1 – Pause wie Original (User-Entscheidung 2026-10-14) — ERLEDIGT**, Commits `488d1e4`
+  (2 Verify-Runden: Runde 1 CHANGES REQUIRED, Runde 2 APPROVE). Ein Umschalt-Button existiert
   bereits („Alle Sicherungsvorgänge anhalten" ↔ „… fortsetzen", `src/backup.rs` `backup_ui`, plus
   Tray `src/tray.rs`); das Original hat **ebenfalls nur einen** Umschalter (`UI_STATES.md` §70),
   nicht zwei Buttons. **Abweichungen vor dem Paket:** (a) Button nur während eines laufenden Laufs
