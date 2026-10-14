@@ -366,11 +366,19 @@ separat ablegen; nur die Laufzeit-Dateien der Tabelle oben werden eingebettet.
 - Dock-/Fenster-Icon: eframe-Viewport-Icon (RGBA) aus `logo.png`; die gezeichnete Variante
   `src/icons.rs::upload_logo` bleibt nur, wo sie heute als Vektor genutzt wird.
 
-**Offener Punkt für den Asset-Auftrag (braucht eine User-Entscheidung):** außerhalb macOS wird das
-Icon **ohne** Template-Flag gesetzt (`with_icon`) — ein **schwarzes** Monochrom-Icon kann auf einer
-**dunklen Windows-Taskleiste** praktisch verschwinden. Optionen: (a) weiße Varianten + Theme-
-Erkennung, (b) das farbige Logo als Windows/Linux-Tray-Icon, (c) als bekannte Einschränkung
-akzeptieren. Nicht entschieden, nicht umgesetzt.
+**Windows/Linux-Tray (User-Entscheidung 2026-10-14): weiße Varianten + Theme-Erkennung.** Außerhalb
+macOS wird das Icon **ohne** Template-Flag gesetzt (`with_icon`), ein schwarzes Monochrom-Icon wäre
+auf dunkler Taskleiste unsichtbar. Deshalb liefert der User die fünf Zustände **zusätzlich in weiß**
+(gleiche Maße, gleiche `@2x`-Logik): `tray-white.png`, `tray-active-white.png`,
+`tray-paused-white.png`, `tray-done-white.png`, `tray-error-white.png` (je + `@2x`). Die App wählt
+per **Theme-Erkennung** — Windows: `AppsUseLightTheme` in `HKCU\…\Themes\Personalize` (0 = dunkel
+⇒ weiß); Linux: GTK `color-scheme` via `gsettings` (bevorzugt) bzw. `GTK_THEME`-Umgebungsvariable
+⇒ weiß bei dunkel. **Fallback bei fehlgeschlagener Erkennung: das farbige `logo.png`** — das ist auf
+jedem Hintergrund sichtbar (dann ohne Zustandswechsel). macOS bleibt beim Template-Satz (das System
+invertiert selbst). **Verworfen:** farbiges Logo als generelle Non-macOS-Lösung (verliert die
+Zustände); „bewusst akzeptieren" (nicht polished). Umsetzung erst, wenn die weißen Dateien vorliegen
+— die Assets sind per Vorgabe **compile-pflichtig**, also bricht ein früherer Einbau den Build.
+Nicht umgesetzt.
 
 Recherche-Grundlage: `docs/SPEC_NOTIFICATIONS.md` §2.4 (Icon-/Status-Map des Originals:
 idle/processing/paused/done/error) und §2.3 (Menüleisten-Item); das Original liefert monochrome

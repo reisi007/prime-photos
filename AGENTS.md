@@ -75,9 +75,14 @@ Laufzeit-Pfad, self-contained Binary). Konkrete Dateiliste + Formatvorgaben steh
 = macOS-Template) und Logo (`logo.png` 1024², `logo-small*.png`). Nur die Laufzeit-Dateien werden
 eingebettet; die QA-Artefakte in `assets/` (`chk-logo-*`, `contact-sheet`, `zoom-corners`,
 `debug-mask-*`, `preview-tray`) gehören nicht in den Git-Bestand. Einbindungspunkte existieren
-bereits (`src/tray.rs`: `with_icon_templated` auf macOS, `with_icon` sonst, `ICON_SIZE = 32`);
-offen ist nur das **Windows/Linux-Tray auf dunkler Taskleiste** (schwarzes Monochrom kann
-verschwinden) — braucht eine Entscheidung.
+bereits (`src/tray.rs`: `with_icon_templated` auf macOS, `with_icon` sonst, `ICON_SIZE = 32`).
+**Windows/Linux-Tray (User-Entscheidung 2026-10-14): weiße Varianten + Theme-Erkennung.** Der User
+liefert die fünf Zustände zusätzlich in weiß (`tray-*-white.png` + `@2x`, gleiche Maße); die App
+wählt per Theme-Erkennung (Windows `AppsUseLightTheme`, Linux GTK `color-scheme`) weiß bei dunklem,
+schwarz bei hellem Theme — **Fallback bei fehlgeschlagener Erkennung: das farbige `logo.png`**, das
+auf jedem Hintergrund sichtbar ist. macOS bleibt Template (System invertiert selbst). Verworfen:
+farbiges Logo generell (verliert die Zustände) und „bewusst akzeptieren". Umsetzung erst, wenn die
+weißen Dateien vorliegen — Assets sind per Vorgabe compile-pflichtig.
 **Kein Fallback (User 2026-10-14):** fehlt ein Asset, ist das ein **Compile-Fehler** — ohne
 `Option`, ohne `exists()`-Prüfung, ohne Rückfall auf die gezeichnete Variante (`src/icons.rs`
 bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Dekodier-Fehler
