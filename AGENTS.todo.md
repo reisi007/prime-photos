@@ -259,6 +259,19 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   `src/folders.rs` auf den gültigen Wortlaut bringen (Radiogruppen: „Neue Datei automatisch
   umbenennen"; Konflikt-Dialog: „Als neue Datei speichern").
 
+  **2.4b — ✅ erledigt 2026-10-15 (`40cf024`; Verifier Runde 1 = CHANGES REQUIRED, danach
+  Ein-Zeilen-Fix in `docs/SPEC_DUPLICATES.md`, Abnahme ohne neue Runde zugesagt).** Umgesetzt sind
+  (a)–(l) plus die zwei Tests **mit Mutationsbeweis**: `padded_content_duplicate_codes_stay_out_of_the_replace_put`
+  pinnt den einzigen Produktivaufruf (`should_replace_after_conflict` im 409-Zweig) mit einem echten,
+  gepolsterten 409-Body — ein Inhaltsduplikat darf nie in den PUT, ein Namenskonflikt schon; ohne
+  `trim()` in `is_content_duplicate_code` fällt der Test. `replace_upload_url_passes_a_non_ascii_node_id_through_byte_exactly`
+  pinnt, dass die Server-Node-Id byte-identisch durchläuft, während `name` im selben Query NFC-gefaltet
+  wird; eine NFC-Faltung der Id fällt auf. Der Verifier hat die vier Korrekturen des Umsetzers als
+  **nötig und richtig** bestätigt (Cross-Path-MD5 existiert seit `f3c773b`, globaler Dedupe-Default seit
+  `36aee39`, `Ignore` ist nirgends Default) und die Gates nachgemessen: **97 Tests, 0 Warnungen**, keine
+  neuen fmt-Diffs. Offen bleibt allein die **Live-Abnahme des PUT** (Leitung — nicht durch Tests
+  abdeckbar).
+
   **Zwischenpakete (2026-10-15, nicht Teil der Welle-2-Planung; je eigener Commit):**
   - **P3-Nits — ✅ `506df58`** (Verifier APPROVE): die aggregierte Fußzeile wird nur noch unter
     `running || sum_total > 0` gezeichnet — bei laufendem Lauf sichtbar auch ohne Ziele, und ein nie
@@ -334,6 +347,51 @@ Nebenbefund: **unser `docs/PROTOCOL.md` enthält nur `POST`/`GET`**, weil aussch
 Upload-Flows mitgeschnitten wurden — Grenze der Aufzeichnung, **nicht** das Verhalten der App.
 **Für unseren Port folgt daraus nichts:** Uploader-Scope, Löschen/Download/Papierkorb ist
 bewusst Out. User-Vorgabe 2026-10-14: dokumentieren, **keine** konkreten TODOs ableiten.
+
+### Sitzung am Leben halten — Recon am Original (2026-10-15)
+
+**Anlass (User-Auftrag):** „schau mit Rea nach, wie es die Original-App macht — ich hab mich da nicht
+öfter angemeldet; das könnte immer refreshed werden. Browser Login würde schon lange verworfen,
+Dokumentation updaten." Gemeint ist der **CDP-Browser-Login** aus dem „Verworfen"-Block weiter unten,
+nicht unser eingebettetes Webview.
+
+**Befund (am DLL belegt: `Amazon Photos.dll` + `Amazon.Auth.Map.dll`, gelesen mit `ilspycmd` 11.1.0.9782
+und gesetztem `DOTNET_ROOT`; REAs `inspect-managed-members` scheitert an diesem Assembly an einem
+Repräsentations-Budget — „Managed metadata exceeds the 67108864 byte representation budget" —, daher der
+`ilspycmd`-Weg):** das Original meldet sich **einmal** an und hält die Sitzung danach selbst am Leben.
+
+1. **Anmelde-Code → Refresh-Token:** `POST <Panda-Base>/auth/register` mit dem `authorization_code` des
+   Portal-Fensters, dem PKCE-`code_verifier`, `code_algorithm = "SHA-256"`, `client_domain =
+   "DeviceLegacy"` und der Client-Id **ohne** `device:`-Präfix; der Body trägt zusätzlich die
+   Geräte-Registrierung (app_name/version, device_type/serial/model, os_version). Antwort:
+   `tokens.bearer.access_token` **und** `refresh_token`.
+2. **Ablage:** Refresh-Token als **Generic-Password-Item der macOS-Keychain**, Service
+   `com.amazon.clouddrive.mac`, Account `amzp-rt` (UTF-8); Access-Token **nur im Speicher**. Die alte
+   Datei `<LocalStorage>/refresh-token` (AES-CBC/PKCS7, Geräteseriennummer als Schlüssel, festes IV)
+   wird beim Lesen in die Keychain migriert und gelöscht. **Empirisch:** das Item existiert auf dieser
+   Maschine, `cdat`/`mdat` = **2026-10-13 09:35** — genau eine Anmeldung, seither nie wieder.
+3. **Takt:** Access-Token-Auffrischung bei **80 % der Restlaufzeit** (Ablauf = `expires_in − 60 s`),
+   Timer-getrieben, bis zu `AccessTokenMaxRetries` Versuche im Abstand
+   `AccessTokenTimeBetweenRetriesInSeconds`, danach ein **fataler** Health-Zähler. (Default-Werte und
+   Tick-Intervall: **unknown**.)
+4. **Ungültiger Refresh-Token:** Autostart-Item abschalten (`SetApplicationStartupStatus(false)`),
+   Tokens löschen, **App neu starten** → das Portal erscheint wieder.
+5. **Der Schlüssel für uns:** die **Web-Cookies werden aus dem Refresh-Token erzeugt** —
+   `POST <Panda-Base>/auth/token?source_token=<refresh>&source_token_type=refresh_token&requested_token_type=auth_cookies&domain=.<tld>&app_name=…&app_version=…`
+   → Cookies in den `NSHttpCookieStorage`. Die Original-App **greift also nie Cookies aus einer Webview
+   ab**, sie lässt sie sich ausstellen. Unser Weg (Cookies einmal kopieren) hat damit keine
+   Erneuerungsquelle — genau die 401 von heute.
+6. **Abmelden** = `POST /auth/deregister` + Tokens löschen; dazu Tamper-Erkennung per FileSystemWatcher
+   auf dem Legacy-Pfad (Renamed/Changed/Deleted → Datei löschen bzw. abmelden).
+
+**Dokumentiert in `docs/SPEC_LOGIN.md` § 3.8 (+ § 3.7/§ 5/§ 5.1/§ 7/§ 9) und `docs/PROTOCOL.md` § 2.1**
+(Auftrag aus derselben User-Nachricht; Paket läuft).
+
+**Entscheidung offen (2026-10-15, als Frage gestellt):** ob wir den Original-Weg nachbauen
+(PKCE-Portal → Refresh-Token → Access-Token bei 80 % → Cookies bei Bedarf), nur dokumentieren, auf
+Bearer-Token umstellen oder beim Cookie-Weg bleiben. **Bis zur Antwort gilt der bisherige Stand:**
+`AGENTS.md` „Auth (upload engine): browser cookies …" und der Ledger-Eintrag „Device registration /
+OAuth from scratch: replaced by browser-cookie auth" (unten unter „Verworfen") sind **nicht** aufgehoben.
 
 ## Scope-Inventar: vergessene Features & bewusste In/Out-Grenzen (User-Wunsch 2026-10-13)
 
@@ -465,8 +523,9 @@ greift **über Pfade hinweg** und ist **persistiert** (`origin = 'content_skip'`
 (2.2/2.2b).
 
 **Offen (Welle 2.4):**
-- [ ] **2.4b Doku + zwei Tests (a)–(l)** — siehe Wellenplan oben. Läuft. (2.4a ist erledigt:
-      `36aee39`; das Aufräumpaket ebenfalls: `b0fa4c4`.)
+- [x] **2.4b Doku + zwei Tests (a)–(l)** — ✅ erledigt 2026-10-15 (`40cf024`, Verifier Runde 1 =
+      CHANGES REQUIRED mit einem reinen Doku-Fund, Ein-Zeilen-Fix danach; Abnahme ohne neue Runde
+      zugesagt). 2.4a `36aee39`, Aufräumpaket `b0fa4c4`.
 
 **Verworfen (2026-10-15):** `SaveAsNew` als **Application Default** (galt 2026-10-14 bis 2026-10-15).
 Wer ihn zurückdreht, ändert eine getroffene Entscheidung — heute ist `Replace` die Vorgabe für neue
@@ -503,6 +562,18 @@ Default** für neue Ziele und Drag&Drop — **kein** Schemawechsel, **kein** Per
       Wortlaut — wird mit **2.4b (l)** entfernt bzw. korrigiert. Die bekannten **Doppel-Keys** in der
       i18n-Tabelle bleiben offen (es gibt keine Eindeutigkeitsprüfung; Kandidat für eine spätere
       Aufräumrunde).
+
+**Offene Befunde aus dem 2.4b-Verify (2026-10-15, nicht blockierend):**
+- [x] **`AGENTS.md:63`** führte die vier Optionen noch als „mapped to `NONE`/`RENAME`/`OVERWRITE`" (stale
+      seit 2.2b und im Widerspruch zu `AGENTS.md:441`) — in dieser Ledger-Runde korrigiert; `OVERWRITE`
+      steht dort jetzt als der Wert, der **nie** gesendet wird.
+- [ ] **`docs/SPEC_DUPLICATES.md`:** die **Empfehlungszelle** neben der jetzt als umgesetzt markierten
+      Zeile „Global dedup default setting" sagt noch „Optional. Only worth it if a preferences screen
+      lands" — beim nächsten Anfassen auf den Nachbarzeilen-Stil („Done") ziehen; der Verifier hat die
+      Zeile bewusst nicht mitgeändert.
+- [ ] **Live-Abnahme des `PUT` (2.2b)** — weiterhin offen: die Tests pinnen URL-Bau und Dispatch, nicht
+      die Leitung (POST → 409 `NameAlreadyExists` → PUT → 200, gleiche Node-Id); hängt an frischen
+      Cookies, siehe Frage an den User (Sitzung/Refresh).
 
 **Warnungen — ✅ erledigt 2026-10-15 (`b0fa4c4`; Baseline jetzt `0`):** User-Entscheidung „jetzt
 abräumen, Ziel 0 Warnungen". Die sieben Build-Warnungen waren nie angeschaut, nur als Zahl
