@@ -246,13 +246,19 @@ not produce a 409 at all.
 
 ## 5. Gap analysis against our implementation
 
-Our current state (read-only): persistent MD5 index **per path** (`src/dedup.rs`,
-`uploads` table with `ix_uploads_md5`), skip rule = same path + same MD5; four
-conflict options per target (`src/folders.rs` `ConflictResolution`, default `SaveAsNew`
-since 2026-10-14 — was `Ignore`);
+Our current state (read-only): persistent MD5 index (`src/dedup.rs`, `uploads` table with
+`ix_uploads_md5`), skip rules = (path, size, mtime) → (path, MD5) → **MD5 across paths**
+(`DedupIndex::content_seen`, hit ⇒ "bereits im Konto", remembered as
+`uploads.origin = 'content_skip'`); four conflict options per target (`src/folders.rs`
+`ConflictResolution`, application default `Replace` since 2026-10-15, enum `#[default]`
+`SaveAsNew` as the `folders.toml`-without-key fallback — was `Ignore`);
 server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSkipped`,
-`src/prime_photos.rs::conflict_node_id`); interactive per-file prompt with a run-wide
-"don't ask again" (`resolve_conflict`); dialog in `src/backup_config.rs`.
+`src/prime_photos.rs::conflict_node_id`/`conflict_cause`); interactive **per-file** prompt
+(`src/upload.rs` `resolve_conflict`, `src/backup.rs` `conflict_dialog`) whose "don't ask again"
+answer is written into the **folder** the asked file belongs to
+(`src/backup.rs` `remember_conflict_in_folder` → `BackupFolder.conflict_resolution`) and stays
+run-wide for the rest of the run; the transient drag & drop target has no folder and stays
+run-only.
 
 | Topic | Original | Our stand | Effort | Recommendation |
 |---|---|---|---|---|
@@ -260,7 +266,7 @@ server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSki
 | **Dedup option granularity** | `DeduplicateOptions` flags exist, UI only boolean | Boolean `dedup` per folder — same practical surface | — | **No change.** The flags are dead weight in the original too. |
 | **Dedup default** | Onboarding → on; post-onboarding → off (global default) | `default_true()` → **on** | — | **Keep.** Our default is the friendlier one; documented in AGENTS.md. |
 | **Conflict default** | `None` = "Jedes Mal nachfragen" | `SaveAsNew` (was `Ignore`; changed 2026-10-14, AGENTS.md) | — | **Keep.** A file's identity is its content; `SaveAsNew` + `dedup` is the deliberate default. Note the divergence so nobody "fixes" it to Ask. |
-| **Global dedup default setting** | `EnableDeduplicationForPhotosAndVideos` in preferences, seeds new backups | **Missing** — each new folder starts `dedup = true` hard-coded | **S** | Optional. Only worth it if a preferences screen lands; a single config field + default for new folders. |
+| **Global dedup default setting** | `EnableDeduplicationForPhotosAndVideos` in preferences, seeds new backups | **Implemented** (2026-10-15, 2.4a) — `Config.dedup_default` (default `true`) in *Einstellungen → Upload*; preselects new backup targets and the one-time queue | **S** | Optional. Only worth it if a preferences screen lands; a single config field + default for new folders. |
 | **Global conflict setting** | **Does not exist** | We also have none | — | **No change** — parity already. |
 | **Name conflict detected client-side** | Via `cloud.db` name+parent lookup, before upload | **Missing** — we only learn of it from the server 409 | **L** | Not worth it without a local node cache (we have none by design, AGENTS.md). Our 409-driven path is the pragmatic equivalent. |
 | **409 cause split (MD5-match vs NameAlreadyExists)** | Split: MD5 → Ignored; NameAlreadyExists → `FileConflict` error | **Implemented** (2026-10-15) — the marker carries the response's `errorCode` (`src/prime_photos.rs` `conflict_cause`); `DuplicatesConflictError`/`MD5_DUPLICATE` (case-insensitive) still skip, but enter the index as `Origin::ContentSkip`; `NameAlreadyExists`/unknown keep the old `record_upload` | — | **Done.** A content duplicate was never uploaded *from that path*, so it must keep reading "bereits im Konto" instead of degrading to "unverändert" on the next run. |
@@ -269,7 +275,7 @@ server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSki
 | **Apple Photos `.heic` JPEG-BOM heuristic** | Present (iOS-duplicate guard) | **Missing** | **L** | **Out of scope** — only meaningful for an Apple Photos library import, which is out of MVP (AGENTS.md "Scope-Grenzen"). |
 | **Dedup state after a 409** | Node cached, record `Ignored` | `record_upload` on `ConflictSkipped` so the next scan skips cheaply — **except** a content duplicate (`DuplicatesConflictError`), which is remembered as `content_skip` (2026-10-15) | — | **Keep** — our behaviour is the equivalent and avoids a repeat 409; the origin split keeps the two outcomes ("unverändert" vs "bereits im Konto") honest. |
 | **Interactive prompt trigger** | Client-side `FileConflict` error + per-schedule modal | Server 409 + per-run prompt | — | **Keep** (see "name conflict detected client-side"). |
-| **"Don't ask again" scope** | Per **schedule**, persisted in `schedules.conflict_resolution` | Per **run**, in-memory (`conflict_override`) | **S** | Persist the answer to the folder when "nicht noch einmal fragen" is checked (write `conflict_resolution`), matching the original. Post-MVP is fine; AGENTS.md already keeps the breakdown in memory only. |
+| **"Don't ask again" scope** | Per **schedule**, persisted in `schedules.conflict_resolution` | **Implemented** (2026-10-15, 2.3b) — persisted **per folder** in `BackupFolder.conflict_resolution` (`folders.toml`), the run-wide `conflict_override` unchanged on top; the drag & drop target stays run-only | — | **Done.** Parity with the original: the answer survives into the next run of that folder. |
 
 **Deliberately not doing:** a local `cloud.db`-style node cache, the Apple-Photos
 import path, per-media dedup flags. These are documented boundaries, not oversights.
@@ -282,8 +288,11 @@ import path, per-media dedup flags. These are documented boundaries, not oversig
 * **~~`conflictResolution=OVERWRITE` acceptance.~~ — solved (2026-10-15, live probe).** Our
   endpoint answers **404 with an empty body** to a POST carrying `OVERWRITE`. The value is no
   longer sent: `Replace` posts `NONE` and then overwrites the node the 409 names via
-  `PUT /v2/upload/<nodeId>?conflictResolution=NONE` (200, same node id, content swapped) —
-  see `docs/SPEC_CONFLICT_OPTIONS.md` §4.4.
+  `PUT /v2/upload/<nodeId>` **carrying the POST's full query set** (`conflictResolution=NONE`,
+  `fileSize`, `name`, `parentNodeId`, `contentDate`; live-proven: 200, same node id, content
+  swapped). A PUT with the bare `?conflictResolution=NONE` — i.e. **without** `fileSize` — is
+  rejected with **400 `MissingFileSize`**, so it is *not* the working path —
+  see `docs/SPEC_CONFLICT_OPTIONS.md` §4.
 * **Whether `GetNodeByMd5` dedup is gated by any additional server-side flag** beyond
   `UploadType` (e.g. a weblab). Only the client-side gating was observed.
 * **Exact button→outcome mapping of the iOS-dedup prompt** — carried over from

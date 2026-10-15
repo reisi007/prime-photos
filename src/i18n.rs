@@ -205,7 +205,6 @@ const EN: &[(&str, &str)] = &[
     ("{}% hochgeladen", "{}% uploaded"),
     // -- backup configuration dialog ------------------------------------
     ("Alles", "Everything"),
-    ("Als neue Dateien speichern", "Save as new files"),
     (
         "Datensicherung für lokalen Pfad existiert bereits",
         "A backup for this local path already exists",

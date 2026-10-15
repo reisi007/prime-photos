@@ -492,4 +492,30 @@ mod tests {
         let url = upload_url("eu", "NONE", 7, "\u{D6}FB.dng", "NODE", "d");
         assert!(url.contains("name=\u{D6}FB.dng"));
     }
+
+    /// The node id is a **server** value (an echo of the 409's
+    /// `errorDetails.conflictNodeIds[0]`), so [`replace_upload_url`] passes it
+    /// through **byte-identically** — unlike `name`, which is folded to NFC. An
+    /// NFD id must survive exactly as it came in: normalising a server id would
+    /// ask for a node that does not exist under the folded spelling.
+    #[test]
+    fn replace_upload_url_passes_a_non_ascii_node_id_through_byte_exactly() {
+        // "o" + combining diaeresis (NFD) — the two codepoints a macOS-spelled
+        // value carries; NFC folds them into the single "ö".
+        let nfd = "B0o\u{308}x\u{F6}";
+        assert_ne!(nfd, crate::text::nfc(nfd));
+        let url = replace_upload_url("eu", nfd, "NONE", 7, "O\u{308}FB.jpg", "P", "d");
+        assert_eq!(
+            url,
+            "https://content-eu.drive.amazonaws.com/v2/upload/B0o\u{308}x\u{F6}?conflictResolution=NONE&fileSize=7&name=\u{D6}FB.jpg&parentNodeId=P&contentDate=d"
+        );
+        // …so within one and the same URL the two treatments are visible: the
+        // **raw** NFD id in the path, the **folded** name in the query.
+        assert!(url.contains("/v2/upload/B0o\u{308}x\u{F6}?"));
+        // Nothing of the id was folded away — the NFC form is nowhere in the URL.
+        assert!(!url.contains(&crate::text::nfc(nfd)));
+        // The name in the same URL is the folded one, so the assertion above is
+        // not vacuous.
+        assert!(url.contains("name=\u{D6}FB.jpg"));
+    }
 }

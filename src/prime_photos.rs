@@ -283,12 +283,13 @@ pub struct ResponseUpload {
 }
 
 /// The upload endpoint's answer to the `PUT` that replaces an existing node
-/// (`ConflictResolution::Replace`). It differs from [`ResponseUpload`] only in
-/// how `id` is treated: `ResponseUpload` **requires** `id` (a body without it is
-/// a parse error), while here `id` carries `#[serde(default)]` — so a PUT answer
-/// that names no id still parses and falls back to the node id from the request
-/// URL ([`replace_upload_id`]). A 2xx is the success signal — the PUT really did
-/// swap the node's content — so a missing id must not turn it into an error.
+/// (`ConflictResolution::Replace`). Nothing of the node's metadata is read from
+/// it — only the id, and even that is optional: where [`ResponseUpload`]
+/// **requires** `id` (a body without it is a parse error), here it carries
+/// `#[serde(default)]`, so a PUT answer that names no id still parses and falls
+/// back to the node id from the request URL ([`replace_upload_id`]). A 2xx is
+/// the success signal — the PUT really did swap the node's content — so a
+/// missing id must not turn it into an error.
 #[derive(Debug, Deserialize)]
 struct ResponseReplaceUpload {
     #[serde(default)]
@@ -1171,14 +1172,16 @@ impl PrimePhotos {
                     // `conflictResolution=NONE` — the value the host accepts —
                     // so a taken name surfaces as 409 naming the node that is
                     // already there. That node is exactly what the original
-                    // overwrites with `PUT /v2/upload/<nodeId>?conflictResolution=NONE`
-                    // (live-proven: 200, same node id, content swapped). The
-                    // worker therefore never sees this 409 for `Replace` and
-                    // needs no conflict handling of its own. Without a node id,
-                    // with any other policy, and for a **content** duplicate
-                    // (the same bytes are already there — re-sending them is the
-                    // wasted bandwidth this project avoids) the unchanged
-                    // conflict marker below goes back, as for the other policies.
+                    // overwrites with `PUT /v2/upload/<nodeId>` **carrying the
+                    // POST's query set** (live-proven: 200, same node id,
+                    // content swapped; live-proven as well that a PUT *without*
+                    // that query set is rejected with 400 `MissingFileSize`), so
+                    // the worker needs no conflict handling of its own for it.
+                    // Without a node id, with any other policy, and for a
+                    // **content** duplicate (the same bytes are already there —
+                    // re-sending them is the wasted bandwidth this project
+                    // avoids) the unchanged conflict marker below goes back, as
+                    // for the other policies.
                     if should_replace_after_conflict(conflict, &code, &existing) {
                         // The PUT answers the node the 409 named. It carries
                         // **the same query set as the POST** (`conflictResolution`
@@ -1576,6 +1579,44 @@ mod tests {
                 "NODE1"
             ));
         }
+    }
+
+    /// A 409 body may pad the `errorCode` (spaces outside the value,
+    /// `"  DuplicatesConflictError  "`). The trim inside
+    /// [`is_content_duplicate_code`] makes it the same cause as the exact
+    /// spelling — and a padded content duplicate is just as little a `Replace`
+    /// candidate: the 409 stays the conflict marker the worker turns into
+    /// "bereits im Konto", no PUT goes out for it.
+    #[test]
+    fn padded_content_duplicate_codes_stay_out_of_the_replace_put() {
+        // The marker is built from a real 409 body, so the padding travels the
+        // same path it travels on the wire: JSON string → `error_code` → cause.
+        let body: ResponseUploadFail = serde_json::from_str(
+            r#"{"message":"m","errorCode":"  DuplicatesConflictError  ","timeStamp":"t","requestId":"r","errorDetails":{"conflictNodeIds":["NODE1"]}}"#,
+        )
+        .expect("a 409 body parses");
+        assert!(is_content_duplicate_code(&body.error_code));
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            &body.error_code,
+            "NODE1"
+        ));
+        // `trim` covers every whitespace form, not only the space character.
+        for padded in ["\tDuplicatesConflictError\n", " MD5_DUPLICATE\r\n"] {
+            assert!(is_content_duplicate_code(padded));
+            assert!(!should_replace_after_conflict(
+                ConflictResolution::Replace,
+                padded,
+                "NODE1"
+            ));
+        }
+        // The trim must not swallow the boundary: a padded **name** conflict is
+        // still a name conflict and still opens the replace stage.
+        assert!(should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "  NameAlreadyExists  ",
+            "NODE1"
+        ));
     }
 
     #[test]

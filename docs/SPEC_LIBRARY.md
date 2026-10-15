@@ -646,7 +646,7 @@ distance; the scope call itself is ours, not a gap to close.
 | Download bandwidth cap | per-file throttled stream, 0 = off | upload-only kbps cap (per-file, after upload) | `src/config.rs`, `src/upload.rs` |
 | Pause / cancel / retry / clear-history | all four, confirm dialog for clear | uploads have pause + per-file conflict dialog; no clear-history | `src/config.rs` (`paused`), `src/upload.rs` (`resolve_conflict`) |
 | "Already present" rule | same length **and** same MD5 → `Ignored` | equivalent on the upload side (path + MD5 → skip) | `src/dedup.rs`, `src/upload.rs` |
-| Local name conflict | counter `name (n).ext` + an MD5-equal reuse path | cloud-side `conflictResolution` (NONE/RENAME/OVERWRITE) | `src/folders.rs`, `src/prime_photos.rs` |
+| Local name conflict | counter `name (n).ext` + an MD5-equal reuse path | cloud-side `conflictResolution` — `NONE` (`Ask`/`Ignore`/`Replace`) or `RENAME` (`SaveAsNew`); `OVERWRITE` is never sent (our host answers it with 404), `Replace` overwrites the node the 409 names via `PUT /v2/upload/<nodeId>` | `src/folders.rs`, `src/urls.rs`, `src/prime_photos.rs` |
 | Temp file + move | download to temp, then move with timestamp copy | upload streams directly; no local write path | `src/upload.rs` |
 | Live photos | `LIVE_VIDEO` asset child as sibling file | **none** | — |
 | Multi-part download | up to 4 parts × ~250 MB, ranged requests | **none** | — |

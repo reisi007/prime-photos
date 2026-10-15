@@ -143,9 +143,12 @@ an image without EXIF (a PNG, `c2.png`) answers with a valid node JSON
 (`id`, `name`, `kind`, `version`, …) whose `contentProperties.image` carries no
 `resolutionUnit`, which the previous strict shape rejected with a JSON parse
 error — a successful upload counted as an error, and no index row written, so
-the file was re-read and re-hashed on every later run. This affects every
-EXIF-less type `is_supported_image` allows (png, bmp, gif, webp); inside a
-JPEG/CR3-only folder it is invisible. Read from the answer is only `id` anyway.
+the file was re-read and re-hashed on every later run. This affects **any**
+EXIF-less type `is_supported_image` allows — live observed with a PNG; `bmp`,
+`gif`, `tif`/`tiff` sit in the same group, and even `webp` is no safe bet,
+because it *can* carry EXIF. The list is deliberately **not** exhaustive and
+must not be read as one; inside a JPEG/CR3-only folder the gap is invisible.
+Read from the answer is only `id` anyway.
 
 `409 Conflict`: parsed as `ResponseUploadFail`:
 

@@ -25,8 +25,10 @@ Bundle-/Ressourcen-Auflistung im About-Umfang wurde für diesen Durchgang dennoc
 wiederholt**; die Befunde wurden gegen die **dekompilierte Assembly** und die **zuvor gesicherten
 Ressourcen-Dumps** geprüft — ein **neues Decompile** ist derzeit nicht möglich (`ilspycmd 11.1.0.9782`
 liegt in `~/.dotnet/tools`, die .NET-Runtime fehlt: „You must install .NET to run this application").
-Die TCC-Beobachtung bleibt als solche stehen: `ls ~/.Trash` ⇒ `Operation not permitted`, der
-Papierkorb ist leer — die App liegt nachweislich **nicht** dort. Bestätigt: `IAppInfo.Version` =
+Die TCC-Beobachtung bleibt als solche stehen: `ls ~/.Trash` ⇒ `Operation not permitted` — der
+Papierkorb ist darüber **nicht messbar**. Die belegte Aussage ist die andere: die App liegt
+nachweislich **nicht** im Papierkorb, weil sie lesbar unter `/Applications` steht (s. o.).
+Bestätigt: `IAppInfo.Version` =
 `CFBundleShortVersionString` + `.` + `CommitId` (Anzeige „Version: 11.3.0.1d7941b5"); die
 **fehlende** eingebettete Lizenzliste (die per `GetManifestResourceStream` geladenen Ressourcen
 sind Bild-Assets, `supported-content-types.json` und `MinervaCustomConfig.json`); der

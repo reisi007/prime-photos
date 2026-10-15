@@ -148,17 +148,26 @@ pub enum ConflictResolution {
     /// drops the new one. Not the default: a file whose content differs is meant
     /// to be uploaded, not silently skipped.
     Ignore,
-    /// "Als neue Dateien speichern" (`conflictResolution=RENAME`) — the default:
-    /// different content is uploaded, renamed when the name is already taken.
+    /// "Neue Datei automatisch umbenennen" (`conflictResolution=RENAME`) — the
+    /// **file** default (a `folders.toml` entry without the key): different
+    /// content is uploaded, renamed when the name is already taken. Newly
+    /// created targets are pre-set with the application default (`Replace`,
+    /// `Config::conflict_resolution_default`). In the radio groups of the
+    /// backup-configuration and the settings dialog the option carries this
+    /// label; the conflict dialog's button keeps its own wording, "Als neue
+    /// Datei speichern" (the original names the same option differently in the
+    /// two places).
     #[default]
     SaveAsNew,
     /// "Ersetzen" — a taken name is resolved in **two steps** (user decision
     /// 2026-10-15). The POST sends `conflictResolution=NONE` (the host rejects
     /// the `OVERWRITE` value with 404 and an empty body), and the 409's
     /// `errorDetails.conflictNodeIds[0]` names the node to replace with
-    /// `PUT /v2/upload/<nodeId>?conflictResolution=NONE` — live-proven: 200,
-    /// the same node id, content actually swapped. The overwrite is therefore
-    /// **not** a wire value, which is why `wire_value` reports `NONE`.
+    /// `PUT /v2/upload/<nodeId>` — live-proven: 200, the same node id, content
+    /// actually swapped, **but only with the POST's query set** (`conflictResolution`,
+    /// `fileSize`, `name`, `parentNodeId`, `contentDate`); without it the host
+    /// answers 400 `MissingFileSize`. The overwrite is therefore **not** a wire
+    /// value, which is why `wire_value` reports `NONE`.
     Replace,
 }
 
