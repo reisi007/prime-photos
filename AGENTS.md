@@ -56,9 +56,18 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   6. **Web-Cookies erneuern:** `POST https://api.amazon.com/auth/token?source_token=<refresh>&source_token_type=refresh_token&requested_token_type=auth_cookies&domain=.<tld>&app_name=…&app_version=…` — **beim Start und nach jeder erfolgreichen Auffrischung** aus dem Refresh-Token gemintet und in die bestehende Cookie-Kette (im Speicher) eingespeist; die **Upload-Engine bleibt cookie-basiert**, die live belegte Kette aus Welle 2 bleibt damit gültig.
   7. **Ungültiger Refresh-Token:** Tokens löschen und zurück auf unseren Login-Screen — **kein** App-Neustart (den braucht nur das Original für seinen Startpfad).
   8. **Abmelden:** `POST https://api.amazon.com/auth/deregister` mit dem Access-Token, danach die Tokens löschen.
-  **S-C-Umsetzung (2026-10-15):** der Auffrischungs-Worker läuft als **ein** langlebiger Task auf der bestehenden Tokio-Runtime (Muster wie `avatar_fetch`), Ergebnis über einen geteilten Slot, den die UI pro Frame pollt. **Folge der Speicher-only-Regel:** der reine Cookie-Rückfall (Geräteweg abgelehnt) gilt nur für die **laufende** Sitzung, nicht über einen Neustart — der Geräteweg ist der persistente Pfad.
-  **Live-Abnahme (2026-10-15, erfolgreich):** einmal anmelden → Haupt-UI; Neustart **ohne** Anmeldung → direkt Haupt-UI; Kontoname/Profilbild erscheint, Uploads laufen („Alles aktuell"). Der **Geräteweg ist damit live bewiesen** (Amazon nimmt unsere Client-Identität an).
-  **Start-Gate (User-Entscheidung 2026-10-15):** mit gespeichertem Refresh-Token startet die App **direkt in die Haupt-UI** — **kein** Anmelde-Screen; Access-Token und Cookies werden im Hintergrund geholt (wie das Original, das das Auth-Portal nur ohne Refresh-Token zeigt). **Einlöse-Pfad:** `/auth/register` bekommt die belegten **3** Versuche (`REGISTER_MAX_ATTEMPTS`); ein Netzwerkfehler zählt auch hier nicht als Versuch.
+  **S-C-Umsetzung:** der Auffrischungs-Worker läuft als **ein** langlebiger Task auf der bestehenden Tokio-Runtime (Muster wie `avatar_fetch`), Ergebnis über einen geteilten Slot, den die UI pro Frame pollt. **Folge der Speicher-only-Regel:** der reine Cookie-Rückfall (Geräteweg abgelehnt) gilt nur für die **laufende** Sitzung, nicht über einen Neustart — der Geräteweg ist der persistente Pfad.
+  **Login-Start leert den Webview-Speicher (User-Entscheidung 2026-10-15):** bei **jedem** Öffnen des
+  Login-Webviews wird der Cookie-/Cache-Speicher des eingebauten WKWebView **vor** dem Laden der
+  Anmeldeseite geleert — wie das Original (`docs/SPEC_LOGIN.md` § 3.3). Umsetzung: `WebViewBuilder`
+  **ohne** `with_url` bauen, `WebView::clear_all_browsing_data()` rufen, dann `WebView::load_url(url)`;
+  der `Err`-Pfad bleibt. **Verworfen:** `with_incognito(true)` (nonPersistent DataStore) und ein
+  benannter DataStore (`with_data_store_identifier` + `remove_data_store`). Hintergrund: „Abmelden"
+  löscht nur **unser** Sessionmaterial — ohne diesen Wipe überlebt Amazons Browser-Sitzung und lässt
+  die nächste Anmeldung **ohne 2FA** durchlaufen. (Zeilen-Icons in der Zeile: Kebab/Refresh/Pause
+  sind durchgängig **ohne** Rahmen; das Kebab-Popup bekommt eine Mindestbreite von 220 px und kein
+  Zeilenumbruch der Menüeinträge.)
+  **Start-Gate (User-Entscheidung 2026-10-15):** mit gespeichertem Refresh-Token startet die App **direkt in die Haupt-UI** — **kein** Anmelde-Screen; Access-Token und Cookies werden im Hintergrund geholt (wie das Original, das das Auth-Portal nur ohne Refresh-Token zeigt). **Einlöse-Pfad:** `/auth/register` bekommt die belegten **3** Versuche (`REGISTER_MAX_ATTEMPTS`); ein Netzwerkfehler zählt auch hier nicht als Versuch. Der `authorization_code` ist **einmalig** — der Pfad wiederholt **nie** nach einer Serverantwort, **nur** wenn der Request den Server nicht erreicht hat.
   **Geräte-Identität (User-Entscheidung 2026-10-15, nach der Suche):** Wir senden **die Werte, die
   das Original aktuell sendet**: `app_name = "Amazon Photos"`, `app_version = "11.3.0.1d7941b5"`
   (Stand 2026-10-15), `device_type = "A2UXDCSFQXA1M7"`. Die Suche hat belegt, dass im Bundle **genau
@@ -68,9 +77,9 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   Geräte-Wegs; UI, Fenstertitel, Bundle-Name und Branding bleiben unberührt (Projektregel
   „Name & Branding"): wir geben uns nicht als Amazon-App aus, sondern sprechen auf der Leitung das
   Protokoll dieses Clients.
-  **Grenze („so gut es geht"):** wir treten als **eigenes** Gerät mit eigener `client_id` auf. **Live belegt am 2026-10-15:** Amazon **nimmt** diese Client-Identität an — die `/auth/register`-Antwort war ein voller Erfolg (`response.success.tokens.bearer`); der erste Live-Lauf scheiterte nur an unserem Parser (`expires_in` kam als **String** `"3600"`). Ein abgelehnter Device-Weg wird als **klare Meldung** gezeigt, nicht still verschluckt.
+  **Grenze („so gut es geht"):** wir treten als **eigenes** Gerät mit eigener `client_id` auf. Ein abgelehnter Device-Weg wird als **klare Meldung** gezeigt, nicht still verschluckt.
 - **Kein Cookie-Rückfall mehr (User-Entscheidung 2026-10-15):** Der Cookie-**Probe** und der Web-/Cookie-Rückfall sind **entfernt**; der Geräteweg (PKCE) ist der **einzige** Anmeldeweg, ein abgelehnter Weg erscheint als klare Meldung. Anlass: `wry::WebView::cookies()` blockiert auf macOS den Hauptthread bis zu **1 s** (`wait_for_blocking_operation`, wry 0.57) und läuft aus einem `DispatchQueue::main`-Block **immer** in den Timeout — die Login-UI fror ein und zeigte „Cookies konnten nicht gelesen werden: IO error: timed out waiting for cookies response". Da der Geräteweg live akzeptiert wird und der Rückfall ohnehin nur sitzungsweit wäre (Cookies werden nicht persistiert), entfällt er. Mit ihm entfallen der Browser-Link „Amazon Photos im Browser öffnen" (`urls::login_url`, `platform::open_url`) und die zugehörigen Texte. **Verworfen:** den Rückfall asynchron über `objc2` am `WKWebView` neu zu bauen (mehr Aufwand, kein Bedarf).
-- **Live-Befunde der Anmeldung (2026-10-15):** (a) die `/auth/register`-Antwort liefert `expires_in` als **JSON-String** (`"3600"`) — der Parser akzeptiert String **und** Zahl (auch beim Refresh); (b) ein `openid.oa2.authorization_code` ist **einmalig** — der Einlöse-Pfad wiederholt deshalb **nur** bei Netzwerkfehlern (der Request hat den Server nie erreicht), **nie** nach einer Serverantwort.
+- **`expires_in` kommt als JSON-String** (`"3600"`): der Parser akzeptiert String **und** Zahl (Register **und** Refresh).
 - UI reference: `docs/UI_FLOWS.md` + `docs/UI_STATES.md` (clean-room spec from the decompiled app + resources). Use them when changing the UI.
 - Folder reconciliation (observed in the client's local DBs under `~/Library/Application Support/Amazon Cloud Drive`): local SQLite state, not an HTTP call. `backup` table (schedule_path, relative_path, node_id, size, modified_date, status, last_scan_time) + `uploads` table (path, status, precomputed_md5, node_id) + `cloud.db` node cache, synced via `/drive/v1/changes` and `/drive/v1/nodes`. `BackupScanIntervalInHours = 336`.
 - Desktop-client upload protocol (observed): `POST https://upload-photos.amazon.de/v2/upload?name=<urlenc>&fileSize=<n>&conflictResolution=NONE&kind=FILE&parentNodeId=<id>` with raw body, `x-amz-access-token`, `x-amzn-file-md5` (hex), `Content-MD5` (base64), `x-amz-clouddrive-appid`, `x-amzn-clouddrive-source`. Not used by the app yet (we use the cookie path); documented for parity.
@@ -168,7 +177,7 @@ Der Login-Item-Schalter „Nach dem Anmelden starten" ist bei erster Nutzung **e
 nur den Schalter, Default aus). Begründung: ohne Login-Item läuft nach Neustart/Ausloggen **kein
 Watcher** — die Event-Erkennung würde schlafen (Wasserscan ist nur Sicherheitsnetz). Das Original
 schaltet Autostart beim Onboarding ebenfalls selbst ein (`docs/SPEC_OS_INTEGRATION.md` §3.6).
-Umsetzung (**erledigt**, Commit `7b8f3d1`, zwei Verify-Runden): `Config.autostart_enabled:
+`Config.autostart_enabled:
 Option<bool>` (`None` = nie entschieden ⇒ einmal registrieren + `Some(true)` speichern; `Some(false)`
 = Veto, nie einschalten, ein von Hand angelegter Eintrag wird nicht bekämpft; `Some(true)` ⇒
 fehlendes Login-Item wird repariert). Der OS-Zustand bleibt die operative Wahrheit, `Config`
@@ -183,7 +192,7 @@ in einem Durchgang ohne Merge-Konflikt läuft — steht im Ledger (`AGENTS.todo.
 „Wellenplan (Neufassung 2026-10-14, nach der Duplikat-/Konflikt-Kette)"), und wird dort
 fortgeschrieben (Abnahme + Commit je Welle). Kurzform:
 
-- **Welle 1 — echter Lauf** (kein Code) ✅ **erledigt 2026-10-15**; Belege im Ledger.
+- **Welle 1 — echter Lauf** (kein Code) — Belege im Ledger.
 - **Welle 2 — Konflikt-/Duplikat-Kette abschließen:** 409-Ursache trennen (2.1), „Ersetzen" via
   `PUT /v2/upload/<nodeId>` (2.2), „Nicht noch einmal fragen" pro Ziel persistieren (2.3), Rest nach
   `docs/SPEC_CONFLICT_OPTIONS.md` (2.4). **Läuft ab 2026-10-15.**
@@ -569,3 +578,8 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   und wird im selben Task behoben; nichts wird pauschal mit `#[allow]` zugedeckt. Einzige Ausnahme:
   ein **bewusst** vorbereiteter Haken **mit** Begründung — heute `folders::supported_extensions()`
   (für einen künftigen Datei-Picker).
+- **`cargo fmt --check` ist kein Gate (Befund 2026-10-15):** Das Repo ist **nicht** fmt-clean als
+  Baseline — `cargo fmt --check` meldet Abweichungen in **unangetasteten** Dateien (`build.rs`,
+  `src/app.rs`: Import-Reihenfolge und Zeilenumbrüche). Ein fmt-Diff ist damit **kein**
+  Regressionssignal und darf einen Task nicht blockieren; Regressionssignal ist allein die
+  **Warnungs-Baseline 0** (oben).

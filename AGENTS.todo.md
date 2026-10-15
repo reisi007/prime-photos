@@ -321,8 +321,9 @@ bleibt dokumentiert, nicht eingeplant).
 **Fachliste (bleibt gültig):**
 - [ ] **S7 — Live-Abnahme (großteils ✅ 2026-10-15):** erledigt: einmal anmelden ✅, Neustart **ohne**
       Anmeldung ✅ (direkt in die Haupt-UI), Kontoname/Profilbild ✅, Uploads liefen ✅ („Alles aktuell",
-      Ziele bei 100 %). **Offen:** Auffrischung/Cookies im Logfile explizit sichten; die `PUT`-Abnahme
-      (2.2b).
+      Ziele bei 100 %), **Auffrischung/Cookies im Logfile ✅** (belegt: „Gespeicherte Sitzung gefunden –
+      Access-Token wird erneuert." / „Access-Token aufgefrischt (3600 s gültig)." / „Web-Cookies
+      erneuert."). **Offen:** nur noch die `PUT`-Abnahme (2.2b).
 
 **S-C-Festlegungen (User-Entscheidung 2026-10-15, Frage + Antwort — verbindlich für S-C):**
 - **Kein Klartext-Sessionmaterial auf der Platte (Kehrtwende zu S-B):** Persistiert wird **nur** der
@@ -370,28 +371,25 @@ bleibt dokumentiert, nicht eingeplant).
   (die Alt-Werte aus Welle 2 sind beim Speichern verschwunden); der Refresh-Token liegt nur im
   Schlüsselbund.
 
-**Offene Punkte aus der Live-Abnahme (2026-10-15):**
-**Entschieden (User 2026-10-15) — Umsetzung beauftragt (Build-Verify-Loop):**
-- **Webview-Cookie-Speicher bei jedem Login-Start leeren** (wie das Original, `docs/SPEC_LOGIN.md`
-  § 3.3): der Cookie-/Cache-Speicher des eingebauten WKWebView wird **bei jedem Öffnen des
-  Login-Webviews** geleert, **vor** dem Laden der Anmeldeseite. Umsetzung: `WebViewBuilder` **ohne**
-  `with_url` bauen, `WebView::clear_all_browsing_data()` rufen (wry; macOS:
-  `WKWebsiteDataStore.removeData…` über **alle** Datentypen, `modifiedSince` 1970), dann
-  `WebView::load_url(url)`. **Verworfen** (bewusst): `with_incognito(true)` (nonPersistent DataStore)
-  und ein benannter DataStore via `with_data_store_identifier` + `remove_data_store`. Grund für die
-  Entscheidung: „Abmelden" löscht nur **unser** Sessionmaterial (Access-Token, vier Cookies,
-  Schlüsselbund-Refresh-Token, `/auth/deregister`) — Amazons Browser-Sitzung in
-  `~/Library/HTTPStorages/prime-photos.binarycookies` überlebte bisher und ließ die nächste
-  Anmeldung **ohne 2FA** durchlaufen.
-- **Zeilen-Icons ohne Rahmen:** Kebab + Refresh bekommen `.frame(false)` wie Play/Pause
-  (Original-Look, User: „alle ohne Rahmen").
-- **Kebab-Popup-Mindestbreite:** `popup_below_widget` (backup.rs) erbt die Breite seines
-  Eltern-Widgets (das ~26 px breite Kebab-Icon) und bricht den Text zeichenweise um ⇒
-  `ui.set_min_width(220.0)` + `ui.style_mut().wrap_mode = Some(TextWrapMode::Extend)` im Popup.
-- **Anmelde-Block in den Einstellungen entfällt ganz:** Anmelden passiert automatisch (Start-Gate →
-  Haupt-UI; der Geräte-Weg läuft nur, wenn er muss), Abmelden liegt im Konto-Block der Seitenleiste,
-  und der Login ist unser eigener Geräte-Weg. Der alte Text („Die Cookies werden automatisch
-  übernommen") beschrieb einen entfernten Pfad. Die dadurch tote i18n-Zeile wird mitentfernt.
+**Aktueller Auftrag (2026-10-15, User: „Alles 1–5 durchziehen, docs-Ordner mit größerer
+Struktur, Subagenten auf Mimo 2.6 free"):**
+
+1. [x] Commits der verifizierten Runde — Code (`9cad019`) + Docs.
+2. [ ] **`docs/`-Gerüst:** bestehende Spec-Dateien in Unterverzeichnisse sortieren, dazu zwei neue
+   Doku-Dateien (Feature-Übersicht `docs/features/FEATURES.md`, Live-Nachweis
+   `docs/features/LIVE_ACCEPTANCE.md`), ein `docs/README.md` als Index — **alle** Referenzen in
+   `AGENTS.md`, `AGENTS.todo.md` und Code mitziehen. Anlass: User-Wunsch „gerne einen docs Ordner
+   mit einer größeren Struktur".
+3. [ ] **Tray-Icon erst nach Login** (User-Vorgabe 2026-10-15: „Tray-Icon soll erst nach Login
+   erscheinen; nicht angemeldet ist es uns egal"). Umsetzung ausschließlich über den Build-Verify-Loop
+   (Implementierer + unabhängiger Verifier, Modell `opencode/mimo-v2.6-flash-free`).
+4. [ ] **Release-Build + Install:** `cargo build --release` + `packaging/make-app.sh`, App
+   installieren, damit der User sie sofort nutzen kann.
+
+**Welle 3 — Progress-/UI-Umbau + Layout-Punkte aus `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8**
+(Detail in den Hauptbereich, Klapp-Panel weg, Live-Status; feste Spaltenköpfe, Kürzel + Tooltip,
+Liste füllt die Höhe, 300-Zeilenkappe entfällt, leerer Zustand zentriert). Wartet auf:
+Abschluss von Welle 2 → Clean-Room-Abnahme des Originals → Umsetzer-Briefing.
 
 **Offen (nicht beauftragt) — macOS-Dialog „Where is use_default?" beim Resync (2026-10-15):**
 Beim Neu-Scannen erschien ein macOS-Panel „Choose Application — Where is use_default?". **Befund:**
@@ -402,6 +400,11 @@ Unser Code startet nur `open -R` (`platform::reveal_in_file_manager`), `explorer
 `defaults read -g AppleLocale` (`countries::system_country`) und über `auto-launch` `launchctl`;
 `rfd::FileDialog::pick_folder()` läuft nur bei „Datensicherung hinzufügen …" / „Durchsuchen".
 **Nötig:** der genaue auslösende Klick + Reproduzierbarkeit (offene Frage an den User).
+**Weitere Negativbefunde (2026-10-15):** `~/Library/LaunchAgents/` enthält **keinen**
+`prime-photos`-Eintrag (konsistent — Autostart ist in den Einstellungen aus, also kein Plist zu
+erwarten); `log show --last 45m --predicate 'eventMessage CONTAINS "use_default"'` liefert **nichts**.
+Der Dialog ist damit weder von uns erzeugt noch von macOS geloggt — er kommt aus einer
+LaunchServices-Zuordnung dieser Maschine (nicht aus unserem Prozess).
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der
