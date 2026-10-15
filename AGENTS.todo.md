@@ -362,11 +362,12 @@ Verifikation → Commit):**
 
 **Modell-Ausnahme (2026-10-15, Rate-Limit):** Der Gratis-Pool
 (`opencode-go/step-5-preview-free`) antwortete mehrfach mit „Rate limit exceeded" — mitten in
-laufenden Aufträgen, nachdem schon Teile geschrieben waren. Auf User-Anweisung laufen die
-Umsetzer-Läufe dieser Welle vorübergehend auf **`opencode-go/deepseek-v4.1-flash`** (vom User
-ausdrücklich benannt), die Doku-Läufe auf **`opencode-go/longcat-2.5-preview-free`**, solange dort
-kein Rate-Limit auftritt. Die Regel „ein Modell für alle Rollen" (`step-5-preview-free`) bleibt
-gültig — das ist eine **Lauf-Ausnahme**, kein Config-Modellwechsel.
+laufenden Aufträgen, nachdem schon Teile geschrieben waren. Auf User-Anweisung gilt für diese Welle
+deshalb: **`opencode-go/longcat-2.5-preview-free` zuerst**, **`opencode-go/deepseek-v4.1-flash`** nur
+als **Fallback**, wenn Longcat denselben Fehler liefert (User-Korrektur 2026-10-15: „Umgekehrt.
+Longcat Preview priorisieren, DS Flash als fallback"). Die Regel „ein Modell für alle Rollen"
+(`step-5-preview-free`) bleibt gültig — das ist eine **Lauf-Ausnahme**, kein Config-Modellwechsel;
+sobald der Gratis-Pool wieder antwortet, laufen die Wellen wieder dort.
 
 **Recon-Fakten, auf denen der Nachbau steht (2026-10-15 am DLL; Verhalten in `docs/SPEC_LOGIN.md`
 § 3.8 / `docs/PROTOCOL.md` § 2.1, die Zahlen hier nachgetragen):**
