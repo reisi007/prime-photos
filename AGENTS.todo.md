@@ -252,7 +252,12 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   fehlen, webp *kann* EXIF tragen). **(i) NEU (EXIF-Verifier):** `src/prime_photos.rs:286` „differs
   only in how `id` is treated" ist leicht überzogen. **(j) NEU:** den gebündelten Original-Sheet
   („N Dateinamenkonflikte in …", eine Antwort für alle, Toast) als bewusste Abweichung in §5
-  dokumentieren.
+  dokumentieren. **(k) NEU (Hygiene-Verifier):** in `docs/SPEC_ABOUT.md` ist „der Papierkorb ist leer"
+  per **TCC nicht messbar** — nur die belegte Aussage stehen lassen (die App liegt nachweislich nicht
+  dort, weil sie lesbar unter `/Applications` steht). **(l) NEU (Aufräumkandidat):** den toten
+  i18n-Key „Als neue Dateien speichern" entfernen und den Doku-Kommentar an `SaveAsNew` in
+  `src/folders.rs` auf den gültigen Wortlaut bringen (Radiogruppen: „Neue Datei automatisch
+  umbenennen"; Konflikt-Dialog: „Als neue Datei speichern").
 
   **Zwischenpakete (2026-10-15, nicht Teil der Welle-2-Planung; je eigener Commit):**
   - **P3-Nits — ✅ `506df58`** (Verifier APPROVE): die aggregierte Fußzeile wird nur noch unter
@@ -271,9 +276,14 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
     vorgeschriebene Zurücklegen des `.app` vor dem Recon zu überspringen — genau der Schaden, den
     die Regel verhindern will. Korrigiert nach dem Wortlautvorschlag des Verifiers, Zahlen vom
     Korrektor selbst nachgemessen; Re-Check der Doku im nächsten Verify-Lauf.
-  - **Aufräumpaket (User-Entscheidung 2026-10-15): Warnungen auf null + `app.rs:346`** — siehe
-    „Warnungen" unten. Läuft **vor 2.4b**, damit alle weiteren Wellen gegen eine Null-Warnungs-Baseline
-    messen.
+  - **Aufräumpaket — ✅ `b0fa4c4`** (User-Entscheidung 2026-10-15; Verifier APPROVE, Runde 1):
+    **Baseline 7 → 0 Warnungen** plus die `app.rs:346`-Konsistenz, gelaufen **vor 2.4b**, damit alle
+    weiteren Wellen gegen null messen. Der Verifier hat nach `cargo clean -p` **voll neu kompiliert**
+    (0 Warnungen, nicht aus dem Cache), die HEAD-Baseline mit exakt den sieben erwarteten Warnungen
+    nachgestellt und per Mutation belegt, dass ohne `1.6_f32` genau diese eine Warnung zurückkehrt.
+    Alle drei entfernten toten Funktionen sind repo-weit referenzfrei (lebender Ersatzpfad je Fall
+    belegt), das **einzige** `#[allow]` im Diff ist das bewusst begründete auf
+    `supported_extensions`; Tests 95 grün, keine neuen fmt-Diffs.
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
@@ -455,9 +465,8 @@ greift **über Pfade hinweg** und ist **persistiert** (`origin = 'content_skip'`
 (2.2/2.2b).
 
 **Offen (Welle 2.4):**
-- [ ] **2.4b Doku + zwei Tests** — siehe Wellenplan oben, je mit Abnahmekriterium. (2.4a ist erledigt:
-      `36aee39`.)
-- [ ] **Aufräumpaket** (Warnungen auf null + `app.rs:346`) — siehe Wellenplan, läuft.
+- [ ] **2.4b Doku + zwei Tests (a)–(l)** — siehe Wellenplan oben. Läuft. (2.4a ist erledigt:
+      `36aee39`; das Aufräumpaket ebenfalls: `b0fa4c4`.)
 
 **Verworfen (2026-10-15):** `SaveAsNew` als **Application Default** (galt 2026-10-14 bis 2026-10-15).
 Wer ihn zurückdreht, ändert eine getroffene Entscheidung — heute ist `Replace` die Vorgabe für neue
@@ -476,10 +485,11 @@ Default** für neue Ziele und Drag&Drop — **kein** Schemawechsel, **kein** Per
       blieben grün. Ursache: `PrimePhotoApp` braucht egui-Kontext bzw. Datei-Dialog. Ein **reiner
       Helfer** (z. B. „Config ⇒ (dedup, conflict) für die Einmal-Queue") würde die Entscheidung
       testbar machen — **noch nicht beauftragt.**
-- [ ] **`src/app.rs:346`** — die nach einem Neustart **wiederhergestellte** Drag&Drop-Zeile wird mit
-      `dedup: true` und `ConflictResolution::default()` (`SaveAsNew`) gebaut statt mit den
-      App-Defaults: ein **frischer** Drop nutzt `Replace`, ein **wiederhergestellter** `SaveAsNew`.
-      Wird mit dem Aufräumpaket behoben (User-Entscheidung 2026-10-15).
+- [x] **`src/app.rs:346`** — **behoben in `b0fa4c4`:** die wiederhergestellte Drag&Drop-Zeile nutzt
+      jetzt `config.dedup_default` / `config.conflict_resolution_default`, genau wie ein frischer Drop
+      (`begin_one_time_run`). Vorher konnte ein frischer Drop `Replace` nutzen und ein
+      wiederhergestellter `SaveAsNew`. Der dadurch unbenutzte `ConflictResolution`-Import in `app.rs`
+      entfiel folgerichtig.
 - [ ] **Ein Label-Test prüft deutschen Wortlaut** (`remember_label_names_the_folder` assertiert
       „-Ordner fragen"): unter `Lang::En` wäre er rot. Unkritisch, solange die Tests mit Deutsch
       laufen — beim nächsten Anfassen sprachneutral formulieren.
@@ -489,11 +499,14 @@ Default** für neue Ziele und Drag&Drop — **kein** Schemawechsel, **kein** Per
       *mit* fremdem Pfad benennt das Häkchen einen Ordner, in den nichts geschrieben würde. Nur dort
       relevant, bewusst im beauftragten Umfang.
 - [ ] **Toter i18n-Key „Als neue Dateien speichern"** (`src/i18n.rs`): außerhalb der i18n-Tabelle kein
-      `tr`-Aufruf mehr, nur der Doku-Kommentar `src/folders.rs:145` zitiert den alten Wortlaut —
-      Aufräumkandidat zusammen mit den bekannten Doppel-Keys.
+      `tr`-Aufruf mehr, nur der Doku-Kommentar an `SaveAsNew` in `src/folders.rs` zitiert den alten
+      Wortlaut — wird mit **2.4b (l)** entfernt bzw. korrigiert. Die bekannten **Doppel-Keys** in der
+      i18n-Tabelle bleiben offen (es gibt keine Eindeutigkeitsprüfung; Kandidat für eine spätere
+      Aufräumrunde).
 
-**Warnungen (User-Entscheidung 2026-10-15: „jetzt abräumen", Ziel 0 Warnungen):** Die sieben
-Build-Warnungen waren nie angeschaut, nur als Zahl weitergereicht. Bestand:
+**Warnungen — ✅ erledigt 2026-10-15 (`b0fa4c4`; Baseline jetzt `0`):** User-Entscheidung „jetzt
+abräumen, Ziel 0 Warnungen". Die sieben Build-Warnungen waren nie angeschaut, nur als Zahl
+weitergereicht. Bestand:
 1. **`src/icons.rs:26`** — `egui::Stroke::new(1.6, …)`, Lint `float_literal_f32_fallback` ⇒
    **future incompatible**, wird in einer künftigen Compiler-Version ein **harter Fehler**
    („will become a hard error in a future release") — das ist der Punkt mit Ablaufdatum; Fix:
