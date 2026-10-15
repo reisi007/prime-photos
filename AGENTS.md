@@ -575,9 +575,18 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   Ledger). Sechs der sieben damaligen Warnungen waren toter Code bzw. Kosmetik, eine war
   `float_literal_f32_fallback` in `src/icons.rs` — **future incompatible**, in einer künftigen
   Compiler-Version ein harter Fehler. Ab hier gilt: **jede neue Build-Warnung ist ein Rückschritt**
-  und wird im selben Task behoben; nichts wird pauschal mit `#[allow]` zugedeckt. Einzige Ausnahme:
-  ein **bewusst** vorbereiteter Haken **mit** Begründung — heute `folders::supported_extensions()`
-  (für einen künftigen Datei-Picker).
+  und wird im selben Task behoben; nichts wird pauschal mit `#[allow]` zugedeckt.
+  **Erzwungen (User-Entscheidung 2026-10-15, „cargo warnings sollen als error behandelt
+  werden"):** `[lints.rust] warnings = "deny"` in `Cargo.toml` — ab sofort ist **jede** Warnung ein
+  **harter Build-Fehler**, kein Hinweis mehr. `[lints]` greift nur für **unser** Paket (`src/`,
+  `build.rs`, Tests), **nicht** für Dependencies (die laufen ohnehin mit `cap-lints`); Rust ≥ 1.74
+  ist erfüllt (edition 2024). **Keine Ausnahme mehr:** der frühere Hinweis auf einen bewusst
+  vorbereiteten Haken (`folders::supported_extensions()`) ist **gekürzt**, weil das Symbol im Repo
+  nicht mehr existiert (Befund 2026-10-15, Suche über `src/` + `Cargo.toml` ohne Treffer).
+  **Verworfen:** `.cargo/config.toml` mit `rustflags = ["-Dwarnings"]` (würde **auch** Deps hart
+  nehmen, deren Warnungen wir nicht beheben können — ein fremder Patch würde unseren Build rot
+  machen) und die Erzwingung **nur** in der CI (es gibt bislang **kein** Workflow, und lokal bliebe
+  es weich statt hart).
 - **`cargo fmt --check` ist kein Gate (Befund 2026-10-15):** Das Repo ist **nicht** fmt-clean als
   Baseline — `cargo fmt --check` meldet Abweichungen in **unangetasteten** Dateien (`build.rs`,
   `src/app.rs`: Import-Reihenfolge und Zeilenumbrüche). Ein fmt-Diff ist damit **kein**

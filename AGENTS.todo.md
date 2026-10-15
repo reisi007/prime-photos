@@ -487,17 +487,30 @@ Abschluss von Welle 2 → Clean-Room-Abnahme des Originals → Umsetzer-Briefing
    `config.toml` hingegen trägt `conflict_resolution_default = "replace"` — das ist unter der neuen
    Regel der falsche Default und wird auf `"saveasnew"` gesetzt.
 
-**Stand der Verify-Runden (2026-10-15, laufend):** Zwei unabhängige Verifier-Subagenten prüfen
-parallel, **bevor** dieser Stopp-Auftrag erging — ihre Ergebnisse werden abgewartet, es wird nichts
-Neues gestartet:
-- **Tray-Fix** (`src/app.rs`, Umsetzer berichtet 3/3 grün: R1 Close-Check nach dem Reconcile,
-  R2 Drop-Branch blendet das Fenster wieder ein über ein neues `window_hidden`-Feld,
-  R3 `tray_build_failed` latched pro Sitzung) → Verifier `ses_ebecc03a2ffeJy8pCC1LJC0QgU`.
-- **Progress-Leiste volle Breite** (`src/backup.rs`, `.desired_width(240.0)` entfernt) →
-  Verifier `ses_ebecc03a1ffet4jwUBDbNO5hCs`.
-**Vorgehen bei Rückmeldung (User-Auftrag „build/verify bis verify ok ist ok"):** APPROVE ⇒ Commit
-(die beiden Änderungen liegen in **getrennten** Commits, da sie getrennte Tasks sind);
-CHANGES REQUIRED ⇒ Fix durch Umsetzer-Subagent → erneuter Verify ⇒ `git commit --amend`.
+10. **Cargo-Warnungen als Fehler behandeln (User-Auftrag 2026-10-15 „TODO: cargo warnings sollen
+    als error getreatet werden"; Umsetzung noch OFFEN).** Entschieden: `[lints.rust]
+    warnings = "deny"` in `Cargo.toml` (einzige Änderung dort, kein `[workspace]`, keine Deps).
+    Damit ist jede Warnung in `src/`, `build.rs` und den Tests ein harter Build-Fehler — die
+    bisherige **Baseline 0** wird erstmals **maschinell** erzwungen statt nur kontrolliert.
+    **Vor dem Umsetzen prüfen:** der Build ist heute bei 0 Warnungen, `[lints]` ändert also nichts
+    am Ist-Zustand — ein roter Build nach dem Eintrag wäre ein echter, bisher übersehener Befund
+    (dann im selben Task beheben, **kein** `#[allow]`). Zusätzlich zu belegen: `cargo check
+    --all-targets` (inkl. Tests) und der Cross-Compile-Check der anderen Ziel-Plattformen, weil
+    `[lints]` auch für cfg-gated Code der Windows-/Linux-Ziele greift.
+    **Verworfen (damit nicht erneut gebaut):** `rustflags = ["-Dwarnings"]` in
+    `.cargo/config.toml` (hart auch für Deps, ohne dass wir sie beheben könnten) und die Erzwingung
+    nur in der CI (kein Workflow vorhanden, lokal bliebe es weich).
+
+**Verify-Runden 2026-10-15 — ABGESCHLOSSEN (User-Auftrag „build/verify bis verify ok ist ok"):**
+- **Progress-Leiste volle Breite** (`src/backup.rs`, `.desired_width(240.0)` entfernt):
+  Verifier **APPROVE** — belegt aus der egui-0.31.1-Quelle
+  (`progress_bar.rs:119-123`: `desired_width.unwrap_or_else(|| available_size_before_wrap().x.at_least(96.0))`)
+  und der Layout-Kette (`ui.rs:1016`, `layout.rs:435/464`); das Clipping des Textes am 240-px-Rechteck
+  (`progress_bar.rs:201-208`) war die gemeldete Kausalität. ⇒ Commit **`0363bf1`**.
+- **Tray erst nach Login** (`src/app.rs`): Verifier **APPROVE** — R1 Close-Check nach dem Reconcile
+  (Code-Stellen `831` → `887`, `poll_session` davor), R2 Drop-Branch blendet über `window_hidden`
+  wieder ein, R3 `tray_build_failed` latched pro Sitzung; Reihenfolge aus dem **Code** belegt, nicht
+  aus dem Kommentar; Blast Radius auf `src/app.rs` beschränkt. ⇒ Commit **`746392d`**.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der
