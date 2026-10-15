@@ -143,8 +143,8 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   Live-Lauf noch einmal (Knoten behält den Namen, Inhalt danach nachweislich der neue —
   Größe/MD5/Version), danach Knoten + Testziel wieder entfernen. **Zwei Low-Funde des Verifiers sind
   bewusst offen gelassen** (reine Doku, kein Logikfehler) und stehen in der 2.4-Liste.
-- **Eigenes Paket (beauftragt, läuft nach 2.3b und vor Welle 3): EXIF-loser Upload darf kein Fehler
-  sein.** Ein **erfolgreicher** Upload von `c2.png` liefert gültiges JSON mit `id`/`name`, unser
+- **Eigenes Paket — läuft jetzt (beauftragt, nach 2.3b, vor Welle 3): EXIF-loser Upload darf kein
+  Fehler sein.** Ein **erfolgreicher** Upload von `c2.png` liefert gültiges JSON mit `id`/`name`, unser
   `ResponseUpload` verlangt aber `resolutionUnit` ⇒ serde bricht ab („missing field
   'resolutionUnit'") ⇒ der Lauf meldet **Fehler** statt Erfolg und schreibt **keine** Indexzeile (die
   Datei würde bei jedem Lauf erneut gelesen und gehasht). Betrifft alle EXIF-losen Typen, die
@@ -175,7 +175,8 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   **(a) Application Default** — ✅ **erledigt 2026-10-15** (`db68cff`, Verifier APPROVE, 81 Tests):
   Feld in `Config` (`config.toml`), Radiogruppe in **Einstellungen → Upload**, Default `SaveAsNew`,
   **Vorauswahl beim Anlegen eines Ziels** **und** für die **Einmal-Queue (Drag&Drop)**.
-  **(b) „Nicht noch einmal fragen" pro Ziel — offen (Paket 2.3b):** die Antwort wird in das
+  **(b) „Nicht noch einmal fragen" pro Ziel — ✅ erledigt 2026-10-15 (`a71191b`, Verifier APPROVE,
+  86 Tests):** die Antwort wird in das
   **bestehende** `BackupFolder.conflict_resolution` des **Ordners der gefragten Datei** geschrieben
   (`folders.toml` — kein Schemawechsel, das Feld existiert); **kein Per-Datei-Default**; innerhalb
   des Laufs bleibt der Override **run-weit** (heutiges Verhalten unverändert).
@@ -184,7 +185,13 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   nächsten Drop entscheidet wieder der Application Default. **Die Drop-Liste selbst bleibt davon
   unberührt persistiert** (SQLite `one_time_queue`, Entscheidung 2026-10-14: beim Start
   wiederhergestellt, gelöscht erst nach vollständig abgeschlossenem Lauf) — nicht persistiert wird
-  hier ausschließlich die **Konflikt-Antwort**.
+  hier ausschließlich die **Konflikt-Antwort**. **Umsetzung:** genau **eine** Schreibstelle
+  `remember_conflict_in_folder` (`src/backup.rs:825`) mit drei Guards — One-Time-Index, Index
+  außerhalb des Stores, Datei **nicht** unter dem Ordner (deckt einen mitten im Lauf entfernten
+  Ordner: `FolderStore::remove` **verschiebt** die Indizes); `UploadShared.pending_conflict_idx`
+  und `-path` werden zusammen mit `pending_conflict` unter **einem** Lock gesetzt und auf **jedem**
+  Ausgang geleert. Der Verifier hat unabhängig am Code belegt, dass der Worker-`idx` wirklich der
+  `store.folders`-Index ist, und das Timeout-Race als **theoretisch** eingeordnet.
   Wörtlich: „es soll der ordner default sein, einzelne dateien haben keinen Default. Zusätzlich soll
   es auch einen Application Default geben, der die Standardauswahl bei einem neuen Folder und die
   Drag & Drop Sachen haben das ApplicationDefault."
