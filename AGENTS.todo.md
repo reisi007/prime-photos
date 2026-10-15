@@ -445,7 +445,34 @@ Abschluss von Welle 2 → Clean-Room-Abnahme des Originals → Umsetzer-Briefing
    die volle Fußzeilenbreite und der Text wird nicht mehr geclippt (egui-Default
    `available_size_before_wrap().x`). 133 Tests grün, 0 Warnungen. **Wartet auf Verify + Commit.**
 
-8. **Sichere Ersetz-Regel (User-Entscheidung 2026-10-15, noch nicht implementiert).**
+8. **Klick auf den leeren Bereich darf NICHTS auslösen (User-Auftrag 2026-10-15).**
+   Wortlaut: „Bitte nicht bei Klick auf leeren Sachen den Finder öffnen, nur Drag & Drop von
+   Bildern anbieten, es gibt keine UX dafür bei einem Klick auf den leeren Bereich, dass da was
+   passieren soll."
+   **Spezifikation:** ein Klick in den leeren Bereich (unterhalb der Zielliste, leere Spalten,
+   Seitenleisten-Rand) ist **reines Nichts** — kein Finder, kein Ordner-Panel, keine Aktion.
+   **Einzige** erlaubte Interaktion mit „leerem" Raum bleibt das **Drag & Drop** von Bildern
+   (der Overlay-Hinweis „FOTOS PER DRAG & DROP VERSCHIEBEN", `drop_overlay`, und der
+   `hovered_files`/`dropped_files`-Pfad in `src/app.rs:766-777`) — der bleibt unverändert.
+   **Untersuchungsstand (Code-Suche, noch NICHT reproduziert):** im gesamten `src/` gibt es
+   **genau einen** `Sense::click()` auf einer größeren Fläche: `nav_item` (`src/app.rs:603`) —
+   das ist die Seitenleiste, nicht der leere Bereich. `icons.rs` nutzt nur `Sense::hover()`.
+   Ein Klick-Handler auf dem leeren Bereich existiert im Code also **nicht**.
+   Erreichbarkeitspfade, die Finder/Panel öffnen könnten, sind **ausschließlich**:
+   `FolderAction::OpenFinder` (`src/backup.rs:1719`, nur über das Kebab-Popup „Im Dateimanager
+   anzeigen"), `add_backup_folder()` → `FileDialog::pick_folder()` (`src/backup.rs:1415→1891`,
+   nur über den Button) und `backup_config.rs:59` (Durchsuchen-Button).
+   **Vermutung (belegt durch 1):** was der User als „Finder öffnet" sieht, ist mit hoher
+   Wahrscheinlichkeit **dasselbe Panel wie in Bug 1** — der von `mac-notification-sys` ausgelöste
+   LaunchServices-„Choose Application"-Dialog, der ein Finder-Ähnliches Auswahlfenster zeigt. Er
+   wird vom **Abschluss eines Upload-Laufs** getriggert und trifft (Main-Dispatch-Queue, s. 1)
+   **nach** dem Klick ein — deshalb der Anschein, der Klick habe ihn verursacht. **Konsequenz:**
+   der Fix aus 1 (`notify_rust::mac::set_application` beim Start) muss **zuerst** verifiziert und
+   getestet werden; erst danach ist zu prüfen, ob überhaupt noch etwas auf einen Klick reagiert.
+   Falls ja: den auslösenden Handler finden und entfernen. **Offene Frage an den User** (falls nach
+   dem Fix aus 1 noch reproduzierbar): Seite, exakte Stelle und Screenshot des Panels.
+
+9. **Sichere Ersetz-Regel (User-Entscheidung 2026-10-15, noch nicht implementiert).**
    Anlass: der Default `Replace` überschreibt bei einem **Namenskonflikt mit anderem Inhalt** das
    vorhandene Foto im Konto — Datenverlust. Der User: „nie was oben ist löschen, außer es ist die
    gleiche Datei physisch relativ zum gesicherten Pfad, dann überschreiben".
@@ -459,6 +486,18 @@ Abschluss von Welle 2 → Clean-Room-Abnahme des Originals → Umsetzer-Briefing
    `folders.toml` trägt für „Sport" bereits `conflict_resolution = "saveasnew"` (**kein** Handlungsbedarf);
    `config.toml` hingegen trägt `conflict_resolution_default = "replace"` — das ist unter der neuen
    Regel der falsche Default und wird auf `"saveasnew"` gesetzt.
+
+**Stand der Verify-Runden (2026-10-15, laufend):** Zwei unabhängige Verifier-Subagenten prüfen
+parallel, **bevor** dieser Stopp-Auftrag erging — ihre Ergebnisse werden abgewartet, es wird nichts
+Neues gestartet:
+- **Tray-Fix** (`src/app.rs`, Umsetzer berichtet 3/3 grün: R1 Close-Check nach dem Reconcile,
+  R2 Drop-Branch blendet das Fenster wieder ein über ein neues `window_hidden`-Feld,
+  R3 `tray_build_failed` latched pro Sitzung) → Verifier `ses_ebecc03a2ffeJy8pCC1LJC0QgU`.
+- **Progress-Leiste volle Breite** (`src/backup.rs`, `.desired_width(240.0)` entfernt) →
+  Verifier `ses_ebecc03a1ffet4jwUBDbNO5hCs`.
+**Vorgehen bei Rückmeldung (User-Auftrag „build/verify bis verify ok ist ok"):** APPROVE ⇒ Commit
+(die beiden Änderungen liegen in **getrennten** Commits, da sie getrennte Tasks sind);
+CHANGES REQUIRED ⇒ Fix durch Umsetzer-Subagent → erneuter Verify ⇒ `git commit --amend`.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der
