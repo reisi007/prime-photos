@@ -94,10 +94,3 @@ pub fn secondary_button(text: &str) -> egui::Button<'static> {
         .fill(Color32::from_rgb(0xFA, 0xFB, 0xFB))
         .stroke(Stroke::new(1.0_f32, BORDER))
 }
-
-pub fn card_frame() -> egui::Frame {
-    egui::Frame::new()
-        .fill(CARD_BG)
-        .inner_margin(egui::Margin::same(12))
-        .outer_margin(egui::Margin::same(0))
-}

@@ -845,7 +845,7 @@ pub(crate) async fn run_upload(
     if !name.is_empty() {
         let ids = { shared.lock().unwrap().uploaded_ids.clone() };
         if !ids.is_empty() {
-            let mut up = PrimePhotos::new(&cfg, false);
+            let up = PrimePhotos::new(&cfg, false);
             if let Ok(c) = up.get_album(&name).await {
                 let _ = up.add_to_album(c.id, &ids).await;
             }

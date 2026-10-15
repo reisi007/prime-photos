@@ -3,7 +3,7 @@ use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
 use crate::dedup::DedupIndex;
-use crate::folders::{BackupFolder, ConflictResolution, FolderStatus, FolderStore};
+use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
 use crate::icons::{draw_flag_badge, nav_icon, NavIcon};
 use crate::login;
@@ -343,8 +343,13 @@ impl PrimePhotoApp {
                     path: display_path,
                     name: "Einmalige Sicherung".to_string(),
                     enabled: true,
-                    dedup: true,
-                    conflict_resolution: ConflictResolution::default(),
+                    // App defaults, exactly like a fresh drop
+                    // (`begin_one_time_run`): a restart-restored queue uses the
+                    // same dedup/conflict settings the user configured, not the
+                    // enum default — otherwise a fresh drop and a restored one
+                    // could diverge (e.g. Replace vs. SaveAsNew).
+                    dedup: config.dedup_default,
+                    conflict_resolution: config.conflict_resolution_default,
                     total_files: files.len(),
                     uploaded_files: 0,
                     last_updated: String::new(),

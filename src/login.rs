@@ -141,7 +141,7 @@ impl WebviewLogin {
             return;
         }
 
-        let mut outcome = None;
+        let outcome;
         let mut error = None;
         let mut schedule = false;
         {

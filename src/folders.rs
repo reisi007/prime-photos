@@ -26,6 +26,12 @@ pub fn is_supported_image(path: &Path) -> bool {
 }
 
 /// Extensions for use in native file dialogs.
+///
+/// **Deliberately not wired up yet** and kept on purpose: this is the single
+/// prepared hook for a future native file picker (project rule, see
+/// `AGENTS.md`). No code path calls it today, so it is annotated with
+/// `#[allow(dead_code)]` rather than removed — the picker will read from here.
+#[allow(dead_code)]
 pub fn supported_extensions() -> Vec<&'static str> {
     STANDARD_EXT.iter().chain(RAW_EXT.iter()).copied().collect()
 }
@@ -218,14 +224,6 @@ impl BackupFolder {
             status: FolderStatus::Idle,
         }
     }
-
-    pub fn percent(&self) -> f32 {
-        if self.total_files == 0 {
-            0.0
-        } else {
-            (self.uploaded_files as f32 / self.total_files as f32).clamp(0.0, 1.0)
-        }
-    }
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
@@ -273,12 +271,6 @@ impl FolderStore {
             .filter(|(_, f)| f.enabled)
             .map(|(i, _)| i)
             .collect()
-    }
-
-    pub fn remove(&mut self, path: &Path) -> bool {
-        let before = self.folders.len();
-        self.folders.retain(|f| f.path != path);
-        self.folders.len() != before
     }
 }
 

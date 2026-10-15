@@ -23,7 +23,7 @@ pub(crate) enum NavIcon {
 pub(crate) fn nav_icon(painter: &egui::Painter, kind: NavIcon, rect: egui::Rect, color: Color32) {
     let s = rect.width().min(rect.height());
     let c = rect.center();
-    let stroke = egui::Stroke::new(1.6, color);
+    let stroke = egui::Stroke::new(1.6_f32, color);
     match kind {
         NavIcon::Backup => {
             // Upload arrow into a tray.
