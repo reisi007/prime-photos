@@ -214,7 +214,12 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   „Wortlaut angleichen"), in zwei Paketen.** Bewusste Abweichungen dokumentieren: die
   Client-Vorprüfung des Originals ersetzen wir durch die Server-Antwort (kein Node-Cache), die
   `.heic`-iOS-Heuristik bleibt draußen, und wir fragen **pro Datei** statt im gebündelten Sheet.
-  **2.4a — Code/UI (beauftragt, läuft):**
+  **2.4a — Code/UI — ✅ erledigt 2026-10-15 (`36aee39`, Verifier APPROVE, 95 Tests).** Umsetzung wie
+  unten beschrieben, alle drei Abnahmekriterien erfüllt; der Verifier hat sie per **Mutation in einer
+  TMPDIR-Kopie** belegt (ohne `default_replace` fallen beide Default-Tests, ohne `#[serde(default)]`
+  auf `BackupFolder.conflict_resolution` fällt der `SaveAsNew`-Fallback-Test, die beiden Label-Tests
+  sind in beide Richtungen scharf). **Drei nicht blockierende Funde** → „Offene Befunde" unten.
+  Beauftragt war:
   - **Globaler Dedupe-Default:** neues `Config.dedup_default` (Default **`true`**, serde-Default
     `true`, damit alte `config.toml` lädt), Einstellung in **Einstellungen → Upload**; er ist die
     Vorauswahl beim Anlegen eines Ziels **und** gilt für die Einmal-Queue (Drag&Drop). Bestehende
@@ -248,6 +253,27 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   only in how `id` is treated" ist leicht überzogen. **(j) NEU:** den gebündelten Original-Sheet
   („N Dateinamenkonflikte in …", eine Antwort für alle, Toast) als bewusste Abweichung in §5
   dokumentieren.
+
+  **Zwischenpakete (2026-10-15, nicht Teil der Welle-2-Planung; je eigener Commit):**
+  - **P3-Nits — ✅ `506df58`** (Verifier APPROVE): die aggregierte Fußzeile wird nur noch unter
+    `running || sum_total > 0` gezeichnet — bei laufendem Lauf sichtbar auch ohne Ziele, und ein nie
+    gelaufenes Ziel (0 von 0) zeichnet gar nichts mehr statt „Gesamt: 0 von 0 Dateien"; dazu die
+    Kommentar-Korrektur in `src/app.rs` (`Idle` zeigt denselben „{}% hochgeladen"-Text wie
+    `Uploading`, nur gedämpft). Lock-Disziplin unverändert. Stammt aus einer früheren Session, die
+    erst nach einem Server-Neustart zurückmeldete.
+  - **About-Belegbasis — ✅ `2803aa9`** (Verifier Runde 1 = **CHANGES REQUIRED**, siehe unten):
+    `docs/SPEC_ABOUT.md` behauptete, das `.app`-Bundle sei nicht mehr lesbar und liege nicht mehr
+    unter `/Applications`. **Falsch:** es steht seit **2026-10-14 18:14** wieder dort und ist
+    vollständig lesbar (`11.3.0` / `CommitId 1d7941b5`, 812 Einträge in `Contents/Resources`,
+    Assembly lesbar). Wahr bleibt: `~/.Trash` ist per **TCC** nicht lesbar (und leer — die App liegt
+    nachweislich nicht dort), und ein **neues Decompile** geht derzeit nicht (`ilspycmd` vorhanden,
+    .NET-Runtime fehlt). Die Notiz hätte den nächsten Agenten dazu verleitet, das in `AGENTS.md`
+    vorgeschriebene Zurücklegen des `.app` vor dem Recon zu überspringen — genau der Schaden, den
+    die Regel verhindern will. Korrigiert nach dem Wortlautvorschlag des Verifiers, Zahlen vom
+    Korrektor selbst nachgemessen; Re-Check der Doku im nächsten Verify-Lauf.
+  - **Aufräumpaket (User-Entscheidung 2026-10-15): Warnungen auf null + `app.rs:346`** — siehe
+    „Warnungen" unten. Läuft **vor 2.4b**, damit alle weiteren Wellen gegen eine Null-Warnungs-Baseline
+    messen.
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
@@ -429,8 +455,9 @@ greift **über Pfade hinweg** und ist **persistiert** (`origin = 'content_skip'`
 (2.2/2.2b).
 
 **Offen (Welle 2.4):**
-- [ ] **2.4a Code/UI** (läuft) und **2.4b Doku + zwei Tests** — siehe Wellenplan oben, je mit
-      Abnahmekriterium.
+- [ ] **2.4b Doku + zwei Tests** — siehe Wellenplan oben, je mit Abnahmekriterium. (2.4a ist erledigt:
+      `36aee39`.)
+- [ ] **Aufräumpaket** (Warnungen auf null + `app.rs:346`) — siehe Wellenplan, läuft.
 
 **Verworfen (2026-10-15):** `SaveAsNew` als **Application Default** (galt 2026-10-14 bis 2026-10-15).
 Wer ihn zurückdreht, ändert eine getroffene Entscheidung — heute ist `Replace` die Vorgabe für neue
@@ -442,6 +469,50 @@ merken).
 Geltende Regel (2.3a/2.3b): die Antwort wird in das **bestehende**
 `BackupFolder.conflict_resolution` des Ordners der gefragten Datei geschrieben, plus **Application
 Default** für neue Ziele und Drag&Drop — **kein** Schemawechsel, **kein** Per-Datei-Feld.
+
+**Offene Befunde aus dem 2.4a-Verify (2026-10-15, nicht blockierend):**
+- [ ] **Kein Test deckt die drei Vorbelegungsstellen** (`add_backup_folder`, transiente Einmal-Zeile,
+      `UploadPlan::from_files`): der Verifier hat jede einzeln auf `true` zurückgedreht — alle 95 Tests
+      blieben grün. Ursache: `PrimePhotoApp` braucht egui-Kontext bzw. Datei-Dialog. Ein **reiner
+      Helfer** (z. B. „Config ⇒ (dedup, conflict) für die Einmal-Queue") würde die Entscheidung
+      testbar machen — **noch nicht beauftragt.**
+- [ ] **`src/app.rs:346`** — die nach einem Neustart **wiederhergestellte** Drag&Drop-Zeile wird mit
+      `dedup: true` und `ConflictResolution::default()` (`SaveAsNew`) gebaut statt mit den
+      App-Defaults: ein **frischer** Drop nutzt `Replace`, ein **wiederhergestellter** `SaveAsNew`.
+      Wird mit dem Aufräumpaket behoben (User-Entscheidung 2026-10-15).
+- [ ] **Ein Label-Test prüft deutschen Wortlaut** (`remember_label_names_the_folder` assertiert
+      „-Ordner fragen"): unter `Lang::En` wäre er rot. Unkritisch, solange die Tests mit Deutsch
+      laufen — beim nächsten Anfassen sprachneutral formulieren.
+- [ ] **Das Häkchen-Gating ist eine Stufe großzügiger als das Schreiben:**
+      `remember_checkbox_label` gated nur auf „Store kennt den Index", `remember_conflict_in_folder`
+      zusätzlich auf `file_path.starts_with(&folder.path)`. Im Sonderfall eines verschobenen Index
+      *mit* fremdem Pfad benennt das Häkchen einen Ordner, in den nichts geschrieben würde. Nur dort
+      relevant, bewusst im beauftragten Umfang.
+- [ ] **Toter i18n-Key „Als neue Dateien speichern"** (`src/i18n.rs`): außerhalb der i18n-Tabelle kein
+      `tr`-Aufruf mehr, nur der Doku-Kommentar `src/folders.rs:145` zitiert den alten Wortlaut —
+      Aufräumkandidat zusammen mit den bekannten Doppel-Keys.
+
+**Warnungen (User-Entscheidung 2026-10-15: „jetzt abräumen", Ziel 0 Warnungen):** Die sieben
+Build-Warnungen waren nie angeschaut, nur als Zahl weitergereicht. Bestand:
+1. **`src/icons.rs:26`** — `egui::Stroke::new(1.6, …)`, Lint `float_literal_f32_fallback` ⇒
+   **future incompatible**, wird in einer künftigen Compiler-Version ein **harter Fehler**
+   („will become a hard error in a future release") — das ist der Punkt mit Ablaufdatum; Fix:
+   `1.6_f32`.
+2. `src/upload.rs:848` unnötiges `mut`; 3. `src/login.rs:144` nie gelesener Ausgangswert von
+   `outcome`.
+4.–7. toter Code: `folders.rs:29 supported_extensions()` — **der einzige bewusst behaltene Haken**
+   (laut Projektregel für einen künftigen Datei-Picker vorgesehen: bekommt `#[allow(dead_code)]`
+   **mit** Begründung), `folders.rs:222 BackupFolder::percent()`, `folders.rs:278
+   FolderStore::remove()`, `theme.rs:98 card_frame()`.
+   **Regel für die drei echten Leichen:** entfernen, wenn ein gleichwertiger lebender Pfad existiert
+   (die UI rechnet den Bruch inline; „Trennen" arbeitet mit `retain`) — sonst behalten **mit**
+   Begründung. Nichts still mit `#[allow]` zudecken. Ziel: **Baseline 0 Warnungen**, damit ab hier
+   jede neu entstehende Warnung sofort auffällt statt im Rauschen zu verschwinden.
+
+**Verworfen (2026-10-15):** die sieben Warnungen pauschal mit `#[allow(...)]` stumm stellen — das
+beseitigt das Rauschen, versteckt aber genau die toten Funktionen, um die es geht. Ebenfalls
+verworfen: nur die future-incompatible Warnung zu fixen und die Baseline bei sechs zu lassen (der
+User wollte 0 als neue Vergleichsbasis).
 
 ## Offene Kandidaten derselben Absturzklasse (2026-10-14) — **ungeprüft**
 

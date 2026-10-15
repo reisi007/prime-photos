@@ -481,8 +481,15 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
     (sonst SmartScreen-Hinweis); Linux: keine Signatur. Details: `docs/RELEASE.md`.
 - **Spec-first pro Feature (User-Entscheidung 2026-10-13):** Vor jeder Implementierung wird das
   Original-Binary (`/Applications/Amazon Photos.app`: .NET-DLL + Ressourcen, nur lesend) zum
-  jeweiligen Feature untersucht — **Achtung (2026-10-14): liegt derzeit im Papierkorb** (der Shell
-  kann ihn nicht lesen, macOS-TCC); vor jedem Recon zurücklegen, sonst laufen die Aufträge ins Leere.
+  jeweiligen Feature untersucht — **Status 2026-10-15: es liegt wieder unter `/Applications` und ist
+  vollständig lesbar** (`CFBundleShortVersionString = 11.3.0`, `CommitId = 1d7941b5`, 812 Einträge in
+  `Contents/Resources`, `Contents/MonoBundle/Amazon Photos.dll` lesbar). Die frühere Warnung „liegt
+  derzeit im Papierkorb" (2026-10-14) war **falsch** — wahr ist nur, dass `~/.Trash` per **TCC** nicht
+  lesbar und leer ist. **Ein neues Decompile geht derzeit nicht:** `ilspycmd` liegt in
+  `~/.dotnet/tools`, die .NET-Runtime fehlt („You must install .NET to run this application") — die
+  Specs stützen sich daher auf die dekompilierte Assembly und die zuvor gesicherten
+  Ressourcen-Dumps. Vor jedem Recon also **prüfen**, ob das Bundle am dokumentierten Ort liegt,
+  sonst laufen die Aufträge ins Leere.
   Das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten
   (beobachtetes Verhalten in eigenen Worten/Tabellen, keine verbatimen Code-Auszüge, keine
   Personendaten) — analog zu `docs/UI_FLOWS.md` / `docs/UI_STATES.md`. Erst danach Umsetzer-Briefing.
@@ -515,3 +522,10 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
 - Project / git repo name: **Prime Photos** (directory `prime-photos`).
 - Git repository initialized on main.
 - Build: `cargo build` / `cargo build --release`.
+- **Warnungs-Baseline: `0`** (User-Entscheidung 2026-10-15; das Aufräumpaket stellt sie her, siehe
+  Ledger). Sechs der sieben damaligen Warnungen waren toter Code bzw. Kosmetik, eine war
+  `float_literal_f32_fallback` in `src/icons.rs` — **future incompatible**, in einer künftigen
+  Compiler-Version ein harter Fehler. Ab hier gilt: **jede neue Build-Warnung ist ein Rückschritt**
+  und wird im selben Task behoben; nichts wird pauschal mit `#[allow]` zugedeckt. Einzige Ausnahme:
+  ein **bewusst** vorbereiteter Haken **mit** Begründung — heute `folders::supported_extensions()`
+  (für einen künftigen Datei-Picker).
