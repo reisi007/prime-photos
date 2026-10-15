@@ -684,8 +684,21 @@ Inhalt liegt schon im Konto) und das Ordner-Wasserzeichen gelöscht, damit die K
 - **2.2 „Ersetzen" reparieren** (`prime_photos.rs`, `urls.rs`): heute `OVERWRITE` ⇒ **404**, die
   Option ist **kaputt** (live belegt). Korrekt: `POST(NONE)` ⇒ 409 ⇒ `conflict_node_id()` ⇒
   `PUT /v2/upload/<nodeId>` (live: 200, In-place-Tausch).
-- **2.3 „Nicht noch einmal fragen" pro Ziel persistieren** (`folders.rs`, `backup_config.rs`, Schema):
-  heute gilt es nur für den laufenden Lauf.
+- **2.3 Konflikt-Standard in drei Ebenen** (User-Entscheidung 2026-10-15; in **zwei** Paketen, weil
+  UI/Config und Worker-Persistenz getrennt verifizierbar sind):
+  **(a) Application Default** — neues Feld in `Config` (`config.toml`), Dropdown in
+  **Einstellungen → Upload**, Default `SaveAsNew`; ist die **Vorauswahl beim Anlegen eines Ziels**
+  **und** gilt für die **Einmal-Queue (Drag&Drop)**. **(b) „Nicht noch einmal fragen"** schreibt die
+  Antwort in `BackupFolder.conflict_resolution` des **Ordners der gefragten Datei**
+  (`folders.toml` — kein Schemawechsel, das Feld existiert); **kein Per-Datei-Default**; innerhalb
+  des Laufs bleibt der Override **run-weit** (heutiges Verhalten unverändert).
+  Wörtlich: „es soll der ordner default sein, einzelne dateien haben keinen Default. Zusätzlich soll
+  es auch einen Application Default geben, der die Standardauswahl bei einem neuen Folder und die
+  Drag & Drop Sachen haben das ApplicationDefault."
+  Abnahme je Paket: (a) ein neues Ziel übernimmt den App-Default, Drag&Drop nutzt ihn, eine alte
+  `config.toml` lädt weiter (serde-Default); (b) nach „Ersetzen" + Häkchen steht
+  `conflict_resolution = "replace"` im Ordner und der **nächste** Lauf fragt dort nicht mehr, während
+  ein zweiter Ordner weiterhin fragt.
 - **2.4 Rest laut `docs/SPEC_CONFLICT_OPTIONS.md`** — jede Variante mit Abnahmekriterium; bewusste
   Abweichungen dokumentieren: die Client-Vorprüfung des Originals ersetzen wir durch die
   Server-Antwort (kein Node-Cache), die `.heic`-iOS-Heuristik bleibt draußen.
