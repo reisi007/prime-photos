@@ -252,11 +252,22 @@ selbstsigniertes `.app` (war die erste Teilantwort des Users).
   Startpfad. Außerdem Maschinen-DNS prüfen (öffentliche Resolver 1.1.1.1/8.8.4.4/8.8.8.8 hinter dem
   10.x-LAN flackerten; ggf. Router-DNS statt Public-Resolvers).
 
-- [x] **Modellwechsel Implementierer/Verifier (User-Entscheidung 2026-10-14):** beide Rollen nutzen jetzt
-  `opencode-go/deepseek-v4.1-flash` (kein `#variant`), frisch pro Task bzw. pro Verify-Runde. Ersetzt
-  `opencode-go/step-5-preview-free` (das seinerseits `opencode-go/deepseek-v4.1-flash#high` abgelöst
-  hatte). Belegter Registry-Stand: `status: active`, Kosten 0,15/0,60 $ je 1M Token, Varianten
-  low/high/max — bewusst ungenutzt.
+- [x] **Modellwechsel Implementierer/Verifier (User-Entscheidung 2026-10-14) — ZURÜCKGENOMMEN
+  2026-10-15:** lief einen Tag auf `opencode-go/deepseek-v4.1-flash` (kein `#variant`), frisch pro Task
+  bzw. pro Verify-Runde. Ersetzt `opencode-go/step-5-preview-free` (das seinerseits
+  `opencode-go/deepseek-v4.1-flash#high` abgelöst hatte). Belegter Registry-Stand: `status: active`,
+  Kosten 0,15/0,60 $ je 1M Token, Varianten low/high/max — bewusst ungenutzt. **Nicht** als Fehler
+  korrigiert: der User hat nur einen Tag später wieder zurückgestellt.
+
+- [x] **Zurück auf `step-5-preview-free` für Subagenten (User-Entscheidung 2026-10-15, „ab jetzt wieder
+  step 5 preview für subagenten nutzen"):** Umsetzer **und** Verifier laufen wieder auf
+  `opencode-go/step-5-preview-free` (kein `#variant`), frische Session pro Task bzw. pro Runde.
+  Begründung des Users nicht angegeben — reine Rückkehr zum vorherigen Stand; der deepseek-Ausflug ist
+  damit verworfen (steht auch im Abschnitt „Verworfen" dieses Ledgers). Das Projekt steht damit wieder
+  auf **derselben** Modellvorgabe wie die globale Config („ein Modell für alle Rollen",
+  `namespaceRule: opencode-go-free-single`). **Konsequenz:** Subagenten-Briefings enthalten wie gehabt
+  **keine** Live-Werte (Cookies, Account-Parameter, Probe-Payloads) — Live-Probes macht nur der
+  Hauptagent.
 
 ## Upload-Queue (User-Entscheidung 2026-10-13)
 
@@ -1258,3 +1269,4 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
 - Standalone paste-only login: superseded by CDP browser login (paste stays as fallback).
 - **Avatar-Thumbnail per Raten/Probieren (2026-10-14, verworfen):** `/drive/v1/nodes/{id}/content` (mit und ohne `tempLink=true`), `/drive/v1/nodes/{id}/thumbnail` (mit `width`/`height`/`transform`), `/drive/v1/nodes/{id}/transforms/IMAGE_THUMBNAIL` (mit und ohne `?tempLink=true`) sowie `/drive/v1/nodes/{id}/content?transform=IMAGE_THUMBNAIL&tempLink=true` — **alle HTTP 404**. Der Parameter `?transform=IMAGE_THUMBNAIL` wird **ignoriert** (der `tempLink` liefert weiterhin die Rohdatei). Das `transforms: ["IMAGE_THUMBNAIL"]` eines Suchtreffers ist eine **Deklaration**, keine URL. Stattdessen belegbar über das Assembly (`GetSmartCroppedThumbnail`/`GetThumbnailUrl`) — Recon läuft, siehe Welle 3.
 - **Avatar lokal dekodieren/schneiden (2026-10-14, verworfen):** der Avatar-Quellknoten kann ein RAW sein (bei diesem Konto ein Canon CR3, 13,5 MB) — die `image`-Crate kann kein CR3. Der 60×60-Crop muss daher **serverseitig** passieren (wie im Original), nicht bei uns.
+- **`deepseek-v4.1-flash` als Umsetzer-/Verifier-Modell (2026-10-14 gesetzt, 2026-10-15 zurückgenommen):** lief genau einen Tag, ohne dass ein Fehler oder Gate daran schuld war — der User hat schlicht wieder zurückgestellt („ab jetzt wieder step 5 preview für subagenten nutzen"). Gültig sind damit wieder `opencode-go/step-5-preview-free` für **beide** Rollen, dieselbe Vorgabe wie global. Nicht „reparieren": ein erneuter Wechsel auf ein Gratis-/Billig-Modell für Subagenten braucht eine **neue** User-Entscheidung, nicht den alten Eintrag.

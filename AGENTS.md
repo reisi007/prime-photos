@@ -402,12 +402,17 @@ Body — live belegt), der Weg des Originals ist `PUT /v2/upload/<nodeId>?confli
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
-- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash` (User-Entscheidung
-  2026-10-14; löst `opencode-go/step-5-preview-free` ab, das wiederum `opencode-go/deepseek-v4.1-flash#high`
-  ersetzt hatte) — bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
-  **Kein `#variant`-Suffix** (deepseek-v4.1-flash wirbt low/high/max; bewusst ungenutzt, siehe globale
-  Modellvorgaben).
-- **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/deepseek-v4.1-flash`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
+- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/step-5-preview-free` (User-Entscheidung
+  2026-10-15, „ab jetzt wieder step 5 preview für subagenten" — die `deepseek-v4.1-flash`-Runde vom
+  2026-10-14 ist damit **zurückgenommen**; sie war kein Fehler, nur eine User-Wahl, die wieder
+  entfallen ist) — bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
+  **Kein `#variant`-Suffix** (step-5-preview-free wirbt low/medium/high; bewusst ungenutzt, siehe
+  globale Modellvorgaben).
+- **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/step-5-preview-free`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
+  **Konsequenz des Gratis-Modells (seit 2026-10-15 wieder gültig):** Briefings an Subagenten enthalten
+  **keine** Live-Werte (Cookies, Account-Parameter, Probe-Payloads) — Live-Probes gegen das
+  Amazon-Konto laufen ausschließlich über den Hauptagent. Damit steht das Projekt wieder auf
+  **derselben** Modellvorgabe wie die globale Config („ein Modell für alle Rollen").
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
 - **CI/Release (User-Entscheidung 2026-10-13, hebt „Kein Push, kein CI" auf):** Ziel ist ein
   öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).
