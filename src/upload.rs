@@ -580,6 +580,10 @@ pub(crate) async fn upload_worker(
             s.conflict_override.unwrap_or(conflict)
         };
         let mut existing_conflict_id: Option<String> = None;
+        // The 409 cause (server `errorCode`, from the marker), so the outcome
+        // can tell a content duplicate ("bereits im Konto", nothing sent from
+        // this path) from a name conflict ("vorhanden", different content).
+        let mut conflict_cause: Option<String> = None;
         let outcome = loop {
             match uploader
                 .upload_picture(&path, Some(&bytes), Some(&md5sum), resolution)
@@ -590,6 +594,7 @@ pub(crate) async fn upload_worker(
                     let Some(existing) = crate::prime_photos::conflict_node_id(&e) else {
                         break FileOutcome::Failed(e);
                     };
+                    conflict_cause = crate::prime_photos::conflict_cause(&e).map(str::to_owned);
                     if resolution != ConflictResolution::Ask {
                         // "Ignorieren": the file is already on the server.
                         existing_conflict_id = Some(existing.to_string());
@@ -682,11 +687,33 @@ pub(crate) async fn upload_worker(
                 // the file is already on the server. Finished and dedup-friendly
                 // — not an error, and no bytes were transferred.
                 //
-                // Record it in the local MD5 index like a real upload: without
-                // this, every later run would read, hash and re-send the whole
-                // file just to get the same 409 again — exactly the wasted
-                // bandwidth this whole path exists to avoid.
-                dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
+                // Which 409 it was decides *how* it enters the local MD5 index
+                // (the worker still needs it there: without an entry, every
+                // later run would read, hash and re-send the whole file just to
+                // get the same 409 again — exactly the wasted bandwidth this
+                // whole path exists to avoid):
+                //
+                // - `DuplicatesConflictError`/`MD5_DUPLICATE` = content
+                //   duplicate: nothing was ever uploaded *from this path*, so it
+                //   must keep reading "bereits im Konto" (`Origin::ContentSkip`).
+                //   Recording it as a real upload was a bug — the next run then
+                //   reported "unverändert" for a path that never uploaded
+                //   anything.
+                // - `NameAlreadyExists` (and anything unknown/empty) = name
+                //   conflict with *different* content: the existing behaviour
+                //   (`Origin::Uploaded`) stands — here the path itself was
+                //   accepted as present.
+                let content_duplicate = conflict_cause
+                    .as_deref()
+                    .is_some_and(crate::prime_photos::is_content_duplicate_code);
+                {
+                    let dedup = dedup.lock().unwrap();
+                    if content_duplicate {
+                        dedup.record_content_skip(&path, &md5sum, size, mtime);
+                    } else {
+                        dedup.record_upload(&path, &md5sum, size, mtime);
+                    }
+                }
                 let mut s = shared.lock().unwrap();
                 s.done += 1;
                 s.conflict_skipped += 1;
@@ -704,10 +731,19 @@ pub(crate) async fn upload_worker(
                 }
                 s.bytes_done = s.bytes_done.saturating_add(size);
                 s.touch_queue();
-                s.log(tr1(
-                    "Vorhanden, übersprungen: {}",
-                    crate::text::nfc(&path.display().to_string()),
-                ));
+                if content_duplicate {
+                    // Same cause and same wording as the local cross-path
+                    // content dedup above.
+                    s.log(tr1(
+                        "Bereits im Konto, nur umbenannt: {}",
+                        crate::text::nfc(&path.display().to_string()),
+                    ));
+                } else {
+                    s.log(tr1(
+                        "Vorhanden, übersprungen: {}",
+                        crate::text::nfc(&path.display().to_string()),
+                    ));
+                }
             }
         }
         if requeued {
@@ -850,6 +886,35 @@ mod tests {
         assert!(!text.contains("0"), "zero category leaked: {text}");
         assert!(text.contains(tr1("{} neu hochgeladen", 1).as_str()));
         assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
+    }
+
+    #[test]
+    fn the_conflict_cause_decides_the_index_origin() {
+        // Pins the `ConflictSkipped` branch without any network: a content
+        // duplicate (nothing was ever uploaded from this path) must take the
+        // content-skip marker, everything else the plain upload entry.
+        let decode = |err: &str| {
+            crate::prime_photos::conflict_cause(err)
+                .is_some_and(crate::prime_photos::is_content_duplicate_code)
+        };
+        assert!(decode(&crate::prime_photos::conflict_error(
+            "DuplicatesConflictError",
+            "N1"
+        )));
+        assert!(decode(&crate::prime_photos::conflict_error(
+            "MD5_DUPLICATE",
+            "N1"
+        )));
+        assert!(!decode(&crate::prime_photos::conflict_error(
+            "NameAlreadyExists",
+            "N1"
+        )));
+        // Unknown or empty cause must behave like a name conflict.
+        assert!(!decode(&crate::prime_photos::conflict_error("", "N1")));
+        assert!(!decode(&crate::prime_photos::conflict_error(
+            "SomethingElse",
+            "N1"
+        )));
     }
 }
 

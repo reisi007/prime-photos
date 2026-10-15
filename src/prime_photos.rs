@@ -275,19 +275,52 @@ const UPLOAD_BACKOFF_BASE_MS: u64 = 500;
 /// Upper bound for any single backoff / `Retry-After` sleep.
 const UPLOAD_BACKOFF_MAX_MS: u64 = 8_000;
 
-/// Marker prefix for a name conflict reported by the upload endpoint (HTTP 409,
+/// Marker prefix for an upload conflict reported by the upload endpoint (HTTP 409,
 /// `docs/SPEC_DEDUP.md` §4.1). The upload worker resolves it per the folder's
 /// policy — skip for `Ignore`, ask the user per file for `Ask`.
 pub(crate) const CONFLICT_PREFIX: &str = "\u{1}conflict\u{1}";
+/// Separator between the server's `errorCode` and the node id inside the
+/// marker. The whole marker is a transient `Err(String)` from `upload_picture`
+/// and is never persisted, so the format can carry both parts safely.
+const CONFLICT_CAUSE_SEP: char = '\u{2}';
 
-/// Build the conflict marker carrying the id of the node already on the server.
-pub(crate) fn conflict_error(existing_node_id: &str) -> String {
-    format!("{CONFLICT_PREFIX}{existing_node_id}")
+/// Build the conflict marker carrying the server's `errorCode` (the 409 cause,
+/// e.g. `DuplicatesConflictError` or `NameAlreadyExists`) and the id of the
+/// node already on the server (empty when the response named none).
+pub(crate) fn conflict_error(code: &str, existing_node_id: &str) -> String {
+    format!("{CONFLICT_PREFIX}{code}{CONFLICT_CAUSE_SEP}{existing_node_id}")
 }
 
 /// `Some(existing_node_id)` when `err` is a conflict marker, else `None`.
 pub(crate) fn conflict_node_id(err: &str) -> Option<&str> {
-    err.strip_prefix(CONFLICT_PREFIX)
+    let rest = err.strip_prefix(CONFLICT_PREFIX)?;
+    Some(match rest.split_once(CONFLICT_CAUSE_SEP) {
+        Some((_, id)) => id,
+        // No cause separator: the whole remainder is the node id.
+        None => rest,
+    })
+}
+
+/// The 409 cause (the response's `errorCode`) when `err` is a conflict
+/// marker, else `None`. The code is empty when the marker carries none.
+pub(crate) fn conflict_cause(err: &str) -> Option<&str> {
+    let rest = err.strip_prefix(CONFLICT_PREFIX)?;
+    Some(match rest.split_once(CONFLICT_CAUSE_SEP) {
+        Some((code, _)) => code,
+        None => "",
+    })
+}
+
+/// True when a 409 `errorCode` means "the file's content is already in the
+/// account" (an MD5 duplicate, possibly under a different path) — as opposed
+/// to a name conflict where the content is *not* there. Compared
+/// case-insensitively: the vocabulary appears both as
+/// `DuplicatesConflictError`/`MD5_DUPLICATE` and in other spellings. Anything
+/// unknown or empty counts as *no* content duplicate.
+pub(crate) fn is_content_duplicate_code(code: &str) -> bool {
+    let code = code.trim();
+    code.eq_ignore_ascii_case("DuplicatesConflictError")
+        || code.eq_ignore_ascii_case("MD5_DUPLICATE")
 }
 
 /// Flatten an error together with its whole `source()` chain into one line, so
@@ -1018,10 +1051,13 @@ impl PrimePhotos {
             let status_code = response.status().as_u16();
             debug!("Upload failed on status code {}", status_code);
             match status_code {
-                // A name conflict. Who resolves it is the caller's business:
-                // `upload_worker` treats it as "already there" for `Ignore`, or
-                // asks the user per file for `Ask` (docs/SPEC_DEDUP.md §4.1).
-                // The marker carries the existing node id.
+                // An upload conflict (HTTP 409). Who resolves it is the
+                // caller's business: `upload_worker` treats it as "already
+                // there" for `Ignore`, or asks the user per file for `Ask`
+                // (docs/SPEC_DEDUP.md §4.1). The marker carries the server's
+                // `errorCode` — so the worker can tell a content duplicate
+                // (`DuplicatesConflictError`) from a name conflict
+                // (`NameAlreadyExists`) — plus the existing node id.
                 409 => {
                     let body = match response.json::<ResponseUploadFail>().await {
                         Ok(v) => v,
@@ -1033,7 +1069,7 @@ impl PrimePhotos {
                         .first()
                         .cloned()
                         .unwrap_or_default();
-                    return Err(conflict_error(&existing));
+                    return Err(conflict_error(&body.error_code, &existing));
                 }
                 _ => {
                     // Check for authentication errors
@@ -1203,5 +1239,43 @@ mod tests {
         ]));
         assert!(!looks_like_image(b"not an image"));
         assert!(!looks_like_image(&[]));
+    }
+
+    #[test]
+    fn conflict_marker_round_trips_code_and_node_id() {
+        let err = conflict_error("DuplicatesConflictError", "NODE123");
+        assert_eq!(conflict_node_id(&err), Some("NODE123"));
+        assert_eq!(conflict_cause(&err), Some("DuplicatesConflictError"));
+    }
+
+    #[test]
+    fn conflict_marker_keeps_an_empty_node_id() {
+        // The server sent `conflictNodeIds` with no usable entry.
+        let err = conflict_error("NameAlreadyExists", "");
+        assert_eq!(conflict_node_id(&err), Some(""));
+        assert_eq!(conflict_cause(&err), Some("NameAlreadyExists"));
+    }
+
+    #[test]
+    fn a_plain_error_has_no_conflict_code_or_node_id() {
+        assert_eq!(conflict_node_id("plain: connection reset"), None);
+        assert_eq!(conflict_cause("plain: connection reset"), None);
+    }
+
+    #[test]
+    fn content_duplicate_codes_are_recognised_case_insensitively() {
+        assert!(is_content_duplicate_code("DuplicatesConflictError"));
+        assert!(is_content_duplicate_code("duplicatesconflicterror"));
+        assert!(is_content_duplicate_code("DUPLICATESCONFLICTERROR"));
+        assert!(is_content_duplicate_code("MD5_DUPLICATE"));
+        assert!(is_content_duplicate_code("md5_duplicate"));
+    }
+
+    #[test]
+    fn name_conflicts_unknown_and_empty_codes_are_not_content_duplicates() {
+        assert!(!is_content_duplicate_code("NameAlreadyExists"));
+        assert!(!is_content_duplicate_code("NAME_ALREADY_EXISTS"));
+        assert!(!is_content_duplicate_code(""));
+        assert!(!is_content_duplicate_code("SomethingElse"));
     }
 }

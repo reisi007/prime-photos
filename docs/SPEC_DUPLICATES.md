@@ -229,7 +229,9 @@ not produce a 409 at all.
 > yields a **409 even with `RENAME`** (live proven) — `SaveAsNew` avoids a *name* clash,
 > not a *content* duplicate. Our default is now **`SaveAsNew`** (was `Ignore`). The
 > local cross-path MD5 check (`DedupIndex::content_seen`) demotes that 409 to a safety
-> net. See AGENTS.md.
+> net; if it does fire, the worker reads the cause and records the path as
+> `uploads.origin = 'content_skip'` — "bereits im Konto", like the local skip, not
+> "unverändert" (2026-10-15). See AGENTS.md.
 
 **Per conflict option:**
 
@@ -261,11 +263,11 @@ server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSki
 | **Global dedup default setting** | `EnableDeduplicationForPhotosAndVideos` in preferences, seeds new backups | **Missing** — each new folder starts `dedup = true` hard-coded | **S** | Optional. Only worth it if a preferences screen lands; a single config field + default for new folders. |
 | **Global conflict setting** | **Does not exist** | We also have none | — | **No change** — parity already. |
 | **Name conflict detected client-side** | Via `cloud.db` name+parent lookup, before upload | **Missing** — we only learn of it from the server 409 | **L** | Not worth it without a local node cache (we have none by design, AGENTS.md). Our 409-driven path is the pragmatic equivalent. |
-| **409 cause split (MD5-match vs NameAlreadyExists)** | Split: MD5 → Ignored; NameAlreadyExists → `FileConflict` error | **Missing** — any 409 becomes `ConflictSkipped`; we do not read `ErrorType` | **S** | Read `ErrorType` (`MD5_DUPLICATE`/`DuplicatesConflictError` vs `NameAlreadyExists`) and only skip on the former; otherwise surface a name-conflict error. Avoids silently "skipping" a same-name-different-content file. |
+| **409 cause split (MD5-match vs NameAlreadyExists)** | Split: MD5 → Ignored; NameAlreadyExists → `FileConflict` error | **Implemented** (2026-10-15) — the marker carries the response's `errorCode` (`src/prime_photos.rs` `conflict_cause`); `DuplicatesConflictError`/`MD5_DUPLICATE` (case-insensitive) still skip, but enter the index as `Origin::ContentSkip`; `NameAlreadyExists`/unknown keep the old `record_upload` | — | **Done.** A content duplicate was never uploaded *from that path*, so it must keep reading "bereits im Konto" instead of degrading to "unverändert" on the next run. |
 | **`Replace` wire value** | `overwrite = true` + existing `nodeId`; wire enum has no `OVERWRITE` | We send `conflictResolution=OVERWRITE` | **S** | Verify `OVERWRITE` is accepted by our cookie endpoint; if not, adopt the overwrite+nodeId form. Flagged in SPEC_DEDUP §7 / open point. |
 | **Per-media dedup (Photos only / Videos only)** | Enum exists, UI never exposes it | none | — | **No change** — deliberately not exposed by the original either. |
 | **Apple Photos `.heic` JPEG-BOM heuristic** | Present (iOS-duplicate guard) | **Missing** | **L** | **Out of scope** — only meaningful for an Apple Photos library import, which is out of MVP (AGENTS.md "Scope-Grenzen"). |
-| **Dedup state after a 409** | Node cached, record `Ignored` | We `record_upload` on `ConflictSkipped` so the next scan skips cheaply | — | **Keep** — our behaviour is the equivalent and avoids a repeat 409. |
+| **Dedup state after a 409** | Node cached, record `Ignored` | `record_upload` on `ConflictSkipped` so the next scan skips cheaply — **except** a content duplicate (`DuplicatesConflictError`), which is remembered as `content_skip` (2026-10-15) | — | **Keep** — our behaviour is the equivalent and avoids a repeat 409; the origin split keeps the two outcomes ("unverändert" vs "bereits im Konto") honest. |
 | **Interactive prompt trigger** | Client-side `FileConflict` error + per-schedule modal | Server 409 + per-run prompt | — | **Keep** (see "name conflict detected client-side"). |
 | **"Don't ask again" scope** | Per **schedule**, persisted in `schedules.conflict_resolution` | Per **run**, in-memory (`conflict_override`) | **S** | Persist the answer to the folder when "nicht noch einmal fragen" is checked (write `conflict_resolution`), matching the original. Post-MVP is fine; AGENTS.md already keeps the breakdown in memory only. |
 
@@ -276,11 +278,7 @@ import path, per-media dedup flags. These are documented boundaries, not oversig
 
 ## 6. UNKNOWN
 
-* **Our cookie endpoint's 409 `ErrorType` vocabulary.** The original's device/router
-  flow uses `MD5_DUPLICATE` / `DuplicatesConflictError` / `NameAlreadyExists`. Whether
-  our `content-<zone>.drive.amazonaws.com/v2/upload` cookie flow returns the same
-  strings (and which one for a pure name conflict) is **unverified** — needs a live
-  probe.
+* **~~Our cookie endpoint's 409 `ErrorType` vocabulary~~ — solved (2026-10-15, live probe).** `DuplicatesConflictError` (content duplicate) and `NameAlreadyExists` (name conflict) both occur on our cookie flow, each with `errorDetails.conflictNodeIds`. `MD5_DUPLICATE` (the original's other spelling) is handled defensively. Split implemented in `src/prime_photos.rs` / `src/upload.rs`, see `docs/SPEC_CONFLICT_OPTIONS.md` §4.2.
 * **`conflictResolution=OVERWRITE` acceptance.** Our `Replace` assumes this value; the
   original never sends it (it overwrites via `nodeId`). Unverified against our flow.
 * **Whether `GetNodeByMd5` dedup is gated by any additional server-side flag** beyond
