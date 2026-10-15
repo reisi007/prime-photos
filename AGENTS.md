@@ -476,6 +476,18 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
 
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)
 
+- **Strikt (User-Regel 2026-10-15):** Jede TODO-Umsetzung läuft **ausschließlich** über den
+  Build-Verify-Loop — der Orchestrator editiert **keine** `src/`-Datei, auch nicht „mal eben".
+  Anlass: am 2026-10-15 wurden drei `src/`-Dateien (`settings.rs`, `login.rs`, `i18n.rs`) direkt
+  vom Hauptagenten editiert, statt sie zu delegieren — die Änderungen wurden zurückgenommen und
+  über den Loop neu umgesetzt.
+  Je Task: **(1)** Umsetzer-Subagent (frische Session) mit Ziel-Dateien + vollständiger
+  Spezifikation; **(2)** `cargo build` grün, Ausgabe zitieren; **(3)** **unabhängiger**
+  Verifier-Subagent (andere Session) prüft die **Substanz** — Diff gegen Auftrag, Invarianten,
+  Blast Radius; **(4)** Commit **nach jeder** Verify-Runde, unabhängig vom Verdikt. Bei
+  „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`. Der Orchestrator darf
+  **lesen/untersuchen** (Code, Logs, Original-Binary) und schreibt nur `AGENTS.md`,
+  `AGENTS.todo.md`, `AGENTS.skills.md`.
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
 - **Umsetzer:** `general`-Subagent mit Modell `opencode-go/step-5-preview-free` (User-Entscheidung
   2026-10-15, „ab jetzt wieder step 5 preview für subagenten" — die `deepseek-v4.1-flash`-Runde vom

@@ -371,20 +371,37 @@ bleibt dokumentiert, nicht eingeplant).
   Schlüsselbund.
 
 **Offene Punkte aus der Live-Abnahme (2026-10-15):**
-- **Entscheidung offen — Webview-Cookie-Speicher beim Abmelden:** „Abmelden" löscht unser Sessionmaterial
-  (Access-Token, vier Cookies, Schlüsselbund-Refresh-Token) und ruft `/auth/deregister`, **aber nicht**
-  den Cookie-Speicher des eingebetteten WKWebView (`~/Library/HTTPStorages/prime-photos.binarycookies`,
-  zuletzt geändert beim Login). Amazons Browser-Sitzung bleibt auf der Platte — deshalb brauchte die
-  Anmeldung **nach** dem Abmelden **kein 2FA**. Das Original **leert** den Speicher bei **jedem
-  Login-Start** (`docs/SPEC_LOGIN.md` § 3.3). wry 0.57 bietet `with_incognito(true)` (macOS:
-  **nonPersistent** DataStore ⇒ nie etwas auf der Platte) oder `with_data_store_identifier` +
-  `WebViewExtDarwin::remove_data_store` (benannter Speicher, gezielt löschbar). **Noch zu entscheiden.**
-- **UI-Punkte (offen, aus dem Live-Screenshot):**
-  1. **Button-Hintergründe inkonsistent:** Play/Pause in der Zeile ist ein nacktes Icon **ohne** Rahmen,
-     Refresh + Kebab sind `Button::image` **mit** Rahmen; auch die Kopfzeilen-Buttons („Datensicherung
-     hinzufügen …", „Alle Sicherungsvorgänge anhalten") haben einen Hintergrund. Vereinheitlichen.
-  2. **Kebab-Popup zu schmal:** `popup_below_widget` (backup.rs ~1701) ohne Mindestbreite ⇒ der Text
-     („Im Dateimanager anzeigen" …) bricht **zeichenweise** um. `ui.set_min_width(...)` im Popup setzen.
+**Entschieden (User 2026-10-15) — Umsetzung beauftragt (Build-Verify-Loop):**
+- **Webview-Cookie-Speicher bei jedem Login-Start leeren** (wie das Original, `docs/SPEC_LOGIN.md`
+  § 3.3): der Cookie-/Cache-Speicher des eingebauten WKWebView wird **bei jedem Öffnen des
+  Login-Webviews** geleert, **vor** dem Laden der Anmeldeseite. Umsetzung: `WebViewBuilder` **ohne**
+  `with_url` bauen, `WebView::clear_all_browsing_data()` rufen (wry; macOS:
+  `WKWebsiteDataStore.removeData…` über **alle** Datentypen, `modifiedSince` 1970), dann
+  `WebView::load_url(url)`. **Verworfen** (bewusst): `with_incognito(true)` (nonPersistent DataStore)
+  und ein benannter DataStore via `with_data_store_identifier` + `remove_data_store`. Grund für die
+  Entscheidung: „Abmelden" löscht nur **unser** Sessionmaterial (Access-Token, vier Cookies,
+  Schlüsselbund-Refresh-Token, `/auth/deregister`) — Amazons Browser-Sitzung in
+  `~/Library/HTTPStorages/prime-photos.binarycookies` überlebte bisher und ließ die nächste
+  Anmeldung **ohne 2FA** durchlaufen.
+- **Zeilen-Icons ohne Rahmen:** Kebab + Refresh bekommen `.frame(false)` wie Play/Pause
+  (Original-Look, User: „alle ohne Rahmen").
+- **Kebab-Popup-Mindestbreite:** `popup_below_widget` (backup.rs) erbt die Breite seines
+  Eltern-Widgets (das ~26 px breite Kebab-Icon) und bricht den Text zeichenweise um ⇒
+  `ui.set_min_width(220.0)` + `ui.style_mut().wrap_mode = Some(TextWrapMode::Extend)` im Popup.
+- **Anmelde-Block in den Einstellungen entfällt ganz:** Anmelden passiert automatisch (Start-Gate →
+  Haupt-UI; der Geräte-Weg läuft nur, wenn er muss), Abmelden liegt im Konto-Block der Seitenleiste,
+  und der Login ist unser eigener Geräte-Weg. Der alte Text („Die Cookies werden automatisch
+  übernommen") beschrieb einen entfernten Pfad. Die dadurch tote i18n-Zeile wird mitentfernt.
+
+**Offen (nicht beauftragt) — macOS-Dialog „Where is use_default?" beim Resync (2026-10-15):**
+Beim Neu-Scannen erschien ein macOS-Panel „Choose Application — Where is use_default?". **Befund:**
+der String `use_default` steht **weder** in unserem Repo **noch** in irgendeiner Cargo-Registry-Quelle
+(beide durchsucht) — es ist also kein Text von uns, sondern ein **LaunchServices-/NSOpenPanel-Prompt**
+von macOS („Where is <App>?" erscheint, wenn ein Datei-/Typ-Zuordnung auf eine fehlende App zeigt).
+Unser Code startet nur `open -R` (`platform::reveal_in_file_manager`), `explorer`, `xdg-open`,
+`defaults read -g AppleLocale` (`countries::system_country`) und über `auto-launch` `launchctl`;
+`rfd::FileDialog::pick_folder()` läuft nur bei „Datensicherung hinzufügen …" / „Durchsuchen".
+**Nötig:** der genaue auslösende Klick + Reproduzierbarkeit (offene Frage an den User).
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der
