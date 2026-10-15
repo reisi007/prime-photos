@@ -137,7 +137,7 @@ impl PrimePhotoApp {
         ui.radio_value(
             &mut form.conflict_resolution,
             ConflictResolution::SaveAsNew,
-            tr("Als neue Dateien speichern"),
+            tr("Neue Datei automatisch umbenennen"),
         );
         ui.radio_value(
             &mut form.conflict_resolution,

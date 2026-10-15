@@ -168,6 +168,18 @@ impl PrimePhotoApp {
             "Hinweis: Die Begrenzung wird pro Datei nach dem Upload angewendet.",
         )));
 
+        // Global dedupe default (user decision 2026-10-15): the preselection of
+        // a new backup target and the policy of the one-time (drag & drop)
+        // queue — the same role the conflict default below plays, which is why
+        // the two are shown as one block and share the closing note. Persisted
+        // with "Speichern".
+        ui.add_space(6.0);
+        ui.label(theme::muted(tr("Standard für neue Upload-Ziele")));
+        ui.checkbox(&mut self.config.dedup_default, tr("Duplikate überspringen"));
+        ui.label(theme::muted(tr(
+            "Dateien, die sich bereits in meinem Konto befinden, nicht sichern",
+        )));
+
         // Application default for the name-conflict policy (user decision
         // 2026-10-15): the preselection of a new backup target and the policy
         // of the one-time (drag & drop) queue. Persisted with "Speichern".
@@ -186,7 +198,7 @@ impl PrimePhotoApp {
         ui.radio_value(
             &mut self.config.conflict_resolution_default,
             ConflictResolution::SaveAsNew,
-            tr("Als neue Dateien speichern"),
+            tr("Neue Datei automatisch umbenennen"),
         );
         ui.radio_value(
             &mut self.config.conflict_resolution_default,

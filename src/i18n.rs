@@ -136,6 +136,14 @@ const EN: &[(&str, &str)] = &[
     ("Datensicherung", "Backup"),
     ("Datensicherungseinstellungen", "Backup settings"),
     ("Mit Amazon anmelden", "Sign in with Amazon"),
+    // Shared by the settings and by the backup-configuration dialog: the label
+    // of the `SaveAsNew` option there is deliberately **not** the dialog button's
+    // "Als neue Datei speichern" (the original names the same option differently
+    // in the two places).
+    (
+        "Neue Datei automatisch umbenennen",
+        "Rename the new file automatically",
+    ),
     ("Prime Photos", "Prime Photos"),
     ("Speichern", "Save"),
     // -- app shell / navigation -----------------------------------------
@@ -265,6 +273,17 @@ const EN: &[(&str, &str)] = &[
     ("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.", "Applies only until the next app start; not saved."),
     ("Slow-Mode (1 Datei gleichzeitig)", "Slow mode (1 file at a time)"),
     ("Standard bei Dateikonflikten", "Default for file conflicts"),
+    // Global dedupe default for new upload targets and the one-time queue
+    // (settings → Upload settings block, above the conflict default).
+    (
+        "Standard für neue Upload-Ziele",
+        "Default for new upload targets",
+    ),
+    ("Duplikate überspringen", "Skip duplicates"),
+    (
+        "Dateien, die sich bereits in meinem Konto befinden, nicht sichern",
+        "Do not back up files that are already in my account",
+    ),
     (
         "Startet Prime Photos automatisch, wenn du dich am System anmeldest.",
         "Starts Prime Photos automatically when you sign in to your system.",
@@ -323,6 +342,10 @@ const EN: &[(&str, &str)] = &[
     ("Ignorieren", "Ignore"),
     ("Keine Antwort auf den Konflikt — wird übersprungen.", "No answer to the conflict — skipping."),
     ("Nicht noch einmal fragen", "Don't ask again"),
+    (
+        "Nicht noch einmal nach ‚{}'-Ordner fragen",
+        "Don't ask again for the '{}' folder",
+    ),
     ("Vorhanden, übersprungen: {}", "Already there, skipped: {}"),
     (
         "Bereits im Konto, nur umbenannt: {}",

@@ -11,6 +11,20 @@ fn default_background_sync() -> bool {
     true
 }
 
+/// Serde default of `Config::conflict_resolution_default`.
+///
+/// The **application** default — the preselection of a new backup target and
+/// the policy of the one-time (drag & drop) queue — is `Replace`
+/// (user decision 2026-10-15).
+///
+/// Deliberately **not** `ConflictResolution::default()`: that enum default
+/// stays `SaveAsNew` because it is the **file** fallback for a `folders.toml`
+/// entry without the key. The two roles are not unified on purpose — a new
+/// target overwrites a taken name, an existing target keeps whatever it stored.
+fn default_replace() -> ConflictResolution {
+    ConflictResolution::Replace
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub country: String,
@@ -51,12 +65,23 @@ pub struct Config {
     /// so an existing `config.toml` without this key still loads.
     #[serde(default)]
     pub autostart_enabled: Option<bool>,
+    /// Global dedupe default (user decision 2026-10-15): the preselection when
+    /// a new backup target is created and the policy of the one-time
+    /// (drag & drop) queue. An existing target keeps its stored `dedup` value.
+    /// `#[serde(default = "default_true")]` (true) so an existing `config.toml`
+    /// without this key still loads — with dedupe on.
+    #[serde(default = "default_true")]
+    pub dedup_default: bool,
     /// Application default for the name-conflict policy: preselected when a new
     /// backup target is created and applied by the one-time (drag & drop) queue.
-    /// `#[serde(default)]` so an existing `config.toml` without this key still
-    /// loads; the field default is `ConflictResolution`'s own default
-    /// (`SaveAsNew`, `#[default]` on the variant — not duplicated here).
-    #[serde(default)]
+    /// `#[serde(default = "default_replace")]` (`Replace`, user decision
+    /// 2026-10-15) so an existing `config.toml` without this key still loads.
+    ///
+    /// Two defaults, deliberately **not** unified: the **file** fallback for a
+    /// `folders.toml` entry without the key is `ConflictResolution`'s own
+    /// `#[default]` (`SaveAsNew`), so an existing target is never silently
+    /// switched to overwriting.
+    #[serde(default = "default_replace")]
     pub conflict_resolution_default: ConflictResolution,
 }
 
@@ -124,7 +149,12 @@ impl Config {
             background_sync: true,
             paused: false,
             autostart_enabled: None,
-            conflict_resolution_default: ConflictResolution::default(),
+            dedup_default: true,
+            // Application default: a new target overwrites a taken name. The
+            // enum's own default (`SaveAsNew`, the `folders.toml` fallback for
+            // an entry without the key) is deliberately different — see
+            // `default_replace` and the field comment.
+            conflict_resolution_default: ConflictResolution::Replace,
         }
     }
 }
@@ -134,8 +164,8 @@ mod tests {
     use super::*;
 
     /// Minimal TOML that satisfies every non-defaulted field of `Config`.
-    /// Deliberately has **no** `autostart_enabled` and **no**
-    /// `conflict_resolution_default` key.
+    /// Deliberately has **no** `autostart_enabled`, **no** `dedup_default` and
+    /// **no** `conflict_resolution_default` key.
     const LEGACY_TOML: &str = r#"
 country = "de"
 zone = "eu"
@@ -165,16 +195,49 @@ cookie_x_amz_access_token = ""
     }
 
     #[test]
-    fn config_without_conflict_default_key_loads_as_save_as_new() {
-        // `#[serde(default)]` reads `ConflictResolution`'s own `Default`
-        // (`SaveAsNew`, `#[default]` on the variant), **not** the inherent
-        // `Config::default()` — an existing `config.toml` predating the field
-        // must land on the type default.
+    fn config_without_conflict_default_key_loads_as_replace() {
+        // `#[serde(default = "default_replace")]` reads the **application**
+        // default (`Replace`, user decision 2026-10-15), **not** the enum's own
+        // `#[default]` (`SaveAsNew`, which stays the file fallback for a
+        // `folders.toml` entry without the key) — an existing `config.toml`
+        // predating the field must land on the application default.
         let config: Config = toml::from_str(LEGACY_TOML).unwrap();
         assert_eq!(
             config.conflict_resolution_default,
-            ConflictResolution::SaveAsNew
+            ConflictResolution::Replace
         );
+    }
+
+    #[test]
+    fn config_defaults_to_replace_and_dedupe_on() {
+        let config = Config::default();
+        assert_eq!(
+            config.conflict_resolution_default,
+            ConflictResolution::Replace
+        );
+        assert!(config.dedup_default);
+    }
+
+    #[test]
+    fn config_without_both_default_keys_loads_as_replace_and_dedup_on() {
+        // One legacy `config.toml` that predates both fields: the serde
+        // defaults apply, so nothing about an existing install changes.
+        let config: Config = toml::from_str(LEGACY_TOML).unwrap();
+        assert_eq!(
+            config.conflict_resolution_default,
+            ConflictResolution::Replace
+        );
+        assert!(config.dedup_default);
+    }
+
+    #[test]
+    fn config_dedup_default_roundtrips() {
+        let mut config = Config::default();
+        config.dedup_default = false;
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(serialized.contains("dedup_default = false"));
+        let back: Config = toml::from_str(&serialized).unwrap();
+        assert!(!back.dedup_default);
     }
 
     #[test]

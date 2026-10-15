@@ -841,6 +841,24 @@ fn remember_conflict_in_folder(
     true
 }
 
+/// Checkbox text of the conflict dialog. `None` stands for the transient
+/// drag & drop target, which has no folder to persist the answer into.
+///
+/// A persisted folder is named, mirroring the original pattern: the answer is
+/// written into **that** folder (see [`remember_conflict_in_folder`]), so the
+/// checkbox says which folder will stop asking. `None` keeps the neutral
+/// "Nicht noch einmal fragen" — the run-wide override still applies, it is just
+/// not persisted anywhere.
+fn remember_checkbox_label(folder_name: Option<&str>) -> String {
+    match folder_name {
+        Some(name) => tr1(
+            "Nicht noch einmal nach ‚{}'-Ordner fragen",
+            crate::text::nfc(name),
+        ),
+        None => tr("Nicht noch einmal fragen").to_string(),
+    }
+}
+
 impl PrimePhotoApp {
     // -- folders ------------------------------------------------------------
 
@@ -850,7 +868,9 @@ impl PrimePhotoApp {
             // mode instead of adding + uploading right away.
             self.config_form = Some(BackupConfigForm {
                 path: folder,
-                dedup: true,
+                // Global dedupe default as the preselection (user decision
+                // 2026-10-15), the same role the conflict default below plays.
+                dedup: self.config.dedup_default,
                 // Application default as the preselection (user decision
                 // 2026-10-15); a value changed in the dialog belongs to the
                 // created target only, it is not written back.
@@ -1082,15 +1102,15 @@ impl PrimePhotoApp {
     /// is **not** written here — the caller owns persistence.
     fn begin_one_time_run(&mut self, display_path: PathBuf, files: Vec<PathBuf>) {
         // The transient target itself: the stored name stays the plain German
-        // key, `tr` is applied at render time. Dedup keeps the folder default,
-        // conflict handling follows the application default (user decision
-        // 2026-10-15; before that `ConflictResolution::default()` — same value
-        // unless the user changed the app default in the settings).
+        // key, `tr` is applied at render time. Dedup and conflict handling both
+        // follow their application default (user decision 2026-10-15; before
+        // that `dedup: true` / `ConflictResolution::default()` — same values
+        // unless the user changed the app defaults in the settings).
         self.one_time = Some(folders::BackupFolder {
             path: display_path,
             name: "Einmalige Sicherung".to_string(),
             enabled: true,
-            dedup: true,
+            dedup: self.config.dedup_default,
             conflict_resolution: self.config.conflict_resolution_default,
             total_files: files.len(),
             uploaded_files: 0,
@@ -1102,7 +1122,7 @@ impl PrimePhotoApp {
         // and `folder_opts` look exactly like a single-folder run.
         let mut plan = UploadPlan::from_files(
             ONE_TIME_IDX,
-            true,
+            self.config.dedup_default,
             self.config.conflict_resolution_default,
             files,
         );
@@ -1176,6 +1196,21 @@ impl PrimePhotoApp {
 
         let mut remember = self.upload.lock().unwrap().conflict_remember;
         let mut answer: Option<ConflictResolution> = None;
+        // Name the folder the answer is persisted into — but only when the
+        // pending target really is one. The transient drag & drop queue
+        // (`ONE_TIME_IDX`) has no `folders.toml` entry, and an index the store
+        // no longer holds must not borrow a neighbouring folder's name; both
+        // fall back to the neutral text and stay run-only, exactly like
+        // `remember_conflict_in_folder` refuses to write for them.
+        let remember_label = match pending_idx {
+            Some(idx) if idx != ONE_TIME_IDX => self
+                .store
+                .folders
+                .get(idx)
+                .map(|f| remember_checkbox_label(Some(&f.name)))
+                .unwrap_or_else(|| remember_checkbox_label(None)),
+            _ => remember_checkbox_label(None),
+        };
         // NOTE: egui 0.31 has no `Window::modal`; the dialog is centred and
         // covers the page it matters for. A second upload run is still
         // impossible while it waits (`upload_busy()`).
@@ -1188,7 +1223,7 @@ impl PrimePhotoApp {
                     "„{}“ existiert bereits in Amazon Photos.",
                     &file_name,
                 ));
-                ui.checkbox(&mut remember, tr("Nicht noch einmal fragen"));
+                ui.checkbox(&mut remember, remember_label.as_str());
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     if ui.add(theme::primary_button(tr("Ignorieren"))).clicked() {
@@ -1878,6 +1913,36 @@ mod tests {
     }
 
     // -- "Nicht noch einmal fragen" persisted per folder -------------------
+
+    #[test]
+    fn remember_label_is_neutral_for_the_one_time_queue() {
+        // `None` stands for the transient drag & drop target: it has no
+        // `folders.toml` entry, so its answer stays run-wide only and there is
+        // no folder the checkbox could name.
+        let label = remember_checkbox_label(None);
+
+        assert_eq!(label, "Nicht noch einmal fragen");
+        assert!(
+            !label.contains("Ordner"),
+            "the neutral label must not name any folder, got: {label}"
+        );
+    }
+
+    #[test]
+    fn remember_label_names_the_folder() {
+        // A persisted folder owns the answer (see `remember_conflict_in_folder`),
+        // so the checkbox names which folder will stop asking.
+        let label = remember_checkbox_label(Some("Sport"));
+
+        assert!(
+            label.contains("Sport"),
+            "expected the folder name in: {label}"
+        );
+        assert!(
+            label.contains("-Ordner fragen"),
+            "expected the folder wording in: {label}"
+        );
+    }
 
     /// A folder path under the system temp dir. No test here may touch the real
     /// `folders.toml`; these are also paths that merely *look* like a folder,
