@@ -166,9 +166,11 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   Genau das war der vermeintliche Hänger vom 2026-10-15 — er war **keiner** (Beweis: dieselbe Datei
   gealtert lädt sofort, Index-Zeile geschrieben). Knoten entfernt man per
   `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>` ⇒ **202 `{}`**; `PUT …/drive/v1/trash/<id>`
-  gibt es auf dem Cookie-Host **nicht** (⇒ 404). **Offen/fraglich (nicht beauftragt):** ob diese
-  Regel für EXIF-lose Dateien richtig ist — frische Screenshots/PNGs werden damit gar nicht
-  hochgeladen.
+  gibt es auf dem Cookie-Host **nicht** (⇒ 404). **Geklärt 2026-10-15:** die 10-Minuten-Regel ist
+  **Original-Parität** (`docs/SPEC_UPLOAD.md:106-113`), keine eigene Erfindung — sie bleibt. Folge
+  bewusst akzeptiert: eine EXIF-lose Datei, die jünger als 10 Minuten ist, wird in **diesem** Lauf
+  nicht geladen (Fehlerzeile nur im UI-Log, `status` bleibt `uploading`), geht aber **nicht**
+  verloren — ein späterer Event-/Wasserzeichen-Lauf nimmt sie mit, sobald sie alt genug ist.
 - **2.3 Konflikt-Standard in drei Ebenen** (User-Entscheidung 2026-10-15):
   **(a) Application Default** — ✅ **erledigt 2026-10-15** (`db68cff`, Verifier APPROVE, 81 Tests):
   Feld in `Config` (`config.toml`), Radiogruppe in **Einstellungen → Upload**, Default `SaveAsNew`,
