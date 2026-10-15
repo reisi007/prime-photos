@@ -36,25 +36,3 @@ pub fn reveal_in_file_manager(path: &Path) -> io::Result<()> {
     }
 }
 
-pub fn open_url(url: &str) -> io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        return std::process::Command::new("open").arg(url).spawn().map(|_| ());
-    }
-    #[cfg(target_os = "windows")]
-    {
-        return std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()
-            .map(|_| ());
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ());
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    {
-        let _ = url;
-        return Err(io::Error::new(io::ErrorKind::Unsupported, "open url not supported on this platform"));
-    }
-}

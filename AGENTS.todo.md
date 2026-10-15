@@ -329,8 +329,8 @@ bleibt dokumentiert, nicht eingeplant).
   `cookie_x_acb`, `cookie_at_acb`, `cookie_ubid_acb`, `cookie_x_amz_access_token`) leben **nur im
   Speicher**; die `Config`-Felder werden `#[serde(skip)]`. Anlass (User): Klartext-Cookies sind
   dieselbe Autorität wie der Refresh-Token, nur ungeschützt; das Original hält sie ebenso nur im
-  Speicher. **Folge:** der reine Cookie-Rückfall (Geräteweg abgelehnt) gilt nur für die **laufende**
-  Sitzung, nicht über einen Neustart — der Geräteweg ist der persistente Pfad.
+  Speicher. **Folge:** der Geräteweg ist der **einzige** persistente Pfad; der Cookie-Rückfall wurde
+  am 2026-10-15 ganz entfernt (siehe „S-C-Nachträge aus der Live-Abnahme").
 - **Auffrischung als Hintergrund-Worker** auf der bestehenden Tokio-Runtime (Muster `avatar_fetch`):
   3-s-Tick, Termin bei 80 % der Restlaufzeit (`expires_in` − 60 s), bis zu 5 Versuche im 15-s-Abstand,
   jeder Erfolg setzt den Termin neu (belegte `AppSettings`-Werte).
@@ -347,7 +347,22 @@ bleibt dokumentiert, nicht eingeplant).
 - **Einlöse-Pfad:** `/auth/register` bekommt die belegten **3** Versuche (`REGISTER_MAX_ATTEMPTS`);
   Netzwerkfehler zählen auch hier nicht als Versuch.
 
-**Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** (bleibt nur Rückfall). Der
+**S-C-Nachträge aus der Live-Abnahme (2026-10-15):**
+- **Live belegt:** Amazon **nimmt** unsere Geräte-Identität an — die `/auth/register`-Antwort war ein
+  voller Erfolg; der erste Live-Lauf scheiterte nur am Parser (`expires_in` kam als **String** `"3600"`).
+  Der Parser akzeptiert jetzt String **und** Zahl (Register + Refresh).
+- **Einmaliger Code:** ein `openid.oa2.authorization_code` ist **einmalig** — die Einlöse-Wiederholung
+  greift **nur** bei Netzwerkfehlern (Request hat den Server nie erreicht), nie nach einer Serverantwort.
+- **Cookie-Probe + Rückfall entfernt (User-Entscheidung):** `wry::WebView::cookies()` blockiert auf
+  macOS den Hauptthread bis zu 1 s und läuft aus einem `DispatchQueue::main`-Block immer in den Timeout
+  (UI-Freeze, „Cookies konnten nicht gelesen werden: IO error: timed out…"). Da der Geräteweg live
+  akzeptiert wird und der Rückfall nur sitzungsweit wäre, entfällt er samt Browser-Link
+  (`urls::login_url`, `platform::open_url`). **Verworfen:** den Rückfall asynchron über `objc2` neu bauen.
+- **UI-Regel:** keine technischen Fehlermeldungen im Endnutzer-UI (Details ins Log); Login-Header
+  vertikal zentriert.
+
+**Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
+**Rückfall** (ganz entfernt). Der
 **CDP-Browser-Login** (externer Browser) bleibt ebenso verworfen wie die **Paste-Variante** als
 Hauptweg. Ebenfalls verworfen: die Original-Login-**UI** (zwei Spalten, Willkommens-Panel, Fenster
 880 × 530) zu übernehmen — unsere UI bleibt.

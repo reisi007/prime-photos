@@ -34,31 +34,6 @@ pub(crate) fn marketplace_domain(country: &str) -> String {
     }
 }
 
-/// Amazon's Photos sign-in URL (two-column layout). The marketplace is encoded
-/// in the domain and in the assoc handle (`amzn_photos_web_<cc>`); `at`/`ch`
-/// sign in on the German marketplace.
-pub(crate) fn login_url(country: &str) -> String {
-    let domain = marketplace_domain(country);
-    let cc = match country {
-        "at" | "ch" => "de",
-        other => other,
-    };
-    let return_to = format!(
-        "https%3A%2F%2Fwww.amazon.{d}%2Fphotos%3Fsf%3D1%26ref_%3DAPH_D_PA1_{cc}",
-        d = domain,
-        cc = cc.to_uppercase()
-    );
-    format!(
-        "https://www.amazon.{domain}/ap/signin?openid.pape.max_auth_age=3600\
-&openid.return_to={return_to}\
-&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select\
-&openid.assoc_handle=amzn_photos_web_{cc}\
-&openid.mode=checkid_setup\
-&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select\
-&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
-    )
-}
-
 /// `photos/auth/token` endpoint (auth-token renewal for content uploads).
 pub(crate) fn auth_token_url(country: &str) -> String {
     format!(
@@ -74,8 +49,8 @@ pub(crate) fn auth_token_url(country: &str) -> String {
 // Since S-B the login itself uses them ([`auth_portal_url`] from
 // `login::begin_login`, the Panda register/auth-cookie URLs from the
 // background redemption); only the S-C-only endpoints keep a per-item
-// `#[allow(dead_code)]` marked "wird in S-C verdrahtet". They are *not* the
-// web/cookie path: [`login_url`] and [`auth_token_url`] above stay untouched.
+// `#[allow(dead_code)]` marked "wird in S-C verdrahtet". The cookie path's
+// [`auth_token_url`] above stays untouched.
 // ---------------------------------------------------------------------------
 
 /// Marketplace identity of the **device** login flow: the Amazon host base, the
@@ -446,16 +421,6 @@ mod tests {
         assert_eq!(marketplace_domain("it"), "it");
         assert_eq!(marketplace_domain("es"), "es");
         assert_eq!(marketplace_domain("ca"), "ca");
-    }
-
-    #[test]
-    fn login_url_uses_marketplace_domain() {
-        assert!(login_url("de").starts_with("https://www.amazon.de/ap/signin?"));
-        // The alias resolves to the real host, not `amazon.uk`.
-        assert!(login_url("uk").starts_with("https://www.amazon.co.uk/ap/signin?"));
-        // `at`/`ch` sign in on the German marketplace.
-        assert!(login_url("at").starts_with("https://www.amazon.de/ap/signin?"));
-        assert!(login_url("jp").contains("amazon.co.jp"));
     }
 
     #[test]

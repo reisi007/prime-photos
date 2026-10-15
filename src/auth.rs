@@ -80,10 +80,11 @@ pub(crate) const TICK_INTERVAL_SECONDS: u64 = 3;
 /// own count (observed in `AppSettings`).
 ///
 /// Used by the device-login background task in `login::poll_login`
-/// (`src/login.rs`): the redeem is retried up to this count, with
-/// [`TICK_INTERVAL_SECONDS`] between attempts. A network error does **not**
-/// consume an attempt, but the number of offline retries is capped at this
-/// value too (so the loop runs at most twice this many passes).
+/// (`src/login.rs`): the redeem is retried up to this many **offline** passes,
+/// with [`TICK_INTERVAL_SECONDS`] between them. Only a network error is retried
+/// (the request never reached the server, so the one-time authorization code is
+/// still valid); a counted error stops the loop at once, because the server has
+/// already consumed the code.
 pub(crate) const REGISTER_MAX_ATTEMPTS: u32 = 3;
 
 /// OS name reported as the device model. There is **no subprocess** and no
@@ -283,6 +284,24 @@ impl RefreshRequest {
 // Response parsing
 // ---------------------------------------------------------------------------
 
+/// `expires_in` arrives as a JSON **string** in the register response and as a
+/// number elsewhere; accept both.
+fn de_expires_in<'de, D>(d: D) -> Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum NumOrStr {
+        Num(i64),
+        Str(String),
+    }
+    match NumOrStr::deserialize(d)? {
+        NumOrStr::Num(n) => Ok(n),
+        NumOrStr::Str(s) => s.trim().parse::<i64>().map_err(serde::de::Error::custom),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RegisterResponseBody {
     response: RegisterResponse,
@@ -307,7 +326,7 @@ struct RegisterTokens {
 struct BearerTokens {
     #[serde(default)]
     access_token: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_expires_in")]
     expires_in: i64,
     #[serde(default)]
     refresh_token: String,
@@ -342,7 +361,7 @@ pub(crate) fn parse_register_response(body: &str) -> Result<RegisterOutcome, Aut
 struct RefreshResponseBody {
     #[serde(default)]
     access_token: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_expires_in")]
     expires_in: i64,
 }
 
@@ -706,6 +725,23 @@ mod tests {
     }
 
     #[test]
+    fn register_response_accepts_expires_in_as_a_string() {
+        // The live `/auth/register` answer sends `"expires_in": "3600"`.
+        let body = r#"{"response":{"success":{"tokens":{"bearer":{"access_token":"AT","expires_in":"3600","refresh_token":"RT"}}}}}"#;
+        let outcome = parse_register_response(body).expect("valid register response");
+        assert_eq!(outcome.access_token, "AT");
+        assert_eq!(outcome.expires_in, 3600);
+        assert_eq!(outcome.refresh_token, "RT");
+    }
+
+    #[test]
+    fn register_response_accepts_expires_in_as_a_number() {
+        let body = r#"{"response":{"success":{"tokens":{"bearer":{"access_token":"AT","expires_in":3600,"refresh_token":"RT"}}}}}"#;
+        let outcome = parse_register_response(body).expect("valid register response");
+        assert_eq!(outcome.expires_in, 3600);
+    }
+
+    #[test]
     fn register_response_rejects_an_empty_access_token() {
         let body = r#"{"response":{"success":{"tokens":{"bearer":{"access_token":"","expires_in":3600,"refresh_token":"RT"}}}}}"#;
         assert!(matches!(
@@ -739,6 +775,14 @@ mod tests {
             parse_refresh_response(r#"{"access_token":"","expires_in":1}"#),
             Err(AuthError::EmptyAccessToken)
         ));
+    }
+
+    #[test]
+    fn refresh_response_accepts_expires_in_as_a_string() {
+        let outcome = parse_refresh_response(r#"{"access_token":"AT2","expires_in":"3600"}"#)
+            .expect("valid refresh response");
+        assert_eq!(outcome.access_token, "AT2");
+        assert_eq!(outcome.expires_in, 3600);
     }
 
     #[test]

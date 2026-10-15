@@ -10,32 +10,23 @@
 //! (`KeyringTokenStore`) and web cookies fetched for the unchanged,
 //! cookie-based upload engine.
 //!
-//! The plain cookie observation stays the **fallback**: once the probe sees
-//! authenticated cookies it records them, but they are only honoured after a
-//! short grace period ([`LOGIN_COOKIE_GRACE`]), so a code that arrives with the
-//! very same redirect wins the race. Our own sign-in screen keeps its browser
-//! link to the plain web sign-in URL.
-//!
-//! Cookies are read asynchronously. On macOS the probe is scheduled on the main
-//! dispatch queue, because wry's `WebView::cookies` is synchronous and spins the
-//! macOS run loop, which would re-enter winit's event handler (and panic) if
-//! called directly from egui's `update`. That run-loop re-entrancy is a
-//! macOS-specific problem: off macOS the probe runs directly.
+//! This is the **only** sign-in path (user decision 2026-10-15): the earlier
+//! cookie observation of the plain web sign-in was removed. wry's
+//! `WebView::cookies` is synchronous and blocks the macOS main thread, so it
+//! cannot be read from egui's `update` — the device path never needs it.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[cfg(target_os = "macos")]
-use dispatch2::DispatchQueue;
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{Rect, WebView, WebViewBuilder};
 
 use crate::app::{PrimePhotoApp, HEADER_H};
 use crate::auth::{self, Pkce, TokenStore};
-use crate::countries::{country_label, parse_cookie_string, COUNTRIES, ParsedCookies};
-use crate::i18n::{tr, tr1};
+use crate::countries::{country_label, COUNTRIES, ParsedCookies};
+use crate::i18n::tr;
 use crate::icons::upload_logo;
 use crate::login;
 use crate::theme;
@@ -45,18 +36,6 @@ thread_local! {
     /// The login webview lives on the main thread only (a WebKit requirement).
     static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
 }
-
-/// How often the cookie store is checked while the sign-in page is open.
-const PROBE_INTERVAL: Duration = Duration::from_millis(500);
-
-/// How long the cookie fallback must wait before it may win the race against
-/// the device path's authorization code.
-///
-/// The original has no such concept — it simply waits for the code — but our
-/// cookie path is kept as a **fallback**, so it must not overtake a code that is
-/// still on its way (the navigation that carries it is ignored, so the code is
-/// only observed by the navigation handler). A documented own default.
-const LOGIN_COOKIE_GRACE: Duration = Duration::from_secs(3);
 
 /// The **sign-in completion signal** of the device flow: the authorization code
 /// carried as `openid.oa2.authorization_code` on a `/ap/` navigation (original
@@ -86,37 +65,6 @@ pub fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
     }
 }
 
-/// True once the **authenticated** Amazon cookies exist (not just an anonymous
-/// session): `session-id` plus the `at-acb*` / `x-acb*` auth cookies.
-fn has_login(cookies: &[wry::cookie::Cookie<'static>]) -> bool {
-    let has_session = cookies.iter().any(|c| c.name() == "session-id");
-    let has_at = cookies.iter().any(|c| c.name().starts_with("at-acb"));
-    let has_x = cookies.iter().any(|c| c.name().starts_with("x-acb"));
-    has_session && has_at && has_x
-}
-
-fn cookie_string(cookies: &[wry::cookie::Cookie<'static>]) -> String {
-    let mut s = String::new();
-    for c in cookies {
-        s.push_str(c.name());
-        s.push('=');
-        s.push_str(c.value());
-        s.push_str("; ");
-    }
-    s
-}
-
-/// State shared with the asynchronous cookie probe.
-#[derive(Default)]
-struct Probe {
-    in_flight: bool,
-    last: Option<Instant>,
-    /// First observation of an authenticated cookie set, with the instant it was
-    /// seen: the fallback may only win the race after [`LOGIN_COOKIE_GRACE`].
-    cookies: Option<(Instant, String)>,
-    error: Option<String>,
-}
-
 /// The successful result of the device redemption: the register outcome (with
 /// the refresh token) plus the freshly minted cookies.
 ///
@@ -132,18 +80,12 @@ pub(crate) struct DeviceLogin {
 /// Owns the login webview for the duration of the sign-in.
 pub struct WebviewLogin {
     pub running: bool,
-    /// Raw cookie string ("name=value; …") once login completed.
-    pub outcome: Option<String>,
     pub error: Option<String>,
-    probe: Arc<Mutex<Probe>>,
     /// PKCE pair of the current device attempt, set by `begin_login`; consumed
     /// when the authorization code is redeemed.
     pkce: Option<Pkce>,
     /// Authorization code captured by the navigation handler.
     auth_code: Arc<Mutex<Option<String>>>,
-    /// True while the code is being redeemed on the runtime: the cookie
-    /// fallback stays quiet until the device result is in.
-    device_busy: bool,
     /// Result of the device redemption, written by the background task,
     /// together with the generation it belongs to.
     device_result: Arc<Mutex<Option<(u64, Result<DeviceLogin, String>)>>>,
@@ -162,12 +104,9 @@ impl WebviewLogin {
     pub fn new() -> Self {
         Self {
             running: false,
-            outcome: None,
             error: None,
-            probe: Arc::new(Mutex::new(Probe::default())),
             pkce: None,
             auth_code: Arc::new(Mutex::new(None)),
-            device_busy: false,
             device_result: Arc::new(Mutex::new(None)),
             login_generation: 0,
         }
@@ -187,7 +126,6 @@ impl WebviewLogin {
         // set by `begin_login` immediately before this call.
         *self.auth_code.lock().unwrap() = None;
         *self.device_result.lock().unwrap() = None;
-        self.device_busy = false;
         self.login_generation += 1;
         let auth_code = Arc::clone(&self.auth_code);
         match WebViewBuilder::new()
@@ -204,13 +142,12 @@ impl WebviewLogin {
         {
             Ok(wv) => {
                 WEBVIEW.with(|slot| *slot.borrow_mut() = Some(wv));
-                *self.probe.lock().unwrap() = Probe::default();
                 self.running = true;
-                self.outcome = None;
                 self.error = None;
             }
             Err(e) => {
-                self.error = Some(tr1("Anmeldeseite konnte nicht geöffnet werden: {}", e));
+                log::warn!("Anmeldeseite konnte nicht geöffnet werden: {e}");
+                self.error = Some(tr("Anmeldeseite konnte nicht geöffnet werden.").to_string());
             }
         }
     }
@@ -231,61 +168,9 @@ impl WebviewLogin {
         self.running = false;
     }
 
-    /// Called every UI frame: schedule a cookie probe and pick up its result.
-    ///
-    /// The webview is **not** torn down here any more — a completed login is
-    /// consumed by [`PrimePhotoApp::poll_login`], which closes it. That keeps the
-    /// device path (async code redemption) and the cookie fallback in one place.
-    /// The fallback only fires once [`LOGIN_COOKIE_GRACE`] has elapsed **and** no
-    /// device redemption is in flight, so a late authorization code always wins.
-    pub fn poll(&mut self) {
-        if !self.running || self.outcome.is_some() {
-            return;
-        }
-
-        let device_busy = self.device_busy;
-        let mut error = None;
-        let mut schedule = false;
-        let mut ready_cookie = None;
-        {
-            let mut p = self.probe.lock().unwrap();
-            if let Some((at, cookies)) = p.cookies.as_ref() {
-                if !device_busy && at.elapsed() >= LOGIN_COOKIE_GRACE {
-                    ready_cookie = Some(cookies.clone());
-                }
-            } else {
-                error = p.error.take();
-                let due = p
-                    .last
-                    .map(|t| t.elapsed() >= PROBE_INTERVAL)
-                    .unwrap_or(true);
-                if !p.in_flight && due {
-                    p.in_flight = true;
-                    p.last = Some(Instant::now());
-                    schedule = true;
-                }
-            }
-        }
-
-        if let Some(cs) = ready_cookie {
-            self.outcome = Some(cs);
-        }
-        if let Some(e) = error {
-            self.error = Some(e);
-        }
-        if schedule {
-            schedule_probe(Arc::clone(&self.probe));
-        }
-    }
-
-    /// Take the captured authorization code; a `Some` marks the device path as
-    /// busy so the cookie fallback stays quiet until its result arrives.
+    /// Take the captured authorization code.
     pub fn take_auth_code(&mut self) -> Option<String> {
-        let code = self.auth_code.lock().unwrap().take();
-        if code.is_some() {
-            self.device_busy = true;
-        }
-        code
+        self.auth_code.lock().unwrap().take()
     }
 
     /// Take the device redemption result published by the background task.
@@ -307,57 +192,6 @@ impl WebviewLogin {
     pub fn take_pkce(&mut self) -> Option<Pkce> {
         self.pkce.take()
     }
-
-    /// The cookie set observed by the probe, independent of the grace period —
-    /// used to fall back when the device path was rejected.
-    pub fn cookie_fallback(&self) -> Option<String> {
-        self.probe
-            .lock()
-            .unwrap()
-            .cookies
-            .as_ref()
-            .map(|(_, cookies)| cookies.clone())
-    }
-}
-
-/// Read the webview's cookie store and record the outcome in `probe`. Shared by
-/// both targets; `in_flight` is cleared when the probe finishes.
-fn run_probe(probe: &Arc<Mutex<Probe>>) {
-    WEBVIEW.with(|slot| {
-        if let Some(wv) = slot.borrow().as_ref() {
-            match wv.cookies() {
-                Ok(cookies) => {
-                    if has_login(&cookies) {
-                        let mut p = probe.lock().unwrap();
-                        if p.cookies.is_none() {
-                            p.cookies = Some((Instant::now(), cookie_string(&cookies)));
-                        }
-                    }
-                }
-                Err(e) => {
-                    let mut p = probe.lock().unwrap();
-                    if p.error.is_none() {
-                        p.error = Some(tr1("Cookies konnten nicht gelesen werden: {}", e));
-                    }
-                }
-            }
-        }
-    });
-    probe.lock().unwrap().in_flight = false;
-}
-
-/// macOS: schedule the probe on the main dispatch queue, i.e. outside winit's
-/// event handler (avoids the run-loop re-entrancy described above).
-#[cfg(target_os = "macos")]
-fn schedule_probe(probe: Arc<Mutex<Probe>>) {
-    DispatchQueue::main().exec_async(move || run_probe(&probe));
-}
-
-/// Non-macOS: there is no run-loop re-entrancy problem, so run the probe
-/// directly/synchronously on the calling (UI) thread.
-#[cfg(not(target_os = "macos"))]
-fn schedule_probe(probe: Arc<Mutex<Probe>>) {
-    run_probe(&probe);
 }
 
 // -- session (S-C) --------------------------------------------------------
@@ -465,6 +299,7 @@ pub(crate) async fn session_worker(
             match auth::refresh_access_token(&client, &country, &language, &refresh_token).await
             {
                 Ok(outcome) => {
+                    log::info!("Access-Token aufgefrischt ({} s gültig).", outcome.expires_in);
                     let delay = auth::next_refresh_delay(outcome.expires_in);
                     let cookies = auth::fetch_auth_cookies(
                         &client,
@@ -489,7 +324,10 @@ pub(crate) async fn session_worker(
                                 + delay.max(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)),
                         );
                         match cookies {
-                            Ok(c) => s.pending_cookies = Some(c),
+                            Ok(c) => {
+                                log::info!("Web-Cookies erneuert.");
+                                s.pending_cookies = Some(c);
+                            }
                             Err(e) => {
                                 log::warn!("Cookies konnten nicht erneuert werden: {e}")
                             }
@@ -663,6 +501,7 @@ impl PrimePhotoApp {
                 // the web cookies are minted **at start**. After a login the
                 // 80 %-schedule is already set by `poll_login`.
                 if s.next_refresh.is_none() {
+                    log::info!("Gespeicherte Sitzung gefunden – Access-Token wird erneuert.");
                     s.next_refresh = Some(Instant::now());
                 }
                 Some(s.generation)
@@ -720,8 +559,6 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn poll_login(&mut self) {
-        self.login.poll();
-
         // (1) The device redemption (background task) reported back.
         if let Some(result) = self.login.take_device_result() {
             // The user cancelled while the task ran: drop the result.
@@ -760,24 +597,14 @@ impl PrimePhotoApp {
                     return;
                 }
                 Err(e) => {
-                    // The device path was rejected: use the cookie fallback when
-                    // the webview did observe a cookie set, otherwise report the
-                    // rejection (never swallow it).
-                    if let Some(cookie_string) = self.login.cookie_fallback() {
-                        self.apply_cookie_string(&cookie_string);
-                        match self.config.save() {
-                            Ok(_) => {
-                                self.log(tr1("Geräteweg abgelehnt ({}) – Cookie-Weg verwendet.", e))
-                            }
-                            Err(err) => self.config_error = Some(err.to_string()),
-                        }
-                    } else {
-                        self.login.error = Some(
-                            tr("Die Anmeldung wurde von Amazon abgelehnt. Bitte erneut versuchen.")
-                                .to_string(),
-                        );
-                        log::warn!("{e}");
-                    }
+                    // The device path was rejected: report it (never swallow it).
+                    // There is no cookie fallback any more (user decision
+                    // 2026-10-15) — the device path is the only sign-in.
+                    self.login.error = Some(
+                        tr("Die Anmeldung wurde von Amazon abgelehnt. Bitte erneut versuchen.")
+                            .to_string(),
+                    );
+                    log::warn!("{e}");
                     self.login.cancel();
                     return;
                 }
@@ -807,14 +634,16 @@ impl PrimePhotoApp {
                     // build the inner result first, then tag it with the
                     // generation in one place.
                     //
-                    // The redeem is retried like the original (user decision
-                    // 2026-10-15): up to `REGISTER_MAX_ATTEMPTS` **counted**
-                    // attempts, with `TICK_INTERVAL_SECONDS` between them (the
-                    // login spinner stays visible). A network error (offline)
-                    // does not consume an attempt, but the offline passes are
-                    // capped at the same value too, so the loop runs at most
-                    // twice that many passes before giving up.
-                    let mut attempts = 0u32;
+                    // The redeem is retried only to **wait out a network
+                    // failure** (user decision 2026-10-15): the request never
+                    // reached the server, so the single-use
+                    // `openid.oa2.authorization_code` is still valid. Up to
+                    // `REGISTER_MAX_ATTEMPTS` offline passes, with
+                    // `TICK_INTERVAL_SECONDS` between them (the login spinner
+                    // stays visible). A **counted** error (HTTP status, JSON,
+                    // empty token) means the server saw the code — a second try
+                    // would find it already consumed (`InvalidValue`), so the
+                    // loop stops at once instead of burning the code.
                     let mut offline_passes = 0u32;
                     let inner: Result<DeviceLogin, String> = loop {
                         match auth::register_device(
@@ -881,20 +710,10 @@ impl PrimePhotoApp {
                                 ))
                                 .await;
                             }
-                            Err(e) => {
-                                attempts += 1;
-                                if attempts >= auth::REGISTER_MAX_ATTEMPTS {
-                                    break Err(e.to_string());
-                                }
-                                log::warn!(
-                                    "Einlösen fehlgeschlagen ({attempts}/{}): {e}",
-                                    auth::REGISTER_MAX_ATTEMPTS
-                                );
-                                tokio::time::sleep(Duration::from_secs(
-                                    auth::TICK_INTERVAL_SECONDS,
-                                ))
-                                .await;
-                            }
+                            // A counted error means the server answered and the
+                            // one-time authorization code is spent: retrying it
+                            // cannot succeed, so fail immediately.
+                            Err(e) => break Err(e.to_string()),
                         }
                     };
                     *slot.lock().unwrap() = Some((my_gen, inner));
@@ -902,22 +721,10 @@ impl PrimePhotoApp {
                 return;
             }
         }
-
-        // (3) Cookie fallback (the webview observed an authenticated cookie set
-        // and the grace period has passed without a device result).
-        let outcome = self.login.outcome.take();
-        if let Some(cookie_string) = outcome {
-            self.apply_cookie_string(&cookie_string);
-            match self.config.save() {
-                Ok(_) => self.log(tr("Login erfolgreich – Cookies übernommen.")),
-                Err(e) => self.config_error = Some(e.to_string()),
-            }
-            self.login.cancel();
-        }
     }
 
-    /// Copy a parsed cookie set into the config (shared by the webview fallback
-    /// and the device path's `fetch_auth_cookies`).
+    /// Copy a parsed cookie set into the config (the device path's
+    /// `fetch_auth_cookies`).
     ///
     /// The config fields feed the upload engine; the same set is mirrored into
     /// the in-memory session so the **detached** background supervisor has the
@@ -932,11 +739,6 @@ impl PrimePhotoApp {
         self.config.cookie_ubid_acb = parsed.cookie_ubid_acb.clone();
         self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token.clone();
         self.session.lock().unwrap().cookies = SessionCookies::from(parsed);
-    }
-
-    pub(crate) fn apply_cookie_string(&mut self, cookie_string: &str) {
-        let parsed = parse_cookie_string(cookie_string);
-        self.apply_parsed(&parsed);
     }
 
     /// Login phase (same window as the app, like the original).
@@ -955,7 +757,7 @@ impl PrimePhotoApp {
                         .inner_margin(egui::Margin::symmetric(16, 8)),
                 )
                 .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_centered(|ui| {
                         upload_logo(ui, 30.0);
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
@@ -1029,12 +831,6 @@ impl PrimePhotoApp {
             if let Some(e) = &self.login.error {
                 ui.add_space(6.0);
                 ui.colored_label(theme::RED, e);
-            }
-
-            ui.add_space(16.0);
-            if ui.link(tr("Amazon Photos im Browser öffnen")).clicked() {
-                let url = crate::urls::login_url(&self.config.country);
-                let _ = crate::platform::open_url(&url);
             }
         });
     }

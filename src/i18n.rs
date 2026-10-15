@@ -299,32 +299,19 @@ const EN: &[(&str, &str)] = &[
         "Sitzung abgelaufen – bitte erneut anmelden.",
         "Session expired – please sign in again.",
     ),
-    ("Amazon Photos im Browser öffnen", "Open Amazon Photos in the browser"),
     (
-        "Anmeldeseite konnte nicht geöffnet werden: {}",
-        "Could not open the sign-in page: {}",
+        "Anmeldeseite konnte nicht geöffnet werden.",
+        "Could not open the sign-in page.",
     ),
     ("Bei Amazon anmelden", "Sign in at Amazon"),
-    (
-        "Cookies konnten nicht gelesen werden: {}",
-        "Could not read the cookies: {}",
-    ),
     (
         "Fotos & Videos zu Amazon Photos hochladen",
         "Upload photos & videos to Amazon Photos",
     ),
     ("Land / Amazon-Marktplatz:", "Country / Amazon marketplace:"),
     (
-        "Login erfolgreich – Cookies übernommen.",
-        "Sign-in successful – cookies captured.",
-    ),
-    (
         "Login erfolgreich – Refresh-Token gespeichert.",
         "Signed in – refresh token saved.",
-    ),
-    (
-        "Geräteweg abgelehnt ({}) – Cookie-Weg verwendet.",
-        "Device path rejected ({}) – cookie path used.",
     ),
     (
         "Die Anmeldung wurde von Amazon abgelehnt. Bitte erneut versuchen.",
