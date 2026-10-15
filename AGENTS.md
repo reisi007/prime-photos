@@ -73,6 +73,14 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   3. **Kein Per-Datei-Default** — einzelne Dateien haben keine eigene Einstellung. Innerhalb eines
      Laufs bleibt ein angekreuztes „Nicht noch einmal fragen" **run-weit** wirksam (unverändert);
      persistiert wird es **pro Ordner**.
+  - **Ausnahme Einmal-Queue (Drag&Drop, User-Entscheidung 2026-10-15):** dort gibt es **keinen**
+    Ordner in `folders.toml` (synthetischer Index `ONE_TIME_IDX = usize::MAX`, `src/app.rs:26`,
+    transienter `BackupFolder`). Das Häkchen wirkt hier **nur run-weit**; beim nächsten Drop
+    entscheidet wieder der Application Default. Bewusst **nicht** gewählt: den Application Default
+    still überschreiben (greift global statt nur für diesen Drop). **Unberührt davon bleibt die
+    2026-10-14 getroffene Regel, dass die Drop-Liste selbst persistiert wird** (SQLite-Tabelle
+    `one_time_queue`, beim Start wiederhergestellt, gelöscht erst nach vollständig abgeschlossenem
+    Lauf) — nicht persistiert wird hier ausschließlich die **Konflikt-Antwort**.
 - Backup configuration window (user decision 2026-10-13): build the full "Datensicherungseinstellungen" window now (destination, content filter, interval, dedup, conflict handling, save/cancel), and **share the form logic** with the create-backup flow (same dialog for create and edit) instead of a separate row-menu. Fields whose backend does not exist yet (destination, content filter, interval) are shown **disabled** with a "Noch nicht verfügbar" hover (user decision 2026-10-13: "volle Anordnung, Rest ausgegraut"); functional now: source folder (read-only when editing), dedup, name-conflict policy.
 
 ## Upload-Queue & Concurrency (User-Entscheidung 2026-10-13)

@@ -175,6 +175,12 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   **bestehende** `BackupFolder.conflict_resolution` des **Ordners der gefragten Datei** geschrieben
   (`folders.toml` — kein Schemawechsel, das Feld existiert); **kein Per-Datei-Default**; innerhalb
   des Laufs bleibt der Override **run-weit** (heutiges Verhalten unverändert).
+  **Einmal-Queue (Drag&Drop) ausgenommen** (User-Entscheidung 2026-10-15): dort gibt es keinen Ordner
+  in `folders.toml` (`ONE_TIME_IDX`, `src/app.rs:26`) — das Häkchen wirkt nur **run-weit**; beim
+  nächsten Drop entscheidet wieder der Application Default. **Die Drop-Liste selbst bleibt davon
+  unberührt persistiert** (SQLite `one_time_queue`, Entscheidung 2026-10-14: beim Start
+  wiederhergestellt, gelöscht erst nach vollständig abgeschlossenem Lauf) — nicht persistiert wird
+  hier ausschließlich die **Konflikt-Antwort**.
   Wörtlich: „es soll der ordner default sein, einzelne dateien haben keinen Default. Zusätzlich soll
   es auch einen Application Default geben, der die Standardauswahl bei einem neuen Folder und die
   Drag & Drop Sachen haben das ApplicationDefault."
