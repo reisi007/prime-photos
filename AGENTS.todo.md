@@ -391,20 +391,74 @@ Struktur, Subagenten auf Mimo 2.6 free"):**
 Liste füllt die Höhe, 300-Zeilenkappe entfällt, leerer Zustand zentriert). Wartet auf:
 Abschluss von Welle 2 → Clean-Room-Abnahme des Originals → Umsetzer-Briefing.
 
-**Offen (nicht beauftragt) — macOS-Dialog „Where is use_default?" beim Resync (2026-10-15):**
-Beim Neu-Scannen erschien ein macOS-Panel „Choose Application — Where is use_default?". **Befund:**
-der String `use_default` steht **weder** in unserem Repo **noch** in irgendeiner Cargo-Registry-Quelle
-(beide durchsucht) — es ist also kein Text von uns, sondern ein **LaunchServices-/NSOpenPanel-Prompt**
-von macOS („Where is <App>?" erscheint, wenn ein Datei-/Typ-Zuordnung auf eine fehlende App zeigt).
-Unser Code startet nur `open -R` (`platform::reveal_in_file_manager`), `explorer`, `xdg-open`,
-`defaults read -g AppleLocale` (`countries::system_country`) und über `auto-launch` `launchctl`;
-`rfd::FileDialog::pick_folder()` läuft nur bei „Datensicherung hinzufügen …" / „Durchsuchen".
-**Nötig:** der genaue auslösende Klick + Reproduzierbarkeit (offene Frage an den User).
-**Weitere Negativbefunde (2026-10-15):** `~/Library/LaunchAgents/` enthält **keinen**
-`prime-photos`-Eintrag (konsistent — Autostart ist in den Einstellungen aus, also kein Plist zu
-erwarten); `log show --last 45m --predicate 'eventMessage CONTAINS "use_default"'` liefert **nichts**.
-Der Dialog ist damit weder von uns erzeugt noch von macOS geloggt — er kommt aus einer
-LaunchServices-Zuordnung dieser Maschine (nicht aus unserem Prozess).
+**Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen, alle belegt)**
+
+1. **„Choose Application — Where is use_default?" — URSACHE GEFUNDEN (falscher Negativbefund korrigiert).**
+   Der String steht **nicht** in unserem Code, aber **in einer von uns genutzten Abhängigkeit**:
+   `mac-notification-sys-0.6.15` (`src/lib.rs:132-138`). `ensure_application_set()` ruft
+   `get_bundle_identifier_or_default("use_default")` — also `get_bundle_identifier("use_default")`,
+   was beim OS nach einer **Anwendung namens „use_default"** fragt (LaunchServices/NSWorkspace).
+   Weil es diese App nicht gibt, zeigt macOS das Panel **„Choose Application — Where is use_default?"**;
+   erst im Fehlerfall fällt die Funktion auf `com.apple.Finder` zurück (`lib.rs:122`). Der Dialog
+   kommt also **aus unserem Prozess**, nur nicht aus unserem Code.
+   **Warum er erst heute auffällt und nicht beim Klick passt:** unser `src/notify.rs` verschiebt die
+   Benachrichtigung auf die Main-Dispatch-Queue (Run-Loop-Reentry-Fix von 2026-10-14) — sie trifft
+   also erst nach dem Klick ein. Ausgelöst wird sie beim **Abschluss eines Upload-Laufs**, nicht
+   durch den Klick in den leeren Bereich; der Klick war Zufall. Dass es „gestern noch ging", erklärt
+   sich über den LaunchServices-Cache: solange der Lookup aus dem Cache beantwortet wird, bleibt er
+   still.
+   **Fix (beauftragt):** einmalig beim Start `notify_rust::mac::set_application(...)` mit **unserer**
+   Bundle-ID `de.reisinger.prime-photos` rufen. Das setzt `INIT_APPLICATION_SET`, sodass
+   `ensure_application_set()` sofort aussteigt (**kein** Lookup, **kein** Dialog) und die
+   Benachrichtigung ohnehin richtig attribuiert wird.
+   **Verworfen (dokumentiert, damit es nicht erneut gebaut wird):** den Fehlschlag „stehen bleibt
+   com.apple.Finder" als Ursache — er trifft nicht zu; der Dialog entsteht **vor** dem Fallback.
+
+2. **Dock-/Taskbar-Icon fehlt (verkleinertes Logo nicht dargestellt).** `packaging/Info.plist`
+   kennt **keinen** `CFBundleIconFile` und `Contents/Resources` enthält **keine** `.icns` — macOS
+   zeigt deshalb ein generisches Platzhalter-Icon im Dock und im verkleinerten Zustand. Die
+   Logos existieren bereits als SVG-Quellen in `assets/` und werden über `build.rs`/`resvg`
+   gerastert; für das Dock-Icon fehlt nur die `.icns`-Bündelung (mehrere Größen) und der
+   Schlüssel im Info.plist.
+
+3. **Logo neben „Prime Photos" in der Seitenleiste erwartet.** Der Sidebar-Kopf zeigt aktuell nur
+   den Produktnamen; der User erwartet dort das Upload-Logo (welches bereits über
+   `icons::upload_logo` vorhanden ist).
+
+4. **Warteschlange und Fortschrittsleiste gehören physisch zusammen.** „▸ Warteschlange (n)" sitzt
+   oben im Kopfbereich, die Gesamt-Leiste unten in der Fußzeile — der User erwartet beide
+   zusammenhängend.
+
+5. **Protokoll-Bereich unten abgeschnitten.** Die Log-Ausliste wird am unteren Fensterrand
+   gekappt, die letzten Zeilen sind nicht erreichbar (siehe Screenshot „Letzter Upload: 54/54
+   erfolgreich" mit abgeschnittenen OK-Zeilen).
+
+6. **Aufnahmedatum / Sortierung bei Lightroom-Exporten.** Offene Frage: werden Fotos mit dem
+   **Aufnahmedatum** (EXIF `DateTimeOriginal`) hochgeladen? Die Sortierung im Konto passt bei
+   von Lightroom exportierten Bildern nicht; der User berichtet, dass es **gestern funktionierte**
+   und „heute nur noch falsch" ist — also vermutlich ein Unterschied in den EXIF-Feldern der
+   Exporte. Zu prüfen: welches Feld wir auf `contentDate` setzen (`src/upload.rs`/`src/urls.rs`)
+   und was Lightroom mitschreibt.
+
+7. **Fortschritts-Leiste nicht über die volle Breite, Text abgeschnitten — IMPLEMENTIERT, noch
+   nicht committed.** `src/backup.rs`: `.desired_width(240.0)` entfernt, dadurch nutzt die Leiste
+   die volle Fußzeilenbreite und der Text wird nicht mehr geclippt (egui-Default
+   `available_size_before_wrap().x`). 133 Tests grün, 0 Warnungen. **Wartet auf Verify + Commit.**
+
+8. **Sichere Ersetz-Regel (User-Entscheidung 2026-10-15, noch nicht implementiert).**
+   Anlass: der Default `Replace` überschreibt bei einem **Namenskonflikt mit anderem Inhalt** das
+   vorhandene Foto im Konto — Datenverlust. Der User: „nie was oben ist löschen, außer es ist die
+   gleiche Datei physisch relativ zum gesicherten Pfad, dann überschreiben".
+   **Regel:** der `PUT /v2/upload/<nodeId>` feuert **nur noch**, wenn dieselbe **lokale Datei
+   (gleicher Pfad)** im MD5-Index bereits mit dieser Node verknüpft ist — dann wurde sie lokal
+   geändert, also zu Recht ersetzt. Ein Name, der aus einem **anderen** Pfad kommt, wird **nie**
+   ersetzt, sondern umbenannt (`SaveAsNew`/Wire `RENAME`). Gilt für **alle** Ziele, auch
+   bestehende. Belegte Grundlage: der Index (`src/dedup.rs`) kennt bereits Pfad, MD5 und Node-ID,
+   die Entscheidung liegt also lokal vor dem Netz.
+   **Lokale Settings (User-Auftrag „bearbeite die lokalen Settings"):** geprüft —
+   `folders.toml` trägt für „Sport" bereits `conflict_resolution = "saveasnew"` (**kein** Handlungsbedarf);
+   `config.toml` hingegen trägt `conflict_resolution_default = "replace"` — das ist unter der neuen
+   Regel der falsche Default und wird auf `"saveasnew"` gesetzt.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der
