@@ -319,9 +319,10 @@ lautet „alles in Wellen implementieren bis fertig": Sitzung → Welle 3 → We
 bleibt dokumentiert, nicht eingeplant).
 
 **Fachliste (bleibt gültig):**
-- [ ] **S7 — Live-Abnahme:** einmal anmelden, App neu starten (Sitzung läuft **ohne** Anmeldung weiter),
-      Auffrischung im Log, Cookies frisch geholt, Upload läuft. Damit kann auch die noch offene
-      Live-Abnahme des `PUT` (2.2b) in derselben Sitzung gefahren werden.
+- [ ] **S7 — Live-Abnahme (großteils ✅ 2026-10-15):** erledigt: einmal anmelden ✅, Neustart **ohne**
+      Anmeldung ✅ (direkt in die Haupt-UI), Kontoname/Profilbild ✅, Uploads liefen ✅ („Alles aktuell",
+      Ziele bei 100 %). **Offen:** Auffrischung/Cookies im Logfile explizit sichten; die `PUT`-Abnahme
+      (2.2b).
 
 **S-C-Festlegungen (User-Entscheidung 2026-10-15, Frage + Antwort — verbindlich für S-C):**
 - **Kein Klartext-Sessionmaterial auf der Platte (Kehrtwende zu S-B):** Persistiert wird **nur** der
@@ -368,6 +369,22 @@ bleibt dokumentiert, nicht eingeplant).
 - **Speicher-only belegt:** nach dem Live-Login steht in `config.toml` **kein** Session-Cookie mehr
   (die Alt-Werte aus Welle 2 sind beim Speichern verschwunden); der Refresh-Token liegt nur im
   Schlüsselbund.
+
+**Offene Punkte aus der Live-Abnahme (2026-10-15):**
+- **Entscheidung offen — Webview-Cookie-Speicher beim Abmelden:** „Abmelden" löscht unser Sessionmaterial
+  (Access-Token, vier Cookies, Schlüsselbund-Refresh-Token) und ruft `/auth/deregister`, **aber nicht**
+  den Cookie-Speicher des eingebetteten WKWebView (`~/Library/HTTPStorages/prime-photos.binarycookies`,
+  zuletzt geändert beim Login). Amazons Browser-Sitzung bleibt auf der Platte — deshalb brauchte die
+  Anmeldung **nach** dem Abmelden **kein 2FA**. Das Original **leert** den Speicher bei **jedem
+  Login-Start** (`docs/SPEC_LOGIN.md` § 3.3). wry 0.57 bietet `with_incognito(true)` (macOS:
+  **nonPersistent** DataStore ⇒ nie etwas auf der Platte) oder `with_data_store_identifier` +
+  `WebViewExtDarwin::remove_data_store` (benannter Speicher, gezielt löschbar). **Noch zu entscheiden.**
+- **UI-Punkte (offen, aus dem Live-Screenshot):**
+  1. **Button-Hintergründe inkonsistent:** Play/Pause in der Zeile ist ein nacktes Icon **ohne** Rahmen,
+     Refresh + Kebab sind `Button::image` **mit** Rahmen; auch die Kopfzeilen-Buttons („Datensicherung
+     hinzufügen …", „Alle Sicherungsvorgänge anhalten") haben einen Hintergrund. Vereinheitlichen.
+  2. **Kebab-Popup zu schmal:** `popup_below_widget` (backup.rs ~1701) ohne Mindestbreite ⇒ der Text
+     („Im Dateimanager anzeigen" …) bricht **zeichenweise** um. `ui.set_min_width(...)` im Popup setzen.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der
