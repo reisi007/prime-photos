@@ -313,7 +313,12 @@ gut wie es geht beibehalten." Die verbindliche Regel steht in `AGENTS.md` („Si
 Clean-Room-Grundlage ist `docs/SPEC_LOGIN.md` § 3.8 + `docs/PROTOCOL.md` § 2.1 (Recon 2026-10-15 am
 DLL, siehe „Sitzung am Leben halten — Recon am Original").
 
-**Pakete (Vorschlag; Reihenfolge zu Welle 3 noch offen — Frage an den User gestellt):**
+**Entschieden (2026-10-15, Frage + Antwort):** Reihenfolge **Sitzung zuerst (S1–S7), dann Welle 3**;
+die Live-Abnahme von „Ersetzen" (2.2b) fährt **zusammen mit S7** — kein doppeltes Anmelden. Der Auftrag
+lautet „alles in Wellen implementieren bis fertig": Sitzung → Welle 3 → Welle 4 → Welle 5 (Welle 6
+bleibt dokumentiert, nicht eingeplant).
+
+**Fachliste (bleibt gültig):**
 - [ ] **S1 — Anmeldeweg auf das Portal umstellen:** `login_url` auf den Parametersatz des Originals
       (`amzn_photos_desktop_<region>`, marketplaceId, language, PKCE-Paar, `client_id=device:<hex>`,
       `return_to=/ap/maplanding`, `forceMobileLayout`). **Unsere Login-UI bleibt** (Header, Abbrechen,
@@ -339,6 +344,72 @@ DLL, siehe „Sitzung am Leben halten — Recon am Original").
 **CDP-Browser-Login** (externer Browser) bleibt ebenso verworfen wie die **Paste-Variante** als
 Hauptweg. Ebenfalls verworfen: die Original-Login-**UI** (zwei Spalten, Willkommens-Panel, Fenster
 880 × 530) zu übernehmen — unsere UI bleibt.
+
+**Umsetzungs-Schnitt (Orchestrator, aus dem Recon abgeleitet — je Paket Build → unabhängige
+Verifikation → Commit):**
+- **S-A — `src/auth.rs` (neu) + `src/urls.rs`:** reine, testbare Bausteine **ohne** UI-Verdrahtung:
+  PKCE-Paar, Portal-URL, Marktplatz-IDs, Client-Identität, JSON-Körper/Antworttypen für
+  `/auth/register`, `/auth/token` (Refresh) und `/auth/token?…auth_cookies`, Abbildung der
+  Cookie-Antwort auf unsere `Config`-Felder, 80-%-Terminberechnung, Schlüsselbund-Ablage
+  (neue Abhängigkeiten `sha2`, `base64`, `rand`, `keyring`). Am Verhalten der App ändert sich nichts.
+- **S-B — Verdrahtung `login.rs`/`app.rs`:** Portal-URL statt `amzn_photos_web_<cc>`, Code-Fang im
+  Navigations-Handler (Navigation verwerfen), Einlösung, Refresh-Token in den Schlüsselbund, Cookies
+  erzeugen und in die bestehende Kette einspeisen; der bisherige Cookie-Weg bleibt **Rückfall**.
+- **S-C — Auffrischung, ungültige Sitzung, Abmelden:** 80-%-Tick, `/auth/deregister` beim Abmelden,
+  ungültige Sitzung ⇒ Tokens löschen + Login-Screen.
+- **S-D — Live-Abnahme (Hauptagent):** einmal anmelden, Neustart **ohne** Anmeldung, Auffrischung im
+  Log, Upload läuft; darin die offene `PUT`-Abnahme (2.2b).
+
+**Recon-Fakten, auf denen der Nachbau steht (2026-10-15 am DLL; Verhalten in `docs/SPEC_LOGIN.md`
+§ 3.8 / `docs/PROTOCOL.md` § 2.1, die Zahlen hier nachgetragen):**
+- Portal-Parameter: `openid.ns`, `openid.claimed_id`/`openid.identity` = `identifier_select`,
+  `openid.mode=checkid_setup`, `openid.oa2.scope=device_auth_access`, `openid.ns.oa2`,
+  `openid.oa2.response_type=code`, `openid.oa2.code_challenge_method=S256`,
+  `openid.oa2.client_id`, `language`, `marketPlaceId`,
+  `openid.return_to=https://www.<domain>/ap/maplanding`, `openid.pape.max_auth_age=0`,
+  `forceMobileLayout=true`, `openid.assoc_handle` **und** `pageId` = `amzn_photos_desktop_<region>`
+  (gb→uk).
+- `code_verifier` = UrlSafeBase64 (ohne `=`-Padding) von 32 Zufallsbytes; `code_challenge` = dasselbe
+  von `SHA-256(verifier)`.
+- `client_id` = `"device:" + hex(utf8("<device_serial>#<device_type>"))`, **lowercased** — das ist
+  **kein** Hash, sondern der Hex-Dump der Bytes. Gerätetyp des Originals: `A2UXDCSFQXA1M7`;
+  `device_serial` = 32-Zeichen-Hash, lokal **einmal** erzeugt und gespeichert.
+- Marktplatz-IDs: DE `A1PA6795UKMFR9`, GB `A1F83G8C2ARO7P`, US `ATVPDKIKX0DER`, FR `A13V1IB3VIYZZH`,
+  IT `APJ6JRA9NG5V4`, ES `A1RKKUPIHCS9HS`, JP `A1VC38T7YXB528`, CA `A2EUQ1WTGCTBG2`,
+  AU `A39IBJ37TRP1C6`, BR `A2Q3Y263D00KWC`, CN `AAHKV2X7AFYLW`.
+- `/auth/register`-Körper: `registration_data` (app_name, app_version, device_type, device_serial,
+  device_model, os_version, `domain="Device"`) + `auth_data` (`use_global_authentication=false`,
+  `authorization_code`, `code_verifier`, `code_algorithm="SHA-256"`, `client_id` **ohne**
+  `device:`-Präfix, `client_domain="DeviceLegacy"`), dazu die Defaults
+  `requested_extensions=["customer_info","device_info"]`, `requested_token_type=["bearer","mac_dms"]`,
+  `user_context_map={}`. Antwort: `response.success.tokens.bearer{access_token, expires_in,
+  refresh_token}` — **dort** liegt der Refresh-Token.
+- Panda-Basis ist `https://api.amazon.com`; der Host wird auf den Marktplatz umgeschrieben
+  (`api.amazon.de`). Retry-Defaults des Dienstes: `PandaServiceRetries=5`, BackOff-Faktor `1.5`,
+  MaxBackOff `60 s`, Netz-Timeout `1 s`.
+- `auth_cookies`-Antwort: `response.tokens.cookies` ist eine **Map Domain → Array** von
+  `{Name, Value, Path, Expires, HttpOnly, Secure}` — der **Domain-Schlüssel** ist die Cookie-Domain
+  (nicht im Cookie-Objekt enthalten).
+- Zugriffs-Token-Ablauf = `expires_in − 60 s`; nächster Auffrischungstermin = **80 % der
+  Restlaufzeit**. Die Auffrischungswerte sind **belegt** (Verifier 2026-10-15, `AppSettings` der
+  App-Assembly): `AccessTokenMaxRetries = 5`, `AccessTokenTimeBetweenRetriesInSeconds = 15`,
+  Ticktakt des `TickTockTimer` = **3 s**, dazu `PandaServiceRetries = 5`,
+  `PandaServiceBackOffFactor = 2.0` (der Map-Default ist 1.5 — die App-Settings binden 2.0),
+  `PandaServiceMaxBackOffInSeconds = 60` (alle per Settings-Datei überschreibbar; das Bundle liefert
+  keine). **Unser Nachbau nimmt diese Werte** — kein eigener Default mehr; der Einlöse-Pfad behält
+  ohnehin die belegten **3** Versuche.
+- Abmelden = `POST /auth/deregister` (Bearer = Access-Token, Körper
+  `request_metadata{app_name, app_version}`), danach Tokens löschen.
+
+**Nachzuziehen:** Der Doku-Verifier hat 6 Befunde + 3 Präzisierungen gemeldet (u. a. § 7 #12/#13/#14
+sind **belegt** statt *unknown*, `amzp-rt` ist ein Keychain-Account-Name und kein geschriebener Pfad,
+`auth/deregister` löscht Tokens nur bei Rückkehr, unserer HEAD **erneuert** sehr wohl
+`cookie_x_amz_access_token`); das Korrekturpaket läuft als eigenes Doku-Paket (S-Doku) und wird vor dem
+Sitzungs-Umbau abgenommen. **Geräte-Identität entschieden** (User 2026-10-15, nach der Suche): die
+Werte des Originals (`app_name = "Amazon Photos"`, `app_version = "11.3.0.1d7941b5"`,
+`device_type = "A2UXDCSFQXA1M7"`); im Bundle existiert **genau ein** Gerätetyp. Nur der
+`device_serial` ist unserer (32 Zeichen, einmalig lokal erzeugt, in `config.toml`). Details in
+`AGENTS.md` („Sitzung wie das Original").
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in

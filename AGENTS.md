@@ -55,6 +55,15 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   6. **Web-Cookies bei Bedarf erzeugen:** `POST https://api.amazon.com/auth/token?source_token=<refresh>&source_token_type=refresh_token&requested_token_type=auth_cookies&domain=.<tld>&app_name=…&app_version=…` und in die bestehende Cookie-Kette einspeisen — die **Upload-Engine bleibt cookie-basiert**, die live belegte Kette aus Welle 2 bleibt damit gültig.
   7. **Ungültiger Refresh-Token:** Tokens löschen und zurück auf unseren Login-Screen — **kein** App-Neustart (den braucht nur das Original für seinen Startpfad).
   8. **Abmelden:** `POST https://api.amazon.com/auth/deregister` mit dem Access-Token, danach die Tokens löschen.
+  **Geräte-Identität (User-Entscheidung 2026-10-15, nach der Suche):** Wir senden **die Werte, die
+  das Original aktuell sendet**: `app_name = "Amazon Photos"`, `app_version = "11.3.0.1d7941b5"`
+  (Stand 2026-10-15), `device_type = "A2UXDCSFQXA1M7"`. Die Suche hat belegt, dass im Bundle **genau
+  ein** Gerätetyp existiert (keine zweite Wahl), der User hat danach entschieden: „aber sonst den
+  aktuellen nehmen". **Nur der `device_serial` ist unserer** — 32 Zeichen, einmalig lokal erzeugt,
+  in `config.toml` gespeichert. Diese Werte stehen **ausschließlich** im Anfragekörper des
+  Geräte-Wegs; UI, Fenstertitel, Bundle-Name und Branding bleiben unberührt (Projektregel
+  „Name & Branding"): wir geben uns nicht als Amazon-App aus, sondern sprechen auf der Leitung das
+  Protokoll dieses Clients.
   **Grenze („so gut es geht"):** wir treten als **eigenes** Gerät mit eigener `client_id` auf; ob Amazon eine dritte Client-Identität annimmt, ist **nicht** belegt. Bis das live bewiesen ist, bleibt der bisherige Web-/Cookie-Weg als **Rückfall** im Code, und ein abgelehnter Device-Weg wird als **klare Meldung** gezeigt, nicht still verschluckt.
 - UI reference: `docs/UI_FLOWS.md` + `docs/UI_STATES.md` (clean-room spec from the decompiled app + resources). Use them when changing the UI.
 - Folder reconciliation (observed in the client's local DBs under `~/Library/Application Support/Amazon Cloud Drive`): local SQLite state, not an HTTP call. `backup` table (schedule_path, relative_path, node_id, size, modified_date, status, last_scan_time) + `uploads` table (path, status, precomputed_md5, node_id) + `cloud.db` node cache, synced via `/drive/v1/changes` and `/drive/v1/nodes`. `BackupScanIntervalInHours = 336`.
