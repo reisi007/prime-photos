@@ -209,6 +209,17 @@ pub(crate) struct PrimePhotoApp {
     /// Set when the user really wants to quit (tray "Beenden" / ⌘Q), so the
     /// close-to-tray intercept below lets the close through.
     pub(crate) quitting: bool,
+    /// We hid the main window ourselves (close-to-tray sent
+    /// `ViewportCommand::Visible(false)`) and have not shown it again since.
+    /// egui offers no way to *query* window visibility, so this mirror is what
+    /// lets the tray-drop path know whether it has to show the window again
+    /// (otherwise the app would keep running with no window and no tray).
+    pub(crate) window_hidden: bool,
+    /// The last `tray::build` attempt failed (the OS has no tray backend —
+    /// logged as an error in `src/tray.rs`). Blocks the per-frame reconcile
+    /// from retrying the build until the next sign-in; see the reconcile in
+    /// [`Self::update`].
+    pub(crate) tray_build_failed: bool,
     /// Last pause state pushed to the tray label, to update it only on change.
     pub(crate) tray_paused: bool,
     /// Last tray glyph state (plus the OS theme it was drawn for), so the icon
@@ -412,8 +423,12 @@ impl PrimePhotoApp {
             zone_override: String::new(),
             was_active: false,
             config_form: None,
-            tray: tray::build(cc.egui_ctx.clone()),
+            // Built lazily: the tray exists exactly while a refresh token does
+            // (reconciled every frame in `update`) — no icon before sign-in.
+            tray: None,
             quitting: false,
+            window_hidden: false,
+            tray_build_failed: false,
             tray_paused: false,
             tray_icon_state: None,
             tray_last_run_failed: false,
@@ -770,6 +785,7 @@ impl eframe::App for PrimePhotoApp {
             if ev.id == *tray.show_item.id() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                self.window_hidden = false;
             } else if ev.id == *tray.pause_item.id() {
                 let next = !*self.paused.borrow();
                 self.paused.send_replace(next);
@@ -794,13 +810,6 @@ impl eframe::App for PrimePhotoApp {
             }
         }
 
-        // Close-to-tray: closing the window hides it and keeps the app running
-        // in the background. Only the tray's "Beenden" (or a real quit) exits.
-        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-        }
-
         // Size the window to the screen once, on the first frame.
         if !self.sized {
             self.sized = true;
@@ -815,6 +824,71 @@ impl eframe::App for PrimePhotoApp {
         // Session upkeep (S-C): starts/stops the background refresh worker and
         // reacts to an invalidated session or freshly minted cookies.
         self.poll_session(ctx);
+        // Tray follows the session (user decision 2026-10-15: the menu-bar
+        // icon appears only after sign-in). Reconciled every frame right where
+        // the token states are applied, so all paths stay covered — keychain
+        // token at start, successful login, logout and an invalidated session.
+        if self.has_pending_session() {
+            if self.tray.is_none() && !self.tray_build_failed {
+                self.tray = tray::build(ctx.clone());
+                if self.tray.is_none() {
+                    // The OS gave us no tray (no backend, e.g. Linux without
+                    // one — logged as an error in `src/tray.rs`). Latch it:
+                    // without this flag `self.tray.is_none()` would still be
+                    // true next frame and we would rebuild the whole tray
+                    // (menu + items + global event handlers) and log the error
+                    // again on **every** repaint, until the end of time. The
+                    // flag is cleared when the session goes away (branch
+                    // below), so the next sign-in gets exactly one new attempt
+                    // — the same "once, not per frame" behaviour the app had
+                    // when the tray was still built in `new`.
+                    self.tray_build_failed = true;
+                }
+                // The glyph cache refers to a concrete tray: a fresh one has
+                // never been drawn and its pause item starts at "Anhalten"
+                // (the per-frame label sync above already ran this frame).
+                self.tray_icon_state = None;
+                let paused_now = *self.paused.borrow();
+                self.tray_paused = paused_now;
+                if let Some(tray) = self.tray.as_ref() {
+                    tray.set_paused(paused_now);
+                }
+            }
+        } else {
+            // No session: a failed build may be retried on the next sign-in.
+            self.tray_build_failed = false;
+            if self.tray.is_some() {
+                // Dropping the `Tray` removes the icon from the menu bar.
+                self.tray = None;
+                // …and forget the cached glyph so a later rebuild gets its
+                // initial state again (`update_tray_icon` exits while no tray).
+                self.tray_icon_state = None;
+                // The tray may have been the only remaining handle to the app:
+                // when the session died while the window was hidden in
+                // tray-mode, nothing would be left to show the login screen
+                // (or the "Sitzung abgelaufen" message) — the app would run
+                // headless. Bring the window back so the user lands on the
+                // login screen; the app is deliberately **not** quit (no
+                // restart on an invalidated session, user decision
+                // 2026-10-15).
+                if self.window_hidden {
+                    self.window_hidden = false;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                }
+            }
+        }
+
+        // Close-to-tray: closing the window hides it and keeps the app running
+        // in the background. Only the tray's "Beenden" (or a real quit) exits.
+        // Runs **after** the tray reconcile so the decision uses this frame's
+        // tray state: a logout followed by a close in the same frame must not
+        // hide the window behind a tray that is dropped in that very frame
+        // (app with no window and no menu-bar icon would be unkillable).
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && self.tray.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            self.window_hidden = true;
+        }
 
         // Account fetch (name + avatar): first attempt after a successful
         // sign-in or at start when a session already exists, with **exactly one**
