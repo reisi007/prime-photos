@@ -159,6 +159,30 @@ pub(crate) fn upload_url(
     )
 }
 
+/// `PUT content-<zone>.drive.amazonaws.com/v2/upload/<nodeId>` — the second
+/// stage of `ConflictResolution::Replace` (user decision 2026-10-15). The POST
+/// asks for `conflictResolution=NONE` (the host rejects `OVERWRITE` with 404 and
+/// an empty body), so a taken name comes back as HTTP 409 naming the node that
+/// is already there; that node is then replaced through this URL — the desktop
+/// client's own overwrite path (`overwrite=true` + `nodeId`), live-proven: 200,
+/// the **same** node id, content actually swapped.
+///
+/// The URL carries only the node id and the query. `name`, `fileSize`,
+/// `parentNodeId` and `contentDate` are deliberately absent: the node already
+/// exists, so the request identifies it by path and sends the same body (the
+/// file bytes) and the same header set as the POST.
+///
+/// The node id is **not** NFC-normalised (unlike [`upload_url`]'s `name`),
+/// because it is a **server** value — an opaque id echoed back in
+/// `errorDetails.conflictNodeIds[0]`, never a file name a filesystem could
+/// spell differently per OS. There is no NFD/NFC variant of an id that macOS and
+/// Windows could disagree about, so normalising could only corrupt it.
+pub(crate) fn replace_upload_url(zone: &str, node_id: &str) -> String {
+    format!(
+        "https://content-{zone}.drive.amazonaws.com/v2/upload/{node_id}?conflictResolution=NONE"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +328,30 @@ mod tests {
             thumbnail_url("NODE", "us")
                 .ends_with("/v1/thumbnail/NODE?viewBox=60%2C60&fit=clip&encoding=jpeg")
         );
+    }
+
+    #[test]
+    fn replace_upload_url_is_zone_and_node_exact() {
+        // The German marketplace uploads into the `eu` zone.
+        assert_eq!(
+            replace_upload_url("eu", "NODE1"),
+            "https://content-eu.drive.amazonaws.com/v2/upload/NODE1?conflictResolution=NONE"
+        );
+        // A non-German marketplace (e.g. `us`) uses its own zone; only the host
+        // changes, path and query stay fixed.
+        assert_eq!(
+            replace_upload_url("na", "B0ABCDEF123"),
+            "https://content-na.drive.amazonaws.com/v2/upload/B0ABCDEF123?conflictResolution=NONE"
+        );
+        // The replace stage never sends the `OVERWRITE` value the host rejects.
+        let url = replace_upload_url("eu", "NODE1");
+        assert!(!url.contains("OVERWRITE"));
+        assert!(!url.contains("fileSize="));
+        assert!(!url.contains("name="));
+        assert!(!url.contains("parentNodeId="));
+        assert!(!url.contains("contentDate="));
+        // The node id is a server value and is passed through byte-exactly.
+        assert!(url.contains("/v2/upload/NODE1?"));
     }
 
     #[test]

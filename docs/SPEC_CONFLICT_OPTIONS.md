@@ -68,7 +68,7 @@ bewusst außen vor (§5).
 | B1 | `None` | `..._file_name_conflicts_ask_option` = **„Jedes Mal nachfragen"** | Zielknoten per Name+Parent **vorhanden** ⇒ `FileUploadNameConflictException` (kein Request); **kein** Zielknoten ⇒ normaler Upload | — (wirft vorher) | 409 mit `NAME_ALREADY_EXISTS`/`NameAlreadyExists` **und** abweichendem MD5 ⇒ `RetryForNameConflict` ⇒ Schedule erneut befragen | **Umgesetzt** als `ConflictResolution::Ask` (`src/folders.rs:134`), Wire `NONE` (`src/folders.rs:150`); Dialog `src/backup.rs:1109`, Auslöser erst bei 409 (`src/upload.rs:520`) | — (da) | „Ask ohne `Nicht noch einmal fragen` fragt pro Datei; mit Häkchen nur einmal pro Lauf." |
 | B2 | `Ignore` | `..._ignore_option` = **„Neue Datei ignorieren"** | Zielknoten vorhanden ⇒ `FileSkippedException` **vor** dem Request ⇒ Status `Skipped` („Verworfen") | — (wirft vorher) | wie B1, aber Schedule `Ignore` ⇒ `FileSkippedException` | **Umgesetzt** (`src/folders.rs:136`, Default `#[default]`), Wire `NONE`; 409 ⇒ `FileOutcome::ConflictSkipped` (`src/upload.rs:597`, `src/upload.rs:685`) | — (da) | „Gleicher Name, anderer Inhalt, `Ignore` ⇒ kein Byte geht raus bzw. 409 wird als Skip gezählt." |
 | B3 | `SaveAsNew` | `..._auto_rename_option` = **„Neue Datei automatisch umbenennen"** | Zielknoten vorhanden ⇒ Server soll umbenennen; Client setzt `overwrite=false` | `POST v2/upload?…&conflictResolution=RENAME` | 409-Name-Konflikt ⇒ `RetryForNameConflict` ⇒ erneut mit `RENAME` | **Umgesetzt** (`src/folders.rs:139`), Wire `RENAME` (`src/folders.rs:151`) | — (da) | „Namensgleichheit ⇒ Server legt umbenannte Kopie an; kein 409-Fehler." |
-| B4 | `Replace` | `..._replace_option` = **„Alte Datei ersetzen"** | Zielknoten vorhanden ⇒ Client setzt `overwrite=true` **und** `nodeId=destinationNode` | `PUT v2/upload/<nodeId>?…&conflictResolution=NONE` (overwrite, **kein** `OVERWRITE`-Wert) | erzeugt normalerweise keinen 409 (PUT ersetzt) | **Teilweise** (`src/folders.rs:141`), Wire `OVERWRITE` (`src/folders.rs:152`) — **weicht ab**, siehe §4.4 | **M** (Live-Probe nötig) | „Ersetzen überschreibt den vorhandenen Knoten statt eine Kopie anzulegen; ein Test belegt, dass danach genau ein Knoten mit diesem Namen existiert." |
+| B4 | `Replace` | `..._replace_option` = **„Alte Datei ersetzen"** | Zielknoten vorhanden ⇒ Client setzt `overwrite=true` **und** `nodeId=destinationNode` | `PUT v2/upload/<nodeId>?…&conflictResolution=NONE` (overwrite, **kein** `OVERWRITE`-Wert) | erzeugt normalerweise keinen 409 (PUT ersetzt) | **Umgesetzt** (2026-10-15, User-Auftrag) — `POST` mit `conflictResolution=NONE`, danach `PUT /v2/upload/<nodeId>`, aber **nur bei Namenskonflikt** (`NameAlreadyExists`/unbekannt/leer): `src/folders.rs:156`, Wire `:170`, `src/urls.rs:180`, Zweig `src/prime_photos.rs:1123`, `replace_picture` `:1202`, Dispatch `should_replace_after_conflict` `:358`. Ein 409-Inhalts-Duplikat wird **nicht** ersetzt (gleiche Bytes ⇒ verschwendete Bandbreite und „bereits im Konto"), sondern bleibt Conflict-Marker. **Abweichung:** wir kennen den Zielknoten erst aus der 409 (`errorDetails.conflictNodeIds[0]`), senden also zwei Requests statt einem direkten `PUT` — kein Knoten-Cache (bewusst, §5); `replace_upload_url` normalisiert die Node-ID **nicht** (Server-Wert) | — (da) | „Ersetzen überschreibt den vorhandenen Knoten statt eine Kopie anzulegen; ein Test belegt, dass danach genau ein Knoten mit diesem Namen existiert." |
 
 **Legacy-Labelsatz** (`clouddrive_desktop_statuswindow_scheduleconfiguration_filenameconflict_*`:
 „Ignorieren", „Ersetzen", „Als neue Dateien speichern", „Jedes Mal nachfragen") existiert nur
@@ -151,13 +151,13 @@ mit `ForceShowNameConflictModal` als Override, der das Hauptfenster erzwingt.
 | Dedupe-Toggle pro Ziel | vorhanden, Default **an** | `src/folders.rs:166` (`dedup`), `:181` (`default_true`); Dialog `src/backup_config.rs:119` |
 | Dedupe-Skip gleicher Pfad+MD5 | vorhanden | `src/dedup.rs:101`; Aufruf `src/upload.rs:463` |
 | Dedupe-Skip gleicher Pfad+size+mtime | vorhanden (schneller Pfad) | `src/dedup.rs:143`; Aufruf `src/upload.rs:416` |
-| Dedupe **über Pfade hinweg** (MD5) | **fehlt** | `should_skip` fragt nur `WHERE path = ?` (`src/dedup.rs:108`); `ix_uploads_md5` ungenutzt (`src/dedup.rs:63`) |
-| 409 ⇒ Skip | vorhanden (jede 409 wird Skip; die Ursache entscheidet nur über den Index-Eintrag) | `src/prime_photos.rs:1060`, `src/upload.rs:597`/`:685` |
-| 409-Ursache trennen (`DuplicatesConflictError` vs `NameAlreadyExists`) | **umgesetzt** (2026-10-15) — Marker trägt den `errorCode`; Inhalts-Duplikat ⇒ `record_content_skip` + „bereits im Konto", Namenskonflikt/unbekannt ⇒ unverändert | Marker `src/prime_photos.rs:281`, `conflict_cause` `:306`, `is_content_duplicate_code` `:320`, 409-Zweig `:1060`; Zweig `src/upload.rs:685` |
+| Dedupe **über Pfade hinweg** (MD5) | **umgesetzt** (`f3c773b`) — Treffer ⇒ „bereits im Konto", nicht „unverändert" | `src/dedup.rs:206` (`content_seen`), Aufruf `src/upload.rs:537`; Marker `Origin::ContentSkip` |
+| 409 ⇒ Skip | vorhanden (jede 409 wird Skip; die Ursache entscheidet nur über den Index-Eintrag) | `src/prime_photos.rs:1123`, `src/upload.rs:597`/`:685` |
+| 409-Ursache trennen (`DuplicatesConflictError` vs `NameAlreadyExists`) | **umgesetzt** (2026-10-15) — Marker trägt den `errorCode`; Inhalts-Duplikat ⇒ `record_content_skip` + „bereits im Konto", Namenskonflikt/unbekannt ⇒ unverändert | Marker `src/prime_photos.rs:294`, `conflict_cause` `:319`, `is_content_duplicate_code` `:333`, 409-Zweig `:1123`; Zweig `src/upload.rs:685` |
 | B1 `Ask` | vorhanden (Dialog pro Datei) | `src/folders.rs:134`, `src/upload.rs:292` (`resolve_conflict`), `src/backup.rs:1109` |
 | B2 `Ignore` (Default) | vorhanden | `src/folders.rs:136` (`#[default]`), `src/upload.rs:511` |
 | B3 `SaveAsNew` | vorhanden (Wire `RENAME`) | `src/folders.rs:139`, `:151` |
-| B4 `Replace` | vorhanden, aber Wire `OVERWRITE` (Original sendet das nie) | `src/folders.rs:141`, `:152` |
+| B4 `Replace` | **umgesetzt** (2026-10-15) — Wire `NONE`, danach `PUT /v2/upload/<nodeId>` bei Namenskonflikt | `src/folders.rs:156`, Wire `:170`; `src/urls.rs:180`; `src/prime_photos.rs:1123`, `:1202` |
 | „Nicht noch einmal fragen" | vorhanden, aber **nur pro Lauf** (in-memory) | `src/upload.rs:98` (`conflict_remember`), `:327`; **nicht** persistiert |
 | Konflikt-Dialog | vorhanden (egui-Fenster, pro Datei, 60-s-Timeout → Ignore) | `src/backup.rs:1109`–`:1154`; Timeout `src/upload.rs:297`/`:333` |
 | Globaler Dedupe-Default (Voreinstellungen) | **fehlt** (jeder neue Ordner startet `dedup=true`) | `src/folders.rs:195` |
@@ -177,9 +177,9 @@ lokale Skip sind schon getrennt.
    gleichem MD5, ohne Netz. (Query auf dem vorhandenen `ix_uploads_md5`.)
 2. **409-Ursache trennen** — **S. — erledigt 2026-10-15.**
    `errorCode` wird aus der 409-Antwort gelesen und im Konflikt-Marker mitgeführt
-   (`src/prime_photos.rs:1060`, Marker `:281`–`:312`, 409 liest `ResponseUploadFail.errorCode`
-   `:1071`). `DuplicatesConflictError`/`MD5_DUPLICATE` (case-insensiver Vergleich,
-   `is_content_duplicate_code` `:320`) ⇒ weiterhin Skip, aber im MD5-Index als
+   (`src/prime_photos.rs:1123`, Marker `:294`–`:365`, 409 liest `ResponseUploadFail.errorCode`
+   `:1128`). `DuplicatesConflictError`/`MD5_DUPLICATE` (case-insensiver Vergleich,
+   `is_content_duplicate_code` `:333`) ⇒ weiterhin Skip, aber im MD5-Index als
    `Origin::ContentSkip` (`record_content_skip`) statt als echter Upload — andernfalls hätte
    der **nächste** Lauf „unverändert" gemeldet, obwohl von diesem Pfad nie etwas hochgeladen
    wurde (Verifier-Fund). `NameAlreadyExists`/`NAME_ALREADY_EXISTS` und jeder unbekannte/leere
@@ -195,12 +195,31 @@ lokale Skip sind schon getrennt.
    (`folders.toml`), wie das Original in `schedules.conflict_resolution`.
    Abnahme: nach „Ersetzen" + Häkchen steht in `folders.toml` `conflict_resolution = "replace"`
    und der nächste Lauf fragt nicht mehr.
-4. **`Replace` auf der Leitung verifizieren** — **M** (braucht Live-Probe).
-   Original: **PUT auf `v2/upload/<nodeId>`** mit `conflictResolution=NONE`, kein
-   `OVERWRITE`-Wert. Wir senden `conflictResolution=OVERWRITE` (`src/folders.rs:152`) — ob der
-   Cookie-Endpunkt das akzeptiert, ist unbelegt (`docs/PROTOCOL.md` §4, §6).
-   Abnahme: ein Live-Upload mit `Replace` beweist genau **einen** Knoten mit dem Namen
-   (Overwrite) **oder** liefert den Beweis, dass `OVERWRITE` serverseitig verstanden wird.
+4. **`Replace` auf der Leitung verifizieren** — **M** (braucht Live-Probe) — **erledigt 2026-10-15.**
+   Live-Beleg (2026-10-15, Hauptagent): `conflictResolution=OVERWRITE` im POST wird von
+   unserem Cookie-Endpunkt **nicht** akzeptiert ⇒ **404, leerer Body**. Der Arbeitsweg ist der
+   des Originals: **`PUT /v2/upload/<nodeId>?conflictResolution=NONE`** ⇒ **200**, **gleiche
+   Node-ID**, Inhalt **wirklich getauscht**.
+   Umsetzung: `ConflictResolution::wire_value` liefert für `Replace` jetzt `NONE`
+   (`src/folders.rs:170`, Test `every_conflict_resolution_maps_to_its_wire_value`); die
+   PUT-URL entsteht ausschließlich in `src/urls.rs:180` (`replace_upload_url`, Test
+   `replace_upload_url_is_zone_and_node_exact` mit Zone `eu`/`na`). Kommt vom POST ein 409
+   **Namenskonflikt** (`NameAlreadyExists`, unbekannt oder leer — **nicht**
+   `DuplicatesConflictError`/`MD5_DUPLICATE`) **mit** `errorDetails.conflictNodeIds[0]`, folgt
+   in `upload_picture` der PUT mit **demselben Body und Header-Satz**
+   (`src/prime_photos.rs:1123`, `replace_picture` `:1202`); 200 ⇒ `Ok(id)` aus der Antwort,
+   sonst die Node-ID aus der URL (`replace_upload_id` `:376`, Tests `replace_upload_id_*`) —
+   der Worker sieht für `Replace` **kein** 409 und ist unverändert. Die Dispatch-Entscheidung
+   ist rein und steht als `should_replace_after_conflict` (`src/prime_photos.rs:358`, Test
+   `replace_follows_a_name_conflict_but_never_a_content_duplicate`) mit der Matrix
+   Namenskonflikt+ID ⇒ PUT / `DuplicatesConflictError`+ID ⇒ **kein** PUT / `MD5_DUPLICATE`+ID
+   ⇒ **kein** PUT / leere ID ⇒ **kein** PUT / andere Policy ⇒ **kein** PUT.
+   Ein **Inhalts-Duplikat** geht unter `Replace` **nicht** in den PUT: die Bytes liegen schon
+   im Konto, der PUT würde sie identisch erneut senden (verschwendete Bandbreite) und als
+   „neu hochgeladen" zählen — es bleibt der Conflict-Marker, den der Worker als „bereits im
+   Konto" mit `Origin::ContentSkip` merkt (User-Entscheidung 2026-10-15). 409 **ohne** Node-ID
+   (und jeder Nicht-409-Fehler) ⇒ unverändertes Fehlverhalten. Abnahme offen: der Live-Lauf
+   mit `Replace` (Hauptagent) bestätigt genau **einen** Knoten mit diesem Namen.
 5. **Globaler Dedupe-Default in den Einstellungen** — **S** (optional).
    Ein Config-Feld als Default für neue Ziele (Original: `EnableDeduplicationForPhotosAndVideos`).
    Abnahme: neues Ziel übernimmt den globalen Default statt hart `true`.
@@ -231,9 +250,14 @@ lokale Skip sind schon getrennt.
   antwortet mit `DuplicatesConflictError`, der Namenskonflikt mit `NameAlreadyExists` —
   **beide** mit `errorDetails.conflictNodeIds` (der vorhandene Knoten). `MD5_DUPLICATE`
   (die zweite Schreibweise des Originals) tritt bei uns nicht auf, wird aber aus
-  Vorsicht gleich behandelt. Umsetzung: `src/prime_photos.rs:320`, `src/upload.rs:685`.
-* **Akzeptanz von `conflictResolution=OVERWRITE`** auf unserem Endpunkt — unbelegt (Original
-  sendet den Wert nie; es macht `PUT` + `nodeId`).
+  Vorsicht gleich behandelt. Umsetzung: `src/prime_photos.rs:333`, `src/upload.rs:685`.
+* **~~Akzeptanz von `conflictResolution=OVERWRITE`~~ — gelöst (2026-10-15).** Live-Beleg gegen
+  unseren Cookie-Flow (`content-<zone>.drive.amazonaws.com/v2/upload`): der POST mit
+  `conflictResolution=OVERWRITE` wird **abgewiesen** — **404, leerer Body**. Der Wert geht von
+  uns deshalb **nicht mehr** auf die Leitung (`ConflictResolution::wire_value` sendet für
+  `Replace` `NONE`, `src/folders.rs:170`); der Arbeitsweg ist der des Originals —
+  `PUT /v2/upload/<nodeId>?conflictResolution=NONE` (200, gleiche Node-ID, Inhalt getauscht),
+  umgesetzt in `src/prime_photos.rs:1123`/`:1202` (nur Namenskonflikt).
 * **Ob `GetNodeByMd5`-Dedupe serverseitig zusätzlich gegated ist** (Weblab o. Ä.) — nur die
   clientseitige Gating (`UploadType`) wurde beobachtet.
 * **Ob der Server einen dedup-berechtigten Upload am `suppress`-Weg anders behandelt** —
@@ -306,15 +330,17 @@ lokale Skip sind schon getrennt.
   `clouddrive_desktop_upload_statuswindow_statusignored` („Zuvor hochgeladen") / `…statusskipped` („Verworfen"),
   `clouddrive_desktop_preferences_filter_potentialduplicates_{title,description}`,
   `clouddrive_desktop_iosdedupeprompt_{header,information}`.
-* **Unser Code:** `src/folders.rs` (`ConflictResolution` `:128`, `wire_value` `:144`, `dedup`
-  `:166`, `default_true` `:181`), `src/dedup.rs` (`should_skip` `:101`, `stat_matches` `:143`,
+* **Unser Code:** `src/folders.rs` (`ConflictResolution` `:136`, `wire_value` `:166`, `dedup`
+  `:185`, `default_true` `:199`), `src/dedup.rs` (`should_skip` `:101`, `stat_matches` `:143`,
   `record_upload` `:175`, `ix_uploads_md5` `:63`), `src/upload.rs` (`FileOutcome` `:279`,
   `resolve_conflict` `:292`, Stat-Skip `:416`, MD5-Skip `:463`, Konflikt-Schleife `:496`,
-  `ConflictSkipped` `:685`, Zähler `:61`), `src/prime_photos.rs` (`CONFLICT_PREFIX` `:281`,
-  `conflict_error` `:290`, `conflict_node_id` `:295`, `conflict_cause` `:306`,
-  `is_content_duplicate_code` `:320`, 409-Zweig `:1060`, `wire_value`-Aufruf `:902`),
-  `src/backup_config.rs` (`:119`, `:126`), `src/backup.rs` (`conflict_dialog` `:1109`),
-  `src/i18n.rs` (Konflikt-/Dedupe-Strings).
+  `ConflictSkipped` `:685`, Zähler `:61`), `src/prime_photos.rs` (`CONFLICT_PREFIX` `:294`,
+  `conflict_error` `:303`, `conflict_node_id` `:308`, `conflict_cause` `:319`,
+  `is_content_duplicate_code` `:333`, `should_replace_after_conflict` `:358`,
+  `replace_upload_id` `:376`, 409-Zweig `:1123`, `wire_value`-Aufruf `:996`,
+  `replace_picture` `:1202`), `src/urls.rs` (`upload_url`,
+  `replace_upload_url` `:180`), `src/backup_config.rs` (`:119`, `:126`), `src/backup.rs`
+  (`conflict_dialog` `:1109`), `src/i18n.rs` (Konflikt-/Dedupe-Strings).
 * **Cross-Referenz:** `docs/SPEC_DUPLICATES.md`, `docs/SPEC_DEDUP.md`,
   `docs/SPEC_ONE_TIME_UPLOAD.md`, `docs/PROTOCOL.md`, `docs/SPEC_FILENAME_ENCODING.md`.
 

@@ -240,7 +240,7 @@ not produce a 409 at all.
 | `None` (ask) | `NONE`, existing node kept | 409 MD5-match → `Ignored`; 409 name-conflict → `FileConflict` → modal |
 | `Ignore` | `NONE`, existing node kept | same as `None`; a name conflict becomes `Skipped`/`Ignored` |
 | `SaveAsNew` | `RENAME` | no 409 — server stores a renamed copy (original client; on our server-driven path a *content* duplicate still returns 409, see the note above) |
-| `Replace` | `overwrite = true` + existing `nodeId` | no 409 — server replaces the node |
+| `Replace` | `overwrite = true` + existing `nodeId` | no 409 — server replaces the node (our path: we have no local node cache, so we only learn the node id **from** the 409 — `POST` with `NONE`, then `PUT /v2/upload/<nodeId>`, 2026-10-15) |
 
 ---
 
@@ -264,7 +264,7 @@ server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSki
 | **Global conflict setting** | **Does not exist** | We also have none | — | **No change** — parity already. |
 | **Name conflict detected client-side** | Via `cloud.db` name+parent lookup, before upload | **Missing** — we only learn of it from the server 409 | **L** | Not worth it without a local node cache (we have none by design, AGENTS.md). Our 409-driven path is the pragmatic equivalent. |
 | **409 cause split (MD5-match vs NameAlreadyExists)** | Split: MD5 → Ignored; NameAlreadyExists → `FileConflict` error | **Implemented** (2026-10-15) — the marker carries the response's `errorCode` (`src/prime_photos.rs` `conflict_cause`); `DuplicatesConflictError`/`MD5_DUPLICATE` (case-insensitive) still skip, but enter the index as `Origin::ContentSkip`; `NameAlreadyExists`/unknown keep the old `record_upload` | — | **Done.** A content duplicate was never uploaded *from that path*, so it must keep reading "bereits im Konto" instead of degrading to "unverändert" on the next run. |
-| **`Replace` wire value** | `overwrite = true` + existing `nodeId`; wire enum has no `OVERWRITE` | We send `conflictResolution=OVERWRITE` | **S** | Verify `OVERWRITE` is accepted by our cookie endpoint; if not, adopt the overwrite+nodeId form. Flagged in SPEC_DEDUP §7 / open point. |
+| **`Replace` wire value** | `overwrite = true` + existing `nodeId`; wire enum has no `OVERWRITE` | **Implemented** (2026-10-15) — `POST` with `conflictResolution=NONE`, then `PUT /v2/upload/<nodeId>?conflictResolution=NONE` on the 409's `conflictNodeIds[0]` (`src/urls.rs` `replace_upload_url`, `src/prime_photos.rs` `replace_picture`) | — | **Done.** `OVERWRITE` is rejected by our endpoint (live probe 2026-10-15: 404, empty body) and is no longer sent. We learn the target node from the 409 rather than a local cache, so `Replace` costs two requests instead of one direct `PUT`. |
 | **Per-media dedup (Photos only / Videos only)** | Enum exists, UI never exposes it | none | — | **No change** — deliberately not exposed by the original either. |
 | **Apple Photos `.heic` JPEG-BOM heuristic** | Present (iOS-duplicate guard) | **Missing** | **L** | **Out of scope** — only meaningful for an Apple Photos library import, which is out of MVP (AGENTS.md "Scope-Grenzen"). |
 | **Dedup state after a 409** | Node cached, record `Ignored` | `record_upload` on `ConflictSkipped` so the next scan skips cheaply — **except** a content duplicate (`DuplicatesConflictError`), which is remembered as `content_skip` (2026-10-15) | — | **Keep** — our behaviour is the equivalent and avoids a repeat 409; the origin split keeps the two outcomes ("unverändert" vs "bereits im Konto") honest. |
@@ -279,8 +279,11 @@ import path, per-media dedup flags. These are documented boundaries, not oversig
 ## 6. UNKNOWN
 
 * **~~Our cookie endpoint's 409 `ErrorType` vocabulary~~ — solved (2026-10-15, live probe).** `DuplicatesConflictError` (content duplicate) and `NameAlreadyExists` (name conflict) both occur on our cookie flow, each with `errorDetails.conflictNodeIds`. `MD5_DUPLICATE` (the original's other spelling) is handled defensively. Split implemented in `src/prime_photos.rs` / `src/upload.rs`, see `docs/SPEC_CONFLICT_OPTIONS.md` §4.2.
-* **`conflictResolution=OVERWRITE` acceptance.** Our `Replace` assumes this value; the
-  original never sends it (it overwrites via `nodeId`). Unverified against our flow.
+* **~~`conflictResolution=OVERWRITE` acceptance.~~ — solved (2026-10-15, live probe).** Our
+  endpoint answers **404 with an empty body** to a POST carrying `OVERWRITE`. The value is no
+  longer sent: `Replace` posts `NONE` and then overwrites the node the 409 names via
+  `PUT /v2/upload/<nodeId>?conflictResolution=NONE` (200, same node id, content swapped) —
+  see `docs/SPEC_CONFLICT_OPTIONS.md` §4.4.
 * **Whether `GetNodeByMd5` dedup is gated by any additional server-side flag** beyond
   `UploadType` (e.g. a weblab). Only the client-side gating was observed.
 * **Exact button→outcome mapping of the iOS-dedup prompt** — carried over from

@@ -247,6 +247,19 @@ pub struct ResponseUpload {
     sub_kinds: Vec<String>,
 }
 
+/// The upload endpoint's answer to the `PUT` that replaces an existing node
+/// (`ConflictResolution::Replace`). Deliberately lenient where
+/// [`ResponseUpload`] is strict: only `id` is read and it defaults to empty, so
+/// a body that names no id still parses and falls back to the node id from the
+/// request URL ([`replace_upload_id`]). A 2xx is the success signal — the PUT
+/// really did swap the node's content — so a missing id must not turn it into
+/// an error.
+#[derive(Debug, Deserialize)]
+struct ResponseReplaceUpload {
+    #[serde(default)]
+    id: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ResponseUploadFail {
     message: String,
@@ -321,6 +334,55 @@ pub(crate) fn is_content_duplicate_code(code: &str) -> bool {
     let code = code.trim();
     code.eq_ignore_ascii_case("DuplicatesConflictError")
         || code.eq_ignore_ascii_case("MD5_DUPLICATE")
+}
+
+/// Whether a 409 from the upload endpoint must be answered with the replace
+/// `PUT` (second stage of `ConflictResolution::Replace`, user decision
+/// 2026-10-15). All three conditions must hold:
+///
+/// - the folder's policy is `Replace`;
+/// - the response named the node that is already there
+///   (`errorDetails.conflictNodeIds[0]`, non-empty) — without it there is no PUT
+///   target;
+/// - the 409 is a **name** conflict (`NameAlreadyExists`, an unknown or an empty
+///   `errorCode`). A **content** duplicate (`DuplicatesConflictError` /
+///   `MD5_DUPLICATE`) is deliberately **not** replaced: those very bytes are
+///   already in the account, so the PUT would carry identical bytes — the wasted
+///   bandwidth the dedup path exists to save — and reporting it as "neu
+///   hochgeladen" would contradict "a file's identity is its content". Such a
+///   409 stays the conflict marker the worker turns into "bereits im Konto"
+///   (`Origin::ContentSkip`, AGENTS.md).
+///
+/// Pure, hence testable without the network: the `PUT` itself needs an
+/// authenticated session.
+fn should_replace_after_conflict(
+    resolution: ConflictResolution,
+    cause: &str,
+    existing_node_id: &str,
+) -> bool {
+    resolution == ConflictResolution::Replace
+        && !existing_node_id.is_empty()
+        && !is_content_duplicate_code(cause)
+}
+
+/// Upload id reported for a successful replace `PUT`: the id the response
+/// names, or — when the response carries none (missing, blank, or no JSON body
+/// at all) — the node id from the request URL. The PUT replaces exactly that
+/// node, so its id describes the outcome either way; the fallback keeps a 200
+/// from turning into a plain failure that would skip the local index entry.
+///
+/// Pure, hence testable without the network: the `PUT` itself needs an
+/// authenticated session.
+fn replace_upload_id(response_body: &str, node_id_from_url: &str) -> String {
+    let id = serde_json::from_str::<ResponseReplaceUpload>(response_body)
+        .ok()
+        .map(|body| body.id.trim().to_string())
+        .unwrap_or_default();
+    if id.is_empty() {
+        node_id_from_url.to_string()
+    } else {
+        id
+    }
 }
 
 /// Flatten an error together with its whole `source()` chain into one line, so
@@ -1063,13 +1125,31 @@ impl PrimePhotos {
                         Ok(v) => v,
                         Err(e) => return Err(error_chain(&e)),
                     };
+                    let code = body.error_code;
                     let existing = body
                         .error_details
                         .conflict_node_ids
                         .first()
                         .cloned()
                         .unwrap_or_default();
-                    return Err(conflict_error(&body.error_code, &existing));
+                    // `Replace` (user decision 2026-10-15): the POST asked for
+                    // `conflictResolution=NONE` — the value the host accepts —
+                    // so a taken name surfaces as 409 naming the node that is
+                    // already there. That node is exactly what the original
+                    // overwrites with `PUT /v2/upload/<nodeId>?conflictResolution=NONE`
+                    // (live-proven: 200, same node id, content swapped). The
+                    // worker therefore never sees this 409 for `Replace` and
+                    // needs no conflict handling of its own. Without a node id,
+                    // with any other policy, and for a **content** duplicate
+                    // (the same bytes are already there — re-sending them is the
+                    // wasted bandwidth this project avoids) the unchanged
+                    // conflict marker below goes back, as for the other policies.
+                    if should_replace_after_conflict(conflict, &code, &existing) {
+                        return self
+                            .replace_picture(&existing, &headers, &contents_vec, pic_path)
+                            .await;
+                    }
+                    return Err(conflict_error(&code, &existing));
                 }
                 _ => {
                     // Check for authentication errors
@@ -1095,6 +1175,88 @@ impl PrimePhotos {
                     Err(format!("HTTP {}: {}", status_code, snippet))
                 }
             }
+        }
+    }
+
+    /// Second stage of `ConflictResolution::Replace` (user decision 2026-10-15):
+    /// replace the node the POST's 409 named (`errorDetails.conflictNodeIds[0]`)
+    /// with `PUT /v2/upload/<nodeId>?conflictResolution=NONE` — the desktop
+    /// client's own overwrite path, live-proven: 200, the same node id, content
+    /// actually swapped. `conflictResolution=OVERWRITE` on the POST is **not**
+    /// an alternative: the host answers 404 with an empty body.
+    ///
+    /// Reached only for a **name** conflict (a content duplicate keeps its
+    /// conflict marker, see [`should_replace_after_conflict`]).
+    ///
+    /// Sends the same request body (the file bytes) and the same header set as
+    /// the POST. The node already exists, so the URL carries neither name, size,
+    /// parent nor content date (`urls::replace_upload_url`).
+    ///
+    /// A 2xx is success and yields `Ok(id)` — the id from the response, or the
+    /// node id from the URL when the response names none
+    /// ([`replace_upload_id`]) — so the worker records it as a real upload
+    /// (`FileOutcome::Uploaded`, `record_upload`): this path really did send the
+    /// bytes. Any failure stays a plain `Err` (a failed replace is an error, not
+    /// a "already there" skip).
+    ///
+    /// Not unit-testable: the `PUT` needs an authenticated session against the
+    /// live endpoint. Only the response-id fallback is covered by
+    /// `replace_upload_id`.
+    async fn replace_picture(
+        &self,
+        node_id: &str,
+        headers: &HeaderMap,
+        contents: &[u8],
+        pic_path: &Path,
+    ) -> Result<String, String> {
+        let url = Url::parse(&urls::replace_upload_url(&self.conf.zone, node_id))
+            .expect("Can't parse the replace upload URL");
+
+        let response = match self
+            .client
+            .put(url)
+            .headers(headers.clone())
+            .body(contents.to_vec())
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => return Err(error_chain(&e)),
+        };
+
+        if response.status().is_success() {
+            let response_text = match response.text().await {
+                Ok(t) => t,
+                Err(e) => return Err(format!("Failed to read response body: {}", error_chain(&e))),
+            };
+            debug!(
+                "Replace upload response (first 500 chars): {}",
+                &response_text.chars().take(500).collect::<String>()
+            );
+            Ok(replace_upload_id(&response_text, node_id))
+        } else {
+            let status_code = response.status().as_u16();
+            debug!("Replace upload failed on status code {}", status_code);
+            if Self::check_auth_error(status_code) {
+                return Err("Authentication failed: Session cookies expired".to_string());
+            }
+            let body = match response.text().await {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(format!(
+                        "Failed to read error response body: {}",
+                        error_chain(&e)
+                    ));
+                }
+            };
+            let snippet: String = body.chars().take(300).collect();
+            error!(
+                "Replace upload for {} failed with HTTP {}: {}",
+                pic_path.display(),
+                status_code,
+                snippet
+            );
+            Err(format!("HTTP {}: {}", status_code, snippet))
         }
     }
 
@@ -1277,5 +1439,100 @@ mod tests {
         assert!(!is_content_duplicate_code("NAME_ALREADY_EXISTS"));
         assert!(!is_content_duplicate_code(""));
         assert!(!is_content_duplicate_code("SomethingElse"));
+    }
+
+    #[test]
+    fn replace_follows_a_name_conflict_but_never_a_content_duplicate() {
+        // A name conflict names the node to replace → PUT.
+        assert!(should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NameAlreadyExists",
+            "NODE1"
+        ));
+        // Unknown and empty causes count as a name conflict → PUT.
+        assert!(should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "SomethingElse",
+            "NODE1"
+        ));
+        assert!(should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "",
+            "NODE1"
+        ));
+        // Both spellings are compared case-insensitively.
+        assert!(should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NAME_ALREADY_EXISTS",
+            "NODE1"
+        ));
+        // A content duplicate: the same bytes are already in the account, so
+        // re-sending them is exactly the wasted bandwidth the dedup path avoids
+        // — no PUT, the worker counts it as "bereits im Konto" instead.
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "DuplicatesConflictError",
+            "NODE1"
+        ));
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "MD5_DUPLICATE",
+            "NODE1"
+        ));
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "duplicatesconflicterror",
+            "NODE1"
+        ));
+        // No node id in the 409 → no PUT target.
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NameAlreadyExists",
+            ""
+        ));
+        // Only `Replace` opens the second stage; the other three policies keep
+        // their unchanged conflict-marker behaviour.
+        for resolution in [
+            ConflictResolution::Ask,
+            ConflictResolution::Ignore,
+            ConflictResolution::SaveAsNew,
+        ] {
+            assert!(!should_replace_after_conflict(
+                resolution,
+                "NameAlreadyExists",
+                "NODE1"
+            ));
+        }
+    }
+
+    #[test]
+    fn replace_upload_id_prefers_the_id_from_the_response() {
+        // The replace `PUT` answers with the node it wrote; that id is reported.
+        assert_eq!(
+            replace_upload_id(r#"{"id":"NEWNODE","name":"a.jpg"}"#, "OLDNODE"),
+            "NEWNODE"
+        );
+        // Surrounding whitespace is not part of the id.
+        assert_eq!(
+            replace_upload_id(r#"{"id":"  NEWNODE  "}"#, "OLDNODE"),
+            "NEWNODE"
+        );
+    }
+
+    #[test]
+    fn replace_upload_id_falls_back_to_the_node_id_from_the_url() {
+        // No `id` field at all.
+        assert_eq!(
+            replace_upload_id(r#"{"name":"a.jpg"}"#, "OLDNODE"),
+            "OLDNODE"
+        );
+        // A blank id is not a usable one.
+        assert_eq!(replace_upload_id(r#"{"id":"   "}"#, "OLDNODE"), "OLDNODE");
+        // No JSON body at all (the endpoint answered 200 with nothing to say).
+        assert_eq!(replace_upload_id("", "OLDNODE"), "OLDNODE");
+        assert_eq!(
+            replace_upload_id("<html>proxy</html>", "OLDNODE"),
+            "OLDNODE"
+        );
     }
 }

@@ -146,10 +146,13 @@ pub enum ConflictResolution {
     /// different content is uploaded, renamed when the name is already taken.
     #[default]
     SaveAsNew,
-    /// "Ersetzen" — **heute nicht funktionsfähig**: the host rejects
-    /// `conflictResolution=OVERWRITE` (`POST` ⇒ 404, empty body); the correct
-    /// path would be `PUT /v2/upload/<nodeId>` (see the ledger, not implemented
-    /// here).
+    /// "Ersetzen" — a taken name is resolved in **two steps** (user decision
+    /// 2026-10-15). The POST sends `conflictResolution=NONE` (the host rejects
+    /// the `OVERWRITE` value with 404 and an empty body), and the 409's
+    /// `errorDetails.conflictNodeIds[0]` names the node to replace with
+    /// `PUT /v2/upload/<nodeId>?conflictResolution=NONE` — live-proven: 200,
+    /// the same node id, content actually swapped. The overwrite is therefore
+    /// **not** a wire value, which is why `wire_value` reports `NONE`.
     Replace,
 }
 
@@ -157,11 +160,14 @@ impl ConflictResolution {
     /// Wire value for the `conflictResolution` upload parameter. `Ask` and
     /// `Ignore` both send `NONE` — the server keeps the existing file and reports
     /// the conflict; the worker decides whether to skip it or ask the user.
+    /// `Replace` also sends `NONE`: no wire value expresses "overwrite" on this
+    /// endpoint (`OVERWRITE` ⇒ 404), the overwrite is the follow-up
+    /// `PUT /v2/upload/<nodeId>` (`urls::replace_upload_url`).
     pub fn wire_value(self) -> &'static str {
         match self {
             ConflictResolution::Ask | ConflictResolution::Ignore => "NONE",
             ConflictResolution::SaveAsNew => "RENAME",
-            ConflictResolution::Replace => "OVERWRITE",
+            ConflictResolution::Replace => "NONE",
         }
     }
 }
@@ -351,6 +357,17 @@ mod tests {
         // default must upload content that differs, renamed when the name is
         // taken — never silently skip it.
         assert_eq!(ConflictResolution::default(), ConflictResolution::SaveAsNew);
+    }
+
+    #[test]
+    fn every_conflict_resolution_maps_to_its_wire_value() {
+        assert_eq!(ConflictResolution::Ask.wire_value(), "NONE");
+        assert_eq!(ConflictResolution::Ignore.wire_value(), "NONE");
+        assert_eq!(ConflictResolution::SaveAsNew.wire_value(), "RENAME");
+        // `Replace` no longer claims the `OVERWRITE` value the host answers with
+        // 404: it posts like `Ask`/`Ignore` and overwrites the node the 409 names
+        // with `PUT /v2/upload/<nodeId>` (user decision 2026-10-15).
+        assert_eq!(ConflictResolution::Replace.wire_value(), "NONE");
     }
 
     #[test]
