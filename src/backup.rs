@@ -1840,11 +1840,10 @@ impl PrimePhotoApp {
                 } else {
                     tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
                 };
-                ui.add(
-                    egui::ProgressBar::new(frac)
-                        .desired_width(240.0)
-                        .text(text),
-                );
+                // No `desired_width`: egui then takes everything the row has
+                // left after the spinner, so the bar spans the full footer
+                // width and the counter text is no longer clipped at 240 px.
+                ui.add(egui::ProgressBar::new(frac).text(text));
             });
             // Extra result line (user decision 2026-10-14): the run's outcome
             // breakdown over **all** targets. It is a result line, not a second
