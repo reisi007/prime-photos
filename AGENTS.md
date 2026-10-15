@@ -110,21 +110,26 @@ Option<bool>` (`None` = nie entschieden ⇒ einmal registrieren + `Some(true)` s
 fehlendes Login-Item wird repariert). Der OS-Zustand bleibt die operative Wahrheit, `Config`
 speichert nur die Absicht. Details: `AGENTS.todo.md` → „Zurückgestellt" #2.
 
-## Geplante Implementierungs-Wellen (User-Auswahl 2026-10-14) — dokumentiert, **nicht gestartet**
+## Geplante Implementierungs-Wellen
 
-Der User hat die nächsten Wellen ausgewählt, aber ausdrücklich **keinen Startauftrag** erteilt
-(„nur dokumentieren, aber nicht starten"). Details und Begründungen je Punkt stehen im Ledger
-(`AGENTS.todo.md` → „Implementierungs-Wellen"). Reihenfolge bei Start:
+**Stand 2026-10-15 (Neuordnung, User-Auftrag):** Der User hat die Restliste **gruppiert** haben
+wollen („dann rest in wellen gruppieren, ausgeben und stoppen") und danach **alle Wellen
+nacheinander** beauftragt. Der verbindliche Plan — Schnitt nach gemeinsamem Umfeld, damit jede Welle
+in einem Durchgang ohne Merge-Konflikt läuft — steht im Ledger (`AGENTS.todo.md` →
+„Wellenplan (Neufassung 2026-10-14, nach der Duplikat-/Konflikt-Kette)"), und wird dort
+fortgeschrieben (Abnahme + Commit je Welle). Kurzform:
 
-1. **P2 + P3** — Drag&Drop-Dateien temporär in der SQLite (Überleben Neustart, Löschen nach
-   vollständigem Upload; kein Watch, kein Wasserzeichen) + **eine** aggregierte Fortschrittsanzeige
-   über **alle** Backup-Ziele inkl. One-Time-Zeile (Fußzeile, auch im Leerlauf).
-2. **Echter Name + Profilbild** im Account-Block — Endpunkt belegt
-   (`GET <metadataUrl>/drive/v1/account/preferences` → `name` + `avatarNodeId`, 60×60-Crop,
-   Cache `ThumbnailsPath/<nodeId>_60_60.jpeg`, Refresh Start + 24 h + on demand). Harte
-   Voraussetzung: ein Test muss zeigen, dass unser Cookie-Pfad dort akzeptiert wird; sonst bleibt
-   der Block wie heute.
-3. **About / Third-Party-Lizenzen** — Voraussetzung für ein öffentliches Release.
+- **Welle 1 — echter Lauf** (kein Code) ✅ **erledigt 2026-10-15**; Belege im Ledger.
+- **Welle 2 — Konflikt-/Duplikat-Kette abschließen:** 409-Ursache trennen (2.1), „Ersetzen" via
+  `PUT /v2/upload/<nodeId>` (2.2), „Nicht noch einmal fragen" pro Ziel persistieren (2.3), Rest nach
+  `docs/SPEC_CONFLICT_OPTIONS.md` (2.4). **Läuft ab 2026-10-15.**
+- **Welle 3 — Progress-/UI-Umbau** (Detail in den Hauptbereich, Klapp-Panel weg, Live-Status).
+- **Welle 4 — About / Third-Party-Lizenzen** (Voraussetzung für ein öffentliches Release).
+- **Welle 5 — Robustheit & Politur** (`rfd::FileDialog` → `AsyncFileDialog`, P2-Reste, Branding).
+- **Welle 6 — Post-MVP / bewusst später** (dokumentiert, **nicht** eingeplant).
+
+Frühere Auswahl von 2026-10-14 („P2+P3", „Echter Name + Profilbild", „About"): die beiden ersten
+sind umgesetzt, das dritte ist jetzt **Welle 4** — die alte Nummerierung ist damit abgelöst.
 
 Weitere offene Punkte (Queue-Paginierung, Fehlerfenster, Pause pro Ordner, Sortierung/Filter,
 Tray-Status-Popup, Pro-Ziel-Limit, Drosselung, Logout im Upload) sind im Ledger

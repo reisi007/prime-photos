@@ -647,17 +647,30 @@ gruppieren, ausgeben und stoppen"). **Keine** Welle startet ohne ausdrücklichen
 sind nach **gemeinsamem Umfeld/Dateien** geschnitten, damit jede in einem Durchgang ohne
 Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
 
-### Welle 1 — Verifikation am **echten Lauf** (kein Code)
-Alles seit dem ersten echten Upload ist **gebaut und getestet, aber nie gelaufen**: NFC-Normalisierung,
-Konflikt-Default + Verdrahtung, Inhalts-Dedupe + Markierung, Ergebnis-Aufschlüsselung. Ein echter Lauf
-zeigt, was Tests nicht können (Namen am Server, „bereits im Konto" statt „480 fertig", kein `O□FB`,
-kein Absturz am Laufende). **Empfehlung: vor jeder weiteren Welle.**
-Abnahme: Lauf über ein kleines Ziel; die Fußzeile zeigt die vier Zahlen; ein bewusst umbenanntes
-Testfile wird als „bereits im Konto" gezählt und im **zweiten** Lauf **ohne** erneutes Hashen wieder so.
-**Warum das nicht durch Tests ersetzbar ist (Verifier-Fund 2026-10-14):** der Round-Trip der
-`origin`-Markierung ist nur auf **Index-Ebene** bewiesen (Unit-Test) plus der Codeposition
-(„Stat-Zweig liegt vor dem Lesen"); einen End-to-End-Test über `upload_worker` gibt es im Repo
-**nicht**. Genau das prüft dieser Lauf.
+### Welle 1 — Verifikation am **echten Lauf** — ✅ **ERLEDIGT** (2026-10-15, ohne Codeänderung)
+
+Setup: eine **Kopie mit neuem Namen** im Sport-Ordner (Inhalt identisch zu einem indexierten File ⇒
+Inhalt liegt schon im Konto) und das Ordner-Wasserzeichen gelöscht, damit die Kaltstart-Runde
+**alle** 481 Dateien prüft statt nur die seit dem letzten Mal geänderten.
+
+- **Lauf 1** (release, `RUST_LOG=info`): 481 Dateien im Plan; 480 über den Stat-Pfad
+  („unverändert"), die umbenannte Kopie **lokal** als „bereits im Konto" erkannt und mit
+  `origin='content_skip'` **gemerkt**. `status = done`, **kein** Upload, Folder-Wasserzeichen neu
+  geschrieben.
+- **Lauf 2** (`RUST_LOG=debug`, Wasserzeichen erneut gelöscht): **481 × `dedup: stat hit`, 0 ×
+  `dedup: skip`** ⇒ **keine einzige** Datei wurde gelesen oder MD5-gehasst; die `content_skip`-Zeile
+  blieb stehen (`content_skip|1`, `uploaded|480`), `status = done`, kein Upload.
+- **Damit ist der geforderte E2E-Beleg erbracht** (Verifier-Fund 2026-10-14: „der Round-Trip ist nur
+  auf Index-Ebene bewiesen"): die Markierung hält im echten Lauf, und der schnelle Pfad entscheidet
+  komplett ohne Datei-I/O.
+- **Aufgeräumt:** Testdatei **und** ihre Indexzeile nach dem Lauf gelöscht (Live-Index wieder 480
+  `uploaded`); Sicherung des Vorzustands liegt unter `…/T/opencode/pp-backup-084750/`.
+- **Nicht visuell bestätigt (ehrliche Lücke):** die **vier Zahlen der Fußzeile** selbst. Der Mac war
+  zum Screenshot-Zeitpunkt gesperrt (Touch-ID-Screen ⇒ `screencapture` liefert Schwarz). Abgeleitet
+  aus Lauf 1: 480 „unverändert" + 1 „bereits im Konto"; die Zuordnung Herkunft⇒Anzeige ist per
+  Verifier und Code belegt. **Bei entsperrtem Screen einmal gegenlesen.**
+- **Nebenbei sichtbar:** die App baut beim Start **eine** Verbindung zu `www.amazon.de` auf
+  (Kontoname/Profilbild, 24-h-Rhythmus) — kein Upload.
 
 ### Welle 2 — Konflikt-/Duplikat-Kette abschließen (ein Umfeld, dieselben Dateien)
 - **2.1 409-Ursache trennen** (`upload.rs`, `prime_photos.rs`): `DuplicatesConflictError` ⇒
