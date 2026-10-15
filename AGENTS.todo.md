@@ -143,14 +143,27 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   Live-Lauf noch einmal (Knoten behält den Namen, Inhalt danach nachweislich der neue —
   Größe/MD5/Version), danach Knoten + Testziel wieder entfernen. **Zwei Low-Funde des Verifiers sind
   bewusst offen gelassen** (reine Doku, kein Logikfehler) und stehen in der 2.4-Liste.
-- **Eigenes Paket — läuft jetzt (beauftragt, nach 2.3b, vor Welle 3): EXIF-loser Upload darf kein
-  Fehler sein.** Ein **erfolgreicher** Upload von `c2.png` liefert gültiges JSON mit `id`/`name`, unser
-  `ResponseUpload` verlangt aber `resolutionUnit` ⇒ serde bricht ab („missing field
-  'resolutionUnit'") ⇒ der Lauf meldet **Fehler** statt Erfolg und schreibt **keine** Indexzeile (die
-  Datei würde bei jedem Lauf erneut gelesen und gehasht). Betrifft alle EXIF-losen Typen, die
-  `is_supported_image` zulässt (png, bmp, gif, webp); im Sport-Ordner (nur JPEG/CR3) unsichtbar, in
-  einer echten Sammlung nicht. Fix: Antwortfelder **optional**, Test mit einer Antwort ohne
-  `resolutionUnit`.
+- **2.3 Konflikt-Standard in drei Ebenen — ✅ erledigt 2026-10-15:** (a) Application Default in
+  `Config` + Einstellungen → Upload *(`db68cff`)*, (b) „Nicht noch einmal fragen" pro Ordner
+  persistiert *(`a71191b`)*, (c) **kein** Per-Datei-Default. Details unter „2.3 Konflikt-Standard in
+  drei Ebenen" weiter unten. **Achtung:** der Default-Wert ändert sich am 2026-10-15 von `SaveAsNew`
+  auf `Replace` (2.4a).
+- **EXIF-loser Upload darf kein Fehler sein — ✅ erledigt 2026-10-15 (`261501e`, Verifier APPROVE,
+  90 Tests).** Ein **erfolgreicher** Upload von `c2.png` lieferte gültiges JSON mit `id`/`name`, unser
+  `ResponseUpload` verlangte aber `resolutionUnit` ⇒ serde brach ab („missing field
+  'resolutionUnit'") ⇒ der Lauf meldete **Fehler** statt Erfolg und schrieb **keine** Indexzeile (die
+  Datei wurde bei jedem Lauf erneut gelesen und gehasht). Betroffen sind alle EXIF-losen Typen, die
+  `is_supported_image` zulässt (im Sport-Ordner mit nur JPEG/CR3 unsichtbar). **Fix:** gelesen wird aus
+  der Antwort ohnehin nur `id` — jetzt ist jedes Feld außer `id` optional (`#[serde(default)]`,
+  `modifiedDate`/`createdDate` als `Option<DateTime<Utc>>`), `id` bleibt **Pflicht** (kein
+  Container-`default`, kein `Default`-Derive — der Verifier hat das per Mutation belegt: mit
+  Container-Default wird der `id`-Test rot). Vier Tests: Live-Fall (`image` ohne `resolutionUnit`),
+  Body nur mit `id`, das vollständige `docs/PROTOCOL.md`-§2.17-Beispiel als Regressionsschutz, `id`
+  bleibt Pflicht. **Bekannte, gewollte Folge:** fehlt künftig ein Nicht-`id`-Feld, greift ein Default
+  statt eines Parse-Fehlers — heute liest diese Felder niemand.
+  **Drei Low-Nits des Verifiers → in die 2.4b-Liste (h)/(i) aufgenommen:** die Aufzählung „png, bmp,
+  gif, webp" (`docs/SPEC_UPLOAD.md:146`) ist nicht abschließend (tif/tiff fehlen, webp *kann* EXIF
+  tragen) und „differs only in how `id` is treated" (`src/prime_photos.rs:286`) ist leicht überzogen.
 - **Zwei echte Befunde aus der Hänger-Diagnose (angelegt, nicht beauftragt):** (a) ein Ziel, dessen
   Dateien **alle** fehlschlagen, behält `status = "uploading"` dauerhaft:
   `finalize_background_store` (`src/backup.rs:353-363`) schreibt Done/Error nur für Indizes aus
@@ -197,25 +210,44 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   Drag & Drop Sachen haben das ApplicationDefault."
   Abnahme (b): nach „Ersetzen" + Häkchen steht `conflict_resolution = "replace"` im Ordner und der
   **nächste** Lauf fragt dort nicht mehr, während ein zweiter Ordner weiterhin fragt.
-- **2.4 Rest laut `docs/SPEC_CONFLICT_OPTIONS.md`** — jede Variante mit Abnahmekriterium; bewusste
-  Abweichungen dokumentieren: die Client-Vorprüfung des Originals ersetzen wir durch die
-  Server-Antwort (kein Node-Cache), die `.heic`-iOS-Heuristik bleibt draußen.
-  **Mitnehmen (nicht blockierende Verifier-Funde aus 2.1/2.2/2.2b, dort bewusst liegen gelassen):**
-  (a) ein Test für **gepaddete** Inhaltsduplikat-Codes („ DuplicatesConflictError " ⇒ **kein** PUT —
-  `is_content_duplicate_code` trimmt, aber kein Test pinnt das); (b) ein Test, der den
-  **Byte-Durchgriff** einer Nicht-ASCII-Node-ID durch `replace_upload_url` festhält (die
-  „kein NFC für die Node-ID"-Begründung steht bisher nur im Doc-Kommentar); (c)
-  `docs/SPEC_CONFLICT_OPTIONS.md` §4, Satz „der Worker sieht für `Replace` **kein** 409" ist zu groß
-  formuliert (beim Inhaltsduplikat sieht er sehr wohl einen); (d) `docs/SPEC_SYNC.md:734` und
-  `docs/SPEC_LIBRARY.md:649` führen `OVERWRITE` noch als unseren Vokabular-Wert; (e) die
-  vorbestehenden stale Zeilenreferenzen in `docs/SPEC_CONFLICT_OPTIONS.md` (§1.2 B1/B2/B3, §7-Refs
-  auf `upload.rs`/`dedup.rs`) und der Widerspruch in `docs/SPEC_DUPLICATES.md` §3 („Dedupe über
-  Pfade hinweg = fehlt") einsammeln, wenn die Datei ohnehin angefasst wird.
-  **(f) Zwei Low-Funde des 2.2b-Verifiers (2026-10-15, reine Doku):** `src/prime_photos.rs:1139`
-  behauptet im Kommentarblock weiterhin, das Original überschreibe per
-  `PUT …?conflictResolution=NONE` „live-proven: 200" — widerspricht dem neuen Kommentar bei
-  `:1149-1153` und der Spec; `src/folders.rs:153` und `docs/SPEC_DUPLICATES.md:286-287` führen
-  denselben veralteten Satz (dort ohne POST-Query). Beim nächsten Anfassen mitkorrigieren.
+- **2.4 — der Rest laut `docs/SPEC_CONFLICT_OPTIONS.md` (User-Entscheidung 2026-10-15: Umfang
+  „Wortlaut angleichen"), in zwei Paketen.** Bewusste Abweichungen dokumentieren: die
+  Client-Vorprüfung des Originals ersetzen wir durch die Server-Antwort (kein Node-Cache), die
+  `.heic`-iOS-Heuristik bleibt draußen, und wir fragen **pro Datei** statt im gebündelten Sheet.
+  **2.4a — Code/UI (beauftragt, läuft):**
+  - **Globaler Dedupe-Default:** neues `Config.dedup_default` (Default **`true`**, serde-Default
+    `true`, damit alte `config.toml` lädt), Einstellung in **Einstellungen → Upload**; er ist die
+    Vorauswahl beim Anlegen eines Ziels **und** gilt für die Einmal-Queue (Drag&Drop). Bestehende
+    Ziele behalten ihren Wert, keine Migration. Abnahme: ein neues Ziel übernimmt den Default statt
+    hart `true`; Tests pinnen `Config::default().dedup_default` und den serde-Default ohne Key.
+  - **Konflikt-Default → `Replace`** (User-Entscheidung 2026-10-15): `Config.conflict_resolution_default`
+    defaultet auf `Replace` (auch im serde-Default). Der **Enum-`#[default]` bleibt `SaveAsNew`** —
+    das ist der **Datei**-Fallback für `folders.toml`-Einträge ohne Schlüssel; sonst sprängen
+    bestehende Ziele still aufs Überschreiben. Abnahme: der Legacy-Key-Test erwartet jetzt `Replace`,
+    der Enum-Fallback-Test weiterhin `SaveAsNew`.
+  - **Wortlaut-Parität:** `SaveAsNew` heißt in beiden Radiogruppen „Neue Datei automatisch
+    umbenennen" (de+en); der Dialog-Knopf bleibt „Als neue Datei speichern". Das Häkchen im
+    Konflikt-Dialog nennt den Ordner („Nicht noch einmal nach ‚<Ordner>'-Ordner fragen"), bei der
+    Einmal-Queue bleibt „Nicht noch einmal fragen".
+  **2.4b — Doku + zwei Tests (nach 2.4a):**
+  (a) Test für **gepaddete** Inhaltsduplikat-Codes („ DuplicatesConflictError " ⇒ **kein** PUT —
+  `is_content_duplicate_code` trimmt, aber kein Test pinnt das); (b) Test für den **Byte-Durchgriff**
+  einer Nicht-ASCII-Node-ID durch `replace_upload_url`; (c) `docs/SPEC_CONFLICT_OPTIONS.md` §4, Satz
+  „der Worker sieht für `Replace` **kein** 409" ist zu groß formuliert (beim Inhaltsduplikat sieht er
+  sehr wohl einen); (d) `docs/SPEC_SYNC.md:734` und `docs/SPEC_LIBRARY.md:649` führen `OVERWRITE`
+  noch als unseren Vokabular-Wert; (e) die vorbestehenden stale Zeilenreferenzen in
+  `docs/SPEC_CONFLICT_OPTIONS.md` (§1.2 B1/B2/B3, §7-Refs auf `upload.rs`/`dedup.rs`) und der
+  Widerspruch in `docs/SPEC_DUPLICATES.md` §3 („Dedupe über Pfade hinweg = fehlt"); (f)
+  `src/prime_photos.rs:1139` („live-proven: 200"-Kommentar), `src/folders.rs:153`,
+  `docs/SPEC_DUPLICATES.md:286-287`. **(g) NEU (durch 2.3b):** `docs/SPEC_CONFLICT_OPTIONS.md:161`
+  behauptet „nicht persistiert" — überholt, die Antwort wird **pro Ordner** persistiert; dort auch die
+  §3-Zeile „Konflikt-Dialog" und die §5-Zeile „Default `None`" auf den neuen Stand bringen (Default
+  `Replace`, per-Datei-Dialog als bewusste Abweichung). **(h) NEU (EXIF-Verifier):**
+  `docs/SPEC_UPLOAD.md:146` — die Aufzählung „png, bmp, gif, webp" ist nicht abschließend (tif/tiff
+  fehlen, webp *kann* EXIF tragen). **(i) NEU (EXIF-Verifier):** `src/prime_photos.rs:286` „differs
+  only in how `id` is treated" ist leicht überzogen. **(j) NEU:** den gebündelten Original-Sheet
+  („N Dateinamenkonflikte in …", eine Antwort für alle, Toast) als bewusste Abweichung in §5
+  dokumentieren.
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
@@ -397,8 +429,14 @@ greift **über Pfade hinweg** und ist **persistiert** (`origin = 'content_skip'`
 (2.2/2.2b).
 
 **Offen (Welle 2.4):**
-- [ ] **Alle Varianten laut Liste** (`docs/SPEC_CONFLICT_OPTIONS.md`) umsetzen, jede mit
+- [ ] **2.4a Code/UI** (läuft) und **2.4b Doku + zwei Tests** — siehe Wellenplan oben, je mit
       Abnahmekriterium.
+
+**Verworfen (2026-10-15):** `SaveAsNew` als **Application Default** (galt 2026-10-14 bis 2026-10-15).
+Wer ihn zurückdreht, ändert eine getroffene Entscheidung — heute ist `Replace` die Vorgabe für neue
+Ziele; der Enum-`#[default]` bleibt trotzdem `SaveAsNew` (Datei-Fallback, siehe Wellenplan). Ebenfalls
+verworfen: den Application Default beim Drag&Drop still zu überschreiben (statt nur run-weit zu
+merken).
 
 **Verworfen (2026-10-15):** „Nicht noch einmal fragen" **pro Datei** als neues persistiertes Feld.
 Geltende Regel (2.3a/2.3b): die Antwort wird in das **bestehende**
