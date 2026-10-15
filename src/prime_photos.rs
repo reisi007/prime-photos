@@ -41,7 +41,7 @@ struct ResponseAccessToken {
     duration: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct ResponseEmpty {}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -176,9 +176,9 @@ pub struct ResponseSearch {
     node_to_search_score_map: ResponseEmpty,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ResponseNode {
-    #[serde(rename(deserialize = "FOLDER"))]
+    #[serde(default, rename(deserialize = "FOLDER"))]
     folder: Vec<String>,
 }
 
@@ -188,13 +188,19 @@ pub struct ResponseNodes {
     data: Vec<ResponseSearchData>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+/// Lenient by design (live finding 2026-10-15): a successful upload of an
+/// image **without EXIF** answers with a `contentProperties.image` that has no
+/// `resolutionUnit`. Nothing here is read — `upload_picture` only needs the node
+/// `id` — so a missing field must never turn a successful upload into an error.
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ResponseImageProperties {
     #[serde(default)]
     orientation: Option<String>,
-    #[serde(rename(deserialize = "resolutionUnit"))]
+    #[serde(default, rename(deserialize = "resolutionUnit"))]
     resolution_unit: String,
+    #[serde(default)]
     width: u32,
+    #[serde(default)]
     height: u32,
 }
 
@@ -206,54 +212,83 @@ pub struct ResponseContentSignature {
     content_signature: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ResponseContentProperties {
+    #[serde(default)]
     size: usize,
+    #[serde(default)]
     version: u16,
-    #[serde(rename(deserialize = "contentType"))]
+    #[serde(default, rename(deserialize = "contentType"))]
     content_type: String,
+    #[serde(default)]
     extension: String,
+    #[serde(default)]
     md5: String,
+    #[serde(default)]
     image: ResponseImageProperties,
-    #[serde(rename(deserialize = "contentSignatures"))]
+    #[serde(default, rename(deserialize = "contentSignatures"))]
     content_signatures: Vec<ResponseContentSignature>,
 }
 
+/// The upload endpoint's success answer (`201`).
+///
+/// Deliberately lenient where it used to be strict: the node **`id` is the only
+/// field we read** (`upload_picture` returns `body.id`), everything else is
+/// protocol documentation. So every field except `id` is optional — a live
+/// finding (2026-10-15) shows a **successful** upload of an EXIF-less image
+/// (a PNG) answering with a valid node that lacks
+/// `contentProperties.image.resolutionUnit`. With the old strict shape that
+/// answer failed to parse, so a successful upload was reported as an error and
+/// no local index row was written — the file was re-read and re-hashed on every
+/// later run.
+///
+/// `id` stays mandatory on purpose: there is **no** `#[serde(default)]` on the
+/// struct itself and no `Default` derive, both of which would let an answer
+/// without an `id` parse into an empty node id and pass as success.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ResponseUpload {
     pub id: String,
+    #[serde(default)]
     name: String,
+    #[serde(default)]
     kind: String,
+    #[serde(default)]
     version: u16,
-    #[serde(rename(deserialize = "modifiedDate"))]
-    modified_date: DateTime<Utc>,
-    #[serde(rename(deserialize = "createdDate"))]
-    created_date: DateTime<Utc>,
+    #[serde(default, rename(deserialize = "modifiedDate"))]
+    modified_date: Option<DateTime<Utc>>,
+    #[serde(default, rename(deserialize = "createdDate"))]
+    created_date: Option<DateTime<Utc>>,
+    #[serde(default)]
     parents: Vec<String>,
-    #[serde(rename(deserialize = "parentMap"))]
+    #[serde(default, rename(deserialize = "parentMap"))]
     parent_map: ResponseNode,
+    #[serde(default)]
     status: String,
+    #[serde(default)]
     restricted: bool,
-    #[serde(rename(deserialize = "protectedFolder"))]
+    #[serde(default, rename(deserialize = "protectedFolder"))]
     protected_folder: bool,
-    #[serde(rename(deserialize = "contentProperties"))]
+    #[serde(default, rename(deserialize = "contentProperties"))]
     content_properties: ResponseContentProperties,
+    #[serde(default)]
     properties: ResponseEmpty,
+    #[serde(default)]
     transforms: Vec<String>,
+    #[serde(default)]
     keywords: Vec<String>,
-    #[serde(rename(deserialize = "ownerId"))]
+    #[serde(default, rename(deserialize = "ownerId"))]
     owner_id: String,
-    #[serde(rename(deserialize = "subKinds"))]
+    #[serde(default, rename(deserialize = "subKinds"))]
     sub_kinds: Vec<String>,
 }
 
 /// The upload endpoint's answer to the `PUT` that replaces an existing node
-/// (`ConflictResolution::Replace`). Deliberately lenient where
-/// [`ResponseUpload`] is strict: only `id` is read and it defaults to empty, so
-/// a body that names no id still parses and falls back to the node id from the
-/// request URL ([`replace_upload_id`]). A 2xx is the success signal — the PUT
-/// really did swap the node's content — so a missing id must not turn it into
-/// an error.
+/// (`ConflictResolution::Replace`). It differs from [`ResponseUpload`] only in
+/// how `id` is treated: `ResponseUpload` **requires** `id` (a body without it is
+/// a parse error), while here `id` carries `#[serde(default)]` — so a PUT answer
+/// that names no id still parses and falls back to the node id from the request
+/// URL ([`replace_upload_id`]). A 2xx is the success signal — the PUT really did
+/// swap the node's content — so a missing id must not turn it into an error.
 #[derive(Debug, Deserialize)]
 struct ResponseReplaceUpload {
     #[serde(default)]
@@ -1572,5 +1607,101 @@ mod tests {
             replace_upload_id("<html>proxy</html>", "OLDNODE"),
             "OLDNODE"
         );
+    }
+
+    /// The live finding (2026-10-15) that made `ResponseUpload` lenient: a
+    /// **successful** upload of an image without EXIF answers with a valid node
+    /// whose `contentProperties.image` carries no `resolutionUnit` — used here
+    /// as an entirely empty `image` object, i.e. no `orientation`,
+    /// `resolutionUnit`, `width` or `height`.
+    #[test]
+    fn response_upload_parses_a_node_without_resolution_unit() {
+        let json = r#"{
+            "id": "NODE1",
+            "name": "c2.png",
+            "kind": "FILE",
+            "version": 2,
+            "contentProperties": {
+                "size": 1234,
+                "version": 1,
+                "contentType": "image/png",
+                "extension": "png",
+                "md5": "0123456789abcdef0123456789abcdef",
+                "image": {},
+                "contentSignatures": []
+            }
+        }"#;
+        let body: ResponseUpload = serde_json::from_str(json).unwrap();
+        assert_eq!(body.id, "NODE1");
+    }
+
+    /// The metadata are optional down to the bare node id — a body that names
+    /// nothing but `id` must still parse, because nothing else is read anyway.
+    #[test]
+    fn response_upload_parses_when_only_the_id_is_present() {
+        let body: ResponseUpload = serde_json::from_str(r#"{"id":"NODE1"}"#).unwrap();
+        assert_eq!(body.id, "NODE1");
+    }
+
+    /// No regression against the documented full response
+    /// (`docs/PROTOCOL.md` §2.17): every field our shape knows is still read and
+    /// still lands in the right place. The example carries a `contentDate`
+    /// inside `contentProperties`, which our shape does not model — serde
+    /// ignores unknown fields, which is wanted here.
+    #[test]
+    fn response_upload_parses_the_complete_protocol_example() {
+        let json = r#"{
+            "id": "NODE1",
+            "name": "Bildschirmfoto 2026-10-13 um 11.02.09.png",
+            "kind": "FILE", "version": 2,
+            "modifiedDate": "2026-10-13T09:06:14.909Z",
+            "createdDate": "2026-10-13T09:06:14.482Z",
+            "parents": ["PARENT1"], "parentMap": {"FOLDER": ["PARENT1"]},
+            "status": "AVAILABLE", "restricted": false, "protectedFolder": false,
+            "contentProperties": {
+                "size": 170242, "version": 1, "contentType": "image/png", "extension": "png",
+                "md5": "1OnJ38ZtY7udFc79DKWS1g",
+                "contentDate": "2026-10-13T00:00:00.000Z",
+                "image": {"resolutionUnit":"Pixels/Inch","width":1378,"height":1182},
+                "contentSignatures": []
+            },
+            "properties": {}, "transforms": [], "keywords": [],
+            "ownerId": "CUSTOMER1", "subKinds": []
+        }"#;
+        let body: ResponseUpload = serde_json::from_str(json).unwrap();
+        assert_eq!(body.id, "NODE1");
+        assert_eq!(body.name, "Bildschirmfoto 2026-10-13 um 11.02.09.png");
+        assert_eq!(body.kind, "FILE");
+        assert_eq!(body.version, 2);
+        assert_eq!(body.parents, ["PARENT1"]);
+        assert_eq!(body.status, "AVAILABLE");
+        assert_eq!(body.owner_id, "CUSTOMER1");
+        assert_eq!(
+            body.modified_date,
+            Some(
+                DateTime::parse_from_rfc3339("2026-10-13T09:06:14.909Z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            )
+        );
+        assert_eq!(
+            body.created_date,
+            Some(
+                DateTime::parse_from_rfc3339("2026-10-13T09:06:14.482Z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            )
+        );
+    }
+
+    /// The flip side of the leniency: `id` stays mandatory. Without it the body
+    /// must stay a parse error, so a nameless answer can never pass as a
+    /// successful upload with an empty node id.
+    #[test]
+    fn response_upload_still_requires_the_id() {
+        assert!(serde_json::from_str::<ResponseUpload>(r#"{"name":"x"}"#).is_err());
+        // Same with every other documented field present but the id.
+        let json = r#"{"name":"x","kind":"FILE","version":1,"parents":[]}"#;
+        assert!(serde_json::from_str::<ResponseUpload>(json).is_err());
     }
 }
