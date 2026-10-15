@@ -360,6 +360,14 @@ bleibt dokumentiert, nicht eingeplant).
   (`urls::login_url`, `platform::open_url`). **Verworfen:** den Rückfall asynchron über `objc2` neu bauen.
 - **UI-Regel:** keine technischen Fehlermeldungen im Endnutzer-UI (Details ins Log); Login-Header
   vertikal zentriert.
+- **UI-Deadlock behoben (Live-Befund):** `icons::icon_texture` rief `ctx.load_texture()` **innerhalb**
+  von `ctx.data_mut(...)` auf — `data_mut` hält den egui-Context-Lock bereits, `load_texture` will ihn
+  erneut ⇒ Selbstblockade beim **ersten** Zeichnen einer Backup-Zeilen-Icon (die App friert ein, der
+  Session-Worker hängt in `ctx.request_repaint`). Drin seit `a6e2ed1` (2026-10-14). Fix: Cache-Treffer
+  per Read-Lock, `load_texture` **außerhalb** des Locks, dann ablegen; Regressionstest mit Timeout.
+- **Speicher-only belegt:** nach dem Live-Login steht in `config.toml` **kein** Session-Cookie mehr
+  (die Alt-Werte aus Welle 2 sind beim Speichern verschwunden); der Refresh-Token liegt nur im
+  Schlüsselbund.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** — und mit der Live-Abnahme auch als
 **Rückfall** (ganz entfernt). Der

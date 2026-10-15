@@ -151,23 +151,37 @@ fn row_icon(ui: &egui::Ui, name: &'static str, png: &'static [u8]) -> egui::Imag
 /// that only receive a `&Ui`. egui's temp data is cleared only when the context
 /// is dropped (`util/id_type_map.rs`: "temporary (cleared when egui is shut
 /// down)"), so the handle — and with it the GPU texture — stays alive.
+/// **Rule: `Context::load_texture` must never be called inside `data_mut`/`data`.**
+/// Both acquire the context's write lock, and `parking_lot`'s lock is not
+/// reentrant: `load_texture` goes through `Context::input`/`Context::write`,
+/// which wants the very lock the surrounding closure already holds — a
+/// self-deadlock that freezes the whole app (and every worker blocked in
+/// `request_repaint`). So the cache is read, populated and written back in three
+/// separate, non-overlapping lock scopes.
 fn icon_texture(ctx: &egui::Context, name: &'static str, png: &'static [u8]) -> egui::TextureHandle {
     let id = egui::Id::new(("prime_photos_row_icon", name));
-    ctx.data_mut(|data| {
-        data.get_temp_mut_or_insert_with(id, || {
-            let image = image::load_from_memory(png)
-                .expect("Prime Photos: eingebettetes Icon-PNG konnte nicht dekodiert werden")
-                .to_rgba8();
-            let size = [image.width() as usize, image.height() as usize];
-            let color = egui::ColorImage::from_rgba_unmultiplied(size, &image.into_raw());
-            ctx.load_texture(
-                format!("prime_photos_row_icon_{name}"),
-                color,
-                egui::TextureOptions::LINEAR,
-            )
-        })
-        .clone()
-    })
+
+    // 1. Cache hit under a read lock that ends immediately.
+    if let Some(handle) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return handle;
+    }
+
+    // 2. Cache miss: decode and upload with **no** context lock held.
+    let image = image::load_from_memory(png)
+        .expect("Prime Photos: eingebettetes Icon-PNG konnte nicht dekodiert werden")
+        .to_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, &image.into_raw());
+    let handle = ctx.load_texture(
+        format!("prime_photos_row_icon_{name}"),
+        color,
+        egui::TextureOptions::LINEAR,
+    );
+
+    // 3. Store the handle under a write lock that ends immediately.
+    ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
+
+    handle
 }
 
 // ---------------------------------------------------------------------------
@@ -458,5 +472,29 @@ mod tests {
                 "{name}: kein gedecktes Pixel — fill-Override wirkungslos?"
             );
         }
+    }
+
+    /// Regression guard for the `data_mut`/`load_texture` self-deadlock.
+    ///
+    /// The old implementation called `ctx.load_texture` *inside*
+    /// `ctx.data_mut(…)`, so the closure re-entered the context's write lock
+    /// (`parking_lot` is not reentrant) and froze the app on the first cache
+    /// miss. Two calls are needed to cover both paths: the first populates the
+    /// cache (the deadlocking path), the second is the read-lock cache hit.
+    ///
+    /// The work runs on its own thread with a fresh `Context` so that a
+    /// regression fails as a bounded timeout instead of hanging the test run.
+    #[test]
+    fn icon_texture_does_not_deadlock() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ctx = egui::Context::default();
+            let first = icon_texture(&ctx, "more-vert", MORE_VERT_PNG);
+            let second = icon_texture(&ctx, "more-vert", MORE_VERT_PNG);
+            assert_eq!(first.id(), second.id(), "Cache-Treffer liefert anderen Handle");
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("icon_texture deadlocked (data_mut/load_texture reentrancy)");
     }
 }
