@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, io, path::PathBuf};
 
+use crate::folders::ConflictResolution;
+
 fn default_true() -> bool {
     true
 }
@@ -49,6 +51,13 @@ pub struct Config {
     /// so an existing `config.toml` without this key still loads.
     #[serde(default)]
     pub autostart_enabled: Option<bool>,
+    /// Application default for the name-conflict policy: preselected when a new
+    /// backup target is created and applied by the one-time (drag & drop) queue.
+    /// `#[serde(default)]` so an existing `config.toml` without this key still
+    /// loads; the field default is `ConflictResolution`'s own default
+    /// (`SaveAsNew`, `#[default]` on the variant — not duplicated here).
+    #[serde(default)]
+    pub conflict_resolution_default: ConflictResolution,
 }
 
 impl Config {
@@ -115,6 +124,7 @@ impl Config {
             background_sync: true,
             paused: false,
             autostart_enabled: None,
+            conflict_resolution_default: ConflictResolution::default(),
         }
     }
 }
@@ -124,7 +134,8 @@ mod tests {
     use super::*;
 
     /// Minimal TOML that satisfies every non-defaulted field of `Config`.
-    /// Deliberately has **no** `autostart_enabled` key.
+    /// Deliberately has **no** `autostart_enabled` and **no**
+    /// `conflict_resolution_default` key.
     const LEGACY_TOML: &str = r#"
 country = "de"
 zone = "eu"
@@ -151,5 +162,33 @@ cookie_x_amz_access_token = ""
             let back: Config = toml::from_str(&serialized).unwrap();
             assert_eq!(back.autostart_enabled, intent);
         }
+    }
+
+    #[test]
+    fn config_without_conflict_default_key_loads_as_save_as_new() {
+        // `#[serde(default)]` reads `ConflictResolution`'s own `Default`
+        // (`SaveAsNew`, `#[default]` on the variant), **not** the inherent
+        // `Config::default()` — an existing `config.toml` predating the field
+        // must land on the type default.
+        let config: Config = toml::from_str(LEGACY_TOML).unwrap();
+        assert_eq!(
+            config.conflict_resolution_default,
+            ConflictResolution::SaveAsNew
+        );
+    }
+
+    #[test]
+    fn config_conflict_default_roundtrips_with_a_non_default_value() {
+        let mut config = Config::default();
+        config.conflict_resolution_default = ConflictResolution::Replace;
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        // `ConflictResolution` is `rename_all = "lowercase"` (same rule as in
+        // `folders.toml`), so the wire value is the lowercase variant name.
+        assert!(serialized.contains(r#"conflict_resolution_default = "replace""#));
+        let back: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(
+            back.conflict_resolution_default,
+            ConflictResolution::Replace
+        );
     }
 }

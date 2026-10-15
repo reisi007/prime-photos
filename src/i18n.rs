@@ -242,6 +242,10 @@ const EN: &[(&str, &str)] = &[
         "Downloads are not implemented in this port yet.",
     ),
     ("Erweitert (Konto)", "Advanced (account)"),
+    (
+        "Gilt für neue Upload-Ziele und für Drag&Drop.",
+        "Applies to new upload targets and to drag & drop.",
+    ),
     ("Gleichzeitige Uploads", "Concurrent uploads"),
     (
         "Hinweis: Die Begrenzung wird pro Datei nach dem Upload angewendet.",
@@ -260,6 +264,7 @@ const EN: &[(&str, &str)] = &[
     ("Nicht begrenzen", "Do not limit"),
     ("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.", "Applies only until the next app start; not saved."),
     ("Slow-Mode (1 Datei gleichzeitig)", "Slow mode (1 file at a time)"),
+    ("Standard bei Dateikonflikten", "Default for file conflicts"),
     (
         "Startet Prime Photos automatisch, wenn du dich am System anmeldest.",
         "Starts Prime Photos automatically when you sign in to your system.",

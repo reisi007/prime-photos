@@ -811,7 +811,10 @@ impl PrimePhotoApp {
             self.config_form = Some(BackupConfigForm {
                 path: folder,
                 dedup: true,
-                conflict_resolution: ConflictResolution::default(),
+                // Application default as the preselection (user decision
+                // 2026-10-15); a value changed in the dialog belongs to the
+                // created target only, it is not written back.
+                conflict_resolution: self.config.conflict_resolution_default,
                 mode: ConfigFormMode::Create,
                 error: None,
             });
@@ -1039,14 +1042,16 @@ impl PrimePhotoApp {
     /// is **not** written here — the caller owns persistence.
     fn begin_one_time_run(&mut self, display_path: PathBuf, files: Vec<PathBuf>) {
         // The transient target itself: the stored name stays the plain German
-        // key, `tr` is applied at render time. Dedup and conflict handling keep
-        // the folder defaults (docs/SPEC_ONE_TIME_UPLOAD.md §10.5).
+        // key, `tr` is applied at render time. Dedup keeps the folder default,
+        // conflict handling follows the application default (user decision
+        // 2026-10-15; before that `ConflictResolution::default()` — same value
+        // unless the user changed the app default in the settings).
         self.one_time = Some(folders::BackupFolder {
             path: display_path,
             name: "Einmalige Sicherung".to_string(),
             enabled: true,
             dedup: true,
-            conflict_resolution: ConflictResolution::default(),
+            conflict_resolution: self.config.conflict_resolution_default,
             total_files: files.len(),
             uploaded_files: 0,
             last_updated: String::new(),
@@ -1058,7 +1063,7 @@ impl PrimePhotoApp {
         let mut plan = UploadPlan::from_files(
             ONE_TIME_IDX,
             true,
-            ConflictResolution::default(),
+            self.config.conflict_resolution_default,
             files,
         );
         let concurrency = if self.slow_mode { 1 } else { self.concurrency };

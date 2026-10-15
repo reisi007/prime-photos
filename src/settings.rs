@@ -1,5 +1,6 @@
 use crate::app::{PrimePhotoApp, SettingsTab};
 use crate::countries::{country_label, COUNTRIES};
+use crate::folders::ConflictResolution;
 use crate::i18n::{self, tr, tr1};
 use crate::theme;
 use eframe::egui;
@@ -165,6 +166,36 @@ impl PrimePhotoApp {
         ui.add_space(6.0);
         ui.label(theme::muted(tr(
             "Hinweis: Die Begrenzung wird pro Datei nach dem Upload angewendet.",
+        )));
+
+        // Application default for the name-conflict policy (user decision
+        // 2026-10-15): the preselection of a new backup target and the policy
+        // of the one-time (drag & drop) queue. Persisted with "Speichern".
+        ui.add_space(6.0);
+        ui.label(theme::muted(tr("Standard bei Dateikonflikten")));
+        ui.radio_value(
+            &mut self.config.conflict_resolution_default,
+            ConflictResolution::Ask,
+            tr("Jedes Mal nachfragen"),
+        );
+        ui.radio_value(
+            &mut self.config.conflict_resolution_default,
+            ConflictResolution::Ignore,
+            tr("Ignorieren"),
+        );
+        ui.radio_value(
+            &mut self.config.conflict_resolution_default,
+            ConflictResolution::SaveAsNew,
+            tr("Als neue Dateien speichern"),
+        );
+        ui.radio_value(
+            &mut self.config.conflict_resolution_default,
+            ConflictResolution::Replace,
+            tr("Ersetzen"),
+        );
+        ui.add_space(6.0);
+        ui.label(theme::muted(tr(
+            "Gilt für neue Upload-Ziele und für Drag&Drop.",
         )));
 
         ui.separator();
