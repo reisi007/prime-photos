@@ -268,8 +268,11 @@ fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: 
     s.net_started = None;
     s.upload_secs = 0.0;
     // Conflict prompt state is per run: a "don't ask again" choice from a
-    // previous run must never silently overwrite files in this one.
+    // previous run must never silently overwrite files in this one — and no
+    // answer may outlive the prompt it belonged to.
     s.pending_conflict = None;
+    s.pending_conflict_idx = None;
+    s.pending_conflict_path = None;
     s.conflict_answer = None;
     s.conflict_remember = false;
     s.conflict_override = None;
@@ -801,6 +804,43 @@ async fn watch_loop(
     }
 }
 
+/// Persist a remembered conflict answer into the folder the asked file belongs
+/// to — the single place that writes it (user decision 2026-10-15).
+///
+/// "Nicht noch einmal fragen" keeps working without a prompt in **that folder**
+/// on later runs, so the answer lands in the folder's own `conflict_resolution`
+/// (`folders.toml`). No schema change: the field already exists, and a folder
+/// that keeps its value simply keeps whatever policy it had.
+///
+/// Refuses — and writes nothing — whenever the target is not provably a
+/// persisted folder this file belongs to:
+/// - the transient drag & drop target (`ONE_TIME_IDX`), which has no
+///   `folders.toml` entry at all and stays run-only,
+/// - an index outside the store (`FolderStore::remove` shifts indices), and
+/// - a file that does not live below that folder's own path — the decisive
+///   guard, because the shifted index is exactly what could point at a
+///   neighbouring folder otherwise.
+///
+/// Returns whether it wrote.
+fn remember_conflict_in_folder(
+    store: &mut FolderStore,
+    idx: usize,
+    file_path: &Path,
+    answer: ConflictResolution,
+) -> bool {
+    if idx == ONE_TIME_IDX {
+        return false;
+    }
+    let Some(folder) = store.folders.get_mut(idx) else {
+        return false;
+    };
+    if !file_path.starts_with(&folder.path) {
+        return false;
+    }
+    folder.conflict_resolution = answer;
+    true
+}
+
 impl PrimePhotoApp {
     // -- folders ------------------------------------------------------------
 
@@ -1115,8 +1155,19 @@ impl PrimePhotoApp {
     /// current page; the answer is written into the shared state, where the
     /// waiting worker picks it up. Drawn only while a conflict is pending.
     pub(crate) fn conflict_dialog(&mut self, ctx: &egui::Context) {
-        let pending = { self.upload.lock().unwrap().pending_conflict.clone() };
-        let Some(file_name) = pending else {
+        // Snapshot the prompt *and* its provenance under one lock. The worker
+        // clears all three together once it takes the answer, so reading them in
+        // one go is what keeps the persisted folder consistent with the name
+        // the user actually saw.
+        let (file_name, pending_idx, pending_path) = {
+            let s = self.upload.lock().unwrap();
+            (
+                s.pending_conflict.clone(),
+                s.pending_conflict_idx,
+                s.pending_conflict_path.clone(),
+            )
+        };
+        let Some(file_name) = file_name else {
             return;
         };
         // The worker only polls the shared state; it does not paint frames, so
@@ -1152,9 +1203,25 @@ impl PrimePhotoApp {
                 });
             });
         if let Some(a) = answer {
-            let mut s = self.upload.lock().unwrap();
-            s.conflict_remember = remember;
-            s.conflict_answer = Some(a);
+            {
+                let mut s = self.upload.lock().unwrap();
+                s.conflict_remember = remember;
+                s.conflict_answer = Some(a);
+            }
+            // "Nicht noch einmal fragen" also persists into the folder the asked
+            // file belongs to (user decision 2026-10-15), so the next run there
+            // stops asking. Purely additive: the run-wide override the worker
+            // applies from `conflict_remember` is untouched, and the transient
+            // drag & drop target has no folder to write to — it stays run-only.
+            if remember {
+                if let (Some(idx), Some(path)) = (pending_idx, &pending_path) {
+                    if remember_conflict_in_folder(&mut self.store, idx, path, a) {
+                        // Same as every other folder write: a failed save must
+                        // not cost the user the answer they just gave.
+                        let _ = self.store.save();
+                    }
+                }
+            }
         } else {
             // Remember the checkbox even before the user commits to an option.
             self.upload.lock().unwrap().conflict_remember = remember;
@@ -1808,5 +1875,125 @@ mod tests {
         let pending_paths: HashSet<PathBuf> =
             pending.iter().map(|(_, p)| p.clone()).collect();
         assert_eq!(pending_paths, seen);
+    }
+
+    // -- "Nicht noch einmal fragen" persisted per folder -------------------
+
+    /// A folder path under the system temp dir. No test here may touch the real
+    /// `folders.toml`; these are also paths that merely *look* like a folder,
+    /// because the guard is a pure path check and needs no real directory.
+    fn scratch_folder(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "prime-photos-remember-{}-{name}",
+            std::process::id()
+        ))
+    }
+
+    /// A store holding one folder at `path` whose policy is `Ask` — the only
+    /// state a folder can be in for the prompt to appear at all.
+    fn asking_store(path: &Path) -> FolderStore {
+        let mut store = FolderStore::default();
+        let mut folder = folders::BackupFolder::new(path.to_path_buf());
+        folder.conflict_resolution = ConflictResolution::Ask;
+        store.folders.push(folder);
+        store
+    }
+
+    #[test]
+    fn remember_ignores_the_transient_drag_and_drop_target() {
+        // The one-time queue has no `folders.toml` entry (`ONE_TIME_IDX`), so
+        // there is nothing to write — it stays run-only by design.
+        let root = scratch_folder("onetime");
+        let mut store = asking_store(&root);
+        let file = root.join("photo.jpg");
+
+        assert!(!remember_conflict_in_folder(
+            &mut store,
+            ONE_TIME_IDX,
+            &file,
+            ConflictResolution::Replace,
+        ));
+        assert_eq!(
+            store.folders[0].conflict_resolution,
+            ConflictResolution::Ask,
+            "the one-time target must not touch a persisted folder"
+        );
+    }
+
+    #[test]
+    fn remember_refuses_an_index_outside_the_store() {
+        // `FolderStore::remove` shifts indices mid-run: the remembered index can
+        // point past the end. Writing nothing is the only safe reaction.
+        let mut store = asking_store(&scratch_folder("oob"));
+        let file = store.folders[0].path.join("photo.jpg");
+
+        assert!(!remember_conflict_in_folder(
+            &mut store,
+            1,
+            &file,
+            ConflictResolution::Replace,
+        ));
+        assert_eq!(
+            store.folders[0].conflict_resolution,
+            ConflictResolution::Ask
+        );
+    }
+
+    #[test]
+    fn remember_refuses_a_file_outside_the_folder() {
+        // The decisive guard against shifted indices: an index that now belongs
+        // to a *different* folder must not inherit this answer.
+        let root = scratch_folder("outside");
+        let other = scratch_folder("other");
+        let mut store = asking_store(&other);
+        // A second folder, so index 0 is not the only candidate.
+        let mut neighbour = folders::BackupFolder::new(root.clone());
+        neighbour.conflict_resolution = ConflictResolution::Ask;
+        store.folders.push(neighbour);
+        let outside_file = root.join("photo.jpg");
+
+        assert!(!remember_conflict_in_folder(
+            &mut store,
+            0,
+            &outside_file,
+            ConflictResolution::Replace,
+        ));
+        assert_eq!(
+            store.folders[0].conflict_resolution,
+            ConflictResolution::Ask,
+            "a folder that does not contain the asked file must stay untouched"
+        );
+        assert_eq!(
+            store.folders[1].conflict_resolution,
+            ConflictResolution::Ask
+        );
+    }
+
+    #[test]
+    fn remember_writes_the_answer_into_the_owning_folder() {
+        let root = scratch_folder("happy");
+        let mut store = asking_store(&root);
+        let file = root.join("sub").join("photo.jpg");
+
+        assert!(remember_conflict_in_folder(
+            &mut store,
+            0,
+            &file,
+            ConflictResolution::Replace,
+        ));
+        assert_eq!(
+            store.folders[0].conflict_resolution,
+            ConflictResolution::Replace
+        );
+
+        // The persisted form is the lowercase serde spelling of the enum
+        // (`#[serde(rename_all = "lowercase")]`) — an existing `folders.toml`
+        // must round-trip, so this pins "replace", not "Replace" or
+        // "save_as_new".
+        let toml = toml::to_string_pretty(&store).expect("a store serializes");
+        assert!(
+            toml.contains("conflict_resolution = \"replace\""),
+            "expected the lowercase spelling, got: {toml}"
+        );
     }
 }

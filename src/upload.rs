@@ -7,7 +7,7 @@ use crate::theme;
 use eframe::egui::Color32;
 use std::{
     collections::{HashMap, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -98,6 +98,17 @@ pub(crate) struct UploadShared {
     pub(crate) conflict_remember: bool,
     /// Per-run override set by `conflict_remember`; wins over the folder policy.
     pub(crate) conflict_override: Option<ConflictResolution>,
+    /// Backup-folder index of the queue entry `pending_conflict` belongs to —
+    /// the `idx` the worker carries per item, and therefore an index into
+    /// `FolderStore::folders`. Lets the dialog persist a remembered answer into
+    /// that folder's `conflict_resolution` (user decision 2026-10-15).
+    /// `usize::MAX` (`ONE_TIME_IDX`) for the transient drag & drop target,
+    /// which has no folder to write to.
+    pub(crate) pending_conflict_idx: Option<usize>,
+    /// Full path of the file being asked about. The safety check for the index
+    /// above: a folder removed mid-run shifts `folders`, so the index alone is
+    /// no proof that this folder is really the one the file lives in.
+    pub(crate) pending_conflict_path: Option<PathBuf>,
 }
 
 impl UploadShared {
@@ -289,9 +300,15 @@ enum FileOutcome {
 /// hit a conflict wait here and pick up the run-wide override if the user chose
 /// "nicht noch einmal fragen". A hard timeout guarantees a hidden window can
 /// never stall the whole run — the dedup-friendly `Ignore` is the fallback.
+///
+/// `idx` and `file_path` describe the queue entry the prompt is about; they are
+/// snapshot into the shared state with the name, so the dialog can persist a
+/// "don't ask again" into that folder's own policy.
 async fn resolve_conflict(
     shared: &Arc<Mutex<UploadShared>>,
+    idx: usize,
     file_name: &str,
+    file_path: &Path,
 ) -> ConflictResolution {
     const POLL: Duration = Duration::from_millis(150);
     const TIMEOUT: Duration = Duration::from_secs(60);
@@ -304,6 +321,11 @@ async fn resolve_conflict(
             }
             if s.pending_conflict.is_none() {
                 s.pending_conflict = Some(file_name.to_string());
+                // Which folder the asked file belongs to — written together with
+                // the name, cleared on every exit below, so the dialog never
+                // persists an answer into a folder it was not asked about.
+                s.pending_conflict_idx = Some(idx);
+                s.pending_conflict_path = Some(file_path.to_path_buf());
                 s.conflict_answer = None;
                 s.touch_queue();
                 s.log(tr1("Dateiname-Konflikt: {}", file_name));
@@ -324,6 +346,8 @@ async fn resolve_conflict(
             let mut s = shared.lock().unwrap();
             if let Some(answer) = s.conflict_answer.take() {
                 s.pending_conflict = None;
+                s.pending_conflict_idx = None;
+                s.pending_conflict_path = None;
                 if s.conflict_remember {
                     s.conflict_override = Some(answer);
                 }
@@ -332,6 +356,8 @@ async fn resolve_conflict(
             }
             if Instant::now() >= deadline {
                 s.pending_conflict = None;
+                s.pending_conflict_idx = None;
+                s.pending_conflict_path = None;
                 s.touch_queue();
                 s.log(tr("Keine Antwort auf den Konflikt — wird übersprungen."));
                 return ConflictResolution::Ignore;
@@ -606,7 +632,10 @@ pub(crate) async fn upload_worker(
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default(),
                     );
-                    let answer = match resolve_conflict(&shared, &name).await {
+                    // `idx` is this item's backup-folder index and `path` the
+                    // file itself — the two facts the dialog needs to persist a
+                    // "don't ask again" into that folder's policy.
+                    let answer = match resolve_conflict(&shared, idx, &name, &path).await {
                         // The prompt can only answer with a concrete policy;
                         // normalise defensively so `Ask` can never bounce the
                         // file through this loop a second time.
