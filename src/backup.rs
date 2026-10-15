@@ -5,6 +5,7 @@ use crate::dedup::DedupIndex;
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
 use crate::i18n::{tr, tr1, tr2, tr3};
 use crate::icons;
+use crate::login::Session;
 use crate::theme;
 use crate::upload::{
     outcome_text, run_upload, status_text, upload_progress_text, FileState, QueueEntry,
@@ -449,6 +450,22 @@ fn start_background_run(
     });
 }
 
+/// Overlay the live in-memory session cookies onto a config loaded from disk.
+///
+/// The `Config` cookie fields are `#[serde(skip)]` (S-C, user decision
+/// 2026-10-15), so `Config::load()` always returns empty ones. The detached
+/// supervisor has no access to `PrimePhotoApp::config` and must take the session
+/// material from the shared [`Session`] instead. The lock is scoped to this
+/// function, so it is never held across an `await`.
+fn overlay_session_cookies(cfg: &mut Config, session: &Arc<Mutex<Session>>) {
+    let cookies = session.lock().unwrap().cookies.clone();
+    cfg.session_id = cookies.session_id;
+    cfg.cookie_x_acb = cookies.cookie_x_acb;
+    cfg.cookie_at_acb = cookies.cookie_at_acb;
+    cfg.cookie_ubid_acb = cookies.cookie_ubid_acb;
+    cfg.cookie_x_amz_access_token = cookies.cookie_x_amz_access_token;
+}
+
 /// The start-time safety net (user decision 2026-10-14): one **metadata-only**
 /// walk per enabled folder decides whether anything changed since the last run.
 /// A folder whose maximum mtime did not grow costs no hash, no per-file DB query
@@ -461,15 +478,19 @@ fn start_background_run(
 async fn background_sync_pass(
     shared: Arc<Mutex<UploadShared>>,
     paused: watch::Sender<bool>,
+    session: Arc<Mutex<Session>>,
     last_config: Config,
     concurrency: usize,
     limit_kbps: u32,
     album: String,
 ) {
     // Freshest settings first: the supervisor is detached from the UI struct, so
-    // the persisted config is the only source that reflects changes made after
-    // it was spawned (login/logout, the `background_sync` toggle).
-    let cfg = Config::load().unwrap_or(last_config);
+    // the persisted config is the source for everything except the **session
+    // material**. The cookie fields are `#[serde(skip)]` — `Config::load()` always
+    // yields empty ones — so the live cookies are overlaid from the shared
+    // in-memory session; without that, `can_start` would never see a sign-in.
+    let mut cfg = Config::load().unwrap_or(last_config);
+    overlay_session_cookies(&mut cfg, &session);
     if !can_start(&cfg, &paused, &shared) {
         return;
     }
@@ -724,6 +745,7 @@ fn sync_watchers(
 async fn watch_loop(
     shared: Arc<Mutex<UploadShared>>,
     paused: watch::Sender<bool>,
+    session: Arc<Mutex<Session>>,
     last_config: Config,
     concurrency: usize,
     limit_kbps: u32,
@@ -737,8 +759,11 @@ async fn watch_loop(
     let mut pending_seen: HashSet<PathBuf> = HashSet::new();
     loop {
         // Freshest settings + store on every pass (the supervisor is detached
-        // from the UI struct, so the persisted files are its only source).
-        let cfg = Config::load().unwrap_or(last_config.clone());
+        // from the UI struct, so the persisted files are its source — except the
+        // session material, which is overlaid from the shared `Session` because
+        // the cookie fields are `#[serde(skip)]`).
+        let mut cfg = Config::load().unwrap_or(last_config.clone());
+        overlay_session_cookies(&mut cfg, &session);
         sync_watchers(&mut watchers, &tx, &cfg);
 
         // Retry what was remembered while a run was busy or paused: no new burst,
@@ -1283,6 +1308,9 @@ impl PrimePhotoApp {
         }
         let shared = self.upload.clone();
         let paused = self.paused.clone();
+        // The session material is `#[serde(skip)]` and cannot be re-read from
+        // disk; the detached supervisor gets the shared in-memory session.
+        let session = self.session.clone();
         let cfg = self.config.clone();
         let concurrency = if self.slow_mode { 1 } else { self.concurrency };
         let limit = if self.limit_enabled {
@@ -1295,6 +1323,7 @@ impl PrimePhotoApp {
             background_sync_pass(
                 shared.clone(),
                 paused.clone(),
+                session.clone(),
                 cfg.clone(),
                 concurrency,
                 limit,
@@ -1302,7 +1331,7 @@ impl PrimePhotoApp {
             )
             .await;
             // From then on the OS events decide.
-            watch_loop(shared, paused, cfg, concurrency, limit, album).await;
+            watch_loop(shared, paused, session, cfg, concurrency, limit, album).await;
         });
     }
 

@@ -30,10 +30,25 @@ pub struct Config {
     pub country: String,
     pub zone: String,
     pub user_agent: String,
+    /// Only runtime state, never persisted (session material lives in the
+    /// keychain / memory).
+    #[serde(skip)]
     pub session_id: String,
+    /// Only runtime state, never persisted (session material lives in the
+    /// keychain / memory).
+    #[serde(skip)]
     pub cookie_x_acb: String,
+    /// Only runtime state, never persisted (session material lives in the
+    /// keychain / memory).
+    #[serde(skip)]
     pub cookie_at_acb: String,
+    /// Only runtime state, never persisted (session material lives in the
+    /// keychain / memory).
+    #[serde(skip)]
     pub cookie_ubid_acb: String,
+    /// Only runtime state, never persisted (session material lives in the
+    /// keychain / memory).
+    #[serde(skip)]
     pub cookie_x_amz_access_token: String,
     /// Desktop notifications when an upload run finishes. Defaults to `true`
     /// for existing `config.toml` files that predate this field.
@@ -272,5 +287,58 @@ cookie_x_amz_access_token = ""
             back.conflict_resolution_default,
             ConflictResolution::Replace
         );
+    }
+
+    #[test]
+    fn session_fields_are_never_serialized() {
+        // The session material is memory-only (keychain / memory, user decision
+        // 2026-10-15): a `Config` with cookies set must not write them to
+        // `config.toml`.
+        let mut config = Config::default();
+        config.session_id = "SID".to_string();
+        config.cookie_x_acb = "ACB".to_string();
+        config.cookie_at_acb = "AT".to_string();
+        config.cookie_ubid_acb = "UBID".to_string();
+        config.cookie_x_amz_access_token = "TOKEN".to_string();
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        // `#[serde(skip)]` drops both key and value, so the stable proof is the
+        // absence of the **field names**. Asserting on short values ("AT", "SID")
+        // was fragile — a future default could contain them by accident.
+        assert!(!serialized.contains("session_id"));
+        assert!(!serialized.contains("cookie_x_acb"));
+        assert!(!serialized.contains("cookie_at_acb"));
+        assert!(!serialized.contains("cookie_ubid_acb"));
+        assert!(!serialized.contains("cookie_x_amz_access_token"));
+        // The load round-trip must succeed and leave the fields empty.
+        let back: Config = toml::from_str(&serialized).unwrap();
+        assert!(back.session_id.is_empty());
+        assert!(back.cookie_x_acb.is_empty());
+        assert!(back.cookie_at_acb.is_empty());
+        assert!(back.cookie_ubid_acb.is_empty());
+        assert!(back.cookie_x_amz_access_token.is_empty());
+    }
+
+    #[test]
+    fn toml_with_legacy_session_keys_still_loads() {
+        // A `config.toml` written by an older version still contains the
+        // session fields; they are ignored on load (the fields stay empty).
+        let toml = r#"
+country = "de"
+zone = "eu"
+user_agent = "ua"
+session-id = "OLD"
+session_id = "OLD"
+cookie_x_acb = "OLD"
+cookie_at_acb = "OLD"
+cookie_ubid_acb = "OLD"
+cookie_x_amz_access_token = "OLD"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.country, "de");
+        assert!(config.session_id.is_empty());
+        assert!(config.cookie_x_acb.is_empty());
+        assert!(config.cookie_at_acb.is_empty());
+        assert!(config.cookie_ubid_acb.is_empty());
+        assert!(config.cookie_x_amz_access_token.is_empty());
     }
 }

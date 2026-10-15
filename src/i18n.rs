@@ -295,6 +295,10 @@ const EN: &[(&str, &str)] = &[
     ("Zone", "Zone"),
     // -- login ----------------------------------------------------------
     ("Abgemeldet.", "Signed out."),
+    (
+        "Sitzung abgelaufen – bitte erneut anmelden.",
+        "Session expired – please sign in again.",
+    ),
     ("Amazon Photos im Browser öffnen", "Open Amazon Photos in the browser"),
     (
         "Anmeldeseite konnte nicht geöffnet werden: {}",

@@ -56,6 +56,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   7. **Ungültiger Refresh-Token:** Tokens löschen und zurück auf unseren Login-Screen — **kein** App-Neustart (den braucht nur das Original für seinen Startpfad).
   8. **Abmelden:** `POST https://api.amazon.com/auth/deregister` mit dem Access-Token, danach die Tokens löschen.
   **S-C-Umsetzung (2026-10-15):** der Auffrischungs-Worker läuft als **ein** langlebiger Task auf der bestehenden Tokio-Runtime (Muster wie `avatar_fetch`), Ergebnis über einen geteilten Slot, den die UI pro Frame pollt. **Folge der Speicher-only-Regel:** der reine Cookie-Rückfall (Geräteweg abgelehnt) gilt nur für die **laufende** Sitzung, nicht über einen Neustart — der Geräteweg ist der persistente Pfad.
+  **Start-Gate (User-Entscheidung 2026-10-15):** mit gespeichertem Refresh-Token startet die App **direkt in die Haupt-UI** — **kein** Anmelde-Screen; Access-Token und Cookies werden im Hintergrund geholt (wie das Original, das das Auth-Portal nur ohne Refresh-Token zeigt). **Einlöse-Pfad:** `/auth/register` bekommt die belegten **3** Versuche (`REGISTER_MAX_ATTEMPTS`); ein Netzwerkfehler zählt auch hier nicht als Versuch.
   **Geräte-Identität (User-Entscheidung 2026-10-15, nach der Suche):** Wir senden **die Werte, die
   das Original aktuell sendet**: `app_name = "Amazon Photos"`, `app_version = "11.3.0.1d7941b5"`
   (Stand 2026-10-15), `device_type = "A2UXDCSFQXA1M7"`. Die Suche hat belegt, dass im Bundle **genau

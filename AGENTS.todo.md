@@ -319,12 +319,6 @@ lautet „alles in Wellen implementieren bis fertig": Sitzung → Welle 3 → We
 bleibt dokumentiert, nicht eingeplant).
 
 **Fachliste (bleibt gültig):**
-- [ ] **S4 — Auffrischen:** 80 %-Regel (Ablauf = `expires_in` − 60 s), eigene dokumentierte
-      Versuchs-Defaults, fataler Ausgang = Sitzung ungültig.
-- [ ] **S5 — Cookies bei Bedarf erzeugen:** `/auth/token?requested_token_type=auth_cookies`, in die
-      bestehende Cookie-Kette einspeisen; Upload-Engine unverändert.
-- [ ] **S6 — Ungültig/Abmelden:** Tokens löschen → unser Login-Screen (ohne App-Neustart); „Abmelden"
-      über `/auth/deregister` + Token-Löschung.
 - [ ] **S7 — Live-Abnahme:** einmal anmelden, App neu starten (Sitzung läuft **ohne** Anmeldung weiter),
       Auffrischung im Log, Cookies frisch geholt, Upload läuft. Damit kann auch die noch offene
       Live-Abnahme des `PUT` (2.2b) in derselben Sitzung gefahren werden.
@@ -347,6 +341,11 @@ bleibt dokumentiert, nicht eingeplant).
   minten und in die bestehende Cookie-Kette (im Speicher) einspeisen.
 - **Ungültige Sitzung:** Tokens löschen → unser Login-Screen, **kein** App-Neustart.
 - **Abmelden:** `/auth/deregister` (Bearer = Access-Token) + Token-Löschung.
+- **Start-Gate:** mit gespeichertem Refresh-Token startet die App **direkt in die Haupt-UI** (kein
+  Anmelde-Screen); Access-Token und Cookies werden im Hintergrund geholt. Der Anmelde-Screen erscheint
+  nur, wenn **kein** Refresh-Token da ist.
+- **Einlöse-Pfad:** `/auth/register` bekommt die belegten **3** Versuche (`REGISTER_MAX_ATTEMPTS`);
+  Netzwerkfehler zählen auch hier nicht als Versuch.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** (bleibt nur Rückfall). Der
 **CDP-Browser-Login** (externer Browser) bleibt ebenso verworfen wie die **Paste-Variante** als
@@ -355,16 +354,6 @@ Hauptweg. Ebenfalls verworfen: die Original-Login-**UI** (zwei Spalten, Willkomm
 
 **Umsetzungs-Schnitt (Orchestrator, aus dem Recon abgeleitet — je Paket Build → unabhängige
 Verifikation → Commit):**
-- **S-A — `src/auth.rs` (neu) + `src/urls.rs`:** reine, testbare Bausteine **ohne** UI-Verdrahtung:
-  PKCE-Paar, Portal-URL, Marktplatz-IDs, Client-Identität, JSON-Körper/Antworttypen für
-  `/auth/register`, `/auth/token` (Refresh) und `/auth/token?…auth_cookies`, Abbildung der
-  Cookie-Antwort auf unsere `Config`-Felder, 80-%-Terminberechnung, Schlüsselbund-Ablage
-  (neue Abhängigkeiten `sha2`, `base64`, `rand`, `keyring`). Am Verhalten der App ändert sich nichts.
-- **S-B — Verdrahtung `login.rs`/`app.rs`:** Portal-URL statt `amzn_photos_web_<cc>`, Code-Fang im
-  Navigations-Handler (Navigation verwerfen), Einlösung, Refresh-Token in den Schlüsselbund, Cookies
-  erzeugen und in die bestehende Kette einspeisen; der bisherige Cookie-Weg bleibt **Rückfall**.
-- **S-C — Auffrischung, ungültige Sitzung, Abmelden:** 80-%-Tick, `/auth/deregister` beim Abmelden,
-  ungültige Sitzung ⇒ Tokens löschen + Login-Screen.
 - **S-D — Live-Abnahme (Hauptagent):** einmal anmelden, Neustart **ohne** Anmeldung, Auffrischung im
   Log, Upload läuft; darin die offene `PUT`-Abnahme (2.2b).
 
@@ -376,7 +365,9 @@ als **Fallback**, wenn Longcat denselben Fehler liefert (User-Korrektur 2026-10-
 Longcat Preview priorisieren, DS Flash als fallback"). Bestätigt 2026-10-15: „Longcat 2.5 Preview für
 subagenten nutzen" — Longcat ist damit das **Standard-Modell für alle Subagenten-Läufe** dieser
 Welle (Umsetzer, Verifier, Doku), DeepSeek Flash nur noch Fallback. Longcat lief in dieser Welle ohne
-Rate-Limit-Fehler. Die Regel „ein Modell für alle Rollen"
+Rate-Limit-Fehler, fiel aber am 2026-10-15 zweimal mitten in Aufträgen mit „Endpoint is unavailable"
+aus — der dokumentierte DeepSeek-Flash-Fallback wurde dabei **real** genutzt (S-C-Umsetzung und
+-Verifikation). Die Regel „ein Modell für alle Rollen"
 (`step-5-preview-free`) bleibt gültig — das ist eine **Lauf-Ausnahme**, kein Config-Modellwechsel;
 sobald der Gratis-Pool wieder antwortet, laufen die Wellen wieder dort.
 

@@ -1,4 +1,5 @@
 use crate::app_menu;
+use crate::auth::TokenStore;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
@@ -177,6 +178,11 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) config_path: String,
     pub(crate) config_error: Option<String>,
     pub(crate) login: login::WebviewLogin,
+    /// In-memory session shared with the background refresh worker (S-C): the
+    /// refresh token (mirrored from the OS keychain), the access token and the
+    /// freshly minted cookies. Nothing here is persisted except the refresh
+    /// token, which lives in the keychain.
+    pub(crate) session: Arc<Mutex<login::Session>>,
     /// Set by the UI when the user asks to sign in; handled in `update` because
     /// creating the webview needs the frame (window handle).
     pub(crate) pending_login: bool,
@@ -383,12 +389,13 @@ impl PrimePhotoApp {
             ),
             _ => (None, false),
         };
-        Self {
+        let app = Self {
             rt,
             config,
             config_path,
             config_error,
             login: login::WebviewLogin::new(),
+            session: Arc::new(Mutex::new(login::Session::default())),
             pending_login: false,
             window_title: None,
             sized: false,
@@ -423,7 +430,20 @@ impl PrimePhotoApp {
             avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
             queue_cache: (0, Vec::new()),
             queue_cache_rev: u64::MAX,
+        };
+        // Session (S-C): only the **refresh token** is persisted, and it lives in
+        // the OS keychain. Load it into the in-memory session; the refresh
+        // worker then starts from `poll_session` on the first frame. A keychain
+        // error (unavailable / locked) only logs a warning — the app simply
+        // starts signed out.
+        match crate::auth::KeyringTokenStore.load() {
+            Ok(Some(refresh_token)) => {
+                app.session.lock().unwrap().refresh_token = Some(refresh_token);
+            }
+            Ok(None) => {}
+            Err(e) => log::warn!("Refresh-Token konnte nicht geladen werden: {e}"),
         }
+        app
     }
 
     pub(crate) fn log(&self, msg: impl Into<String>) {
@@ -792,6 +812,9 @@ impl eframe::App for PrimePhotoApp {
         }
 
         self.poll_login();
+        // Session upkeep (S-C): starts/stops the background refresh worker and
+        // reacts to an invalidated session or freshly minted cookies.
+        self.poll_session(ctx);
 
         // Account fetch (name + avatar): first attempt after a successful
         // sign-in or at start when a session already exists, with **exactly one**
@@ -806,8 +829,10 @@ impl eframe::App for PrimePhotoApp {
         self.poll_avatar(ctx);
 
         // Onboarding: until the user is signed in (or while the sign-in page is
-        // open) show the login flow in this same window.
-        if self.login.running || !self.is_logged_in() {
+        // open) show the login flow in this same window. A stored refresh
+        // token counts as a pending session: no login flash on restart — the
+        // worker mints the cookies in the background (like the original).
+        if self.login.running || !(self.is_logged_in() || self.has_pending_session()) {
             self.login_ui(ctx);
         } else {
             // Start a one-time queue restored from the DB at app start (user
@@ -935,7 +960,7 @@ impl eframe::App for PrimePhotoApp {
         }
 
         // Keep the window title clear about what this window is.
-        let title = if self.login.running || !self.is_logged_in() {
+        let title = if self.login.running || !(self.is_logged_in() || self.has_pending_session()) {
             tr("Login – Prime Photos")
         } else {
             tr("Prime Photos")

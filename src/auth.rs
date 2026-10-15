@@ -7,8 +7,10 @@
 //! keychain-backed refresh-token store and the 80 %-refresh schedule. Since S-B
 //! the **login path is wired in**: `begin_login`/`poll_login` use [`Pkce`],
 //! [`client_id`], [`register_device`], [`KeyringTokenStore`] and
-//! [`fetch_auth_cookies`]. What S-C still consumes (token refresh, deregister)
-//! carries a per-item `#[allow(dead_code)]` marked "wird in S-C verdrahtet".
+//! [`fetch_auth_cookies`]. Since S-C the **session is wired in** too:
+//! `login::session_worker` consumes [`refresh_access_token`],
+//! [`fetch_auth_cookies`], [`next_refresh_delay`], [`counts_as_attempt`] and
+//! the refresh constants, and [`deregister`] backs `logout`.
 
 use std::time::Duration;
 
@@ -55,27 +57,33 @@ pub(crate) const KEYRING_ACCOUNT: &str = "refresh-token";
 
 /// Seconds subtracted from `expires_in` so a token is refreshed slightly before
 /// it actually expires (documented default, `AGENTS.md` 2026-10-15).
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const ACCESS_TOKEN_EXPIRY_CUSHION_SECONDS: i64 = 60;
 
 /// Fraction of the **remaining** lifetime after which the next refresh is due
 /// (80 %, `AGENTS.md` 2026-10-15).
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const ACCESS_TOKEN_REFRESH_FRACTION: f64 = 0.8;
 
-/// Number of refresh attempts before the session is declared invalid. The
-/// original's own count is unproven; this is our documented default.
-#[allow(dead_code)] // wird in S-C verdrahtet
+/// Number of refresh attempts before the session is declared invalid. This is
+/// the original's own count (observed in `AppSettings`).
 pub(crate) const ACCESS_TOKEN_MAX_RETRIES: u32 = 5;
 
-/// Seconds between two refresh attempts (our documented default; the original's
-/// spacing is unproven).
-#[allow(dead_code)] // wird in S-C verdrahtet
+/// Seconds between two refresh attempts. This is the original's own spacing
+/// (observed in `AppSettings`).
 pub(crate) const ACCESS_TOKEN_RETRY_DELAY_SECONDS: u64 = 15;
 
-/// Attempts of the **redeem** (`/auth/register`) step (documented default; the
-/// original's count is unproven).
-#[allow(dead_code)] // wird in S-C verdrahtet
+/// Tick interval of the background refresh worker (user decision 2026-10-15):
+/// the worker wakes up this often to check whether a refresh is due. Modeled
+/// after `TickTockTimer` in the original.
+pub(crate) const TICK_INTERVAL_SECONDS: u64 = 3;
+
+/// Attempts of the **redeem** (`/auth/register`) step. This is the original's
+/// own count (observed in `AppSettings`).
+///
+/// Used by the device-login background task in `login::poll_login`
+/// (`src/login.rs`): the redeem is retried up to this count, with
+/// [`TICK_INTERVAL_SECONDS`] between attempts. A network error does **not**
+/// consume an attempt, but the number of offline retries is capped at this
+/// value too (so the loop runs at most twice this many passes).
 pub(crate) const REGISTER_MAX_ATTEMPTS: u32 = 3;
 
 /// OS name reported as the device model. There is **no subprocess** and no
@@ -157,11 +165,20 @@ fn hex(bytes: &[u8]) -> String {
 /// Delay until the access token is refreshed: 80 % of the lifetime that is left
 /// after the [`ACCESS_TOKEN_EXPIRY_CUSHION_SECONDS`] cushion. A non-positive
 /// remainder yields a zero delay (refresh immediately).
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) fn next_refresh_delay(expires_in_seconds: i64) -> Duration {
     let remaining = (expires_in_seconds - ACCESS_TOKEN_EXPIRY_CUSHION_SECONDS).max(0);
     let seconds = (remaining as f64 * ACCESS_TOKEN_REFRESH_FRACTION) as u64;
     Duration::from_secs(seconds)
+}
+
+/// Whether an error counts as a refresh **attempt** (user decision 2026-10-15).
+///
+/// A connection error means "offline" — it must **not** consume one of the
+/// [`ACCESS_TOKEN_MAX_RETRIES`] attempts; the schedule stays and the next tick
+/// tries again. Offline never signs the app out. Only real server responses
+/// (HTTP status, empty token, JSON error) count towards the retry budget.
+pub(crate) fn counts_as_attempt(e: &AuthError) -> bool {
+    !matches!(e, AuthError::Network(_))
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +257,6 @@ impl RegisterRequest {
 }
 
 /// Body of `POST <base>/auth/token` in the refresh-token mode.
-#[allow(dead_code)] // wird in S-C verdrahtet
 #[derive(Debug, Serialize)]
 pub(crate) struct RefreshRequest {
     source_token: String,
@@ -252,7 +268,6 @@ pub(crate) struct RefreshRequest {
 
 impl RefreshRequest {
     /// Build the refresh body for the stored refresh token.
-    #[allow(dead_code)] // wird in S-C verdrahtet
     pub(crate) fn new(source_token: &str) -> Self {
         Self {
             source_token: source_token.to_string(),
@@ -301,10 +316,7 @@ struct BearerTokens {
 /// The bearer tokens extracted from a successful register response. The
 /// **refresh token lives here**; the access token is memory-only.
 pub(crate) struct RegisterOutcome {
-    /// Memory-only in S-B; the refresh schedule that reads it is wired in S-C.
-    #[allow(dead_code)] // wird in S-C verdrahtet
     pub(crate) access_token: String,
-    #[allow(dead_code)] // wird in S-C verdrahtet
     pub(crate) expires_in: i64,
     pub(crate) refresh_token: String,
 }
@@ -326,7 +338,6 @@ pub(crate) fn parse_register_response(body: &str) -> Result<RegisterOutcome, Aut
     })
 }
 
-#[allow(dead_code)] // wird in S-C verdrahtet
 #[derive(Debug, Deserialize)]
 struct RefreshResponseBody {
     #[serde(default)]
@@ -336,14 +347,12 @@ struct RefreshResponseBody {
 }
 
 /// The renewed access token from `/auth/token`.
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) struct RefreshOutcome {
     pub(crate) access_token: String,
     pub(crate) expires_in: i64,
 }
 
 /// Parse the refresh response. An empty access token is a failure here too.
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) fn parse_refresh_response(body: &str) -> Result<RefreshOutcome, AuthError> {
     let parsed: RefreshResponseBody =
         serde_json::from_str(body).map_err(|e| AuthError::Json(e.to_string()))?;
@@ -406,9 +415,7 @@ fn get_ci<'a>(
 /// access token stays in memory.
 pub(crate) trait TokenStore {
     fn save(&self, refresh_token: &str) -> Result<(), String>;
-    #[allow(dead_code)] // wird in S-C verdrahtet
     fn load(&self) -> Result<Option<String>, String>;
-    #[allow(dead_code)] // wird in S-C verdrahtet
     fn clear(&self) -> Result<(), String>;
 }
 
@@ -534,7 +541,6 @@ pub(crate) async fn register_device(
 }
 
 /// `POST /auth/token`: renew the access token from the refresh token.
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) async fn refresh_access_token(
     client: &reqwest::Client,
     country: &str,
@@ -586,7 +592,6 @@ pub(crate) async fn fetch_auth_cookies(
 
 /// `POST /auth/deregister`: sign out on the server (the local token is cleared
 /// separately).
-#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) async fn deregister(
     client: &reqwest::Client,
     country: &str,
@@ -840,6 +845,20 @@ mod tests {
         assert_eq!(ACCESS_TOKEN_MAX_RETRIES, 5);
         assert_eq!(ACCESS_TOKEN_RETRY_DELAY_SECONDS, 15);
         assert_eq!(REGISTER_MAX_ATTEMPTS, 3);
+        assert_eq!(TICK_INTERVAL_SECONDS, 3);
+    }
+
+    #[test]
+    fn counts_as_attempt_treats_network_errors_as_offline() {
+        // A connection error means "offline": it must not consume a retry.
+        assert!(!counts_as_attempt(&AuthError::Network("down".to_string())));
+        // Every real server response counts towards the retry budget.
+        assert!(counts_as_attempt(&AuthError::HttpStatus {
+            status: 403,
+            body: "nope".to_string()
+        }));
+        assert!(counts_as_attempt(&AuthError::EmptyAccessToken));
+        assert!(counts_as_attempt(&AuthError::Json("bad".to_string())));
     }
 
     #[test]

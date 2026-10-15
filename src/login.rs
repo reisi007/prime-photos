@@ -117,6 +117,18 @@ struct Probe {
     error: Option<String>,
 }
 
+/// The successful result of the device redemption: the register outcome (with
+/// the refresh token) plus the freshly minted cookies.
+///
+/// `cookies` is `None` when the register succeeded but the follow-up
+/// `fetch_auth_cookies` failed: the login is **valid** (the refresh token is
+/// stored) and the worker will mint the cookies on its next pass — it must never
+/// be reported as a rejected device path.
+pub(crate) struct DeviceLogin {
+    pub(crate) register: auth::RegisterOutcome,
+    pub(crate) cookies: Option<ParsedCookies>,
+}
+
 /// Owns the login webview for the duration of the sign-in.
 pub struct WebviewLogin {
     pub running: bool,
@@ -132,8 +144,12 @@ pub struct WebviewLogin {
     /// True while the code is being redeemed on the runtime: the cookie
     /// fallback stays quiet until the device result is in.
     device_busy: bool,
-    /// Result of the device redemption, written by the background task.
-    device_result: Arc<Mutex<Option<Result<ParsedCookies, String>>>>,
+    /// Result of the device redemption, written by the background task,
+    /// together with the generation it belongs to.
+    device_result: Arc<Mutex<Option<(u64, Result<DeviceLogin, String>)>>>,
+    /// Incremented on every new login attempt; guards against a stale
+    /// redemption result landing in a newer attempt.
+    login_generation: u64,
 }
 
 impl Default for WebviewLogin {
@@ -153,6 +169,7 @@ impl WebviewLogin {
             auth_code: Arc::new(Mutex::new(None)),
             device_busy: false,
             device_result: Arc::new(Mutex::new(None)),
+            login_generation: 0,
         }
     }
 
@@ -171,6 +188,7 @@ impl WebviewLogin {
         *self.auth_code.lock().unwrap() = None;
         *self.device_result.lock().unwrap() = None;
         self.device_busy = false;
+        self.login_generation += 1;
         let auth_code = Arc::clone(&self.auth_code);
         match WebViewBuilder::new()
             .with_url(url)
@@ -271,8 +289,18 @@ impl WebviewLogin {
     }
 
     /// Take the device redemption result published by the background task.
-    pub fn take_device_result(&mut self) -> Option<Result<ParsedCookies, String>> {
-        self.device_result.lock().unwrap().take()
+    ///
+    /// Only returns the result if it belongs to the **current** login
+    /// generation — a stale result from a previous (cancelled) attempt is
+    /// discarded. This closes the race "cancel + sign in again immediately ⇒
+    /// old result lands in the new attempt".
+    pub fn take_device_result(&mut self) -> Option<Result<DeviceLogin, String>> {
+        let (result_gen, result) = self.device_result.lock().unwrap().take()?;
+        if result_gen == self.login_generation {
+            Some(result)
+        } else {
+            None
+        }
     }
 
     /// Take the PKCE pair of the current attempt (consumed by the redemption).
@@ -332,6 +360,183 @@ fn schedule_probe(probe: Arc<Mutex<Probe>>) {
     run_probe(&probe);
 }
 
+// -- session (S-C) --------------------------------------------------------
+
+/// The in-memory cookie set shared with the detached background supervisor
+/// (S-C, user decision 2026-10-15).
+///
+/// Since the `Config` cookie fields are `#[serde(skip)]`, a `Config::load()` from
+/// disk always yields **empty** cookies. The supervisor (`background_sync_pass`,
+/// `watch_loop`) needs the live material, so `apply_parsed` mirrors it here and
+/// the supervisor overlays it onto its loaded config.
+#[derive(Default, Clone)]
+pub(crate) struct SessionCookies {
+    pub(crate) session_id: String,
+    pub(crate) cookie_x_acb: String,
+    pub(crate) cookie_at_acb: String,
+    pub(crate) cookie_ubid_acb: String,
+    pub(crate) cookie_x_amz_access_token: String,
+}
+
+impl From<&ParsedCookies> for SessionCookies {
+    fn from(parsed: &ParsedCookies) -> Self {
+        Self {
+            session_id: parsed.session_id.clone(),
+            cookie_x_acb: parsed.cookie_x_acb.clone(),
+            cookie_at_acb: parsed.cookie_at_acb.clone(),
+            cookie_ubid_acb: parsed.cookie_ubid_acb.clone(),
+            cookie_x_amz_access_token: parsed.cookie_x_amz_access_token.clone(),
+        }
+    }
+}
+
+/// In-memory session state shared between the background refresh worker and
+/// the UI thread (user decision 2026-10-15). Only the **refresh token** is
+/// persisted (OS keychain); the access token and the cookies live here and
+/// are lost on restart.
+#[derive(Default)]
+pub(crate) struct Session {
+    pub(crate) refresh_token: Option<String>,
+    pub(crate) access_token: Option<String>,
+    /// When the next access-token refresh is due.
+    pub(crate) next_refresh: Option<Instant>,
+    /// Incremented on every new worker generation (login, logout, invalidated);
+    /// a worker that sees a foreign generation stops.
+    pub(crate) generation: u64,
+    /// True while a session worker is running for the current generation.
+    pub(crate) started: bool,
+    /// Set by the worker when the session is declared invalid (too many
+    /// failed refresh attempts); consumed by [`PrimePhotoApp::poll_session`].
+    pub(crate) invalid: bool,
+    /// Freshly minted cookies, picked up by `poll_session` every frame and
+    /// copied into `Config` (memory only, never persisted).
+    pub(crate) pending_cookies: Option<ParsedCookies>,
+    /// The live cookie set, mirrored from `Config` by `apply_parsed` so the
+    /// detached background supervisor has the session material that the
+    /// on-disk `config.toml` no longer carries (`#[serde(skip)]`).
+    pub(crate) cookies: SessionCookies,
+}
+
+/// Background refresh worker (user decision 2026-10-15). Ticks every
+/// [`auth::TICK_INTERVAL_SECONDS`] seconds; refreshes the access token when
+/// [`Session::next_refresh`] is due, then mints fresh cookies from the new
+/// refresh token. Offline errors do **not** count as attempts and never sign
+/// out. After [`auth::ACCESS_TOKEN_MAX_RETRIES`] failed attempts the session
+/// is declared invalid.
+pub(crate) async fn session_worker(
+    session: Arc<Mutex<Session>>,
+    country: String,
+    language: String,
+    ctx: egui::Context,
+    my_gen: u64,
+) {
+    let client = reqwest::Client::new();
+    let mut attempts = 0u32;
+    loop {
+        // Check due-ness **first**, then sleep only when nothing is due: a
+        // session restored from the keychain is due immediately (`poll_session`
+        // sets `next_refresh = now`), so the access token and the web cookies
+        // are renewed right at start instead of after the first tick. Whenever
+        // nothing is due we sleep a full tick — never a busy loop.
+        let due_token = {
+            let s = session.lock().unwrap();
+            if s.generation != my_gen {
+                return;
+            }
+            match (s.refresh_token.clone(), s.next_refresh) {
+                (Some(rt), Some(t)) if t <= Instant::now() => Some(rt),
+                // No token yet, no schedule yet, or the schedule lies in the
+                // future: nothing to do this pass.
+                _ => None,
+            }
+        };
+        let Some(refresh_token) = due_token else {
+            tokio::time::sleep(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)).await;
+            continue;
+        };
+        // Attempt loop (reuses the client).
+        loop {
+            // Re-check the generation before every attempt.
+            {
+                if session.lock().unwrap().generation != my_gen {
+                    return;
+                }
+            }
+            match auth::refresh_access_token(&client, &country, &language, &refresh_token).await
+            {
+                Ok(outcome) => {
+                    let delay = auth::next_refresh_delay(outcome.expires_in);
+                    let cookies = auth::fetch_auth_cookies(
+                        &client,
+                        &country,
+                        &language,
+                        &refresh_token,
+                    )
+                    .await;
+                    {
+                        let mut s = session.lock().unwrap();
+                        // Re-check the generation *inside* the lock, after the
+                        // awaits: a "log out" during the refresh bumped it, so
+                        // writing now would resurrect the discarded session.
+                        if s.generation != my_gen {
+                            return;
+                        }
+                        s.access_token = Some(outcome.access_token);
+                        // Clamp the schedule to at least one tick, so a tiny
+                        // `expires_in` cannot turn the worker into a hot loop.
+                        s.next_refresh = Some(
+                            Instant::now()
+                                + delay.max(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)),
+                        );
+                        match cookies {
+                            Ok(c) => s.pending_cookies = Some(c),
+                            Err(e) => {
+                                log::warn!("Cookies konnten nicht erneuert werden: {e}")
+                            }
+                        }
+                    }
+                    attempts = 0;
+                    ctx.request_repaint();
+                    break;
+                }
+                Err(e) if !auth::counts_as_attempt(&e) => {
+                    // Offline: don't count, keep the schedule. `next_refresh`
+                    // still lies in the past, so the outer loop would be due
+                    // again immediately — sleep one tick (3 s) before breaking
+                    // to keep this a paced retry, never a hot request loop.
+                    tokio::time::sleep(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)).await;
+                    break;
+                }
+                Err(e) => {
+                    attempts += 1;
+                    if attempts >= auth::ACCESS_TOKEN_MAX_RETRIES {
+                        let mut s = session.lock().unwrap();
+                        // Same re-check as the success path: never invalidate a
+                        // session that was already superseded while we awaited.
+                        if s.generation != my_gen {
+                            return;
+                        }
+                        s.invalid = true;
+                        s.access_token = None;
+                        s.next_refresh = None;
+                        s.started = false;
+                        ctx.request_repaint();
+                        return;
+                    }
+                    log::warn!(
+                        "Auffrischung fehlgeschlagen ({attempts}/{}): {e}",
+                        auth::ACCESS_TOKEN_MAX_RETRIES
+                    );
+                    tokio::time::sleep(Duration::from_secs(
+                        auth::ACCESS_TOKEN_RETRY_DELAY_SECONDS,
+                    ))
+                    .await;
+                }
+            }
+        }
+    }
+}
+
 // -- login --------------------------------------------------------------
 
 impl PrimePhotoApp {
@@ -339,9 +544,33 @@ impl PrimePhotoApp {
         self.login.cancel();
     }
 
-    /// Sign out: drop the stored cookies and return to the login screen.
+    /// Sign out: drop the in-memory session and the stored refresh token, tell
+    /// the server, and return to the login screen (user decision 2026-10-15).
+    ///
+    /// The **refresh token** is deleted from the OS keychain and the whole
+    /// session (access token + cookies) is dropped — nothing session-related is
+    /// left on disk (`Config` keeps the cookie fields in memory only). Telling
+    /// the server (`/auth/deregister`) is **best-effort**: a failure only logs a
+    /// warning, the local sign-out still happens.
     pub(crate) fn logout(&mut self) {
         self.config_form = None;
+        // Remember what the server call needs before the session is cleared.
+        let access_token = self.session.lock().unwrap().access_token.clone();
+        let country = self.config.country.clone();
+        let language = crate::urls::portal_language(&country).to_string();
+        // Stop the worker for good: bumping the generation makes a running
+        // worker return on its next check.
+        {
+            let mut s = self.session.lock().unwrap();
+            s.generation += 1;
+            s.started = false;
+            s.refresh_token = None;
+            s.access_token = None;
+            s.next_refresh = None;
+            s.invalid = false;
+            s.pending_cookies = None;
+            s.cookies = SessionCookies::default();
+        }
         self.config.session_id.clear();
         self.config.cookie_x_acb.clear();
         self.config.cookie_at_acb.clear();
@@ -350,6 +579,112 @@ impl PrimePhotoApp {
         match self.config.save() {
             Ok(_) => self.log(tr("Abgemeldet.")),
             Err(e) => self.config_error = Some(e.to_string()),
+        }
+        // Deregister on the server when we still had an access token; never on
+        // the UI thread.
+        if let Some(access_token) = access_token {
+            self.rt.spawn(async move {
+                let client = reqwest::Client::new();
+                if let Err(e) = auth::deregister(&client, &country, &language, &access_token).await {
+                    log::warn!("Abmelden am Server fehlgeschlagen: {e}");
+                }
+            });
+        }
+        if let Err(e) = auth::KeyringTokenStore.clear() {
+            log::warn!("Refresh-Token konnte nicht gelöscht werden: {e}");
+        }
+    }
+
+    /// Whether a **refresh token** is available but the cookies have not been
+    /// minted yet — a session restored from the keychain at start (S-C).
+    ///
+    /// The login screen is only shown when this is `false` too, so a restart
+    /// with a stored token goes straight to the main UI while the worker fetches
+    /// the access token and the cookies in the background (like the original,
+    /// which only shows its auth portal without a refresh token).
+    pub(crate) fn has_pending_session(&self) -> bool {
+        self.session.lock().unwrap().refresh_token.is_some()
+    }
+
+    /// Session upkeep, called every UI frame (S-C, user decision 2026-10-15).
+    ///
+    /// This is the **only** place a session worker is spawned. It starts one as
+    /// soon as a refresh token is available (after a device login, or at start
+    /// with a token from the keychain) and no worker is running for the current
+    /// generation. It also reacts to an invalidated session and picks up freshly
+    /// minted cookies.
+    pub(crate) fn poll_session(&mut self, ctx: &egui::Context) {
+        // (1) The worker declared the session invalid (too many failed refresh
+        // attempts): drop every token and return to the login screen — **no**
+        // app restart (user decision 2026-10-15). This runs **before** the spawn
+        // branch below: it bumps the generation and clears the refresh token, so
+        // the spawn branch sees `refresh_token == None` and cannot start a worker
+        // for the token we just discarded in the very same frame.
+        if self.session.lock().unwrap().invalid {
+            if let Err(e) = auth::KeyringTokenStore.clear() {
+                log::warn!("Refresh-Token konnte nicht gelöscht werden: {e}");
+            }
+            {
+                let mut s = self.session.lock().unwrap();
+                s.refresh_token = None;
+                s.access_token = None;
+                s.next_refresh = None;
+                s.invalid = false;
+                s.generation += 1;
+                s.started = false;
+                s.cookies = SessionCookies::default();
+                // Drop any cookies the worker minted but the UI has not consumed
+                // yet: otherwise step (3) below would re-install exactly the
+                // cookies we just discarded in this same frame.
+                s.pending_cookies = None;
+            }
+            self.config.session_id = String::new();
+            self.config.cookie_x_acb = String::new();
+            self.config.cookie_at_acb = String::new();
+            self.config.cookie_ubid_acb = String::new();
+            self.config.cookie_x_amz_access_token = String::new();
+            if let Err(e) = self.config.save() {
+                self.config_error = Some(e.to_string());
+            }
+            self.log(tr("Sitzung abgelaufen – bitte erneut anmelden."));
+        }
+
+        // (2) Start the refresh worker. `started` is cleared by a successful
+        // login (`poll_login`), by `logout` and by an invalidated session, so
+        // this branch covers both "app start with a stored token" and "just
+        // signed in".
+        let start_gen = {
+            let mut s = self.session.lock().unwrap();
+            if !s.started && s.refresh_token.is_some() {
+                s.generation += 1;
+                s.started = true;
+                // A session restored from the keychain has no schedule yet: make
+                // the worker due immediately, so the access token is renewed and
+                // the web cookies are minted **at start**. After a login the
+                // 80 %-schedule is already set by `poll_login`.
+                if s.next_refresh.is_none() {
+                    s.next_refresh = Some(Instant::now());
+                }
+                Some(s.generation)
+            } else {
+                None
+            }
+        };
+        if let Some(my_gen) = start_gen {
+            let country = self.config.country.clone();
+            let language = crate::urls::portal_language(&country).to_string();
+            let session = Arc::clone(&self.session);
+            let ctx = ctx.clone();
+            self.rt.spawn(async move {
+                session_worker(session, country, language, ctx, my_gen).await;
+            });
+        }
+
+        // (3) Freshly minted cookies from the worker: into the in-memory config
+        // only, never persisted (`#[serde(skip)]`, see `config.rs`).
+        let pending = self.session.lock().unwrap().pending_cookies.take();
+        if let Some(cookies) = pending {
+            self.apply_parsed(&cookies);
         }
     }
 
@@ -394,8 +729,29 @@ impl PrimePhotoApp {
                 return;
             }
             match result {
-                Ok(parsed) => {
-                    self.apply_parsed(&parsed);
+                Ok(dl) => {
+                    // Cookies may be absent: the register succeeded but the
+                    // follow-up cookie fetch failed. That is a **valid** login
+                    // (the refresh token is stored) — the worker is made due
+                    // immediately and mints the cookies on its next pass.
+                    let have_cookies = dl.cookies.is_some();
+                    if let Some(cookies) = &dl.cookies {
+                        self.apply_parsed(cookies);
+                    }
+                    {
+                        let mut s = self.session.lock().unwrap();
+                        s.refresh_token = Some(dl.register.refresh_token.clone());
+                        s.access_token = Some(dl.register.access_token.clone());
+                        s.next_refresh = Some(if have_cookies {
+                            Instant::now() + auth::next_refresh_delay(dl.register.expires_in)
+                        } else {
+                            // No cookies yet: refresh at once, not after 80 %.
+                            Instant::now()
+                        });
+                        s.invalid = false;
+                        s.started = false;
+                        s.generation += 1;
+                    }
                     match self.config.save() {
                         Ok(_) => self.log(tr("Login erfolgreich – Refresh-Token gespeichert.")),
                         Err(e) => self.config_error = Some(e.to_string()),
@@ -444,40 +800,104 @@ impl PrimePhotoApp {
                 let client_id = auth::client_id(&serial, auth::DEVICE_TYPE);
                 let language = crate::urls::portal_language(&country).to_string();
                 let slot = Arc::clone(&self.login.device_result);
+                let my_gen = self.login.login_generation;
                 self.rt.spawn(async move {
                     let client = reqwest::Client::new();
-                    let result = match auth::register_device(
-                        &client,
-                        &country,
-                        &language,
-                        &serial,
-                        &code,
-                        &pkce.verifier,
-                        &client_id,
-                    )
-                    .await
-                    {
-                        Ok(outcome) => {
-                            // The refresh token is persisted; a keychain failure
-                            // is reported but not fatal — the cookies are still
-                            // worth fetching.
-                            if let Err(e) = auth::KeyringTokenStore.save(&outcome.refresh_token) {
-                                log::warn!(
-                                    "Refresh-Token konnte nicht im Schlüsselbund gespeichert werden: {e}"
-                                );
+                    // The slot holds `(generation, Result<DeviceLogin, String>)`:
+                    // build the inner result first, then tag it with the
+                    // generation in one place.
+                    //
+                    // The redeem is retried like the original (user decision
+                    // 2026-10-15): up to `REGISTER_MAX_ATTEMPTS` **counted**
+                    // attempts, with `TICK_INTERVAL_SECONDS` between them (the
+                    // login spinner stays visible). A network error (offline)
+                    // does not consume an attempt, but the offline passes are
+                    // capped at the same value too, so the loop runs at most
+                    // twice that many passes before giving up.
+                    let mut attempts = 0u32;
+                    let mut offline_passes = 0u32;
+                    let inner: Result<DeviceLogin, String> = loop {
+                        match auth::register_device(
+                            &client,
+                            &country,
+                            &language,
+                            &serial,
+                            &code,
+                            &pkce.verifier,
+                            &client_id,
+                        )
+                        .await
+                        {
+                            Ok(outcome) => {
+                                // The refresh token is persisted; a keychain
+                                // failure is reported but not fatal — the
+                                // cookies are still worth fetching.
+                                if let Err(e) =
+                                    auth::KeyringTokenStore.save(&outcome.refresh_token)
+                                {
+                                    log::warn!(
+                                        "Refresh-Token konnte nicht im Schlüsselbund gespeichert werden: {e}"
+                                    );
+                                }
+                                break match auth::fetch_auth_cookies(
+                                    &client,
+                                    &country,
+                                    &language,
+                                    &outcome.refresh_token,
+                                )
+                                .await
+                                {
+                                    Ok(cookies) => Ok(DeviceLogin {
+                                        register: outcome,
+                                        cookies: Some(cookies),
+                                    }),
+                                    // The register succeeded: the login is valid
+                                    // and the refresh token is stored. Do **not**
+                                    // turn this into a rejection — publish the
+                                    // outcome without cookies so the worker mints
+                                    // them on its next pass.
+                                    Err(e) => {
+                                        log::warn!(
+                                            "Cookies konnten nach der Anmeldung nicht abgerufen werden: {e}"
+                                        );
+                                        Ok(DeviceLogin {
+                                            register: outcome,
+                                            cookies: None,
+                                        })
+                                    }
+                                };
                             }
-                            auth::fetch_auth_cookies(
-                                &client,
-                                &country,
-                                &language,
-                                &outcome.refresh_token,
-                            )
-                            .await
-                            .map_err(|e| e.to_string())
+                            Err(e) if !auth::counts_as_attempt(&e) => {
+                                offline_passes += 1;
+                                if offline_passes >= auth::REGISTER_MAX_ATTEMPTS {
+                                    break Err(e.to_string());
+                                }
+                                log::warn!(
+                                    "Einlösen fehlgeschlagen (offline {offline_passes}/{}): {e}",
+                                    auth::REGISTER_MAX_ATTEMPTS
+                                );
+                                tokio::time::sleep(Duration::from_secs(
+                                    auth::TICK_INTERVAL_SECONDS,
+                                ))
+                                .await;
+                            }
+                            Err(e) => {
+                                attempts += 1;
+                                if attempts >= auth::REGISTER_MAX_ATTEMPTS {
+                                    break Err(e.to_string());
+                                }
+                                log::warn!(
+                                    "Einlösen fehlgeschlagen ({attempts}/{}): {e}",
+                                    auth::REGISTER_MAX_ATTEMPTS
+                                );
+                                tokio::time::sleep(Duration::from_secs(
+                                    auth::TICK_INTERVAL_SECONDS,
+                                ))
+                                .await;
+                            }
                         }
-                        Err(e) => Err(e.to_string()),
                     };
-                    *slot.lock().unwrap() = Some(result);
+                    *slot.lock().unwrap() = Some((my_gen, inner));
                 });
                 return;
             }
@@ -498,6 +918,10 @@ impl PrimePhotoApp {
 
     /// Copy a parsed cookie set into the config (shared by the webview fallback
     /// and the device path's `fetch_auth_cookies`).
+    ///
+    /// The config fields feed the upload engine; the same set is mirrored into
+    /// the in-memory session so the **detached** background supervisor has the
+    /// live cookies the on-disk `config.toml` no longer carries (`#[serde(skip)]`).
     pub(crate) fn apply_parsed(&mut self, parsed: &ParsedCookies) {
         self.config.session_id = parsed.session_id.clone();
         if !parsed.country.is_empty() {
@@ -507,6 +931,7 @@ impl PrimePhotoApp {
         self.config.cookie_at_acb = parsed.cookie_at_acb.clone();
         self.config.cookie_ubid_acb = parsed.cookie_ubid_acb.clone();
         self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token.clone();
+        self.session.lock().unwrap().cookies = SessionCookies::from(parsed);
     }
 
     pub(crate) fn apply_cookie_string(&mut self, cookie_string: &str) {
