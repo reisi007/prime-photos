@@ -1,0 +1,66 @@
+# Live acceptance — device session path (2026-10-15)
+
+Evidence that the rebuilt session flow (`docs/SPEC_LOGIN.md` § 3.8,
+`docs/PROTOCOL.md` § 2.1) works against the real Amazon Photos service.
+
+This file exists because `AGENTS.md` holds **rules only** — every "this was
+proven live" statement moved out of it and lives here instead.
+
+## What was proven
+
+| # | Behaviour | Result |
+|---|---|---|
+| 1 | Sign in once through our own webview (device flow, PKCE) | accepted |
+| 2 | Restart the app **without** signing in again → straight into the main UI | pass |
+| 3 | Account name and profile picture appear in the sidebar | pass |
+| 4 | Uploads run and finish at 100 %, folder reports "Alles aktuell" | pass |
+| 5 | Restart resumes the previous run instead of starting over | pass |
+
+The device path is therefore live-proven: Amazon accepts our client identity
+(`app_name` / `app_version` / `device_type` per `AGENTS.md`, our own
+`device_serial`).
+
+## Session material at rest
+
+- The **refresh token** lives in the macOS keychain under our own service and
+  account — never under `com.amazon.clouddrive.mac` / `amzp-rt`.
+- The **access token** and the four session cookies (`session-id`, `x-acb*`,
+  `at-acb*`, `ubid-acb*`) live **in memory only**. The corresponding `Config`
+  fields are `#[serde(skip)]`, so `config.toml` carries **no** session material.
+  Verified: no cookie value appears in the config file.
+
+This mirrors the original, which keeps the same material in
+`NSHttpCookieStorage` rather than on disk.
+
+## Log evidence
+
+From `~/Library/Application Support/prime_photos/prime-photos.log`:
+
+```
+Gespeicherte Sitzung gefunden – Access-Token wird erneuert.
+Access-Token aufgefrischt (3600 s gültig).
+Web-Cookies erneuert.
+```
+
+That is the full start-gate sequence: keychain token found → access token
+renewed → web cookies minted, all in the background while the main UI is
+already usable.
+
+## Live findings that changed the implementation
+
+| Finding | Consequence |
+|---|---|
+| `expires_in` arrives from `/auth/register` **and** `/auth/token` as the JSON **string** `"3600"` | the parser accepts string **and** number in both places |
+| An `openid.oa2.authorization_code` is **single-use** | the redemption path repeats **only** when the request never reached the server (network error), **never** after a server answer |
+| `wry::WebView::cookies()` blocks the main thread up to 1 s and always times out when called from a `DispatchQueue::main` block | the cookie probe and the whole web/cookie fallback were removed; the device flow is the only sign-in path |
+| Amazon's browser cookies survived a sign-out (`~/Library/HTTPStorages/prime-photos.binarycookies`) and let the next sign-in skip 2FA | opening the login webview now clears its browsing data first (`docs/SPEC_LOGIN.md` § 3.3) |
+| The 10-minute EXIF guard rejects an EXIF-less file that is younger than 10 minutes **before** an upload URL is even built — live-reproduced on 2026-10-15 and **original parity** (`docs/SPEC_UPLOAD.md`), not an invention of ours | for live test runs, age the file first: `SetFile -d "01/01/2020 12:00:00" -m "01/01/2020 12:00:00"`. Without that, the run shows an error line in the UI log only and the row keeps `status = uploading`; a later event/watermark run picks the file up once it is old enough |
+| A stray node is removed with `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>` ⇒ **202 `{}`**; `PUT …/drive/v1/trash/<id>` does **not** exist on the cookie host (⇒ 404) | test targets and leftover nodes are cleaned up with the DELETE (verbs collected in `docs/PROTOCOL.md` § 5) |
+
+## Not accepted yet
+
+The `PUT /v2/upload/<nodeId>` replace path (Welle 2, item 2.2b) has **not**
+been exercised against the live account: it needs a genuine name conflict and
+would overwrite an existing photo, so it must never be triggered unprompted.
+Its query-parameter requirement is already proven (`fileSize` missing ⇒
+400 `MissingFileSize`).

@@ -639,3 +639,30 @@ between header and response.
   **unverified**.
 * **`/v2/upload` response `Content-Type`/extra headers**: captures show only JSON
   body + `x-amzn-RequestId`; region/CDN headers are **unverified**.
+
+## 5. Node mutation verbs (assembly recon, not captured)
+
+Recorded because the sections above cover **upload flows only** — the capture
+never saw a delete, a rename or a content replace, so `1`–`4` read as if the
+client could only write. That is a **limitation of the recording, not of the
+app**: the client's `CloudDriveService` builds all of the following (read off
+the shipped assembly, 2026-10-14).
+
+| Verb | Path | Purpose / notes |
+|---|---|---|
+| `DELETE` | `<metadata>/nodes/{id}` (optional `?recurse=true`) | delete a node; assembly name `DeleteNode` |
+| `DELETE` | `/v2/upload/multipart-upload/{id}` | abort an in-flight multipart upload |
+| `PUT` | `<content>/nodes/{id}/content` | replace a node's content in place |
+| `PATCH` | `<metadata>/nodes/{id}` | body is a `nodeChanges` JSON (`NullValueHandling.Ignore`, metrics key `HealthMetrics.Request.PatchNode`) — used for rename, move, favourite, album |
+| `POST` | `trash/{id}` and `trash/{id}/restore` | trash / restore; **the exact verbs are still open** |
+
+**Live-checked on the cookie host (2026-10-15):**
+
+| Call | Result |
+|---|---|
+| `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>` | **202**, body `{}` — works, this is how stray test nodes get removed |
+| `PUT https://www.amazon.<cc>/drive/v1/trash/<id>` | **404** — trash is **not** available on this host |
+
+**For this project:** none of it is implemented. Delete / download / trash stay
+deliberately out of scope (`AGENTS.md` → „Scope-Grenzen (In/Out)"); this section
+exists so the verbs are not re-discovered from scratch.

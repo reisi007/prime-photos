@@ -149,7 +149,9 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   für den aktuellen Lauf `concurrency = 1` erzwingt; bei App-Neustart zurückgesetzt. Automatische
   Drosselung anhand des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs, Post-MVP).
 
-## Assets: Tray-Icons + Logo (User 2026-10-14) — geplant, **nicht** implementiert
+## Assets: Tray-Icons + Logo (User 2026-10-14) — **implementiert** (Befund 2026-10-15: `build.rs`
+rastert die SVGs bereits, `src/tray.rs` bettet sie ein; der frühere Stand „geplant, nicht
+implementiert" war veraltet)
 
 Eigene Assets des Users liegen in **`assets/`** — als **SVG-Quellen** (eine Quelle der Wahrheit).
 **User-Entscheidung 2026-10-14: im Build entstehen daraus PNGs, die mit ausgeliefert werden.** Umsetzung:
@@ -498,17 +500,31 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   **lesen/untersuchen** (Code, Logs, Original-Binary) und schreibt nur `AGENTS.md`,
   `AGENTS.todo.md`, `AGENTS.skills.md`.
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
-- **Umsetzer:** `general`-Subagent mit Modell `opencode-go/step-5-preview-free` (User-Entscheidung
-  2026-10-15, „ab jetzt wieder step 5 preview für subagenten" — die `deepseek-v4.1-flash`-Runde vom
-  2026-10-14 ist damit **zurückgenommen**; sie war kein Fehler, nur eine User-Wahl, die wieder
-  entfallen ist) — bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
-  **Kein `#variant`-Suffix** (step-5-preview-free wirbt low/medium/high; bewusst ungenutzt, siehe
-  globale Modellvorgaben).
-- **Verifier:** ein **anderer** `general`-Subagent mit Modell `opencode-go/step-5-preview-free`, frische Session pro Runde; prüft die Substanz (Diff gegen Auftrag, Invarianten, Blast Radius), nicht die Gates.
-  **Konsequenz des Gratis-Modells (seit 2026-10-15 wieder gültig):** Briefings an Subagenten enthalten
-  **keine** Live-Werte (Cookies, Account-Parameter, Probe-Payloads) — Live-Probes gegen das
-  Amazon-Konto laufen ausschließlich über den Hauptagent. Damit steht das Projekt wieder auf
-  **derselben** Modellvorgabe wie die globale Config („ein Modell für alle Rollen").
+- **Ledger-Hygiene (User-Entscheidung 2026-10-15):** `AGENTS.todo.md` ist das Protokoll der **offenen**
+  Arbeit, nicht die Geschichtsschreibung. Sobald ein Eintrag umgesetzt **und** unabhängig verifiziert
+  ist (Verifier `APPROVE` + Commit), wird er **gelöscht** — nicht als „✅ erledigt" stehen gelassen;
+  die Historie lebt in den Commits. **Vor dem Löschen** wird geprüft, ob der Eintrag Wissen trägt,
+  das **nur dort** steht: solches Wissen wandert **zuerst** in die passende Datei unter `docs/`
+  (Clean-Room-Spec zum Thema, `docs/PROTOCOL.md` für Endpunkte, `docs/features/LIVE_ACCEPTANCE.md`
+  für Live-Befunde, `docs/DEV_NOTES.md` für Fallstricke unserer Codebase), erst dann wird gelöscht.
+  **Niemals gelöscht:** offene Punkte, bewusst Zurückgestelltes und der ganze Abschnitt „Verworfen"
+  (damit keine verworfenen Ansätze erneut gebaut werden).
+- **Umsetzer:** `general`-Subagent mit Modell **`opencode/mimo-v2.6-flash-free`** (User-Entscheidung
+  2026-10-15, „Mimo 2.6 free subagenten nutzen" — ersetzt die kurzlebige Vorgabe
+  `opencode-go/step-5-preview-free` für Subagenten; die Modell-Geschichte dieses Projekts ist
+  `step-5-preview-free` → `deepseek-v4.1-flash` (2026-10-14) → `step-5-preview-free` (2026-10-15)
+  → **`mimo-v2.6-flash-free`** (2026-10-15)). Bekommt Ziel-Dateien und die vollständige
+  Spezifikation, frische Session pro Task. **Kein `#variant`-Suffix.**
+  **Kein** Wechsel ohne neue User-Entscheidung — auch nicht „zurück", wenn ein Modell mal streikt
+  (dann Fallback auf einen anderen Rollen-Task, nicht auf eine Modelländerung).
+- **Verifier:** ein **anderer** `general`-Subagent mit **derselben** Vorgabe
+  (`opencode/mimo-v2.6-flash-free`), frische Session pro Runde; prüft die Substanz (Diff gegen
+  Auftrag, Invarianten, Blast Radius), nicht die Gates.
+  **Konsequenz des Gratis-Modells:** Briefings an Subagenten enthalten **keine** Live-Werte
+  (Cookies, Account-Parameter, Probe-Payloads) — Live-Probes gegen das Amazon-Konto laufen
+  ausschließlich über den Hauptagent. **Abweichung zur globalen Config (bewusst):** dort steht
+  `opencode-go/step-5-preview-free`; dieses Projekt läuft seit 2026-10-15 auf Mimo. Beides sind
+  $0-Modelle, es ist **kein** bezahltes Modell konfiguriert.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
 - **CI/Release (User-Entscheidung 2026-10-13, hebt „Kein Push, kein CI" auf):** Ziel ist ein
   öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).

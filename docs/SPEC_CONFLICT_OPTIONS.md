@@ -67,7 +67,7 @@ bewusst außen vor (§5).
 |---|---|---|---|---|---|---|---|---|
 | B1 | `None` | `..._file_name_conflicts_ask_option` = **„Jedes Mal nachfragen"** | Zielknoten per Name+Parent **vorhanden** ⇒ `FileUploadNameConflictException` (kein Request); **kein** Zielknoten ⇒ normaler Upload | — (wirft vorher) | 409 mit `NAME_ALREADY_EXISTS`/`NameAlreadyExists` **und** abweichendem MD5 ⇒ `RetryForNameConflict` ⇒ Schedule erneut befragen | **Umgesetzt** als `ConflictResolution::Ask` (`src/folders.rs`), Wire `NONE` (`ConflictResolution::wire_value`); Dialog `src/backup.rs` (`conflict_dialog`), Auslöser erst bei 409 (`src/upload.rs` `resolve_conflict`) | — (da) | „Ask ohne `Nicht noch einmal fragen` fragt pro Datei; mit Häkchen nur einmal pro Lauf." |
 | B2 | `Ignore` | `..._ignore_option` = **„Neue Datei ignorieren"** | Zielknoten vorhanden ⇒ `FileSkippedException` **vor** dem Request ⇒ Status `Skipped` („Verworfen") | — (wirft vorher) | wie B1, aber Schedule `Ignore` ⇒ `FileSkippedException` | **Umgesetzt** (`src/folders.rs`; **kein** Default mehr — ein neues Ziel startet auf dem Application-Default `Replace`, der Enum-`#[default]` bleibt `SaveAsNew`), Wire `NONE`; 409 ⇒ `FileOutcome::ConflictSkipped` (`src/upload.rs`) | — (da) | „Gleicher Name, anderer Inhalt, `Ignore` ⇒ kein Byte geht raus bzw. 409 wird als Skip gezählt." |
-| B3 | `SaveAsNew` | `..._auto_rename_option` = **„Neue Datei automatisch umbenennen"** | Zielknoten vorhanden ⇒ Server soll umbenennen; Client setzt `overwrite=false` | `POST v2/upload?…&conflictResolution=RENAME` | 409-Name-Konflikt ⇒ `RetryForNameConflict` ⇒ erneut mit `RENAME` | **Umgesetzt** (`src/folders.rs` — trägt den Enum-`#[default]`, ist also der **Datei**-Fallback für `folders.toml`-Einträge ohne Schlüssel), Wire `RENAME` (`ConflictResolution::wire_value`) | — (da) | „Namensgleichheit ⇒ Server legt umbenannte Kopie an; kein 409-Fehler." |
+| B3 | `SaveAsNew` | `..._auto_rename_option` = **„Neue Datei automatisch umbenennen"** | **ohne** Vorbedingung: `NameConflictStrategy.GetConflictResolution` liefert `SaveAsNew`, **ohne** auf einen vorhandenen Zielknoten zu prüfen (nur `Replace` und `Ignore` sind mit `destinationNodeId != null` gegated); der `SaveAsNew`-Zweig in `UploadViaSimpleOrLegacyUploader` setzt `overwrite=false` + `conflictResolution=Rename` **unbedingt** ⇒ `RENAME` geht auf **jedem** SaveAsNew-Upload raus, auch ohne Namenskonflikt (der Server benennt nur um, falls einer entsteht, sonst nimmt er den Namen an) | `POST v2/upload?…&conflictResolution=RENAME` | 409-Name-Konflikt ⇒ `RetryForNameConflict` ⇒ erneut mit `RENAME` | **Umgesetzt** (`src/folders.rs` — trägt den Enum-`#[default]`, ist also der **Datei**-Fallback für `folders.toml`-Einträge ohne Schlüssel), Wire `RENAME` (`ConflictResolution::wire_value`) | — (da) | „Namensgleichheit ⇒ Server legt umbenannte Kopie an; kein 409-Fehler." |
 | B4 | `Replace` | `..._replace_option` = **„Alte Datei ersetzen"** | Zielknoten vorhanden ⇒ Client setzt `overwrite=true` **und** `nodeId=destinationNode` | `PUT v2/upload/<nodeId>?…&conflictResolution=NONE` (overwrite, **kein** `OVERWRITE`-Wert) | erzeugt normalerweise keinen 409 (PUT ersetzt) | **Umgesetzt** (2026-10-15, User-Auftrag) — `POST` mit `conflictResolution=NONE`, danach `PUT /v2/upload/<nodeId>` **mit dem vollen Query-Satz des POST** (`conflictResolution`/`fileSize`/`name`/`parentNodeId`/`contentDate`; live: ohne `fileSize` ⇒ 400 `MissingFileSize`), aber **nur bei Namenskonflikt** (`NameAlreadyExists`/unbekannt/leer): `src/folders.rs` (`ConflictResolution::Replace`), Wire `ConflictResolution::wire_value`, `src/urls.rs` (`replace_upload_url`), Zweig `src/prime_photos.rs` (`upload_picture`/`replace_picture`), Dispatch `should_replace_after_conflict`. Ein 409-Inhalts-Duplikat wird **nicht** ersetzt (gleiche Bytes ⇒ verschwendete Bandbreite und „bereits im Konto"), sondern bleibt Conflict-Marker. **Abweichung:** wir kennen den Zielknoten erst aus der 409 (`errorDetails.conflictNodeIds[0]`), senden also zwei Requests statt einem direkten `PUT` — kein Knoten-Cache (bewusst, §5); `replace_upload_url` normalisiert die Node-ID **nicht** (Server-Wert) | — (da) | „Ersetzen überschreibt den vorhandenen Knoten statt eine Kopie anzulegen; ein Test belegt, dass danach genau ein Knoten mit diesem Namen existiert." |
 
 **Legacy-Labelsatz** (`clouddrive_desktop_statuswindow_scheduleconfiguration_filenameconflict_*`:
@@ -332,8 +332,12 @@ lokale Skip sind schon getrennt.
 * **Entscheidung/Erkennung:** `CloudDriveStorageService.PreUploadCheck`, `…CloudNodeCheck`,
   `…UploadViaSimpleOrLegacyUploader` (der Options-Switch), `…HandleNodeResponse` (nur
   `MD5 == md5`), `…HandleNodeResponseSync` (zusätzlich `MD5_DUPLICATE`/`DuplicatesConflictError`);
-  `UploadHelper.RetryForNameConflict` (`NAME_ALREADY_EXISTS`/`NameAlreadyExists`, MD5 muss
-  **abweichen**); `NameConflictStrategy.GetConflictResolution` / `…GetScheduleConflictResolution`;
+  `UploadHelper.RetryForNameConflict` (drei Guards: **409**, **abweichender MD5**,
+  `ErrorType ∈ {NAME_ALREADY_EXISTS, NameAlreadyExists}`); der Aufrufer
+  `CloudDriveStorageService.UploadViaSimpleOrLegacyUploader` legt zusätzlich
+  `uploadRecord.IsAutoSave()` an (`ScheduleId != "ManualUpload"`, `UploadRecordExtensions`) —
+  ein Retry auf Namenskonflikt gibt es also **nur** für Autosave/Backup, nicht für die
+  Einmal-Queue (`ManualUpload`); `NameConflictStrategy.GetConflictResolution` / `…GetScheduleConflictResolution`;
   `UploadRecordExtensions.GetConflictResolution` (Autosave ⇒ `None`) / `…GetSuppressFileUpload`;
   `CloudDriveDatabase.GetNodeByNameAndParentIfExists` / `…GetNodeByMd5`;
   `System.ExceptionExtensions.TryParseErrorType` / `…ToTransferError`.
@@ -405,3 +409,24 @@ lokale Skip sind schon getrennt.
    erzeugen also nie einen 409. Ein 409 entsteht nur bei stale Cache (Client sah den Knoten
    nicht) bzw. auf dem zweiten, servergetriebenen Pfad (`RetryForNameConflict`), der den
    Schedule erneut befragt (Ignore ⇒ Skip, SaveAsNew ⇒ erneut mit `RENAME`).
+
+   **Korrekturen am eigenen Text dieser Datei (Re-Decompile 2026-10-15):**
+
+4. **§1.2 Zeile B3 (`SaveAsNew`) unterschlug, dass `overwrite=false`/`RENAME` unbedingt
+   gesetzt wird — die „Zielknoten vorhanden"-Vorbedingung war falsch.** Der frühere Wortlaut
+   stellte die Umbenennung unter dieselbe Vorbedingung wie `Replace`/`Ignore`. Belegt durch
+   `NameConflictStrategy.GetConflictResolution`: nur `Replace` und `Ignore` sind mit
+   `destinationNodeId != null` gegated, `SaveAsNew` wird **ohne** diesen Guard zurückgegeben.
+   Der `SaveAsNew`-Zweig in `CloudDriveStorageService.UploadViaSimpleOrLegacyUploader` setzt
+   `overwrite = false` und `conflictResolution = Rename` daher auf **jedem** Upload — auch wenn
+   kein Name existiert. Folge für die Leitung: `conflictResolution=RENAME` ist bei `SaveAsNew`
+   **nicht** an einen clientseitig erkannten Konflikt gebunden; der Server benennt nur um, falls
+   einer entsteht, sonst nimmt er den Namen an. (Korrigiert in §1.2 B3 und §7.)
+5. **§7 wies `RetryForNameConflict` nur zwei Guards zu; es sind drei — plus ein vierter am
+   Aufruf.** Der Helfer selbst prüft (a) Status `409`, (b) abweichenden MD5, (c)
+   `ErrorType ∈ {NAME_ALREADY_EXISTS, NameAlreadyExists}`. Der Aufrufer
+   `UploadViaSimpleOrLegacyUploader` legt zusätzlich `uploadRecord.IsAutoSave()` an
+   (`ScheduleId != "ManualUpload"`, `UploadRecordExtensions.IsAutoSave`). Konsequenz: der
+   servergetriebene Retry auf Namenskonflikt läuft **nur** für Autosave/Backup-Schedules —
+   die Einmal-Queue (`schedule_id = "ManualUpload"`) retryt nie, ein 409 dort ist endgültig.
+   (Ergänzt in §7.)
