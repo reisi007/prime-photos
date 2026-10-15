@@ -348,10 +348,13 @@ impl PrimePhotoApp {
                     total_files: files.len(),
                     uploaded_files: 0,
                     last_updated: String::new(),
-                    // Not `Uploading`: at this point no run is live yet, so the
-                    // row must not claim to be uploading (it would render
-                    // "0 %"). `Idle` is the "waiting / not active" state;
-                    // `resume_one_time` flips it as soon as the run starts.
+                    // `Idle` is the only non-active, non-terminal variant here:
+                    // at this point no run is live yet, so the row must not
+                    // claim to be uploading. The effect is the muted look
+                    // (`MUTED` instead of the active `TEAL`) — it asserts no
+                    // activity, not a different label (`Idle` renders the same
+                    // "{}% hochgeladen" text as `Uploading`). `resume_one_time`
+                    // flips it as soon as the run starts.
                     status: FolderStatus::Idle,
                 }),
                 true,

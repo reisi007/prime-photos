@@ -1748,34 +1748,39 @@ impl PrimePhotoApp {
         // targets — the persisted folders plus the transient one-time row
         // (`rows` above). It replaces the old header bar, which only showed the
         // currently running run, and it stays visible while idle (user decision
-        // 2026-10-14). Without any target nothing is drawn — the empty-folder
-        // hint above stays untouched.
-        if !rows.is_empty() {
+        // 2026-10-14).
+        //
+        // The byte/ETA detail only exists for a live run; `rows` is a plain
+        // snapshot, so the shared state is locked once more here (no guard is
+        // held at this point). The outcome counters are read here too — they
+        // are already the aggregate over every target (maintained directly by
+        // the workers, no second summation of the rows).
+        let (running, progress_text, outcome) = {
+            let s = self.upload.lock().unwrap();
+            let outcome = outcome_text(
+                s.uploaded_new,
+                s.conflict_skipped,
+                s.unchanged_skipped,
+                s.failed,
+            );
+            if s.active {
+                (true, upload_progress_text(&s), outcome)
+            } else {
+                (false, String::new(), outcome)
+            }
+        };
+        let (sum_done, sum_total) = aggregate_progress(&rows);
+        // Draw the footer while a run is live even if its last target was just
+        // removed (the run continues, so bars and byte/ETA must stay). Without a
+        // live run a real total is required: a freshly added target that never
+        // ran (`sum_total == 0`) draws nothing instead of "Gesamt: 0 von 0
+        // Dateien". With neither, the empty-folder hint above stays untouched.
+        if running || sum_total > 0 {
             ui.add_space(8.0);
-            let (sum_done, sum_total) = aggregate_progress(&rows);
             let frac = if sum_total > 0 {
                 (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
             } else {
                 0.0
-            };
-            // The byte/ETA detail only exists for a live run; `rows` is a plain
-            // snapshot, so the shared state is locked once more here (no guard
-            // is held at this point). The outcome counters are read here too —
-            // they are already the aggregate over every target (maintained
-            // directly by the workers, no second summation of the rows).
-            let (running, progress_text, outcome) = {
-                let s = self.upload.lock().unwrap();
-                let outcome = outcome_text(
-                    s.uploaded_new,
-                    s.conflict_skipped,
-                    s.unchanged_skipped,
-                    s.failed,
-                );
-                if s.active {
-                    (true, upload_progress_text(&s), outcome)
-                } else {
-                    (false, String::new(), outcome)
-                }
             };
             ui.horizontal(|ui| {
                 // A spinner belongs to this one display and only while a run is
