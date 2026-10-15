@@ -420,6 +420,13 @@ Werte des Originals (`app_name = "Amazon Photos"`, `app_version = "11.3.0.1d7941
   für dieses Ziel ⇒ „Upload läuft"; erst nach `finalize` gilt der persistierte Ausgang).
 - **3.4** Die zwei noch **gezeichneten** Glyphen (Nav-Icons, Flagge) auf Material Symbols umstellen
   (User-Regel: nichts selbst zeichnen außer dem Logo).
+- **3.5** Die Layout-Punkte aus `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8, die der User ausdrücklich mit
+  in diese Welle genommen hat (User-Entscheidung 2026-10-15): **feste Spaltenköpfe** (einmal oben,
+  nicht pro Zeile), **Kürzen + Tooltip** bei zu langen Namen, **Liste füllt die Höhe** (kein
+  Leerraum unter der Liste), **300-Zeilen-Kappe entfällt**, **leerer Zustand zentriert**.
+- **Ein Paket:** 3.1–3.5 gehen zusammen in **einen** UI-Umbau — die Zustandsfehler (3.2/3.3) und der
+  Fortschritt (3.1) sitzen an denselben Stellen, ein getrennter Schnitt erzeugt nur Merge-Konflikt.
+  Beauftragt wird das Paket erst **nach** der Sitzungs-Welle (Reihenfolge-Entscheidung 2026-10-15).
 
 ### Welle 4 — Release-Pflicht: About + Third-Party-Lizenzen (die alte „Welle 4")
 Recon liegt vor (`docs/SPEC_ABOUT.md`), Attributionen sind gepflegt (`docs/THIRD_PARTY.md`, u. a.

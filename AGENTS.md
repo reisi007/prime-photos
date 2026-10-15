@@ -181,7 +181,10 @@ fortgeschrieben (Abnahme + Commit je Welle). Kurzform:
 - **Welle 2 — Konflikt-/Duplikat-Kette abschließen:** 409-Ursache trennen (2.1), „Ersetzen" via
   `PUT /v2/upload/<nodeId>` (2.2), „Nicht noch einmal fragen" pro Ziel persistieren (2.3), Rest nach
   `docs/SPEC_CONFLICT_OPTIONS.md` (2.4). **Läuft ab 2026-10-15.**
-- **Welle 3 — Progress-/UI-Umbau** (Detail in den Hauptbereich, Klapp-Panel weg, Live-Status).
+- **Welle 3 — Progress-/UI-Umbau** (Detail in den Hauptbereich, Klapp-Panel weg, Live-Status)
+  **plus die Layout-Punkte aus `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8** — feste Spaltenköpfe,
+  Kürzen + Tooltip, Liste füllt die Höhe, die 300-Zeilen-Kappe entfällt, leerer Zustand zentriert
+  (User-Entscheidung 2026-10-15: „3.1–3.4 **plus** §7.8-Layout" als **ein** Paket).
 - **Welle 4 — About / Third-Party-Lizenzen** (Voraussetzung für ein öffentliches Release).
 - **Welle 5 — Robustheit & Politur** (`rfd::FileDialog` → `AsyncFileDialog`, P2-Reste, Branding).
 - **Welle 6 — Post-MVP / bewusst später** (dokumentiert, **nicht** eingeplant).
