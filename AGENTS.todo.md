@@ -365,7 +365,10 @@ Verifikation → Commit):**
 laufenden Aufträgen, nachdem schon Teile geschrieben waren. Auf User-Anweisung gilt für diese Welle
 deshalb: **`opencode-go/longcat-2.5-preview-free` zuerst**, **`opencode-go/deepseek-v4.1-flash`** nur
 als **Fallback**, wenn Longcat denselben Fehler liefert (User-Korrektur 2026-10-15: „Umgekehrt.
-Longcat Preview priorisieren, DS Flash als fallback"). Die Regel „ein Modell für alle Rollen"
+Longcat Preview priorisieren, DS Flash als fallback"). Bestätigt 2026-10-15: „Longcat 2.5 Preview für
+subagenten nutzen" — Longcat ist damit das **Standard-Modell für alle Subagenten-Läufe** dieser
+Welle (Umsetzer, Verifier, Doku), DeepSeek Flash nur noch Fallback. Longcat lief in dieser Welle ohne
+Rate-Limit-Fehler. Die Regel „ein Modell für alle Rollen"
 (`step-5-preview-free`) bleibt gültig — das ist eine **Lauf-Ausnahme**, kein Config-Modellwechsel;
 sobald der Gratis-Pool wieder antwortet, laufen die Wellen wieder dort.
 
