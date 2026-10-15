@@ -673,7 +673,8 @@ Inhalt liegt schon im Konto) und das Ordner-Wasserzeichen gelöscht, damit die K
   (Kontoname/Profilbild, 24-h-Rhythmus) — kein Upload.
 
 ### Welle 2 — Konflikt-/Duplikat-Kette abschließen (ein Umfeld, dieselben Dateien)
-- **2.1 409-Ursache trennen** (`upload.rs`, `prime_photos.rs`): `DuplicatesConflictError` ⇒
+- **2.1 409-Ursache trennen** — ✅ **erledigt 2026-10-15** (`42149bb`, Verifier APPROVE, 79 Tests)
+  (`upload.rs`, `prime_photos.rs`): `DuplicatesConflictError` ⇒
   „bereits im Konto", `NameAlreadyExists` ⇒ Konflikt (Prompt/Fehler je Option). **Beide Codes sind
   live belegt**, beide liefern `conflictNodeIds`.
   **Dazu (Verifier-Fund 2026-10-14, vorbestehend):** der 409-Pfad ruft heute `record_upload` ⇒
@@ -681,9 +682,14 @@ Inhalt liegt schon im Konto) und das Ordner-Wasserzeichen gelöscht, damit die K
   obwohl nichts hochgeladen wurde. Beim Trennen der Ursachen den **Inhaltsduplikat**-Fall als
   `content_skip` merken, damit die Anzeige konsistent bleibt (der `NameAlreadyExists`-Fall bleibt
   ein Konflikt und wird nicht als „im Konto" verbucht).
-- **2.2 „Ersetzen" reparieren** (`prime_photos.rs`, `urls.rs`): heute `OVERWRITE` ⇒ **404**, die
-  Option ist **kaputt** (live belegt). Korrekt: `POST(NONE)` ⇒ 409 ⇒ `conflict_node_id()` ⇒
-  `PUT /v2/upload/<nodeId>` (live: 200, In-place-Tausch).
+- **2.2 „Ersetzen" reparieren** — ✅ **erledigt 2026-10-15** (`4ec98e7`, Verifier APPROVE, 79 Tests)
+  (`prime_photos.rs`, `urls.rs`): `wire_value(Replace) = "NONE"`, neue `replace_upload_url(zone,
+  node_id)`, 409-Dispatch **nur** bei Namenskonflikt (ein Inhaltsduplikat bleibt „bereits im Konto"
+  und wird **nicht** per PUT ersetzt — identische Bytes erneut zu senden ist genau die Bandbreite,
+  die die Dedup-Semantik spart), PUT-Fehler zählt als Fehler. Vorher: `OVERWRITE` ⇒ **404** (live
+  belegt), die Option war **kaputt**. **Live-Abnahme offen** (ein Knoten mit dem Namen, Inhalt
+  getauscht) — nur Hauptagent, braucht einen eigenen Testknoten im Konto samt Aufräumen; gehört
+  zusammen mit den vier Fußzeilen-Zahlen aus Welle 1 an den entsperrten Screen.
 - **2.3 Konflikt-Standard in drei Ebenen** (User-Entscheidung 2026-10-15; in **zwei** Paketen, weil
   UI/Config und Worker-Persistenz getrennt verifizierbar sind):
   **(a) Application Default** — neues Feld in `Config` (`config.toml`), Dropdown in
@@ -702,6 +708,17 @@ Inhalt liegt schon im Konto) und das Ordner-Wasserzeichen gelöscht, damit die K
 - **2.4 Rest laut `docs/SPEC_CONFLICT_OPTIONS.md`** — jede Variante mit Abnahmekriterium; bewusste
   Abweichungen dokumentieren: die Client-Vorprüfung des Originals ersetzen wir durch die
   Server-Antwort (kein Node-Cache), die `.heic`-iOS-Heuristik bleibt draußen.
+  **Mitnehmen (nicht blockierende Verifier-Funde aus 2.1/2.2, dort bewusst liegen gelassen):**
+  (a) ein Test für **gepaddete** Inhaltsduplikat-Codes („ DuplicatesConflictError " ⇒ **kein** PUT —
+  `is_content_duplicate_code` trimmt, aber kein Test pinnt das); (b) ein Test, der den
+  **Byte-Durchgriff** einer Nicht-ASCII-Node-ID durch `replace_upload_url` festhält (die
+  „kein NFC für die Node-ID"-Begründung steht bisher nur im Doc-Kommentar); (c)
+  `docs/SPEC_CONFLICT_OPTIONS.md` §4, Satz „der Worker sieht für `Replace` **kein** 409" ist zu groß
+  formuliert (beim Inhaltsduplikat sieht er sehr wohl einen); (d) `docs/SPEC_SYNC.md:734` und
+  `docs/SPEC_LIBRARY.md:649` führen `OVERWRITE` noch als unseren Vokabular-Wert; (e) die
+  vorbestehenden stale Zeilenreferenzen in `docs/SPEC_CONFLICT_OPTIONS.md` (§1.2 B1/B2/B3, §7-Refs
+  auf `upload.rs`/`dedup.rs`) und der Widerspruch in `docs/SPEC_DUPLICATES.md` §3 („Dedupe über
+  Pfade hinweg = fehlt") einsammeln, wenn die Datei ohnehin angefasst wird.
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
@@ -1008,8 +1025,11 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       Lauf ⇒ „bereits im Konto", (b) zweiter Lauf ⇒ **weiterhin** „bereits im Konto", aber **ohne**
       Datei-Lesung (per Test belegbar), (c) ändert sich der Inhalt später, wird hochgeladen und die
       Markierung verschwindet.
-- [ ] **409-Ursache trennen** — das Original unterscheidet Inhaltsduplikat (⇒ wie ignoriert) von
-      Namenskonflikt (⇒ Fehler); wir machen aus jedem 409 „bereits im Konto".
+- [x] **409-Ursache trennen** — **umgesetzt 2026-10-15** (`42149bb`, Verifier APPROVE, 79 Tests):
+      `errorCode` der 409 wird gelesen und im Konflikt-Marker geführt; `DuplicatesConflictError` /
+      `MD5_DUPLICATE` ⇒ „bereits im Konto" **und** `content_skip` im Index, `NameAlreadyExists` /
+      unbekannt ⇒ unverändert Konflikt (Prompt/Fehler je Option). Vorher machte aus **jedem** 409
+      „bereits im Konto".
       **Beide Gründe sind jetzt live belegt (2026-10-14), mit exakter Schreibweise:**
       Inhaltsduplikat ⇒ `errorCode = "DuplicatesConflictError"`; Namenskonflikt ⇒
       `errorCode = "NameAlreadyExists"` (**MixedCase** — der Recon nennt auch `NAME_ALREADY_EXISTS`,
@@ -1017,10 +1037,16 @@ SaveAsNew,Replace}`, `src/folders.rs:130-142`; Default `Ignore` = `conflictResol
       des vorhandenen Knotens. Abnahme: ein Inhaltsduplikat zählt als „bereits im Konto", ein
       Namenskonflikt wird als Konflikt behandelt (Prompt/Fehler je Option); Test über die
       Fehlertexte, ohne Netz.
-- [ ] **„Nicht noch einmal fragen" pro Ziel persistieren** — das Original schreibt die Antwort in
-      `schedules.conflict_resolution` zurück; bei uns gilt sie nur für den laufenden Lauf. Braucht
-      ein **neues persistiertes Feld pro Ziel** (bewusste Schemaänderung, nicht „nur flüchtig").
-- [ ] **„Ersetzen" reparieren (PUT + Node-ID).** **Verdikt der Probe (2026-10-14):**
+- [ ] **„Nicht noch einmal fragen" pro Ziel persistieren** — **überholt (2026-10-15), diese Variante
+      ist verworfen:** „Braucht ein **neues persistiertes Feld pro Ziel** (bewusste Schemaänderung)"
+      gilt **nicht**. Geltende Regel (User-Entscheidung 2026-10-15, Paket 2.3b): die Antwort wird in
+      das **bestehende** `BackupFolder.conflict_resolution` des Ordners der gefragten Datei
+      geschrieben — **kein Schemawechsel**, **kein** Per-Datei-Feld; dazu ein **Application Default**
+      für neue Ziele und Drag&Drop (Paket 2.3a). Siehe Welle 2.3 „Konflikt-Standard in drei Ebenen".
+- [x] **„Ersetzen" reparieren (PUT + Node-ID).** **Umgesetzt 2026-10-15** (`4ec98e7`, Verifier
+      APPROVE, 79 Tests): `wire_value(Replace) = "NONE"`, `replace_upload_url` in `urls.rs`,
+      409-Dispatch **nur** bei Namenskonflikt, fehlgeschlagener PUT = Fehler. **Live-Abnahme offen**
+      (nur Hauptagent). **Verdikt der Probe (2026-10-14):**
       `POST …/v2/upload?conflictResolution=OVERWRITE` wird **nicht akzeptiert** — **404 mit leerem
       Body** (kein `errorCode`) ⇒ unser „Ersetzen" ist **kaputt**: es ersetzt nichts und fällt in den
       generischen Fehlerzweig (Upload-Fehler, kein Konflikt-Skip, kein Dialog). Der Weg des
