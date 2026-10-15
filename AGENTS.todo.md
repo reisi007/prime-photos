@@ -447,6 +447,11 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
   (macOS ist safe, ⌘Q) — Residuum aus PORT-3.
 - [ ] **Gezeichnete UI-Glyphen ersetzen:** `nav_icon`, Flagge und Logo auf die Material-Symbols-
   Pipeline umstellen (Icons werden nicht handgezeichnet, siehe `AGENTS.md`); nicht beauftragt.
+- [ ] **i18n-Hygiene:** doppelte Keys in der Tabelle — `"Ersetzen"` (`src/i18n.rs:209` **und** `:322`)
+  und `"Ignorieren"` (`:213` **und** `:323`); je eine Kopie ist toter Text (gleicher Wert, daher
+  harmlos). Dazu fehlt eine Prüfung, die doppelte Keys überhaupt aufdeckt. Nebenbei geklärt: die
+  Config-Nits aus 2.3a sind **erledigt** (`src/config.rs:167-178` pinnt den Legacy-Default
+  `SaveAsNew`, `:180-193` die kleingeschriebene Serde-Schreibweise `"replace"`).
 - [ ] Download-Vorgang (Herunterladen-Tab des Originals) — relevant, aber explizit **nicht** Teil des
   MVP (siehe `AGENTS.md` → „Scope-Grenzen (In/Out)").
 
