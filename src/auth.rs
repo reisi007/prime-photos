@@ -4,16 +4,11 @@
 //!
 //! This module contains the **pure, testable building blocks only**: PKCE, the
 //! portal URL (in [`crate::urls`]), the request bodies and response parsers, the
-//! keychain-backed refresh-token store and the 80 %-refresh schedule. It is
-//! **deliberately not wired into the app** yet — the wiring (and every UI
-//! string, which the later package translates) follows in S-B/S-C. The app's
-//! behaviour is unchanged by this module's existence.
-//!
-//! Because nothing here is reachable from `main` yet, the whole module carries
-//! a scoped `#![allow(dead_code)]` (the `AGENTS.md` "prepared hook" exception,
-//! like [`crate::folders::supported_extensions`]) instead of one attribute per
-//! item — it must be removed as soon as S-B/S-C wires the flow in.
-#![allow(dead_code)]
+//! keychain-backed refresh-token store and the 80 %-refresh schedule. Since S-B
+//! the **login path is wired in**: `begin_login`/`poll_login` use [`Pkce`],
+//! [`client_id`], [`register_device`], [`KeyringTokenStore`] and
+//! [`fetch_auth_cookies`]. What S-C still consumes (token refresh, deregister)
+//! carries a per-item `#[allow(dead_code)]` marked "wird in S-C verdrahtet".
 
 use std::time::Duration;
 
@@ -60,22 +55,27 @@ pub(crate) const KEYRING_ACCOUNT: &str = "refresh-token";
 
 /// Seconds subtracted from `expires_in` so a token is refreshed slightly before
 /// it actually expires (documented default, `AGENTS.md` 2026-10-15).
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const ACCESS_TOKEN_EXPIRY_CUSHION_SECONDS: i64 = 60;
 
 /// Fraction of the **remaining** lifetime after which the next refresh is due
 /// (80 %, `AGENTS.md` 2026-10-15).
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const ACCESS_TOKEN_REFRESH_FRACTION: f64 = 0.8;
 
 /// Number of refresh attempts before the session is declared invalid. The
 /// original's own count is unproven; this is our documented default.
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const ACCESS_TOKEN_MAX_RETRIES: u32 = 5;
 
 /// Seconds between two refresh attempts (our documented default; the original's
 /// spacing is unproven).
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const ACCESS_TOKEN_RETRY_DELAY_SECONDS: u64 = 15;
 
 /// Attempts of the **redeem** (`/auth/register`) step (documented default; the
 /// original's count is unproven).
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) const REGISTER_MAX_ATTEMPTS: u32 = 3;
 
 /// OS name reported as the device model. There is **no subprocess** and no
@@ -157,6 +157,7 @@ fn hex(bytes: &[u8]) -> String {
 /// Delay until the access token is refreshed: 80 % of the lifetime that is left
 /// after the [`ACCESS_TOKEN_EXPIRY_CUSHION_SECONDS`] cushion. A non-positive
 /// remainder yields a zero delay (refresh immediately).
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) fn next_refresh_delay(expires_in_seconds: i64) -> Duration {
     let remaining = (expires_in_seconds - ACCESS_TOKEN_EXPIRY_CUSHION_SECONDS).max(0);
     let seconds = (remaining as f64 * ACCESS_TOKEN_REFRESH_FRACTION) as u64;
@@ -239,6 +240,7 @@ impl RegisterRequest {
 }
 
 /// Body of `POST <base>/auth/token` in the refresh-token mode.
+#[allow(dead_code)] // wird in S-C verdrahtet
 #[derive(Debug, Serialize)]
 pub(crate) struct RefreshRequest {
     source_token: String,
@@ -250,6 +252,7 @@ pub(crate) struct RefreshRequest {
 
 impl RefreshRequest {
     /// Build the refresh body for the stored refresh token.
+    #[allow(dead_code)] // wird in S-C verdrahtet
     pub(crate) fn new(source_token: &str) -> Self {
         Self {
             source_token: source_token.to_string(),
@@ -298,7 +301,10 @@ struct BearerTokens {
 /// The bearer tokens extracted from a successful register response. The
 /// **refresh token lives here**; the access token is memory-only.
 pub(crate) struct RegisterOutcome {
+    /// Memory-only in S-B; the refresh schedule that reads it is wired in S-C.
+    #[allow(dead_code)] // wird in S-C verdrahtet
     pub(crate) access_token: String,
+    #[allow(dead_code)] // wird in S-C verdrahtet
     pub(crate) expires_in: i64,
     pub(crate) refresh_token: String,
 }
@@ -320,6 +326,7 @@ pub(crate) fn parse_register_response(body: &str) -> Result<RegisterOutcome, Aut
     })
 }
 
+#[allow(dead_code)] // wird in S-C verdrahtet
 #[derive(Debug, Deserialize)]
 struct RefreshResponseBody {
     #[serde(default)]
@@ -329,12 +336,14 @@ struct RefreshResponseBody {
 }
 
 /// The renewed access token from `/auth/token`.
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) struct RefreshOutcome {
     pub(crate) access_token: String,
     pub(crate) expires_in: i64,
 }
 
 /// Parse the refresh response. An empty access token is a failure here too.
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) fn parse_refresh_response(body: &str) -> Result<RefreshOutcome, AuthError> {
     let parsed: RefreshResponseBody =
         serde_json::from_str(body).map_err(|e| AuthError::Json(e.to_string()))?;
@@ -397,7 +406,9 @@ fn get_ci<'a>(
 /// access token stays in memory.
 pub(crate) trait TokenStore {
     fn save(&self, refresh_token: &str) -> Result<(), String>;
+    #[allow(dead_code)] // wird in S-C verdrahtet
     fn load(&self) -> Result<Option<String>, String>;
+    #[allow(dead_code)] // wird in S-C verdrahtet
     fn clear(&self) -> Result<(), String>;
 }
 
@@ -523,6 +534,7 @@ pub(crate) async fn register_device(
 }
 
 /// `POST /auth/token`: renew the access token from the refresh token.
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) async fn refresh_access_token(
     client: &reqwest::Client,
     country: &str,
@@ -574,6 +586,7 @@ pub(crate) async fn fetch_auth_cookies(
 
 /// `POST /auth/deregister`: sign out on the server (the local token is cleared
 /// separately).
+#[allow(dead_code)] // wird in S-C verdrahtet
 pub(crate) async fn deregister(
     client: &reqwest::Client,
     country: &str,

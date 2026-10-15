@@ -287,6 +287,23 @@ impl PrimePhotoApp {
                 config.country = c;
             }
         }
+        // Device identity (S-B): the serial is generated **once** and stored. It
+        // is only persisted when the on-disk config loaded successfully — the
+        // same PKG-3 guard as the autostart intent below: a broken but
+        // hand-fixable `config.toml` must never be clobbered by the default
+        // fallback. `begin_login` carries the same check as a safety net.
+        if config.device_serial.is_empty() {
+            config.device_serial = crate::auth::new_device_serial();
+            if config_loaded_ok {
+                if let Err(e) = config.save() {
+                    log::warn!("Geräte-Serial konnte nicht gespeichert werden: {e}");
+                }
+            } else {
+                log::warn!(
+                    "Geräte-Serial konnte nicht gespeichert werden: config.toml wurde nicht geladen"
+                );
+            }
+        }
         let config_path = Config::get_config_path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| e.to_string());

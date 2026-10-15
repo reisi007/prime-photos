@@ -314,6 +314,18 @@ const EN: &[(&str, &str)] = &[
         "Login erfolgreich – Cookies übernommen.",
         "Sign-in successful – cookies captured.",
     ),
+    (
+        "Login erfolgreich – Refresh-Token gespeichert.",
+        "Signed in – refresh token saved.",
+    ),
+    (
+        "Geräteweg abgelehnt ({}) – Cookie-Weg verwendet.",
+        "Device path rejected ({}) – cookie path used.",
+    ),
+    (
+        "Die Anmeldung wurde von Amazon abgelehnt. Bitte erneut versuchen.",
+        "Amazon rejected the sign-in. Please try again.",
+    ),
     // -- countries / marketplaces ---------------------------------------
     ("Australien", "Australia"),
     ("Brasilien", "Brazil"),

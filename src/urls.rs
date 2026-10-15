@@ -70,12 +70,12 @@ pub(crate) fn auth_token_url(country: &str) -> String {
 // ---------------------------------------------------------------------------
 // Device login flow (user decision 2026-10-15, `docs/SPEC_LOGIN.md` § 3.8).
 //
-// These helpers are the **pure** URL builders of the device/PKCE sign-in path
-// and are deliberately not wired into the app yet (wiring follows in a later
-// package), so each carries `#[allow(dead_code)]` — the `AGENTS.md`
-// "prepared hook" exception, to be removed once the flow is wired. They are
-// *not* the web/cookie path: [`login_url`] and [`auth_token_url`] above stay
-// untouched.
+// These helpers are the **pure** URL builders of the device/PKCE sign-in path.
+// Since S-B the login itself uses them ([`auth_portal_url`] from
+// `login::begin_login`, the Panda register/auth-cookie URLs from the
+// background redemption); only the S-C-only endpoints keep a per-item
+// `#[allow(dead_code)]` marked "wird in S-C verdrahtet". They are *not* the
+// web/cookie path: [`login_url`] and [`auth_token_url`] above stay untouched.
 // ---------------------------------------------------------------------------
 
 /// Marketplace identity of the **device** login flow: the Amazon host base, the
@@ -87,7 +87,6 @@ pub(crate) fn auth_token_url(country: &str) -> String {
 /// the German one, and **everything unknown falls back to US** — including
 /// `mx` and `in`, which *are* selectable marketplaces but are not in the
 /// device table, exactly like the original.
-#[allow(dead_code)]
 pub(crate) struct AuthMarketplace {
     /// Host base (`amazon.de`, `amazon.co.uk`, …).
     pub(crate) domain: String,
@@ -98,7 +97,6 @@ pub(crate) struct AuthMarketplace {
 }
 
 /// Resolve a marketplace **code** to its [`AuthMarketplace`] (table above).
-#[allow(dead_code)]
 pub(crate) fn auth_marketplace(country: &str) -> AuthMarketplace {
     let (id, domain, region) = match country {
         "au" => ("A39IBJ37TRP1C6", "com.au", "au"),
@@ -125,7 +123,6 @@ pub(crate) fn auth_marketplace(country: &str) -> AuthMarketplace {
 /// original's exact order and **raw** — the original concatenates the query
 /// without percent-encoding, so the same values are passed through verbatim
 /// here (this is the deviation that makes the flow recognisable to Amazon).
-#[allow(dead_code)]
 pub(crate) fn auth_portal_url(
     country: &str,
     client_id: &str,
@@ -162,25 +159,21 @@ openid.ns=http://specs.openid.net/auth/2.0\
 /// Panda (`api.amazon.<tld>`) host base for a marketplace. The host is the
 /// marketplace domain with `www` replaced by `api` (DE → `api.amazon.de`,
 /// JP → `api.amazon.co.jp`).
-#[allow(dead_code)]
 pub(crate) fn panda_base_url(country: &str) -> String {
     format!("https://api.{}", auth_marketplace(country).domain)
 }
 
 /// `POST <base>/auth/register` (exchange the PKCE authorization code).
-#[allow(dead_code)]
 pub(crate) fn panda_register_url(country: &str) -> String {
     format!("{}/auth/register", panda_base_url(country))
 }
 
 /// `POST <base>/auth/token` (refresh an access token, or request auth cookies).
-#[allow(dead_code)]
 pub(crate) fn panda_token_url(country: &str) -> String {
     format!("{}/auth/token", panda_base_url(country))
 }
 
 /// `POST <base>/auth/deregister` (sign out).
-#[allow(dead_code)]
 pub(crate) fn panda_deregister_url(country: &str) -> String {
     format!("{}/auth/deregister", panda_base_url(country))
 }
@@ -191,7 +184,6 @@ pub(crate) fn panda_deregister_url(country: &str) -> String {
 ///
 /// The query order follows the original; only `app_name`/`app_version` are
 /// percent-encoded (the refresh token and `domain` are passed through raw).
-#[allow(dead_code)]
 pub(crate) fn panda_auth_cookies_url(
     country: &str,
     refresh_token: &str,
@@ -213,11 +205,38 @@ pub(crate) fn panda_auth_cookies_url(
     )
 }
 
+/// Culture string the **device** portal URL sends (`language=<culture>`).
+///
+/// The original sends a "sanitised culture string" here; how exactly it is
+/// sanitised is unproven (`docs/SPEC_LOGIN.md` § 3.3). The mapping below is our
+/// documented own default: the marketplace languages the original client
+/// actually ships, resolved from the marketplace **code** (`at`/`ch` sign in
+/// on the German marketplace; `gb`/`uk` on the British one — matching
+/// [`auth_marketplace`]). Unknown codes fall back to `en_US`.
+pub(crate) fn portal_language(country: &str) -> &'static str {
+    match country {
+        "de" | "at" => "de_DE",
+        "ch" => "de_CH",
+        "us" => "en_US",
+        "uk" | "gb" => "en_GB",
+        "fr" => "fr_FR",
+        "it" => "it_IT",
+        "es" => "es_ES",
+        "jp" => "ja_JP",
+        "ca" => "en_CA",
+        "au" => "en_AU",
+        "br" => "pt_BR",
+        "cn" => "zh_CN",
+        "mx" => "es_MX",
+        "in" => "en_IN",
+        _ => "en_US",
+    }
+}
+
 /// Minimal percent-encoder for the auth-cookies query. The unreserved set
 /// `A–Z a–z 0–9 - _ . ~` is kept verbatim (RFC 3986); everything else becomes
 /// `%XX` uppercase. A full encoder is not needed — only two known strings
 /// (app name/version) pass through here.
-#[allow(dead_code)]
 fn percent_encode(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for byte in input.bytes() {
@@ -802,5 +821,32 @@ openid.ns=http://specs.openid.net/auth/2.0\
         assert!(url.contains("domain=.amazon.co.uk"));
         assert!(url.contains("app_name=A%20B"));
         assert!(url.contains("app_version=1%202"));
+    }
+
+    #[test]
+    fn portal_language_maps_marketplaces_to_their_culture() {
+        assert_eq!(portal_language("de"), "de_DE");
+        assert_eq!(portal_language("at"), "de_DE");
+        assert_eq!(portal_language("ch"), "de_CH");
+        assert_eq!(portal_language("gb"), "en_GB");
+        assert_eq!(portal_language("uk"), "en_GB");
+        assert_eq!(portal_language("jp"), "ja_JP");
+        assert_eq!(portal_language("us"), "en_US");
+        assert_eq!(portal_language("fr"), "fr_FR");
+        assert_eq!(portal_language("it"), "it_IT");
+        assert_eq!(portal_language("es"), "es_ES");
+        assert_eq!(portal_language("ca"), "en_CA");
+        assert_eq!(portal_language("au"), "en_AU");
+        assert_eq!(portal_language("br"), "pt_BR");
+        assert_eq!(portal_language("cn"), "zh_CN");
+        assert_eq!(portal_language("mx"), "es_MX");
+        assert_eq!(portal_language("in"), "en_IN");
+    }
+
+    #[test]
+    fn portal_language_falls_back_to_en_us_for_unknown_codes() {
+        assert_eq!(portal_language("xx"), "en_US");
+        assert_eq!(portal_language(""), "en_US");
+        assert_eq!(portal_language("ZZ"), "en_US");
     }
 }
