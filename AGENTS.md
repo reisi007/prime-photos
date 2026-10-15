@@ -49,6 +49,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - UI reference: `docs/UI_FLOWS.md` + `docs/UI_STATES.md` (clean-room spec from the decompiled app + resources). Use them when changing the UI.
 - Folder reconciliation (observed in the client's local DBs under `~/Library/Application Support/Amazon Cloud Drive`): local SQLite state, not an HTTP call. `backup` table (schedule_path, relative_path, node_id, size, modified_date, status, last_scan_time) + `uploads` table (path, status, precomputed_md5, node_id) + `cloud.db` node cache, synced via `/drive/v1/changes` and `/drive/v1/nodes`. `BackupScanIntervalInHours = 336`.
 - Desktop-client upload protocol (observed): `POST https://upload-photos.amazon.de/v2/upload?name=<urlenc>&fileSize=<n>&conflictResolution=NONE&kind=FILE&parentNodeId=<id>` with raw body, `x-amz-access-token`, `x-amzn-file-md5` (hex), `Content-MD5` (base64), `x-amz-clouddrive-appid`, `x-amzn-clouddrive-source`. Not used by the app yet (we use the cookie path); documented for parity.
+- Upload response (cookie path, live observed 2026-10-15): a successful upload returns JSON whose **metadata is not always present** — for an image without EXIF resolution (live: a PNG) the body carries `id`/`name`/`kind`/`version`/… but **no `resolutionUnit`**. `ResponseUpload` requires it today, so a **successful** upload is reported as a parse error (counted as an error, no index row ⇒ re-read every run). Those fields must be treated as optional; the bug and the repro are in the ledger (Welle 2, live findings), fix not yet commissioned.
 - Desktop auth chain (observed): `POST api.amazon.com/auth/token` (`source_token_type=refresh_token` -> `access_token`) -> `GET drive.amazonaws.com/drive/v2/account/endpoint` -> `POST cdws.../drive/v1/account/source`.
 - Supported photos: jpg, jpeg, png, heic, heif, tif, tiff, gif, webp, bmp plus common RAW (cr2, cr3, arw, nef, dng, raf, rw2, orf, srw, pef, and others). `.xmp` sidecars are explicitly rejected.
 - Folder scans enforce `is_supported_image` (single source in `folders.rs`). There is **no file picker** in HEAD (only `FileDialog::pick_folder()`) and `supported_extensions()` is currently unwired.
@@ -63,7 +64,8 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - Conflict-handling **default** (user decision 2026-10-14): a file's identity is its **content**. New targets default to **`SaveAsNew`** ("Neue Datei automatisch umbenennen", wire `RENAME`) together with `dedup = true` — the rule is *content differs ⇒ upload* (renamed when the name is taken), *same content ⇒ skip* ("only renamed"). Same content is already caught **server-side** by MD5 (`409` + `errorCode = "DuplicatesConflictError"`, live proven) and, once implemented, by the local cross-path MD5 check; that server check is what makes `SaveAsNew` safe today. The existing target "Sport" was switched **manually, once** (`conflict_resolution = "saveasnew"` in `~/Library/Application Support/prime_photos/folders.toml`) — no migration code, like the config-dir rename. **Watch out:** `ConflictResolution` uses `#[serde(rename_all = "lowercase")]`, so the file value is `saveasnew`, **not** `save_as_new` — renaming the serde rule would break existing config files.
 - **Drei Ebenen der Konflikt-Standardwahl (User-Entscheidung 2026-10-15):**
   1. **Application Default** — neues Feld in `Config` (`config.toml`), einstellbar in
-     **Einstellungen → Upload** (Dropdown mit den vier Optionen), Default `SaveAsNew`. Er ist die
+     **Einstellungen → Upload** (Radiogruppe mit den vier vorhandenen Optionslabels, das Muster der
+     Seite; umgesetzt in `db68cff`), Default `SaveAsNew`. Er ist die
      **Vorauswahl beim Anlegen eines Ziels** und gilt für die **Einmal-Queue (Drag&Drop)**.
   2. **Ordner-Default** — das bestehende `BackupFolder.conflict_resolution` (`folders.toml`).
      Hierher schreibt „**Nicht noch einmal fragen**" seine Antwort (in den Ordner der gefragten
@@ -411,7 +413,10 @@ Inhalts-Dedupe über Pfade, das Trennen der 409-Ursache (`MD5_DUPLICATE` vs. `Na
 das Persistieren von „Nicht noch einmal fragen" **pro Ziel** und das Reparieren von „Ersetzen":
 `conflictResolution=OVERWRITE` wird vom Cookie-Host **nicht akzeptiert** (`POST` ⇒ 404, leerer
 Body — live belegt), der Weg des Originals ist `PUT /v2/upload/<nodeId>?conflictResolution=NONE`
-(⇒ 200, gleiche Node-ID, Inhalt wirklich getauscht).
+— **aber nur mit den Query-Parametern des POST** (`name`, `fileSize`, `kind`, `parentNodeId`; live
+belegt 2026-10-15: ohne `fileSize` ⇒ **400 `MissingFileSize`**, mit dem POST-Satz gültig). Der `PUT`
+unterliegt außerdem der **Inhalts-Dedupe**: exakt dieselben Bytes ⇒ 409 statt 200 — deshalb wird ein
+Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto".
 **Verworfen:** beim rein pfadbasierten Index bleiben (er erkennt den NFD/NFC-Zwilling nicht).
 
 ## Arbeitsablauf (Build-Verify, seit 2026-10-13)

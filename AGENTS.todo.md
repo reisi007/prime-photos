@@ -687,14 +687,50 @@ Inhalt liegt schon im Konto) und das Ordner-Wasserzeichen gelöscht, damit die K
   node_id)`, 409-Dispatch **nur** bei Namenskonflikt (ein Inhaltsduplikat bleibt „bereits im Konto"
   und wird **nicht** per PUT ersetzt — identische Bytes erneut zu senden ist genau die Bandbreite,
   die die Dedup-Semantik spart), PUT-Fehler zählt als Fehler. Vorher: `OVERWRITE` ⇒ **404** (live
-  belegt), die Option war **kaputt**. **Live-Abnahme offen** (ein Knoten mit dem Namen, Inhalt
-  getauscht) — nur Hauptagent, braucht einen eigenen Testknoten im Konto samt Aufräumen; gehört
-  zusammen mit den vier Fußzeilen-Zahlen aus Welle 1 an den entsperrten Screen.
+  belegt), die Option war **kaputt**.
+  **Live-Abnahme 2026-10-15: FEHLGESCHLAGEN — sie hat einen echten Fehler gefunden** (Details und
+  Belege in **2.2b**): der Lauf erzeugte den erwarteten 409 `NameAlreadyExists`, der anschließende
+  `PUT` wurde aber mit **400 `MissingFileSize`** abgewiesen. Als Fehler gezählt (wie entschieden),
+  Index blieb sauber, Konto unverändert — die Option ist damit **noch nicht** repariert.
+- **2.2b „Ersetzen" korrigieren — Live-Befund 2026-10-15, vom Nutzer beauftragt (offen).** Unser
+  `PUT` trägt nur `conflictResolution=NONE`; der Server verlangt aber die **Parameter des POST**.
+  Live gegen einen echten Testknoten, abgestufte Probes:
+  (a) `PUT …/v2/upload/<nodeId>?conflictResolution=NONE` ⇒ **400 `MissingFileSize`**, Body
+  „File size should not be empty.";
+  (b) derselbe `PUT` **mit** `name`, `fileSize`, `kind`, `parentNodeId` ⇒ kommt durch die
+  Validierung und antwortet **409 `DuplicatesConflictError`** (ich sendete absichtlich genau den
+  Inhalt, den der Knoten schon hat — keine Wirkung, kein Schaden).
+  **Regel daraus:** der `PUT` trägt **denselben Query-Satz wie der POST** — `name`, `fileSize`,
+  `kind`, `parentNodeId` usw. bleiben, `conflictResolution` bleibt `NONE`, die Node-ID kommt in den
+  Pfad. Der Fix muss die POST-Parameter **wiederverwenden** (gemeinsamer Query-Bauer), nicht ein
+  Subset raten; welche Parameter im Einzelnen Pflicht sind, ist damit bewusst **nicht** festgelegt.
+  **Zweiter Live-Befund:** der `PUT` ist der **Inhalts-Dedupe unterworfen** — identische Bytes
+  ergeben 409 statt 200. Das bestätigt die Entscheidung, ein Inhaltsduplikat **nicht** per PUT zu
+  „ersetzen". Abnahme: derselbe Live-Lauf noch einmal (Knoten behält den Namen, Inhalt danach
+  nachweislich der neue — Größe/MD5/Version), danach Knoten + Testziel wieder entfernen.
+- **Live-Befunde derselben Runde (nicht Welle 2, noch nicht beauftragt):**
+  **(1) EXIF-loser Upload wird als Fehler gezählt.** Ein **erfolgreicher** Upload von `c2.png`
+  lieferte gültiges JSON mit `id`/`name`, unser `ResponseUpload` verlangt aber `resolutionUnit`:
+  `serde` bricht mit „missing field 'resolutionUnit'" ab ⇒ der Lauf meldet **Fehler** statt Erfolg
+  und schreibt **keine** Indexzeile (die Datei würde bei jedem Lauf erneut gelesen). Betrifft alle
+  EXIF-losen Typen, die `is_supported_image` zulässt (png, bmp, gif, webp) — im Sport-Ordner
+  (nur JPEG/CR3) unsichtbar, in einer echten Sammlung nicht. Fix gehört in ein eigenes Paket
+  (Antwortfelder optional statt Pflicht).
+  **(2) Aufräum-/Ops-Wissen:** Knoten entfernt man per `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>`
+  ⇒ **202 `{}`**; `PUT …/drive/v1/trash/<id>` gibt es auf dem Cookie-Host **nicht** (⇒ 404).
+  **(3) Offene Beobachtung (Ursache unbekannt, nicht reproduziert):** zwei Läufe blieben nach der
+  Sport-Runde stehen (`status = "uploading"`, **keine** Verbindung zum Upload-Host, danach
+  wiederholte Knoten-Suchen root → „Pictures" → „Web" und ein **spurlos beendeter** Prozess: kein
+  Panic, kein Crash-Report). Lauf 3 (gleicher Startweg) lud normal hoch. Der Upload-Host wurde in
+  den hängenden Läufen **nie** kontaktiert ⇒ nicht durch 2.1/2.2/2.3a erklärbar. Bei Wiederauftreten
+  mit `RUST_LOG=debug` und Exit-Code fahren.
 - **2.3 Konflikt-Standard in drei Ebenen** (User-Entscheidung 2026-10-15; in **zwei** Paketen, weil
   UI/Config und Worker-Persistenz getrennt verifizierbar sind):
-  **(a) Application Default** — neues Feld in `Config` (`config.toml`), Dropdown in
-  **Einstellungen → Upload**, Default `SaveAsNew`; ist die **Vorauswahl beim Anlegen eines Ziels**
-  **und** gilt für die **Einmal-Queue (Drag&Drop)**. **(b) „Nicht noch einmal fragen"** schreibt die
+  **(a) Application Default** — ✅ **erledigt 2026-10-15** (`db68cff`, Verifier APPROVE, 81 Tests):
+  neues Feld in `Config` (`config.toml`), Radiogruppe in **Einstellungen → Upload** (das
+  Radio-Muster der Seite statt eines Dropdowns), Default `SaveAsNew`; ist die **Vorauswahl beim
+  Anlegen eines Ziels** **und** gilt für die **Einmal-Queue (Drag&Drop)**. **(b) „Nicht noch einmal
+  fragen"** — offen, schreibt die
   Antwort in `BackupFolder.conflict_resolution` des **Ordners der gefragten Datei**
   (`folders.toml` — kein Schemawechsel, das Feld existiert); **kein Per-Datei-Default**; innerhalb
   des Laufs bleibt der Override **run-weit** (heutiges Verhalten unverändert).
