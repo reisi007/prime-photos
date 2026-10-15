@@ -38,8 +38,8 @@ details (`docs/SPEC_UPLOAD.md`).
 
 | Source | Used for |
 |---|---|
-| `Contents/MonoBundle/Amazon Photos.dll` (decompiled via `ilspycmd`) | `LoginConstants`, `LoginWindowController`, `LoginWebPolicyDelegate`, `MacLoginTask`, `DomainProvider`, `Localization`, `WebCookieManager` |
-| `Contents/MonoBundle/Amazon.Auth.Map.dll` (decompiled) | `AuthPortalUrl` base class, `AmazonCloudDriveAuthPortalUrl` subclass, `ClientIdProvider` |
+| `Contents/MonoBundle/Amazon Photos.dll` (decompiled via `ilspycmd`) | `LoginConstants`, `LoginWindowController`, `LoginWebPolicyDelegate`, `MacLoginTask`, `DomainProvider`, `Localization`, `WebCookieManager`, `EncryptedFileTokenProvider`, `AccessTokenWorker`, `AppRestartInvalidRefreshTokenHandler` |
+| `Contents/MonoBundle/Amazon.Auth.Map.dll` (decompiled) | `AuthPortalUrl` base class, `AmazonCloudDriveAuthPortalUrl` subclass, `ClientIdProvider`, `AuthService`, `PandaService` / `RetriablePandaService` (incl. request/response DTOs), `AmazonAccessToken` / `AmazonRefreshToken`, `Constants` |
 | `Contents/Resources/de.lproj/Localizable.strings` | German labels (keys cited inline) |
 | `docs/UI_FLOWS.md`, `docs/UI_STATES.md`, `docs/PROTOCOL.md` | window geometry, navigation vocabulary, device-flow endpoints |
 | `git show HEAD:src/login.rs`, `HEAD:src/config.rs`, login parts of `HEAD:src/main.rs`, `HEAD:src/prime_photos.rs` | our committed implementation |
@@ -224,14 +224,170 @@ cloud-drive region used in `assoc_handle` and the Amazon region used in
 
 The original does **not** use browser cookies for uploads; its sign-in produces
 an OAuth authorization code that is exchanged for a refresh token and then an
-access token (`Atna|…`), see `docs/PROTOCOL.md`. `WebCookieManager` exists for
-a secondary purpose (writing website cookies obtained from Panda into
-`NSHttpCookieStorage`), and login starts with a full cookie wipe; the relevant
-session cookie names for *our* web flow (`session-id`, `at-acb*`, `x-acb*`,
-`ubid-acb*`) are **not** referenced in the original binary. *observed: the*
-*original never names these cookie names; our cookie names come from the web*
-*upload reference.* Therefore the mapping of those names to "authenticated" is
-defined by our implementation (§ 4.3), not by the original.
+access token (`Atna|…`), see `docs/PROTOCOL.md`. Website cookies do exist in the
+original — but they are **minted from the stored refresh token**
+(`POST <Panda-Base>/auth/token … requested_token_type=auth_cookies`) for the
+embedded web views and are never harvested from a webview (§ 3.8). Login still
+starts with a full cookie wipe (`WebCookieManager.DeleteAllCookies()` empties the
+shared `NSHttpCookieStorage`). The relevant session cookie names for *our* web
+flow (`session-id`, `at-acb*`, `x-acb*`, `ubid-acb*`) are **not** referenced in
+the original binary — confirmed again in this pass: the original's cookie code
+copies Name/Domain/Path/Value/HttpOnly/Secure/Expires straight out of the Panda
+response into `NSHttpCookieStorage`, so any cookie name it ever holds arrives at
+runtime. *observed.* Our cookie names come from the web upload reference;
+therefore the mapping of those names to "authenticated" is defined by our
+implementation (§ 4.3), not by the original.
+
+### 3.8 Session life cycle — how the original stays signed in
+
+Everything below is *observed* in the decompiled auth types (`AuthService`,
+`PandaService` / `RetriablePandaService`, `EncryptedFileTokenProvider`,
+`AccessTokenWorker`, `AppRestartInvalidRefreshTokenHandler`, `AmazonAccessToken`,
+`AmazonRefreshToken`, `WebCookieManager`) plus — all from `Amazon Photos.dll` —
+`AppSettings`, `TickTockTimer` and `Constants` (`Amazon.CloudDrive.Constants`,
+the holder of `LocalStoragePath`). `<Panda-Base>` is the Panda service base URL
+as configured — `https://api.amazon.com` in the captures
+(`docs/PROTOCOL.md` § 2); before a request leaves the client that `amazon.com`
+host is rewritten onto the marketplace domain, so a `DE` login talks to
+`api.amazon.de` (§ 3.6). *observed.*
+
+**1. Authorization code → refresh token.** The
+`openid.oa2.authorization_code` captured in the portal window (§§ 3.3/3.4) is
+redeemed with `POST <Panda-Base>/auth/register`. Endpoint and body match
+`docs/PROTOCOL.md` § 2.2 — including the captured `client_id`, which is the § 3.3
+client id **without** its `device:` prefix (the prefix is stripped before the
+request).
+`registration_data` carries `app_name`, `app_version`, `device_type`,
+`device_serial`, `device_model`, `os_version` and — flag-gated, optional —
+`device_name`; `auth_data` carries `use_global_authentication = false`,
+`authorization_code`, `code_verifier`, `code_algorithm = "SHA-256"`, `client_id`
+and `client_domain = "DeviceLegacy"`. The serialisation always carries the
+request DTO's constructor defaults as well, whether they were assigned here or
+not: `registration_data.domain = "Device"`, `user_context_map = {}`,
+`requested_extensions = ["customer_info", "device_info"]` and
+`requested_token_type = ["bearer", "mac_dms"]`. *observed.*
+
+| Aspect | Behaviour |
+|---|---|
+| Response contents | access token **and** refresh token (`response.success.tokens.bearer`), plus `extensions.customer_info` / `extensions.device_info` |
+| Success status but empty / missing access token | treated as **failure** (`SignInEmptyResponse`); nothing is stored |
+| Success | refresh token stored (2), access token kept in memory, customer/device info published |
+
+**2. Storage.** *observed:*
+
+| Item | Where it lives |
+|---|---|
+| Refresh token | Generic-Password item in the macOS Keychain: `Service = com.amazon.clouddrive.mac`, `Account = amzp-rt`, value stored as UTF-8 |
+| Access token | process memory only — never written to disk |
+| *Legacy* refresh token | `<LocalStorage>/refresh-token`, AES-CBC/PKCS7, key = device serial number, fixed IV — read for migration only, not written |
+
+Reading a *legacy* file migrates it: the value is decrypted, written to the
+Keychain, and the file is then **deleted**. "Abmelden" (8) removes the Keychain
+item and drops the in-memory access token.
+
+**Empirical evidence (2026-10-15, this machine):** the Keychain item exists,
+with `cdat` / `mdat` = **2026-10-13 09:35** — i.e. exactly one sign-in ever, and
+none since then.
+
+**3. Refresh cadence (worker).** A startup worker fetches an access token on
+start and schedules the next refresh *observed*:
+
+- an already in-memory and still valid access token is reused;
+- otherwise the exchange in (4) runs and the next appointment is
+  **80 % of the remaining lifetime**: the token's expiry is
+  `expires_in − 60 s` from the response, and the appointment is
+  `now + 0.8 × (expiry − now)` — immediately (`now`) if no usable token could be
+  vended;
+- a timer ticks; ticks before the appointment do nothing. From the appointment
+  on, up to `AccessTokenMaxRetries` attempts are made, spaced
+  `AccessTokenTimeBetweenRetriesInSeconds` apart;
+- each success resets the appointment to 80 % of the new remaining lifetime;
+  after the last failed attempt a **fatal** health-metric counter
+  (`RefreshAccessToken`) is recorded.
+
+The two counts are settings-driven, not hard-coded: `AppSettings` ships
+`AccessTokenMaxRetries = 5` and `AccessTokenTimeBetweenRetriesInSeconds = 15`.
+The shared `TickTockTimer` ticks on a **fixed 3 s** interval, so the worker
+wakes that often and does nothing on ticks before the appointment. The values
+live in `app-settings.json`, which the bundle does **not** ship — out of the box
+the defaults above apply, and only a local override can change them.
+*observed.*
+
+**4. The exchange itself.** Up to **3** attempts, each preceded by a network
+availability wait: `POST <Panda-Base>/auth/token` with the body
+`{source_token: <refresh token>, source_token_type: refresh_token,
+requested_token_type: access_token, app_name, app_version}` →
+`access_token` + `expires_in` (TTL 3600 s, `docs/PROTOCOL.md` § 2.1). The call
+sits inside a generic retry/back-off wrapper around the Panda service (settings
+`PandaServiceRetries`, `PandaServiceBackOffFactor`,
+`PandaServiceMaxBackOffInSeconds` — `AppSettings` defaults **5**, **2.0**,
+**60 s**). *observed.*
+
+**5. No access token obtainable (invalid refresh token).** The
+invalid-refresh-token handler runs only when **all 3 attempts threw** — i.e.
+when no access-token object was vended at all. A server that *answers* with an
+empty or already-expired token does **not** reach it: that still yields an
+access-token object, so the code only records a PMET counter
+(`VendedNoValueAccessToken` / `VendedExpiredAccessToken`) and passes the
+unusable token on. (*observed*; the code path does not distinguish a rejected
+token from a persistent network failure):
+
+1. switch the **autostart/login item off**;
+2. delete the stored tokens (Keychain item + in-memory token);
+3. **restart the app**.
+
+After that restart no refresh token is stored, so the next start goes straight
+to the auth portal (§ 3.5) — *inferred from the token-empty path.* If no refresh
+token is stored at all (first run, or after sign-out), the auth portal is shown
+directly. *observed.*
+
+**6. Web cookies are minted from the refresh token** — the part that matters for
+any cookie-based frontend: `POST <Panda-Base>/auth/token` with **query
+parameters** (`source_token=<refresh token>`,
+`source_token_type=refresh_token`, `requested_token_type=auth_cookies`,
+`domain=.<tld>`, `app_name=…`, `app_version=…`) vends the customer's website
+cookies. They are written into the shared `NSHttpCookieStorage` with
+Name/Domain/Path/Value/HttpOnly/Secure/Expires, for the embedded web views; the
+cookie storage is wiped completely at the start of every login (§ 3.3).
+*observed.*
+
+**7. Tamper detection.** A `FileSystemWatcher` on the LocalStorage directory —
+`<LocalStorage>` = `~/Library/Application Support/Amazon Cloud Drive`
+(`Amazon.CloudDrive.Constants`) — watches a path named `amzp-rt`, i.e.
+`<LocalStorage>/amzp-rt`, for Renamed / Changed / Deleted *observed*:
+
+| Event | Reaction |
+|---|---|
+| Renamed (and the renamed file still exists) | the renamed file is deleted |
+| watched path no longer exists | **sign out** |
+| watcher error | the watcher is re-armed |
+
+`amzp-rt` is the same string as the Keychain **account** that holds the refresh
+token (2) — that Keychain item, not a file, is the store. The *legacy* file name
+is `refresh-token` (2), a different name, and it is only read for migration. No
+code in this build writes a file named `amzp-rt`, so the watcher only bites if
+one exists — dropped there by something other than this client.
+`UnregisteredUserCacheCleaningTask` probes the very same path for **existence
+only** and uses it as a marker: no such file ⇒ the unregistered-user cache
+clean-up runs. *observed.*
+
+**8. Sign-out ("Abmelden").** `POST <Panda-Base>/auth/deregister` with the
+in-memory access token as bearer (body carries `app_name` / `app_version`).
+What happens to the stored tokens depends on how that call **ends**: if it
+returns — *any* status, success or not — the Keychain item and the in-memory
+token are deleted. If it **throws** (a non-success status raises), the
+surrounding catch ends the sign-out without deleting anything, so both tokens
+stay in place. *observed.*
+
+**9. Same auth layer, other calls.** *observed,* for completeness — the
+registration/portal flow of §§ 3.3–3.5 is only one consumer of this layer:
+
+| Call | Purpose |
+|---|---|
+| `GET <Panda-Base>/user/profile` (Bearer access token) | customer profile / Amazon account id |
+| `POST <Panda-Base>/auth/token` with `scope_list` + `client_auth_data.client_id` (`requested_token_type = scope_access_token`, default scope `profile:user_id`) | scoped access token |
+| `POST <Panda-Base>/auth/create/codepair` | code-pair (device-code style) flow |
+| `POST <Panda-Base>/auth/register` with `auth_data.email_password` / `auth_data.code_pair` / `auth_data.access_token` | further registration variants of the same endpoint |
 
 ---
 
@@ -456,10 +612,9 @@ to `https://content-<zone>.drive.amazonaws.com/v2/upload?…` (see
 Token refresh happens against
 `https://www.amazon.<country>/photos/auth/token?_=<epoch_ms>` with the same
 cookie header, returning an `access_token` that is stored in
-`cookie_x_amz_access_token`. How (or whether) that token is then used for
-uploads is *not visible* in the committed code's header builder (it stores it
-but `build_common_headers` does not send `x-amz-access-token`); treat as
-*unverified/legacy* — do not change behaviour without a recon. *observed.*
+`cookie_x_amz_access_token`. The refreshed token is stored in
+`cookie_x_amz_access_token` and persisted in `config.toml`; the header builder
+does **not** send it as `x-amz-access-token`. *observed.*
 
 ### 4.10 Zone and account details
 
@@ -504,7 +659,8 @@ but `build_common_headers` does not send `x-amz-access-token`); treat as
 | No-network handling | Overlay in the auth container, retry button, `NetworkDetector` | `WebviewLogin::error` surfaced in red; page simply fails to load (*no* dedicated no-network overlay) |
 | Cleanup before load | `WebCookieManager.DeleteAllCookies()` wipes `NSHttpCookieStorage` | none — wry store starts empty anyway |
 | Completion signal | `openid.oa2.authorization_code` query param on a `/ap/` navigation | `session-id` + `at-acb*` + `x-acb*` cookies appearing in the store |
-| Post-login consumption | Authorization code → device registration → refresh/access token → `/drive/v2/account/endpoint` | Cookie string parsed into `Config` fields; no device registration; uploads use Cookie header (`session-id`, `x-acb`, `at-acb`, `ubid-acb`) + `x-amzn-SessionId` |
+| Post-login consumption | Authorization code → device registration → refresh + access token; the access token is then kept alive by the refresh worker (§ 3.8) → `/drive/v2/account/endpoint` | Cookie string parsed into `Config` fields; no device registration; uploads use Cookie header (`session-id`, `x-acb`, `at-acb`, `ubid-acb`) + `x-amzn-SessionId` |
+| Session persistence / session keeping | Refresh token in the macOS Keychain (`Service = com.amazon.clouddrive.mac`, `Account = amzp-rt`); access token memory-only, refreshed at 80 % of its remaining lifetime; web cookies minted from the refresh token on demand (§ 3.8) | The four session cookies (`session-id`, `x-acb*`, `at-acb*`, `ubid-acb*`) are copied **once** into `config.toml` and never renewed — they expire and the sign-in has to be repeated; only the derived `cookie_x_amz_access_token` is renewed on a `401` mid-upload |
 | Sign-in outcome detectivity | Success = auth code captured | Success = auth cookie predicate |
 | Profile / avatar | not in the sign-in window itself (account info comes later) | not implemented in HEAD; P2 item |
 
@@ -526,6 +682,19 @@ Consequences: features the original derives from sign-in (per-account endpoint
 URLs, source id, quota, region) are **not** available to us without extra work;
 where we approximate them (fixed `zone = eu`) we must not present it as
 auth-derived. *inferred from the comparison above.*
+
+Consequence for the session itself (recon 2026-10-15, § 3.8): our path stores a
+**snapshot of a browser session**, not a credential. The four session cookies
+(`session-id`, `x-acb*`, `at-acb*`, `ubid-acb*`) are never renewed — once they
+lapse, uploads stop authenticating and the user has to sign in again. Only the
+derived `cookie_x_amz_access_token` is renewed (on a `401` mid-upload). The
+original is not bound to a cookie's lifetime at all: it holds a stored refresh
+token (whose own lifetime is *unknown*) and trades it for short-lived access
+tokens at 80 % of each token's remaining lifetime, and even the cookies it needs
+for its embedded web views are minted from that same refresh token. Its only
+user-visible re-authentication is the invalid-refresh-token path, which clears
+the token and restarts into the auth portal. What we do with that finding is
+deliberately **not** recorded here (it belongs to `AGENTS.md` / `AGENTS.todo.md`).
 
 ---
 
@@ -583,14 +752,23 @@ Marked *unknown* rather than guessed:
    never complete login. Empirical timing not measured.
 8. **Webview first-run cookie state:** wry's store behaviour across app
    restarts (whether Amazon's session persists) is not pinned down here.
-9. **Original's handling of expired sessions during sign-in** (auto-refresh,
-   account-status invalid retry) — partially covered by § 3.5 but the invalid-
-   account path's UI is *unknown*.
+9. **Original's handling of expired sessions** — **answered** by § 3.8: the
+   access token is refreshed at 80 % of its remaining lifetime, and a refresh
+   token from which no access token can be obtained any more leads to token
+   deletion + app restart into the auth portal. Only the *invalid-account
+   path's UI* (§ 3.5 `AccountStatusValidator`) remains *unknown*.
 10. **Our sign-out** is not implemented in committed `HEAD` (no handler wiring
     for "Abmelden"); the flow exists only as a TODO (P2).
 11. **Main-window sizing deviation:** original uses fixed 1130 × 770; ours
     sizes elastically. Whether Amazon's UI breaks under other sizes is not part
     of this spec (see `SPEC_UPLOAD` / UI specs).
+12. **Defaults of `AccessTokenMaxRetries` and `AccessTokenTimeBetweenRetriesInSeconds`**
+    (and of `PandaServiceRetries` / `PandaServiceBackOffFactor` /
+    `PandaServiceMaxBackOffInSeconds`) — **answered** by `AppSettings`: 5, 15,
+    5, 2.0 and 60 s respectively.
+13. **`TickTockTimer` tick interval** used by the access-token worker — **answered**:
+    fixed 3 s.
+14. **`LocalStoragePath` composition** — **answered**: `<UserProfile>/Library/Application Support/Amazon Cloud Drive` (`Amazon.CloudDrive.Constants`).
 
 ## 8. Files of interest (committed `HEAD`)
 
@@ -614,8 +792,19 @@ Marked *unknown* rather than guessed:
 - Probe timing (`PROBE_INTERVAL`) must remain off the egui `update` thread.
 - Login-window title and branded header are **documented deviations**; do not
   silently revert to the original's two-column layout.
-- Never implement device flow by accident: this spec intentionally scopes `ours`
-  to the web (cookie) flow; the device flow lives in `PROTOCOL.md`.
+- **Session keeping is a decided direction, not a side note.** The original's
+  refresh-token path (§ 3.8) is the model we build towards as far as feasible:
+  sign in once, store a refresh token, refresh the access token, mint web cookies
+  on demand. The decision, its scope and the package list live in `AGENTS.md`
+  (decision "Sitzung wie das Original") / `AGENTS.todo.md`. This spec
+  deliberately stays the clean-room description of the **original** and does not
+  carry the plan; the original's keychain item (§ 3.8) likewise remains a fact
+  about the original, not something we reuse.
+- **Our login UI is kept.** The embedded webview with our branded header, the
+  marketplace picker, "Abbrechen" and the login window title stay as documented
+  in § 4 — the retained deviation from the original's § 3.1 two-column window
+  and its own chrome. The `ours` columns above therefore keep describing the
+  committed state, not the planned one.
 
 ---
 

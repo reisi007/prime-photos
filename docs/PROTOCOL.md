@@ -113,6 +113,14 @@ Response `200` (shape; tokens truncated):
 Notes: `source_token`/`requested_token_type` are the variable inputs; the rest are
 constant. Access token TTL is 3600 s.
 
+**Same endpoint, different mode — website cookies.** The original also calls this
+exact endpoint with **query parameters** instead of a JSON body:
+`POST /auth/token?source_token=<refresh token>&source_token_type=refresh_token&requested_token_type=auth_cookies&domain=.<tld>&app_name=…&app_version=…`
+vends the customer's **website cookies** (written into `NSHttpCookieStorage` for
+the embedded web views). The body form with `requested_token_type=access_token`
+shown above remains the access-token refresh path. See
+`docs/SPEC_LOGIN.md` § 3.8.
+
 ### 2.2 `POST https://api.amazon.com/auth/register`
 
 One-time device registration (login era). Exchanges a browser-obtained OAuth
@@ -550,7 +558,9 @@ per file.
    with `{"source_token":"Atnr|<stored refresh token>","source_token_type":"refresh_token","requested_token_type":"access_token","app_name":"Amazon Photos","app_version":"11.3.0.1d7941b5"}`
    → `200` with `access_token: Atna|<…>` (TTL 3600 s) and `secureSessionToken: Sst1|<…>`.
    *(Once registered, the client sends only the refresh token; the registration in
-   §2.2 happens only on first login.)*
+   §2.2 happens only on first login. Where the two tokens are stored and how the
+   refresh is scheduled — 80 % of the remaining lifetime — is documented in
+   `docs/SPEC_LOGIN.md` § 3.8.)*
 
 2. **Resolve the account + regional endpoints**
    * `GET https://api.amazon.com/user/profile` (`Authorization: bearer Atna|<…>`) → account id.
