@@ -272,6 +272,12 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   neuen fmt-Diffs. Offen bleibt allein die **Live-Abnahme des PUT** (Leitung — nicht durch Tests
   abdeckbar).
 
+  **Zweiter Verify-Lauf (nachgeholt, frische Session): APPROVE.** Beide Tests mit Mutationsbeweis
+  scharf, alle Punkte (c)–(l) und die vier Eigenkorrekturen bestätigt, Umfang = genau die 10 Dateien,
+  `cargo clean -p` + Build 0 Warnungen, 97 Tests, keine neuen fmt-Diffs. Sein Fund 1 (die stale
+  Gap-Zeile) war zum Zeitpunkt des Laufs **schon behoben** — er hatte gegen den `a5a9e2d`-Snapshot
+  gelesen; die Funde 2 und 3 sind echt und stehen unten in der Befundliste.
+
   **Zwischenpakete (2026-10-15, nicht Teil der Welle-2-Planung; je eigener Commit):**
   - **P3-Nits — ✅ `506df58`** (Verifier APPROVE): die aggregierte Fußzeile wird nur noch unter
     `running || sum_total > 0` gezeichnet — bei laufendem Lauf sichtbar auch ohne Ziele, und ein nie
@@ -297,6 +303,42 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
     Alle drei entfernten toten Funktionen sind repo-weit referenzfrei (lebender Ersatzpfad je Fall
     belegt), das **einzige** `#[allow]` im Diff ist das bewusst begründete auf
     `supported_extensions`; Tests 95 grün, keine neuen fmt-Diffs.
+
+### Neue Welle: Sitzung wie das Original (Login einmal + Refresh-Token) — **User-Entscheidung 2026-10-15**
+
+**Auftrag (wörtlich, zwei Nachrichten):** „Ziel wäre so gut es geht so wie im Original mit der Anmeldung
+/ Update der Tokens zu verfahren" und „Ziel: nur einmal Anmeldung nötig, refresh token speichern.
+Nachbau Original hier mit Rea clean room spec für Login / auth. Gerne aber unsere aktuelle Login Ui so
+gut wie es geht beibehalten." Die verbindliche Regel steht in `AGENTS.md` („Sitzung wie das Original");
+Clean-Room-Grundlage ist `docs/SPEC_LOGIN.md` § 3.8 + `docs/PROTOCOL.md` § 2.1 (Recon 2026-10-15 am
+DLL, siehe „Sitzung am Leben halten — Recon am Original").
+
+**Pakete (Vorschlag; Reihenfolge zu Welle 3 noch offen — Frage an den User gestellt):**
+- [ ] **S1 — Anmeldeweg auf das Portal umstellen:** `login_url` auf den Parametersatz des Originals
+      (`amzn_photos_desktop_<region>`, marketplaceId, language, PKCE-Paar, `client_id=device:<hex>`,
+      `return_to=/ap/maplanding`, `forceMobileLayout`). **Unsere Login-UI bleibt** (Header, Abbrechen,
+      Marktplatz-Auswahl, Fenstertitel) — nur URL und Erfolgserkennung ändern sich.
+- [ ] **S2 — Erfolgserkennung umstellen:** statt Cookie-Prädikat (`session-id` + `at-acb*` + `x-acb*`)
+      den `openid.oa2.authorization_code` aus einer `/ap/…`-Navigation abfangen (Navigation verwerfen).
+      Die bisherige Cookie-Übernahme bleibt als **Rückfall** erhalten.
+- [ ] **S3 — Code einlösen + Tokens ablegen:** `POST https://api.amazon.com/auth/register` (Felder wie
+      das Original), Refresh-Token in den **OS-Schlüsselbund** (eigener Service, cross-platform Crate),
+      Access-Token nur im Speicher; leerer Access-Token = Fehlschlag, abgelehnte Client-Identität = klare
+      Meldung + Rückfall.
+- [ ] **S4 — Auffrischen:** 80 %-Regel (Ablauf = `expires_in` − 60 s), eigene dokumentierte
+      Versuchs-Defaults, fataler Ausgang = Sitzung ungültig.
+- [ ] **S5 — Cookies bei Bedarf erzeugen:** `/auth/token?requested_token_type=auth_cookies`, in die
+      bestehende Cookie-Kette einspeisen; Upload-Engine unverändert.
+- [ ] **S6 — Ungültig/Abmelden:** Tokens löschen → unser Login-Screen (ohne App-Neustart); „Abmelden"
+      über `/auth/deregister` + Token-Löschung.
+- [ ] **S7 — Live-Abnahme:** einmal anmelden, App neu starten (Sitzung läuft **ohne** Anmeldung weiter),
+      Auffrischung im Log, Cookies frisch geholt, Upload läuft. Damit kann auch die noch offene
+      Live-Abnahme des `PUT` (2.2b) in derselben Sitzung gefahren werden.
+
+**Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** (bleibt nur Rückfall). Der
+**CDP-Browser-Login** (externer Browser) bleibt ebenso verworfen wie die **Paste-Variante** als
+Hauptweg. Ebenfalls verworfen: die Original-Login-**UI** (zwei Spalten, Willkommens-Panel, Fenster
+880 × 530) zu übernehmen — unsere UI bleibt.
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
@@ -571,6 +613,18 @@ Default** für neue Ziele und Drag&Drop — **kein** Schemawechsel, **kein** Per
       Zeile „Global dedup default setting" sagt noch „Optional. Only worth it if a preferences screen
       lands" — beim nächsten Anfassen auf den Nachbarzeilen-Stil („Done") ziehen; der Verifier hat die
       Zeile bewusst nicht mitgeändert.
+- [ ] **`docs/SPEC_DUPLICATES.md:269`** — ✅ behoben (Ein-Zeilen-Fix vor dem Commit `40cf024`); die
+      **Empfehlungszelle** neben der Zeile sagt aber weiter „Optional. Only worth it if a preferences
+      screen lands" — beim nächsten Anfassen auf den Nachbarzeilen-Stil („Done") ziehen.
+- [ ] **`docs/SPEC_DUPLICATES.md:268`** (Fund 2 des zweiten Verifiers, echt): die Zeile
+      „**Conflict default**" nennt `SaveAsNew` („was `Ignore`; changed 2026-10-14") und lässt den
+      **Application Default `Replace`** (seit 2.4a, 2026-10-15) weg — sie widerspricht damit dem
+      eigenen §5-Absatz zwei Zeilen darüber. Auf den neuen Stand bringen (Application Default
+      `Replace`, Enum-`#[default]` `SaveAsNew` als Datei-Fallback).
+- [ ] **`docs/SPEC_DUPLICATES.md:273`** (Fund 3 des zweiten Verifiers, echt): die Zeile
+      „**`Replace` wire value**" führt unseren Weg noch als `PUT /v2/upload/<nodeId>?conflictResolution=NONE`
+      — genau die Form, die **dieselbe Datei** in §291-295 als **400 `MissingFileSize`** verwirft.
+      Auf den POST-Query-Satz umstellen (wie §291-295).
 - [ ] **Live-Abnahme des `PUT` (2.2b)** — weiterhin offen: die Tests pinnen URL-Bau und Dispatch, nicht
       die Leitung (POST → 409 `NameAlreadyExists` → PUT → 200, gleiche Node-Id); hängt an frischen
       Cookies, siehe Frage an den User (Sitzung/Refresh).
@@ -662,7 +716,7 @@ Nichts da ist umgesetzt; alle Punkte sind bewusst **nicht** angefasst, weil sie 
 - Separates Login-Fenster (`ppu-login` Helper-Prozess mit eigener `tao`-Eventloop): wirkte ungewohnt und passte nicht zum Original, das im Hauptfenster anmeldet. Ersetzt durch die eingebettete Child-WebView im Hauptfenster.
 - Synchrone Cookie-Abfrage in `update` (wry `WebView::cookies`): Panic durch winit-Reentrancy (dreht die NSRunLoop). Ersetzt durch `dispatch_async` auf der Main-Queue.
 - mitmproxy live capture: kept only as a debugging tool; app uses the cookie upload path.
-- Device registration / OAuth from scratch: replaced by browser-cookie auth.
+- Device registration / OAuth from scratch: replaced by browser-cookie auth. — **Aufgehoben am 2026-10-15** (User-Entscheidung „so gut es geht wie das Original", siehe Welle „Sitzung wie das Original" oben und `AGENTS.md`): genau dieser Weg ist jetzt das **Ziel**. Verworfen bleibt daran nur der **CDP-Browser-Login** (externer Browser) und die **Paste-Variante** als Hauptweg.
 - Standalone paste-only login: superseded by CDP browser login (paste stays as fallback).
 - **Avatar-Thumbnail per Raten/Probieren (2026-10-14, verworfen):** `/drive/v1/nodes/{id}/content` (mit und ohne `tempLink=true`), `/drive/v1/nodes/{id}/thumbnail` (mit `width`/`height`/`transform`), `/drive/v1/nodes/{id}/transforms/IMAGE_THUMBNAIL` (mit und ohne `?tempLink=true`) sowie `/drive/v1/nodes/{id}/content?transform=IMAGE_THUMBNAIL&tempLink=true` — **alle HTTP 404**. Der Parameter `?transform=IMAGE_THUMBNAIL` wird **ignoriert** (der `tempLink` liefert weiterhin die Rohdatei). Das `transforms: ["IMAGE_THUMBNAIL"]` eines Suchtreffers ist eine **Deklaration**, keine URL. Stattdessen belegbar über das Assembly (`GetSmartCroppedThumbnail`/`GetThumbnailUrl`) — Recon läuft, siehe Welle 3.
 - **Avatar lokal dekodieren/schneiden (2026-10-14, verworfen):** der Avatar-Quellknoten kann ein RAW sein (bei diesem Konto ein Canon CR3, 13,5 MB) — die `image`-Crate kann kein CR3. Der 60×60-Crop muss daher **serverseitig** passieren (wie im Original), nicht bei uns.
