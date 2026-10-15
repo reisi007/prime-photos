@@ -319,17 +319,6 @@ lautet „alles in Wellen implementieren bis fertig": Sitzung → Welle 3 → We
 bleibt dokumentiert, nicht eingeplant).
 
 **Fachliste (bleibt gültig):**
-- [ ] **S1 — Anmeldeweg auf das Portal umstellen:** `login_url` auf den Parametersatz des Originals
-      (`amzn_photos_desktop_<region>`, marketplaceId, language, PKCE-Paar, `client_id=device:<hex>`,
-      `return_to=/ap/maplanding`, `forceMobileLayout`). **Unsere Login-UI bleibt** (Header, Abbrechen,
-      Marktplatz-Auswahl, Fenstertitel) — nur URL und Erfolgserkennung ändern sich.
-- [ ] **S2 — Erfolgserkennung umstellen:** statt Cookie-Prädikat (`session-id` + `at-acb*` + `x-acb*`)
-      den `openid.oa2.authorization_code` aus einer `/ap/…`-Navigation abfangen (Navigation verwerfen).
-      Die bisherige Cookie-Übernahme bleibt als **Rückfall** erhalten.
-- [ ] **S3 — Code einlösen + Tokens ablegen:** `POST https://api.amazon.com/auth/register` (Felder wie
-      das Original), Refresh-Token in den **OS-Schlüsselbund** (eigener Service, cross-platform Crate),
-      Access-Token nur im Speicher; leerer Access-Token = Fehlschlag, abgelehnte Client-Identität = klare
-      Meldung + Rückfall.
 - [ ] **S4 — Auffrischen:** 80 %-Regel (Ablauf = `expires_in` − 60 s), eigene dokumentierte
       Versuchs-Defaults, fataler Ausgang = Sitzung ungültig.
 - [ ] **S5 — Cookies bei Bedarf erzeugen:** `/auth/token?requested_token_type=auth_cookies`, in die
@@ -339,6 +328,25 @@ bleibt dokumentiert, nicht eingeplant).
 - [ ] **S7 — Live-Abnahme:** einmal anmelden, App neu starten (Sitzung läuft **ohne** Anmeldung weiter),
       Auffrischung im Log, Cookies frisch geholt, Upload läuft. Damit kann auch die noch offene
       Live-Abnahme des `PUT` (2.2b) in derselben Sitzung gefahren werden.
+
+**S-C-Festlegungen (User-Entscheidung 2026-10-15, Frage + Antwort — verbindlich für S-C):**
+- **Kein Klartext-Sessionmaterial auf der Platte (Kehrtwende zu S-B):** Persistiert wird **nur** der
+  Refresh-Token (OS-Schlüsselbund). Access-Token **und** die vier Session-Cookies (`session_id`,
+  `cookie_x_acb`, `cookie_at_acb`, `cookie_ubid_acb`, `cookie_x_amz_access_token`) leben **nur im
+  Speicher**; die `Config`-Felder werden `#[serde(skip)]`. Anlass (User): Klartext-Cookies sind
+  dieselbe Autorität wie der Refresh-Token, nur ungeschützt; das Original hält sie ebenso nur im
+  Speicher. **Folge:** der reine Cookie-Rückfall (Geräteweg abgelehnt) gilt nur für die **laufende**
+  Sitzung, nicht über einen Neustart — der Geräteweg ist der persistente Pfad.
+- **Auffrischung als Hintergrund-Worker** auf der bestehenden Tokio-Runtime (Muster `avatar_fetch`):
+  3-s-Tick, Termin bei 80 % der Restlaufzeit (`expires_in` − 60 s), bis zu 5 Versuche im 15-s-Abstand,
+  jeder Erfolg setzt den Termin neu (belegte `AppSettings`-Werte).
+- **Offline zählt nicht:** `AuthError::Network` (Connect/Timeout) verbraucht **keinen** Versuch; der
+  Termin bleibt, der nächste Tick probiert erneut; offline meldet **nie** ab. Nur echte
+  Serverantworten zählen zu den 5 Versuchen.
+- **Cookies erneuern:** beim Start und nach **jeder** erfolgreichen Auffrischung aus dem Refresh-Token
+  minten und in die bestehende Cookie-Kette (im Speicher) einspeisen.
+- **Ungültige Sitzung:** Tokens löschen → unser Login-Screen, **kein** App-Neustart.
+- **Abmelden:** `/auth/deregister` (Bearer = Access-Token) + Token-Löschung.
 
 **Verworfen (2026-10-15):** der reine Web-/Cookie-Weg als **Ziel** (bleibt nur Rückfall). Der
 **CDP-Browser-Login** (externer Browser) bleibt ebenso verworfen wie die **Paste-Variante** als
