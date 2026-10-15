@@ -1,5 +1,6 @@
 mod prime_photos;
 mod app_menu;
+mod auth;
 mod config;
 mod countries;
 mod dedup;

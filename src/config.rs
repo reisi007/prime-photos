@@ -83,6 +83,14 @@ pub struct Config {
     /// switched to overwriting.
     #[serde(default = "default_replace")]
     pub conflict_resolution_default: ConflictResolution,
+    /// Device serial of the device login flow (user decision 2026-10-15): 32
+    /// hex characters, generated **once** by [`crate::auth::new_device_serial`]
+    /// and then stable. This is the one identity value that is ours — every
+    /// other device-flow value is the original's. `#[serde(default)]` (empty)
+    /// so an existing `config.toml` without this key still loads; the empty
+    /// value means "not generated yet" and is filled in when the flow is wired.
+    #[serde(default)]
+    pub device_serial: String,
 }
 
 impl Config {
@@ -155,6 +163,8 @@ impl Config {
             // an entry without the key) is deliberately different — see
             // `default_replace` and the field comment.
             conflict_resolution_default: ConflictResolution::Replace,
+            // Empty = "not generated yet"; the device login flow fills it once.
+            device_serial: String::new(),
         }
     }
 }
@@ -181,6 +191,15 @@ cookie_x_amz_access_token = ""
     fn config_without_autostart_key_loads_as_none() {
         let config: Config = toml::from_str(LEGACY_TOML).unwrap();
         assert_eq!(config.autostart_enabled, None);
+    }
+
+    #[test]
+    fn config_without_device_serial_key_loads_as_empty() {
+        // `#[serde(default)]` (empty string) so an existing `config.toml`
+        // predating the device login flow still loads; empty = "not generated
+        // yet" (the flow fills it on first use).
+        let config: Config = toml::from_str(LEGACY_TOML).unwrap();
+        assert!(config.device_serial.is_empty());
     }
 
     #[test]

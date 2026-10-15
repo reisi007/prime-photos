@@ -30,6 +30,18 @@ wry = "0.57.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 tray-icon = "0.26"
 unicode-normalization = "0.1.25"
+# Device login flow (`src/auth.rs`): `sha2` + `base64` build the PKCE S256
+# challenge, `rand` supplies the verifier / device-serial entropy, `keyring`
+# keeps the refresh token in the OS credential store.
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+# `default-features = false` + explicit per-OS stores keeps the **blocking** API
+# on every target: macOS Keychain (`apple-native`), Windows Credential Manager
+# (`windows-native`) and the Linux Secret Service (`sync-secret-service`, with
+# `crypto-rust` as its session-encryption backend). No async/zbus stack is
+# pulled in.
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [build-dependencies]
 # Rasterises `assets/*.svg` into PNGs inside `OUT_DIR` (see `build.rs`).
