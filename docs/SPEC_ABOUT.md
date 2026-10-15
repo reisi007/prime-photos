@@ -14,6 +14,25 @@ Managed Assembly: `Contents/MonoBundle/Amazon Photos.dll`. Werkzeug: `ilspycmd 1
 **Datenschutz-Hinweis:** Keine Personendaten in diesem Dokument. Fundstellen mit Personenbezug
 (Geräte-Seriennummer, Gerätename) sind als „Feld existiert, Inhalt redigiert" beschrieben.
 
+**Nachtrag Belegbasis (2026-10-15):** Das oben genannte `.app`-Bundle liegt (wieder) unter
+`/Applications` und ist **vollständig lesbar** — nachgeprüft am 2026-10-15, nur lesend:
+`CFBundleShortVersionString = 11.3.0`, `CFBundleVersion = 36`, `CommitId = 1d7941b5`,
+`CFBundleIdentifier = com.amazon.clouddrive.mac`; `Contents/Resources` listet 812 Einträge
+(793 Dateien, 19 Verzeichnisse), `about-grey16@1x/2x/3x.png` und `ne.lproj` sind vorhanden,
+`Contents/MonoBundle/Amazon Photos.dll` ist lesbar (4.591.616 B, `MZ`-Header); `kMDItemDateAdded` =
+2026-10-14 18:14. Der Inhalt entspricht damit unverändert dem oben genannten Stand. Eine neue
+Bundle-/Ressourcen-Auflistung im About-Umfang wurde für diesen Durchgang dennoch **nicht
+wiederholt**; die Befunde wurden gegen die **dekompilierte Assembly** und die **zuvor gesicherten
+Ressourcen-Dumps** geprüft — ein **neues Decompile** ist derzeit nicht möglich (`ilspycmd 11.1.0.9782`
+liegt in `~/.dotnet/tools`, die .NET-Runtime fehlt: „You must install .NET to run this application").
+Die TCC-Beobachtung bleibt als solche stehen: `ls ~/.Trash` ⇒ `Operation not permitted`, der
+Papierkorb ist leer — die App liegt nachweislich **nicht** dort. Bestätigt: `IAppInfo.Version` =
+`CFBundleShortVersionString` + `.` + `CommitId` (Anzeige „Version: 11.3.0.1d7941b5"); die
+**fehlende** eingebettete Lizenzliste (die per `GetManifestResourceStream` geladenen Ressourcen
+sind Bild-Assets, `supported-content-types.json` und `MinervaCustomConfig.json`); der
+Release-Notes-CloudFront-Pfad samt Sprach-Whitelist {`de`,`en`,`es`,`fr`,`it`,`ja`}; und die
+Menü-/Kürzel-Lage (About und Versionshinweise **ohne** Tastenkürzel). → **belegt**
+
 ---
 
 ## 1. Welche Fenster/Dialoge gehören dazu?
