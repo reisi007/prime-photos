@@ -1145,8 +1145,27 @@ impl PrimePhotos {
                     // wasted bandwidth this project avoids) the unchanged
                     // conflict marker below goes back, as for the other policies.
                     if should_replace_after_conflict(conflict, &code, &existing) {
+                        // The PUT answers the node the 409 named. It carries
+                        // **the same query set as the POST** (`conflictResolution`
+                        // [wire value of the policy], `fileSize`, `name`,
+                        // `parentNodeId`, `contentDate`) — the host rejects a
+                        // PUT without `fileSize` with 400 `MissingFileSize`
+                        // (live-proven 2026-10-15) — plus body and header set.
+                        // `file_name` is passed **raw**; the URL helper applies
+                        // the same NFC normalisation as the POST's URL, so the
+                        // two cannot disagree.
                         return self
-                            .replace_picture(&existing, &headers, &contents_vec, pic_path)
+                            .replace_picture(
+                                &existing,
+                                conflict.wire_value(),
+                                file_size,
+                                &file_name,
+                                parent_node,
+                                &capture_date_str,
+                                &headers,
+                                &contents_vec,
+                                pic_path,
+                            )
                             .await;
                     }
                     return Err(conflict_error(&code, &existing));
@@ -1180,17 +1199,23 @@ impl PrimePhotos {
 
     /// Second stage of `ConflictResolution::Replace` (user decision 2026-10-15):
     /// replace the node the POST's 409 named (`errorDetails.conflictNodeIds[0]`)
-    /// with `PUT /v2/upload/<nodeId>?conflictResolution=NONE` — the desktop
-    /// client's own overwrite path, live-proven: 200, the same node id, content
-    /// actually swapped. `conflictResolution=OVERWRITE` on the POST is **not**
-    /// an alternative: the host answers 404 with an empty body.
+    /// with `PUT /v2/upload/<nodeId>` — the desktop client's own overwrite path,
+    /// live-proven: 200, the same node id, content actually swapped.
+    /// `conflictResolution=OVERWRITE` on the POST is **not** an alternative: the
+    /// host answers 404 with an empty body.
     ///
     /// Reached only for a **name** conflict (a content duplicate keeps its
     /// conflict marker, see [`should_replace_after_conflict`]).
     ///
-    /// Sends the same request body (the file bytes) and the same header set as
-    /// the POST. The node already exists, so the URL carries neither name, size,
-    /// parent nor content date (`urls::replace_upload_url`).
+    /// The PUT carries **the same query set as the POST**: `conflictResolution`
+    /// (the `Replace` wire value `NONE`), `fileSize`, `name`, `parentNodeId` and
+    /// `contentDate` — built by `urls::upload_query`, shared with the POST URL so
+    /// the two cannot drift apart. Live-proven 2026-10-15: without `fileSize` the
+    /// host rejects the PUT with HTTP **400 `MissingFileSize`** ("File size should
+    /// not be empty."); only the path differs (the node id takes the place of the
+    /// bare `/v2/upload`). `file_name` is passed raw — the URL helper applies the
+    /// same NFC normalisation as the POST. The request body (the file bytes) and
+    /// the header set are the POST's, unchanged.
     ///
     /// A 2xx is success and yields `Ok(id)` — the id from the response, or the
     /// node id from the URL when the response names none
@@ -1205,12 +1230,25 @@ impl PrimePhotos {
     async fn replace_picture(
         &self,
         node_id: &str,
+        conflict_resolution: &str,
+        file_size: usize,
+        file_name: &str,
+        parent_node_id: &str,
+        content_date: &str,
         headers: &HeaderMap,
         contents: &[u8],
         pic_path: &Path,
     ) -> Result<String, String> {
-        let url = Url::parse(&urls::replace_upload_url(&self.conf.zone, node_id))
-            .expect("Can't parse the replace upload URL");
+        let url = Url::parse(&urls::replace_upload_url(
+            &self.conf.zone,
+            node_id,
+            conflict_resolution,
+            file_size,
+            file_name,
+            parent_node_id,
+            content_date,
+        ))
+        .expect("Can't parse the replace upload URL");
 
         let response = match self
             .client

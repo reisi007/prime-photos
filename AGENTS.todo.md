@@ -131,16 +131,18 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   war **kaputt**), PUT **nur** bei Namenskonflikt, ein Inhaltsduplikat bleibt „bereits im Konto"
   (identische Bytes erneut zu senden spart die Dedup-Semantik ein), PUT-Fehler zählt als Fehler.
   **Die Live-Abnahme schlug fehl** — sie fand genau den Fehler, der jetzt 2.2b ist.
-- **2.2b „Ersetzen" korrigieren — umgesetzt, Verifikation und Live-Abnahme offen (2026-10-15, vom
-  Nutzer beauftragt).** Unser `PUT` trug nur `conflictResolution=NONE`; der Server verlangt die
-  **Parameter des POST** (live: ohne `fileSize` ⇒ **400 `MissingFileSize`**, mit dem POST-Satz kommt
-  er durch die Validierung). **Geltende Regel (auch in `AGENTS.md`): der `PUT` trägt denselben
-  Query-Satz wie der POST** — über einen **gemeinsamen** Query-Bauer, kein geratenes Subset; welche
-  Parameter im Einzelnen Pflicht sind, bleibt bewusst offen. **Zweiter Live-Befund:** der `PUT`
-  unterliegt der Inhalts-Dedupe (identische Bytes ⇒ 409 statt 200) — deshalb wird ein
-  Inhaltsduplikat **nie** per PUT „ersetzt". **Abnahme (offen):** derselbe Live-Lauf noch einmal
-  (Knoten behält den Namen, Inhalt danach nachweislich der neue — Größe/MD5/Version), danach Knoten
-  + Testziel wieder entfernen.
+- **2.2b „Ersetzen" korrigieren — ✅ umgesetzt und verifiziert 2026-10-15 (Verifier APPROVE,
+  82 Tests); Live-Abnahme offen.** Unser `PUT` trug nur `conflictResolution=NONE`; der Server
+  verlangt die **Parameter des POST** (live: ohne `fileSize` ⇒ **400 `MissingFileSize`**, mit dem
+  POST-Satz kommt er durch die Validierung). **Geltende Regel (auch in `AGENTS.md`): der `PUT` trägt
+  denselben Query-Satz wie der POST** — gebaut **einmal** in `urls::upload_query`, benutzt von POST
+  **und** PUT, kein geratenes Subset; welche Parameter im Einzelnen Pflicht sind, bleibt bewusst
+  offen. Der Invarianten-Test `replace_upload_url_carries_the_same_query_as_the_post` pinnt genau
+  das. **Zweiter Live-Befund:** der `PUT` unterliegt der Inhalts-Dedupe (identische Bytes ⇒ 409 statt
+  200) — deshalb wird ein Inhaltsduplikat **nie** per PUT „ersetzt". **Abnahme (offen):** derselbe
+  Live-Lauf noch einmal (Knoten behält den Namen, Inhalt danach nachweislich der neue —
+  Größe/MD5/Version), danach Knoten + Testziel wieder entfernen. **Zwei Low-Funde des Verifiers sind
+  bewusst offen gelassen** (reine Doku, kein Logikfehler) und stehen in der 2.4-Liste.
 - **Eigenes Paket (beauftragt, läuft nach 2.3b und vor Welle 3): EXIF-loser Upload darf kein Fehler
   sein.** Ein **erfolgreicher** Upload von `c2.png` liefert gültiges JSON mit `id`/`name`, unser
   `ResponseUpload` verlangt aber `resolutionUnit` ⇒ serde bricht ab („missing field
@@ -200,6 +202,11 @@ Merge-Konflikte läuft; die Reihenfolge ist eine Empfehlung.
   vorbestehenden stale Zeilenreferenzen in `docs/SPEC_CONFLICT_OPTIONS.md` (§1.2 B1/B2/B3, §7-Refs
   auf `upload.rs`/`dedup.rs`) und der Widerspruch in `docs/SPEC_DUPLICATES.md` §3 („Dedupe über
   Pfade hinweg = fehlt") einsammeln, wenn die Datei ohnehin angefasst wird.
+  **(f) Zwei Low-Funde des 2.2b-Verifiers (2026-10-15, reine Doku):** `src/prime_photos.rs:1139`
+  behauptet im Kommentarblock weiterhin, das Original überschreibe per
+  `PUT …?conflictResolution=NONE` „live-proven: 200" — widerspricht dem neuen Kommentar bei
+  `:1149-1153` und der Spec; `src/folders.rs:153` und `docs/SPEC_DUPLICATES.md:286-287` führen
+  denselben veralteten Satz (dort ohne POST-Query). Beim nächsten Anfassen mitkorrigieren.
 
 ### Welle 3 — Progress-/UI-Umbau (entschieden; Recon liegt vor: `docs/SPEC_UPLOAD_PROGRESS.md` §7)
 - **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in

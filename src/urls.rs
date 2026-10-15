@@ -144,6 +144,9 @@ pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
 /// and the server compares names exactly, so an unnormalised NFD name would not
 /// match a node created from Windows (see `text::nfc`). Nothing is encoded — the
 /// original does not pre-encode the name either.
+///
+/// The query itself is built by [`upload_query`] and shared with the replace
+/// `PUT` ([`replace_upload_url`]), so the two stages cannot drift apart.
 pub(crate) fn upload_url(
     zone: &str,
     conflict_resolution: &str,
@@ -152,9 +155,39 @@ pub(crate) fn upload_url(
     parent_node_id: &str,
     content_date: &str,
 ) -> String {
+    format!(
+        "https://content-{zone}.drive.amazonaws.com/v2/upload?{q}",
+        q = upload_query(
+            conflict_resolution,
+            file_size,
+            name,
+            parent_node_id,
+            content_date
+        )
+    )
+}
+
+/// The query string **both** upload stages carry (`conflictResolution`,
+/// `fileSize`, `name`, `parentNodeId`, `contentDate`), in the order the desktop
+/// client uses. Built once here so the `POST` ([`upload_url`]) and the replace
+/// `PUT` ([`replace_upload_url`]) can never disagree: live-proven 2026-10-15,
+/// the host answers a `PUT` without `fileSize` with HTTP 400
+/// `MissingFileSize` — the replace stage must therefore send exactly the POST's
+/// set, only the path differs (the node id moves into it).
+///
+/// `name` is normalised to Unicode **NFC** ([`crate::text::nfc`]) — see
+/// [`upload_url`] for the full reasoning. Nothing is percent-encoded, matching
+/// the original.
+fn upload_query(
+    conflict_resolution: &str,
+    file_size: usize,
+    name: &str,
+    parent_node_id: &str,
+    content_date: &str,
+) -> String {
     let name = crate::text::nfc(name);
     format!(
-        "https://content-{zone}.drive.amazonaws.com/v2/upload?conflictResolution={}&fileSize={}&name={}&parentNodeId={}&contentDate={}",
+        "conflictResolution={}&fileSize={}&name={}&parentNodeId={}&contentDate={}",
         conflict_resolution, file_size, name, parent_node_id, content_date
     )
 }
@@ -167,19 +200,39 @@ pub(crate) fn upload_url(
 /// client's own overwrite path (`overwrite=true` + `nodeId`), live-proven: 200,
 /// the **same** node id, content actually swapped.
 ///
-/// The URL carries only the node id and the query. `name`, `fileSize`,
-/// `parentNodeId` and `contentDate` are deliberately absent: the node already
-/// exists, so the request identifies it by path and sends the same body (the
-/// file bytes) and the same header set as the POST.
+/// The `PUT` carries **the same query set as the POST** ([`upload_query`]:
+/// `conflictResolution=NONE`, `fileSize`, `name` (NFC-normalised),
+/// `parentNodeId`, `contentDate`; only the path differs (the node id takes the
+/// place of the bare `/v2/upload`). Live-proven 2026-10-15: without `fileSize`
+/// the host rejects the `PUT` with HTTP **400 `MissingFileSize`** ("File size
+/// should not be empty."). Body (the file bytes) and headers are the POST's,
+/// too ([`crate::prime_photos::PrimePhotos::replace_picture`]).
+///
+/// The parameters mirror [`upload_url`]'s, plus the `node_id`.
 ///
 /// The node id is **not** NFC-normalised (unlike [`upload_url`]'s `name`),
 /// because it is a **server** value — an opaque id echoed back in
 /// `errorDetails.conflictNodeIds[0]`, never a file name a filesystem could
 /// spell differently per OS. There is no NFD/NFC variant of an id that macOS and
 /// Windows could disagree about, so normalising could only corrupt it.
-pub(crate) fn replace_upload_url(zone: &str, node_id: &str) -> String {
+pub(crate) fn replace_upload_url(
+    zone: &str,
+    node_id: &str,
+    conflict_resolution: &str,
+    file_size: usize,
+    name: &str,
+    parent_node_id: &str,
+    content_date: &str,
+) -> String {
     format!(
-        "https://content-{zone}.drive.amazonaws.com/v2/upload/{node_id}?conflictResolution=NONE"
+        "https://content-{zone}.drive.amazonaws.com/v2/upload/{node_id}?{q}",
+        q = upload_query(
+            conflict_resolution,
+            file_size,
+            name,
+            parent_node_id,
+            content_date
+        )
     )
 }
 
@@ -334,24 +387,76 @@ mod tests {
     fn replace_upload_url_is_zone_and_node_exact() {
         // The German marketplace uploads into the `eu` zone.
         assert_eq!(
-            replace_upload_url("eu", "NODE1"),
-            "https://content-eu.drive.amazonaws.com/v2/upload/NODE1?conflictResolution=NONE"
+            replace_upload_url(
+                "eu",
+                "NODE1",
+                "NONE",
+                1234,
+                "foto.jpg",
+                "PARENT",
+                "2020-01-02T03:04:05.000Z"
+            ),
+            "https://content-eu.drive.amazonaws.com/v2/upload/NODE1?conflictResolution=NONE&fileSize=1234&name=foto.jpg&parentNodeId=PARENT&contentDate=2020-01-02T03:04:05.000Z"
         );
-        // A non-German marketplace (e.g. `us`) uses its own zone; only the host
-        // changes, path and query stay fixed.
+        // A non-German marketplace (e.g. `us` → the `na` zone) uses its own
+        // zone; only the host changes, path and query stay the same shape.
         assert_eq!(
-            replace_upload_url("na", "B0ABCDEF123"),
-            "https://content-na.drive.amazonaws.com/v2/upload/B0ABCDEF123?conflictResolution=NONE"
+            replace_upload_url(
+                "na",
+                "B0ABCDEF123",
+                "NONE",
+                7,
+                "a b.jpg",
+                "P",
+                "2020-01-02T03:04:05.000Z"
+            ),
+            "https://content-na.drive.amazonaws.com/v2/upload/B0ABCDEF123?conflictResolution=NONE&fileSize=7&name=a b.jpg&parentNodeId=P&contentDate=2020-01-02T03:04:05.000Z"
         );
         // The replace stage never sends the `OVERWRITE` value the host rejects.
-        let url = replace_upload_url("eu", "NODE1");
+        let url = replace_upload_url("eu", "NODE1", "NONE", 1, "f.jpg", "P", "d");
         assert!(!url.contains("OVERWRITE"));
-        assert!(!url.contains("fileSize="));
-        assert!(!url.contains("name="));
-        assert!(!url.contains("parentNodeId="));
-        assert!(!url.contains("contentDate="));
         // The node id is a server value and is passed through byte-exactly.
         assert!(url.contains("/v2/upload/NODE1?"));
+    }
+
+    #[test]
+    fn replace_upload_url_carries_the_same_query_as_the_post() {
+        // The invariant behind the 2026-10-15 live fix: the host rejects a
+        // `PUT` without `fileSize` with HTTP 400 `MissingFileSize`, so the
+        // replace stage must send exactly the POST's query set — the only
+        // difference between the two URLs is the node id in the path.
+        let post = upload_url(
+            "eu",
+            "NONE",
+            1234,
+            "foto.jpg",
+            "PARENT",
+            "2020-01-02T03:04:05.000Z",
+        );
+        let put = replace_upload_url(
+            "eu",
+            "NODE1",
+            "NONE",
+            1234,
+            "foto.jpg",
+            "PARENT",
+            "2020-01-02T03:04:05.000Z",
+        );
+        let post_query = post.split_once('?').expect("POST URL has a query").1;
+        let put_query = put.split_once('?').expect("PUT URL has a query").1;
+        assert_eq!(post_query, put_query);
+        // …and it is the full set, not just `conflictResolution`.
+        assert!(put.contains("conflictResolution=NONE"));
+        assert!(put.contains("fileSize=1234"));
+        assert!(put.contains("name=foto.jpg"));
+        assert!(put.contains("parentNodeId=PARENT"));
+        assert!(put.contains("contentDate=2020-01-02T03:04:05.000Z"));
+        // The PUT must be passed the **same** name, otherwise the two URLs
+        // would normalise differently: `name` is NFC-folded in both stages.
+        let nfd = "O\u{308}FB-Reisinger_01.dng";
+        let put = replace_upload_url("eu", "NODE1", "NONE", 7, nfd, "PARENT", "d");
+        assert!(put.contains("name=\u{D6}FB-Reisinger_01.dng"));
+        assert!(!put.contains('\u{308}'));
     }
 
     #[test]
