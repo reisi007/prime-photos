@@ -63,24 +63,9 @@ impl PrimePhotoApp {
                 self.apply_tray_labels();
             }
         });
-        ui.separator();
-
-        ui.heading(tr("Anmeldung"));
-        ui.label(theme::muted(tr(
-            "Melde dich bei Amazon Photos an. Die Cookies werden automatisch übernommen.",
-        )));
-        ui.horizontal(|ui| {
-            if ui.add(theme::primary_button(tr("Mit Amazon anmelden"))).clicked() {
-                self.pending_login = true;
-            }
-            if self.login.running {
-                ui.spinner();
-            }
-        });
-        if let Some(e) = &self.login.error {
-            ui.colored_label(theme::RED, e);
-        }
-
+        // No sign-in block here: the login is our own device flow, started
+        // automatically by the start gate; sign-out lives in the sidebar's
+        // account block. The old text described the removed cookie path.
         ui.separator();
         ui.heading(tr("Upload"));
         ui.horizontal(|ui| {

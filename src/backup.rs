@@ -1690,7 +1690,8 @@ impl PrimePhotoApp {
                                             let kebab = ui
                                                 .add(
                                                     egui::Button::image(icons::kebab_icon(ui))
-                                                        .image_tint_follows_text_color(true),
+                                                        .image_tint_follows_text_color(true)
+                                                        .frame(false),
                                                 )
                                                 .on_hover_text(tr("Aktionen"));
                                             let popup_id =
@@ -1704,6 +1705,13 @@ impl PrimePhotoApp {
                                                 &kebab,
                                                 egui::popup::PopupCloseBehavior::CloseOnClick,
                                                 |ui| {
+                                                    // popup_below_widget sizes the popup to
+                                                    // its parent widget — here the ~26 px
+                                                    // kebab icon — which would wrap every
+                                                    // entry character by character.
+                                                    ui.set_min_width(220.0);
+                                                    ui.style_mut().wrap_mode =
+                                                        Some(egui::TextWrapMode::Extend);
                                                     if ui
                                                         .button(tr("Im Dateimanager anzeigen"))
                                                         .clicked()
@@ -1731,7 +1739,8 @@ impl PrimePhotoApp {
                                             if ui
                                                 .add(
                                                     egui::Button::image(icons::refresh_icon(ui))
-                                                        .image_tint_follows_text_color(true),
+                                                        .image_tint_follows_text_color(true)
+                                                        .frame(false),
                                                 )
                                                 .on_hover_text(tr("Jetzt scannen und hochladen"))
                                                 .clicked()

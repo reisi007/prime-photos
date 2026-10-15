@@ -260,10 +260,7 @@ const EN: &[(&str, &str)] = &[
     ),
     ("KB/Sekunde", "KB/second"),
     ("Konfiguration: {}", "Configuration: {}"),
-    (
-        "Melde dich bei Amazon Photos an. Die Cookies werden automatisch übernommen.",
-        "Sign in to Amazon Photos. The cookies are captured automatically.",
-    ),
+
     ("Nach dem Anmelden starten", "Launch at login"),
     ("Hintergrund-Synchronisierung", "Background sync"),
     ("Sucht automatisch nach neuen Dateien in den aktiven Sicherungszielen. Läuft nur, solange Prime Photos geöffnet ist.",

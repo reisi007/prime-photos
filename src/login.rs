@@ -129,7 +129,6 @@ impl WebviewLogin {
         self.login_generation += 1;
         let auth_code = Arc::clone(&self.auth_code);
         match WebViewBuilder::new()
-            .with_url(url)
             .with_bounds(bounds)
             .with_navigation_handler(move |url: String| match extract_authorization_code(&url) {
                 Some(code) => {
@@ -141,9 +140,24 @@ impl WebviewLogin {
             .build_as_child(window)
         {
             Ok(wv) => {
-                WEBVIEW.with(|slot| *slot.borrow_mut() = Some(wv));
-                self.running = true;
-                self.error = None;
+                // Clear the browser storage first, then load: every sign-in
+                // starts without the previous session's state (original
+                // behaviour, docs/SPEC_LOGIN.md § 3.3).
+                if let Err(e) = wv.clear_all_browsing_data() {
+                    log::warn!("Login-Speicher konnte nicht geleert werden: {e}");
+                }
+                match wv.load_url(url) {
+                    Ok(()) => {
+                        WEBVIEW.with(|slot| *slot.borrow_mut() = Some(wv));
+                        self.running = true;
+                        self.error = None;
+                    }
+                    Err(e) => {
+                        log::warn!("Anmeldeseite konnte nicht geladen werden: {e}");
+                        self.error =
+                            Some(tr("Anmeldeseite konnte nicht geöffnet werden.").to_string());
+                    }
+                }
             }
             Err(e) => {
                 log::warn!("Anmeldeseite konnte nicht geöffnet werden: {e}");
