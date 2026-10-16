@@ -63,6 +63,16 @@ fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
         })
 }
 
+/// Clamp a target's completed count to its total for display (Welle 5.11): an
+/// inconsistent legacy state (`total_files < uploaded_files`, once rendered as
+/// "320 %") must never read above 100 %. `total == 0` yields `0` — the folder's
+/// progress text is empty then ([`crate::upload::folder_progress_text`]) and the
+/// aggregate bar guards its division. Pure, so the row's percent text and the
+/// aggregate bar below stay consistent.
+fn capped_done(done: usize, total: usize) -> usize {
+    done.min(total)
+}
+
 /// Forced pause (user decision 2026-10-16, `docs/SPEC_MISSING_SOURCE.md`): a
 /// backup target whose source folder is gone must be **paused**, not errored —
 /// and it must recover by itself once the source is back.
@@ -1673,13 +1683,15 @@ impl PrimePhotoApp {
         let _ = self.store.save();
         // The transient one-time target is settled the same way, but from the
         // synthetic `ONE_TIME_IDX` counters and onto `self.one_time` — nothing
-        // is written back to the store here.
+        // is written back to the store here. `folder_total` is the trigger
+        // (Welle 5.11), exactly like the persisted folders above: a run whose
+        // files **all** fail has no `folder_done` entry, so a `folder_done`
+        // trigger left this row stuck on the `Uploading` it was born with
+        // (`begin_one_time_run`). `folder_failed` decides the outcome.
         if let Some(one) = self.one_time.as_mut() {
-            if let Some(&done) = folder_done.get(&ONE_TIME_IDX) {
-                if let Some(&total) = folder_total.get(&ONE_TIME_IDX) {
-                    one.total_files = total;
-                }
-                one.uploaded_files = done;
+            if let Some(&total) = folder_total.get(&ONE_TIME_IDX) {
+                one.total_files = total;
+                one.uploaded_files = folder_done.get(&ONE_TIME_IDX).copied().unwrap_or(0);
                 one.last_updated = now.clone();
                 one.status = if folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0) > 0 {
                     FolderStatus::Error
@@ -1754,6 +1766,10 @@ impl PrimePhotoApp {
                 .map(|(i, f)| {
                     let total = s.folder_total.get(&i).copied().unwrap_or(f.total_files);
                     let done = s.folder_done.get(&i).copied().unwrap_or(f.uploaded_files);
+                    // Cap the completed count (Welle 5.11): a legacy folder whose
+                    // `total_files < uploaded_files` must not read above 100 % in
+                    // the row's progress text; the same value feeds the aggregate.
+                    let done = capped_done(done, total);
                     // Live status (Welle 3.3): while the run counts this target in
                     // `folder_total` it is *uploading*, regardless of the (stale)
                     // persisted status — the persisted outcome only applies once
@@ -1805,6 +1821,8 @@ impl PrimePhotoApp {
                     .get(&ONE_TIME_IDX)
                     .copied()
                     .unwrap_or(one.uploaded_files);
+                // Same cap as the persisted rows (Welle 5.11).
+                let done = capped_done(done, total);
                 // Same live-status rule as the persisted folders (Welle 3.3).
                 let status = if s.active && s.folder_total.contains_key(&ONE_TIME_IDX) {
                     FolderStatus::Uploading
@@ -2455,6 +2473,18 @@ mod tests {
         // the sum (and the caller guards the division by zero).
         let rows = vec![row(0, 0, 0), row(1, 10, 3)];
         assert_eq!(aggregate_progress(&rows), (3, 10));
+    }
+
+    #[test]
+    fn capped_done_never_exceeds_total() {
+        // Normal progress passes through unchanged.
+        assert_eq!(capped_done(5, 10), 5);
+        assert_eq!(capped_done(10, 10), 10);
+        // The inconsistent legacy state (once shown as "320 %") is capped at 100 %.
+        assert_eq!(capped_done(320, 100), 100);
+        // No known total: no progress, and never a division by zero downstream.
+        assert_eq!(capped_done(0, 0), 0);
+        assert_eq!(capped_done(3, 0), 0);
     }
 
     #[test]
