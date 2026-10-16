@@ -43,6 +43,14 @@ use std::path::{Path, PathBuf};
 //   of the `* { color: … }` one the tray glyphs use:
 //     assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
 //     assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
+//
+//   macOS app icon (the Dock/taskbar icon of the .app bundle):
+//     assets/logo.svg ⇒ <target>/pp-appicon.iconset/<name>.png  (10 files)
+//   Deliberately **not** inside `$OUT_DIR`: `packaging/make-app.sh` hands the
+//   directory to `iconutil -c icns` to build `Contents/Resources/AppIcon.icns`,
+//   so it has to live at a path the script can name. `<target>` is recovered
+//   from `$OUT_DIR` (see `target_dir_from_out_dir`). The ten file names and
+//   their pixel sizes are fixed by `iconutil` and must not be renamed.
 
 /// Tray glyph stems, in the order idle / active / paused / done / error.
 const TRAY_STEMS: [&str; 5] = [
@@ -70,6 +78,26 @@ const LOGOS: [(&str, u32); 3] = [
 /// Row-action icon stems (Material Symbols) plus the pixel size to raster them
 /// at. Rastered white, one file each — the UI tints them at run time.
 const ICONS: [(&str, u32); 2] = [("icon-more-vert", 64), ("icon-refresh", 64)];
+
+/// Directory (directly under Cargo's `<target>`) that `packaging/make-app.sh`
+/// feeds to `iconutil` to build `AppIcon.icns`.
+const APPICON_ICONSET_DIR: &str = "pp-appicon.iconset";
+
+/// The ten iconset entries `iconutil` requires, as (file name, pixel size).
+/// The names and sizes are mandated by `iconutil` and mirrored by the Tray/
+/// Dock icon of the bundle; they are rastered from `assets/logo.svg`.
+const APPICON_ICONSET: [(&str, u32); 10] = [
+    ("icon_16x16.png", 16),
+    ("icon_16x16@2x.png", 32),
+    ("icon_32x32.png", 32),
+    ("icon_32x32@2x.png", 64),
+    ("icon_128x128.png", 128),
+    ("icon_128x128@2x.png", 256),
+    ("icon_256x256.png", 256),
+    ("icon_256x256@2x.png", 512),
+    ("icon_512x512.png", 512),
+    ("icon_512x512@2x.png", 1024),
+];
 
 /// How a source's paint is recoloured before rasterising.
 enum Recolor {
@@ -115,6 +143,58 @@ fn main() {
         let png = format!("{stem}.png");
         render(&manifest_dir, &out_dir, &svg, Recolor::Fill("#ffffff"), &png, size);
     }
+
+    // The macOS app icon: the ten iconset rasters next to (not inside) OUT_DIR,
+    // where `packaging/make-app.sh` picks them up for `iconutil`.
+    let iconset_dir = target_dir_from_out_dir(&out_dir).join(APPICON_ICONSET_DIR);
+    if iconset_dir.is_dir() {
+        std::fs::remove_dir_all(&iconset_dir).unwrap_or_else(|e| {
+            panic!(
+                "Prime Photos build.rs: altes iconset-Verzeichnis konnte nicht entfernt werden: {} ({e})",
+                iconset_dir.display()
+            )
+        });
+    }
+    std::fs::create_dir_all(&iconset_dir).unwrap_or_else(|e| {
+        panic!(
+            "Prime Photos build.rs: iconset-Verzeichnis konnte nicht angelegt werden: {} ({e})",
+            iconset_dir.display()
+        )
+    });
+    for (png, size) in APPICON_ICONSET {
+        render(&manifest_dir, &iconset_dir, "logo.svg", Recolor::AsIs, png, size);
+    }
+}
+
+/// Recover Cargo's `<target>` directory from `OUT_DIR`.
+///
+/// `OUT_DIR` has the shape `<target>/<profile>/build/<crate>-<hash>/out`. This
+/// walks up to the ancestor named `build` and returns its grandparent. Panics
+/// with the offending path when the shape is unexpected: the iconset location
+/// is a contract with `packaging/make-app.sh`, so a silent fallback would drop
+/// the files where `iconutil` never looks — fail fast instead.
+fn target_dir_from_out_dir(out_dir: &Path) -> PathBuf {
+    for ancestor in out_dir.ancestors() {
+        if ancestor.file_name() == Some(std::ffi::OsStr::new("build")) {
+            let profile = ancestor.parent().unwrap_or_else(|| {
+                panic!(
+                    "Prime Photos build.rs: '<target>/<profile>/build' erwartet, aber dem 'build'-Verzeichnis fehlt der Profil-Elternteil: {}",
+                    out_dir.display()
+                )
+            });
+            let target = profile.parent().unwrap_or_else(|| {
+                panic!(
+                    "Prime Photos build.rs: '<target>/<profile>/build' erwartet, aber dem Profil-Verzeichnis fehlt der target-Elternteil: {}",
+                    out_dir.display()
+                )
+            });
+            return target.to_path_buf();
+        }
+    }
+    panic!(
+        "Prime Photos build.rs: OUT_DIR ohne 'build'-Verzeichnis im Pfad (erwartet '<target>/<profile>/build/<crate>/out'): {}",
+        out_dir.display()
+    );
 }
 
 /// Raster `assets/<svg_name>` into `$OUT_DIR/<png_name>` at `size` px wide

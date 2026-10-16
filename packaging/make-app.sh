@@ -7,9 +7,11 @@
 #   2. target/dist/Prime Photos.app/ assemblieren (Contents/MacOS + Contents/Resources)
 #   3. target/release/prime-photos -> Contents/MacOS/prime-photos
 #   4. Contents/Info.plist aus packaging/Info.plist schreiben (__VERSION__/__BUILD__ ersetzt)
-#   5. codesign --force --options runtime --sign "$CODESIGN_IDENTITY" (Standard: "-" = ad-hoc)
+#   5. Contents/Resources/AppIcon.icns aus target/pp-appicon.iconset bauen (iconutil);
+#      das iconset rastert build.rs aus assets/logo.svg, es ist nicht eingecheckt
+#   6. codesign --force --options runtime --sign "$CODESIGN_IDENTITY" (Standard: "-" = ad-hoc)
 #      und anschließendes codesign --verify --verbose=2
-#   6. Pfad + Startkommando ausgeben
+#   7. Pfad + Startkommando ausgeben
 #
 # Umgebungsvariablen:
 #   SKIP_BUILD=1                 überspringt `cargo build --release`
@@ -22,6 +24,8 @@
 # unversionierter Build-Müll im Repo entsteht.
 # Idempotent: ein erneuter Lauf entfernt das Bundle und baut es sauber neu.
 # Hinweis: bindet keine neuen Abhängigkeiten und braucht kein Netz. Nur macOS.
+# Hinweis: CARGO_TARGET_DIR wird nicht berücksichtigt — das iconset legt build.rs in
+# `<target>/pp-appicon.iconset` ab, dieses Skript liest es aus `target/pp-appicon.iconset`.
 
 set -euo pipefail
 
@@ -40,6 +44,9 @@ BIN_SRC="target/release/${BIN_NAME}"
 DIST_DIR="${DIST_DIR:-target/dist}"
 APP_DIR="${DIST_DIR}/${APP_NAME}.app"
 CONTENTS="${APP_DIR}/Contents"
+
+# Von build.rs aus assets/logo.svg erzeugt (siehe build.rs, kein eingechecktes Icon).
+ICONSET_DIR="${REPO_ROOT}/target/pp-appicon.iconset"
 
 # --- 1) Build -----------------------------------------------------------------
 if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
@@ -70,12 +77,20 @@ sed -e "s/__VERSION__/${VERSION}/g" -e "s/__BUILD__/${BUILD}/g" \
 plutil -lint "${CONTENTS}/Info.plist" >/dev/null
 echo "    Info.plist gültig"
 
-# --- 5) Codesignieren + verifizieren ------------------------------------------
+# --- 5) App-Icon (.icns) aus dem Build-erzeugten iconset ----------------------
+if [[ ! -d "${ICONSET_DIR}" ]]; then
+	echo "FEHLER: ${ICONSET_DIR} fehlt. build.rs legt es an; ohne SKIP_BUILD=1 entsteht es beim Build, sonst zuerst 'cargo build' ausführen." >&2
+	exit 1
+fi
+echo "==> AppIcon.icns aus ${ICONSET_DIR} bauen (iconutil)"
+iconutil -c icns "${ICONSET_DIR}" -o "${CONTENTS}/Resources/AppIcon.icns"
+
+# --- 6) Codesignieren + verifizieren ------------------------------------------
 echo "==> codesign (Identität: ${CODESIGN_IDENTITY})"
 codesign --force --options runtime --sign "${CODESIGN_IDENTITY}" "${APP_DIR}"
 codesign --verify --verbose=2 "${APP_DIR}"
 
-# --- 6) Ergebnis melden -------------------------------------------------------
+# --- 7) Ergebnis melden -------------------------------------------------------
 echo
 echo "Fertig: ${REPO_ROOT}/${APP_DIR}"
 echo "Starten:"

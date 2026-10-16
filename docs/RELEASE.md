@@ -71,6 +71,12 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
 
 - Das Skript baut `cargo build --release`, assembliert das Bundle und signiert **ad-hoc**
   (`codesign --sign -`). Eine eigene Identität ist per `CODESIGN_IDENTITY="<Name>"` möglich.
+- **App-Icon:** das Dock-/Taskbar-Icon wird **im Build** erzeugt, nichts ist eingecheckt —
+  `build.rs` rastert `assets/logo.svg` (die SVG-Quelle) in die zehn iconset-Größen nach
+  `target/pp-appicon.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
+  `iconutil -c icns` in `Contents/Resources/AppIcon.icns` um. `Contents/Info.plist` verweist
+  per `CFBundleIconFile = AppIcon` darauf. (`CARGO_TARGET_DIR` wird dabei nicht
+  berücksichtigt: das Skript liest das iconset aus `target/`.)
 - Kein `codesign --deep` (von Apple abgeraten). Details: `packaging/README.md`.
 - Das fertige Bundle wird bei Bedarf **manuell** an ein bestehendes GitHub Release gehängt
   (ein `.zip` per `ditto -c -k --keepParent "Prime Photos.app" Prime-Photos-macos-arm64.zip`

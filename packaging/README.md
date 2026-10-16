@@ -31,6 +31,13 @@ Das erzeugt `target/dist/Prime Photos.app` und signiert sie **ad-hoc** (`codesig
 open "target/dist/Prime Photos.app"
 ```
 
+Das Bundle trägt ein **App-Icon** (Dock-/Taskbar-Icon): `build.rs` rastert die SVG-Quelle
+`assets/logo.svg` in die zehn iconset-Größen nach `target/pp-appicon.iconset/`, und `make-app.sh`
+bündelt dieses Verzeichnis mit `iconutil -c icns` zu `Contents/Resources/AppIcon.icns`. Darauf
+verweist `CFBundleIconFile = AppIcon` in `packaging/Info.plist`. Das Icon entsteht also **im Build
+und ist nicht eingecheckt** — im Repo liegt keine `.icns`/PNG-Datei, sie liegt unter dem
+ignorierten `target/`.
+
 ### Umgebungsvariablen
 
 | Variable | Wirkung | Standard |
@@ -82,7 +89,9 @@ CODESIGN_IDENTITY="Prime Photos Codesign" ./packaging/make-app.sh
 
 Das Skript ruft `codesign --force --options runtime --sign "<Name>"` auf und prüft mit
 `codesign --verify --verbose=2`. Zum erneuten Signieren nur der Signatur-Schritt reicht
-`SKIP_BUILD=1` (bzw. ein erneuter vollständiger Lauf — das Bundle wird dabei sauber neu gebaut).
+`SKIP_BUILD=1` (bzw. ein erneuter vollständiger Lauf — das Bundle wird dabei sauber neu gebaut); mit
+`SKIP_BUILD=1` muss das vom Build erzeugte `target/pp-appicon.iconset` allerdings schon aus einem
+früheren Build vorliegen, sonst bricht das Skript beim Icon-Schritt ab.
 
 ## Windows (nur Hinweis)
 
@@ -104,10 +113,11 @@ Archiv mitzugeben. **AppImage/Flatpak/.deb sind nicht Teil dieses Skripts** (out
   nur mit einer Developer-ID-Signatur sinnvoll.
 - Ob macOS-Benachrichtigungen im signierten Bundle zuverlässig erscheinen, ist nicht geprüft
   (siehe `docs/BUILD.md` §7).
-- Es gibt **kein App-Icon** (`.icns`) im Bundle — `Contents/Resources` bleibt leer. Ein
-  `CFBundleIconFile`-Eintrag ist deshalb bewusst nicht gesetzt.
 - Der komplette Ablauf wurde auf diesem Rechner ausgeführt (ad-hoc, `EXIT=0`): Bundle unter
   `target/dist/Prime Photos.app`, `Info.plist` ersetzt, `codesign -dv` meldet `Signature=adhoc`,
   `codesign --verify --verbose=2` meldet „valid on disk / satisfies its Designated Requirement".
+  Der Icon-Schritt ist ebenso belegt: `iconutil -c icns target/pp-appicon.iconset` liefert eine
+  gültige `.icns`, die sich über alle zehn Größen (16–1024 px) zurückwandeln lässt; das Bundle
+  enthält `Contents/Resources/AppIcon.icns` und `CFBundleIconFile = AppIcon` im `Info.plist`.
   **Nicht** verifiziert ist der Pfad mit einer selbstsignierten Identität (`CODESIGN_IDENTITY=<Name>`),
   da hier bewusst kein Zertifikat angelegt wird.
