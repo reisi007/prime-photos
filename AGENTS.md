@@ -628,6 +628,11 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   Hauptagenten") ist damit wieder **aufgehoben**. `step-5-preview-free` ist **tot** (vom Anbieter
   2026-10-15 entfernt) und darf nicht zurückkommen.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
+- **Provider-Fehler („Endpoint is unavailable", User-Regel 2026-10-16):** die Subagent-Sessions
+  brechen gelegentlich ab (nach Erfahrung **etwa die Hälfte** der Läufe), **die Arbeit überlebt** auf
+  der Platte. Dann **nicht** lange diagnostizieren, sondern **„weiter"**: die Session fortsetzen
+  bzw. eine kurze Folge-Session auf den vorhandenen Diff ansetzen (Ziel-Dateien, „arbeite darauf
+  auf", grün bauen, Bericht). Kein Zurücksetzen, keine Neu-Erzählung des Auftrags.
 - **CI/Release (User-Entscheidung 2026-10-13, hebt „Kein Push, kein CI" auf):** Ziel ist ein
   öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).
   - **Push/PR gegen `main`:** nur **Linux** — `cargo build` + `cargo test` als Pflicht-Gate; die
