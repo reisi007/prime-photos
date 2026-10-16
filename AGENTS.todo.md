@@ -83,6 +83,23 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    gegen das Verhalten des Originals stellen und die TODOs dorthin ableiten. **Achtung:** das ist
    mehr als Kosmetik — „Pause pro Ordner" ist heute **Post-MVP** (Original hat ein Zeilen-Symbol);
    der Unterschied ist, dass diese Pause **automatisch** aus dem fehlenden Ordner folgt.
+   **Am Code belegt (Spec 2026-10-16, 293 → 456 Zeilen):** das Original hat genau das — bei
+   Laufwerksentfernung setzt `BackupScannerWorker.HandleDeviceRemoval` **`PauseSource.SystemPaused`**,
+   beim Wiederanschließen hebt `HandleDeviceArrival` sie auf (`EnableAutoConnect`); erkannt wird das
+   über `ObservableHardwareChangeWatcher` (`NSWorkspace`-Mount/Unmount), die Laufwerksidentität liegt
+   in `.AmazonDriveConfig` als GUID. **Abgeleitete TODOs (aus der Spec, hierher übernommen):**
+   - **T1 (vor Release)** `FolderStatus::Paused` bei fehlendem Ordner zuweisen — Kaltstart, Watcher
+     **und** manueller Rescan.
+   - **T2 (vor Release)** Wasserzeichen-Guard: `record_folder_scan` **nur** bei vorhandenem Ordner.
+   - **T3 (vor Release)** UI-Hinweis „Angehalten (X%)" in AMBER (existiert, nur zuweisen).
+   - **T4 (vor Release)** Wiederanschließen aktiv erkennen statt 30-s-Polling.
+   - **T5 (vor Release)** verständliche Meldung statt „Keine Fotos gefunden", wenn der Ordner fehlt.
+   - **T6–T9 (Post-MVP)** Volume-GUID wie das Original; `HandleDeviceArrival`/`Removal` als aktive
+     Hardware-Erkennung; der Bearbeiten-Dialog prüft den Pfad wie der Anlegen-Dialog; ein
+     `ScheduleError`-Äquivalent „Ordner nicht verfügbar".
+   **UNKNOWN geblieben:** Netzwerk-Laufwerk-Sonderfall, Latenz des Wiederanschließens, was das
+   Original mit Dateien macht, die **während** eines Laufs verschwinden, und Windows/Linux-Verhalten
+   (`NSWorkspace` ist macOS-only).
 8. [ ] **Warteschlange zu hoch (User-Entscheidung: feste Regel „Ordner zuerst, Warteschlange
    max. 50 %").** Ursache im Code belegt: `table_h = free − QUEUE_BELOW_H(88) −
    FOLDER_LIST_MIN_H(200)` (`src/backup.rs:1751`) — die Warteschlange bekommt **jeden Überschuss**,
