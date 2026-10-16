@@ -357,7 +357,7 @@ Not re-quoted here (owned by other docs): the status-popup titles
 | Autostart / login item | preference via `osascript` System Events; auto-enabled at onboarding | **partial** — `auto-launch` crate in **LaunchAgent mode** (plist under `~/Library/LaunchAgents`, no AppleScript); settings checkbox "Nach dem Anmelden starten"; *inferred* not auto-enabled at first sign-in (no onboarding default found) | `Cargo.toml` (`auto-launch`), `src/app.rs` (`Autostart`, `build_autostart`), `src/settings.rs` |
 | Notifications | `NSUserNotification` + status item | `notify-rust` run-finished toast → cross-ref | `src/notify.rs`, `docs/SPEC_NOTIFICATIONS.md` |
 | Apple Photos import | `NSPhotoLibraryUsageDescription` + entitlement | **out of scope** (MVP excludes the import) | — |
-| Bundle packaging | full `Info.plist` (URL, services, LSUIElement…) | template with identifier/version/category only; `make-app.sh` signs ad-hoc; **no icon copied, no `CFBundleIconFile`** (observed) | `packaging/Info.plist`, `packaging/make-app.sh` |
+| Bundle packaging | full `Info.plist` (URL, services, LSUIElement…) | template with identifier/version/category only; `make-app.sh` signs ad-hoc; **app icon copied and `CFBundleIconFile = AppIcon`** (observed) — `Contents/Resources/AppIcon.icns`, built from `assets/logo.svg` (`build.rs` → `target/pp-appicon.iconset` → `iconutil` in `make-app.sh`), **not checked in** | `packaging/Info.plist`, `packaging/make-app.sh` |
 
 ---
 
