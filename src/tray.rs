@@ -176,8 +176,8 @@ impl Tray {
 //   colours: black (#000000) / white (#ffffff)
 //   sizes:   32 (1×) / 64 ("@2x") — macOS takes the 64-px source, the other
 //     platforms the 32-px one (the tray scales to the menu-bar height).
-// The coloured `logo.png` (from `assets/logo.svg`, 1024 px) is the fallback
-// glyph for an unknown OS theme.
+// The coloured `logo-small.png` (from `assets/logo-small.svg`, 256 px) is the
+// fallback glyph for an unknown OS theme.
 
 /// Visual state of the tray icon, derived by the pure [`tray_state`] function.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,7 +267,7 @@ const WHITE_PNGS_32: [&[u8]; 5] = [
 ];
 
 #[cfg(not(target_os = "macos"))]
-const LOGO_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo.png"));
+const LOGO_SMALL_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo-small.png"));
 
 /// Decoded glyphs, keyed by [`TrayState::index`].
 struct TrayIcons {
@@ -290,7 +290,7 @@ impl TrayIcons {
         let icons = Self {
             black,
             white: WHITE_PNGS_32.map(decode_icon),
-            logo: decode_icon(LOGO_PNG),
+            logo: decode_icon(LOGO_SMALL_PNG),
         };
         icons
     }

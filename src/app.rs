@@ -819,11 +819,15 @@ impl PrimePhotoApp {
 
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(app_logo(ui, 24.0));
-            ui.add_space(6.0);
-            ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
-        });
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 30.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add(app_logo(ui, 30.0));
+                ui.add_space(6.0);
+                ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
+            },
+        );
         ui.add_space(16.0);
         Self::nav_item(
             ui,

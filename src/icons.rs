@@ -23,7 +23,8 @@ use eframe::egui::{self, Color32};
 //   assets/icon-settings.svg  ⇒ $OUT_DIR/icon-settings.png  (64 px, white)
 //   assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
 //   assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
-//   assets/logo-small.svg     ⇒ $OUT_DIR/logo-small.png     (256 px, colour)
+//   assets/logo.svg           ⇒ $OUT_DIR/logo.png           (1024 px, colour, App-UI)
+//   assets/logo-small.svg     ⇒ $OUT_DIR/logo-small.png     (256 px, colour, Tray-Fallback)
 // The rasters are deliberately white: the buttons and the sidebar tint them to
 // the theme colour, so one raster per icon covers light and dark themes.
 
@@ -36,8 +37,8 @@ const NAV_SETTINGS_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-s
 const MORE_VERT_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-more-vert.png"));
 /// The refresh ("scan and upload now") row-action icon, as a build-time PNG.
 const REFRESH_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-refresh.png"));
-/// The app logo (`assets/logo-small.svg`, 256 px, coloured), as a build-time PNG.
-const LOGO_SMALL_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo-small.png"));
+/// The detailed app logo (`assets/logo.svg`, 1024 px, coloured), as a build-time PNG.
+const APP_LOGO_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo.png"));
 
 /// Logical display size of a sidebar navigation icon, in points. The sidebar
 /// icon column is 18 px wide; the row-action icons' 17 pt are a different
@@ -71,7 +72,7 @@ pub(crate) fn refresh_icon(ui: &egui::Ui) -> egui::Image<'static> {
 /// The app logo at an exact square size. Unlike the navigation icons this is
 /// **not** tinted: the logo is coloured and carries the brand identity.
 pub(crate) fn app_logo(ui: &egui::Ui, size: f32) -> egui::Image<'static> {
-    let texture = icon_texture(ui.ctx(), "logo", LOGO_SMALL_PNG);
+    let texture = icon_texture(ui.ctx(), "logo", APP_LOGO_PNG);
     egui::Image::new(egui::load::SizedTexture::from_handle(&texture))
         .fit_to_exact_size(egui::vec2(size, size))
 }

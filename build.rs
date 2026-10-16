@@ -35,7 +35,6 @@ use std::path::{Path, PathBuf};
 //   Logos (rastered as-is, no colour substitution):
 //     assets/logo.svg             ⇒ $OUT_DIR/logo.png             (1024 px)
 //     assets/logo-small.svg       ⇒ $OUT_DIR/logo-small.png       (256 px)
-//     assets/logo-small-black.svg ⇒ $OUT_DIR/logo-small-black.png (256 px)
 //
 //   UI icons (Material Symbols, Apache-2.0 — see docs/dev/THIRD_PARTY.md): the two
 //   sidebar navigation icons and the two row-action icons, rastered white so
@@ -73,10 +72,9 @@ const TRAY_COLORS: [(&str, &str); 2] = [("black", "#000000"), ("white", "#ffffff
 const TRAY_SIZES: [u32; 2] = [32, 64];
 
 /// Logo stem plus the pixel size to raster it at.
-const LOGOS: [(&str, u32); 3] = [
+const LOGOS: [(&str, u32); 2] = [
     ("logo", 1024),
     ("logo-small", 256),
-    ("logo-small-black", 256),
 ];
 
 /// UI icon stems (Material Symbols) plus the pixel size to raster them at: the
