@@ -66,6 +66,43 @@ impl Origin {
     }
 }
 
+/// The one and only definition of the `uploads` table (plus its MD5 index).
+///
+/// A fresh database and the repair path of [`DedupIndex::from_conn`] both run
+/// exactly this DDL, so the two schemas can never drift apart.
+const UPLOADS_DDL: &str = "\
+CREATE TABLE IF NOT EXISTS uploads (
+     path        TEXT PRIMARY KEY,
+     md5         TEXT NOT NULL,
+     size        INTEGER NOT NULL,
+     mtime       INTEGER NOT NULL,
+     uploaded_at TEXT NOT NULL,
+     origin      TEXT NOT NULL DEFAULT 'uploaded',
+     node_id     TEXT
+ );
+ CREATE INDEX IF NOT EXISTS ix_uploads_md5 ON uploads(md5);";
+
+/// The remaining tables: the cold-start watermark (`folder_scan`) and the
+/// persisted one-time drag & drop queue (`one_time_queue`). They are independent
+/// of the `uploads` schema and survive a repair untouched.
+const AUX_TABLES_DDL: &str = "\
+CREATE TABLE IF NOT EXISTS folder_scan (
+     path       TEXT PRIMARY KEY,
+     max_mtime  INTEGER NOT NULL,
+     scanned_at TEXT NOT NULL
+ );
+ -- Persisted one-time (drag & drop) queue (user decision 2026-10-14): one row
+ -- per already-resolved file, ordered by `position`. The table holds at most
+ -- ONE queue — a new drop replaces every row. `position` is the primary key, so
+ -- the order is fixed and reproducible across a restart. The row's
+ -- `display_path` is stored on every row (denormalised): the spec mandates one
+ -- row per file, and the value is identical for all rows of a queue.
+ CREATE TABLE IF NOT EXISTS one_time_queue (
+     position     INTEGER PRIMARY KEY,
+     display_path TEXT NOT NULL,
+     path         TEXT NOT NULL
+ );";
+
 impl DedupIndex {
     /// Open (creating if needed) the persistent index. Falls back to an
     /// in-memory database and then to a no-op on any error.
@@ -92,52 +129,50 @@ impl DedupIndex {
     }
 
     fn from_conn(conn: Connection) -> Self {
-        let ok = conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS uploads (
-                     path        TEXT PRIMARY KEY,
-                     md5         TEXT NOT NULL,
-                     size        INTEGER NOT NULL,
-                     mtime       INTEGER NOT NULL,
-                     uploaded_at TEXT NOT NULL,
-                     origin      TEXT NOT NULL DEFAULT 'uploaded',
-                     node_id     TEXT
-                 );
-                 CREATE INDEX IF NOT EXISTS ix_uploads_md5 ON uploads(md5);
-                 CREATE TABLE IF NOT EXISTS folder_scan (
-                     path       TEXT PRIMARY KEY,
-                     max_mtime  INTEGER NOT NULL,
-                     scanned_at TEXT NOT NULL
-                 );
-                 -- Persisted one-time (drag & drop) queue (user decision
-                 -- 2026-10-14): one row per already-resolved file, ordered by
-                 -- `position`. The table holds at most ONE queue — a new drop
-                 -- replaces every row. `position` is the primary key, so the
-                 -- order is fixed and reproducible across a restart. The row's
-                 -- `display_path` is stored on every row (denormalised): the
-                 -- spec mandates one row per file, and the value is identical
-                 -- for all rows of a queue.
-                 CREATE TABLE IF NOT EXISTS one_time_queue (
-                     position     INTEGER PRIMARY KEY,
-                     display_path TEXT NOT NULL,
-                     path         TEXT NOT NULL
-                 );",
-            )
-            .is_ok();
+        let ok = conn.execute_batch(UPLOADS_DDL).is_ok()
+            && conn.execute_batch(AUX_TABLES_DDL).is_ok();
         if !ok {
             return Self { conn: None };
         }
-        // Databases created before 2026-10-14 lack the `origin` column: the
-        // `CREATE TABLE IF NOT EXISTS` above leaves an existing table untouched,
-        // so the column is added explicitly. Best effort — a failed migration
-        // only costs the origin distinction, never correctness.
+        // Databases created before 2026-10-14 lack the `origin` column, and
+        // those created before 2026-10-16 lack `node_id`: the `CREATE TABLE IF
+        // NOT EXISTS` above leaves an existing table untouched, so each missing
+        // column is added explicitly. This is the **first** path — a plain
+        // `ALTER TABLE` that keeps every existing row.
         //
-        // Databases created before 2026-10-16 lack the `node_id` column for the
-        // same reason; the migration adds it in place. A legacy row without a
-        // node id is simply *unbound* — it is renamed instead of replaced on the
-        // first content change (accepted, user decision 2026-10-16).
+        // The ignored `Result` is only acceptable because the schema is
+        // *verified* right after (Welle 5.4). A migration that silently fails is
+        // not a cosmetic loss: without `origin`, `should_skip`/`stat_matches`
+        // (both `SELECT …, origin FROM uploads`) fail and answer `None`, and
+        // `record` (which writes `origin`) writes nothing — the fast path and
+        // the recording die **for good**, while `content_seen` (reads only
+        // `md5`) keeps working, so the index never heals because nothing is ever
+        // recorded. Without `node_id` the same hits `node_id_for` and with it the
+        // safe-replace binding. When the check below still finds the schema
+        // broken, it is therefore rebuilt from scratch
+        // ([`DedupIndex::repair_uploads_schema`]). The accepted price is the lost
+        // index content — including the `node_id` bindings, which makes the
+        // safe-replace rule fall back to *renaming* for those files (the safe
+        // direction, already accepted for legacy rows).
         let _ = Self::ensure_origin_column(&conn);
         let _ = Self::ensure_node_id_column(&conn);
+        if !Self::uploads_schema_ok(&conn) {
+            match Self::repair_uploads_schema(&conn) {
+                Ok(()) => log::warn!(
+                    "Der lokale Upload-Index war beschädigt und wurde neu angelegt; \
+                     die nächste Prüfung liest alle Dateien erneut."
+                ),
+                Err(err) => {
+                    log::debug!("dedup: Index-Reparatur fehlgeschlagen: {err}");
+                    log::error!(
+                        "Der lokale Upload-Index ist beschädigt und konnte nicht neu \
+                         angelegt werden; in dieser Sitzung wird nichts übersprungen \
+                         und nichts aufgezeichnet."
+                    );
+                    return Self { conn: None };
+                }
+            }
+        }
         Self { conn: Some(conn) }
     }
 
@@ -176,6 +211,57 @@ impl DedupIndex {
             conn.execute("ALTER TABLE uploads ADD COLUMN node_id TEXT", [])?;
         }
         Ok(())
+    }
+
+    /// Whether `uploads` really carries both columns the code reads and writes
+    /// unconditionally: `origin` (Welle 2) and `node_id` (Welle 4).
+    ///
+    /// A missing column does not fail loudly at the call sites — `should_skip`,
+    /// `stat_matches` and `record` swallow the query error — so this check is
+    /// what decides whether the schema is usable or has to be rebuilt
+    /// (Welle 5.4, self-healing). The names are matched exactly, like the
+    /// migrations above.
+    fn uploads_schema_ok(conn: &Connection) -> bool {
+        let Ok(mut stmt) = conn.prepare("PRAGMA table_info(uploads)") else {
+            return false;
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(1)) else {
+            return false;
+        };
+        let mut has_origin = false;
+        let mut has_node_id = false;
+        for name in rows.flatten() {
+            match name.as_str() {
+                "origin" => has_origin = true,
+                "node_id" => has_node_id = true,
+                _ => {}
+            }
+        }
+        has_origin && has_node_id
+    }
+
+    /// Rebuild a `uploads` table whose migration failed (Welle 5.4,
+    /// self-healing): drop the broken table and recreate exactly the fresh
+    /// schema ([`UPLOADS_DDL`]).
+    ///
+    /// The `folder_scan` watermark is cleared in the same transaction — a stale
+    /// `max_mtime` would make every folder look "unchanged" and the freshly
+    /// emptied index would never be refilled. `one_time_queue` is deliberately
+    /// left alone: it does not depend on the `uploads` schema.
+    ///
+    /// Everything runs in one transaction, so a failure leaves the database
+    /// exactly as it was; the caller then degrades to a no-op index.
+    fn repair_uploads_schema(conn: &Connection) -> rusqlite::Result<()> {
+        let tx = conn.unchecked_transaction()?;
+        // Dropping the table also drops its indexes; the explicit `DROP INDEX`
+        // covers an index that somehow exists on its own.
+        tx.execute_batch(
+            "DROP INDEX IF EXISTS ix_uploads_md5;
+             DROP TABLE IF EXISTS uploads;",
+        )?;
+        tx.execute_batch(UPLOADS_DDL)?;
+        tx.execute("DELETE FROM folder_scan", [])?;
+        tx.commit()
     }
 
     fn db_path() -> Option<PathBuf> {
@@ -846,5 +932,101 @@ mod tests {
         let p = Path::new("/photos/new.jpg");
         idx.record_upload(p, "bbbb", 20, 2, Some("N1"));
         assert_eq!(idx.node_id_for(p), Some("N1".to_string()));
+    }
+
+    /// A database whose `uploads` table is *unmigratable*: it carries the two
+    /// columns under the names `ORIGIN`/`NODE_ID`. SQLite compares column names
+    /// case-insensitively, so both `ALTER TABLE … ADD COLUMN` migrations fail
+    /// with "duplicate column name" while the exact-name check
+    /// ([`DedupIndex::uploads_schema_ok`]) sees neither column — exactly the
+    /// broken state Welle 5.4 heals. A `folder_scan` watermark is present too.
+    fn broken_index_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE uploads (
+                 path        TEXT PRIMARY KEY,
+                 md5         TEXT NOT NULL,
+                 size        INTEGER NOT NULL,
+                 mtime       INTEGER NOT NULL,
+                 uploaded_at TEXT NOT NULL,
+                 ORIGIN      TEXT NOT NULL DEFAULT 'uploaded',
+                 NODE_ID     TEXT
+             );
+             INSERT INTO uploads (path, md5, size, mtime, uploaded_at, ORIGIN, NODE_ID)
+             VALUES ('/photos/old.jpg', 'aaaa', 10, 1, '2026-01-01T00:00:00Z', 'uploaded', 'N9');
+             CREATE TABLE folder_scan (
+                 path       TEXT PRIMARY KEY,
+                 max_mtime  INTEGER NOT NULL,
+                 scanned_at TEXT NOT NULL
+             );
+             INSERT INTO folder_scan (path, max_mtime, scanned_at)
+             VALUES ('/photos/album', 100, '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn broken_schema_is_rebuilt_and_works_again() {
+        let idx = DedupIndex::from_conn(broken_index_db());
+
+        // The broken table was dropped: the row it carried is gone rather than
+        // half-readable.
+        assert_eq!(
+            idx.should_skip(Path::new("/photos/old.jpg"), "aaaa", 10, 1),
+            None
+        );
+        assert_eq!(idx.node_id_for(Path::new("/photos/old.jpg")), None);
+
+        // The rebuilt table is fully functional again: recording and both fast
+        // paths round-trip.
+        let p = Path::new("/photos/a.jpg");
+        idx.record_upload(p, "bbbb", 20, 2, Some("N1"));
+        assert_eq!(idx.should_skip(p, "bbbb", 20, 2), Some(Origin::Uploaded));
+        assert_eq!(idx.stat_matches(p, 20, 2), Some(Origin::Uploaded));
+        assert_eq!(idx.node_id_for(p), Some("N1".to_string()));
+        assert!(idx.content_seen("bbbb"));
+    }
+
+    #[test]
+    fn repair_clears_the_folder_watermark() {
+        let conn = broken_index_db();
+        // Before the repair the watermark is there …
+        let watermark: i64 = conn
+            .query_row(
+                "SELECT max_mtime FROM folder_scan WHERE path = '/photos/album'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(watermark, 100);
+
+        let idx = DedupIndex::from_conn(conn);
+
+        // … after it the folder counts as unscanned, so the next start re-reads
+        // it instead of trusting a stale "unchanged".
+        assert_eq!(idx.folder_max_mtime(Path::new("/photos/album")), None);
+    }
+
+    #[test]
+    fn intact_schema_is_left_untouched() {
+        let mut idx = index();
+        let p = Path::new("/photos/a.jpg");
+        idx.record_upload(p, "aaaa", 10, 1, Some("N1"));
+        idx.record_folder_scan(Path::new("/photos/album"), 100);
+
+        // Reopen the very same database: a healthy schema must not trigger the
+        // repair, so every row (and the watermark) survives.
+        let conn = idx.conn.take().unwrap();
+        let reopened = DedupIndex::from_conn(conn);
+        assert_eq!(
+            reopened.should_skip(p, "aaaa", 10, 1),
+            Some(Origin::Uploaded)
+        );
+        assert_eq!(reopened.node_id_for(p), Some("N1".to_string()));
+        assert_eq!(
+            reopened.folder_max_mtime(Path::new("/photos/album")),
+            Some(100)
+        );
     }
 }
