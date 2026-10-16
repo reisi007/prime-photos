@@ -32,16 +32,22 @@ Bug 1 „Where is `use_default?" (`2899bc5`; Wissen in `docs/DEV_NOTES.md` § 1)
 leeren Bereich = Nichts" (nichts zu bauen — Belege in `docs/DEV_NOTES.md` § 6), Bug 9 „Warnungen als
 Fehler" (`c019528`; Regel in `AGENTS.md`), Bug 8 „Sichere Ersetz-Regel" (`2e2f183`; Regel in
 `AGENTS.md` → „Sichere Ersetz-Regel", Belege in `docs/SPEC_DUPLICATES.md` § 5 und
-`docs/SPEC_CONFLICT_OPTIONS.md`).
+`docs/SPEC_CONFLICT_OPTIONS.md`), Bug 3 „Logo neben „Prime Photos" in der Seitenleiste" (`ecb9bb8`;
+nur `src/app.rs`, Verifier APPROVE) und Bug 6 „Aufnahmedatum/Online-Sortierung" (`fcbc14d`; Regel in
+`AGENTS.md` → „Aufnahmedatum", Live-Belege in `docs/SPEC_CAPTURE_DATE.md` § 12, PUT-Abnahme in
+`docs/features/LIVE_ACCEPTANCE.md`).
 
 2. **Dock-/Taskbar-Icon fehlt (verkleinertes Logo nicht dargestellt).** `packaging/Info.plist`
    kennt **keinen** `CFBundleIconFile` und `Contents/Resources` enthält **keine** `.icns` — macOS
    zeigt ein generisches Platzhalter-Icon im Dock und im verkleinerten Zustand. Die Logos liegen
    als SVG-Quellen in `assets/` und werden über `build.rs`/`resvg` bereits gerastert; fehlt ist nur
    die `.icns`-Bündelung (mehrere Größen) und der Schlüssel im Info.plist.
-
-3. **Logo neben „Prime Photos" in der Seitenleiste erwartet.** Der Sidebar-Kopf zeigt nur den
-   Produktnamen; erwartet wird dort das Upload-Logo (`icons::upload_logo` ist vorhanden).
+   **In Umsetzung (User-Entscheidung 2026-10-16):** die `.icns` wird **im Build** aus
+   `assets/logo.svg` erzeugt — `build.rs` schreibt die zehn iconset-Größen nach
+   `target/pp-appicon.iconset`, `packaging/make-app.sh` bündelt sie per `iconutil` (macOS-Bordmittel)
+   zu `Contents/Resources/AppIcon.icns`, `CFBundleIconFile = AppIcon`. **Kein** eingechecktes
+   Binary, keine neue Abhängigkeit. Die Form bleibt **vollflächig** (belegt: auch das Original-Bundle
+   `Contents/Resources/AppIcon.icns` ist vollflächig — kein Rand/Squircle-Umbau).
 
 4. **Warteschlange und Fortschrittsleiste gehören physisch zusammen.** „▸ Warteschlange (n)" sitzt
    oben im Kopfbereich, die Gesamt-Leiste unten in der Fußzeile — der User erwartet beide
@@ -51,59 +57,6 @@ Fehler" (`c019528`; Regel in `AGENTS.md`), Bug 8 „Sichere Ersetz-Regel" (`2e2f
    die letzten Zeilen sind nicht erreichbar (Screenshot „Letzter Upload: 54/54 erfolgreich" mit
    abgeschnittenen OK-Zeilen).
 
-6. **Aufnahmedatum / Online-Sortierung (User-Anliegen 2026-10-15, präzisiert 2026-10-16: „das
-   Wichtige ist, dass die Sortierung online nach Aufnahmedatum geht").** Offene Frage: landen Fotos
-   im Konto mit dem **Aufnahmedatum** (EXIF `DateTimeOriginal`)?
-   **Lokale Belege (2026-10-16, `exiftool` über die letzten Importe in `Pictures/Sport`):** die
-   Lightroom-Classic-Exporte tragen `DateTimeOriginal` = `CreateDate` = **Aufnahmezeit** (109 JPEGs,
-   z. B. `2026:10:13 19:47:36`, Aufnahmestunden 18–20) und `ModifyDate` = **Exportzeit**
-   (`2026:10:14 15:40`); die Dateizeit (mtime) ist ebenfalls die Exportzeit.
-   **Unser Weg heute** (`src/prime_photos.rs::upload_picture`): `DateTimeDigitized` →
-   `DateTimeOriginal` → `DateTime`, danach Dateizeit (10-Minuten-Sperre), formatiert als **lokale**
-   Zeit mit `Z` (`…T19:47:36.000Z`) — die belegten `OffsetTime*` (`+02:00`) werden **ignoriert**.
-   Sub-Sekunden sind **immer** `.000`: `kamadak-exif-0.6.1` setzt `nanosecond` nur in
-   `parse_subsec`, und **kein** Reader-Aufruf ruft das auf (belegt im Crate-Quelltext; die Warnung
-   in `docs/SPEC_UPLOAD.md` §2.4 dazu ist damit latenter Code, **nicht** die Ursache).
-   **Damit ausgeschlossen:** die Sub-Sekunden-Überlänge. **Nicht aussagekräftig für diese Dateien:**
-   die Tag-Priorität — bei den Exporten sind `DateTimeOriginal` und `DateTimeDigitized` **gleich**.
-   **REA-Befund (2026-10-16, Original-Bundle `Amazon Photos.app` 11.3.0 / Commit `1d7941b5`,
-   DLL-SHA-256 `34a616e7…cedc0`):** Der Original-Client **sendet gar kein `contentDate`**.
-   `UploadRequest.ContentDate` und `InitiateMultipartUploadRequest.ContentDate`/`FallbackContentDate`
-   existieren als Felder, werden aber **an keiner Stelle zugewiesen**; der Query-Bauer verwirft
-   `null`-Properties, und `fallbackContentDate` hat genau **einen** Treffer (die Attribut-Deklaration).
-   Eine EXIF-/Metadaten-Bibliothek referenziert die Assembly **nicht** (kein `DateTimeOriginal`,
-   `SubSecTime`, `OffsetTime` im dekompilierten Code) — die Aufnahmezeit leitet also **der Server**
-   aus den hochgeladenen Bytes ab. Serverseitiger Sortierschlüssel (belegt):
-   `sort=['contentProperties.contentDate …']`; lokal liegt er in der Tabelle `nodes`, Spalte
-   `content_date`. **Methode/Blocker:** die Managed-Route von REA war blockiert
-   (`metadata-not-admitted`, 64-MiB-Budget) und wurde über `ilspycmd` 11.1.0.9782 + Literal-Scan
-   ersetzt; Session mit `close_binary` beendet, nichts im Repo verändert.
-   **Folge für uns:** unser Cookie-Client **überschreibt** die Server-Ableitung aktiv — er sendet die
-   EXIF-**Lokalzeit** mit `Z` (also als UTC deklariert) und ignoriert die belegten `OffsetTime*`.
-   Damit ist der wahrscheinlichste Träger der falschen Sortierung **unser eigenes `contentDate`**,
-   nicht die Tag-Priorität.
-   **Live-Nachweis (2026-10-16, gegen das eigene Konto über den Cookie-Host
-   `content-eu.drive.amazonaws.com/v2/upload`; alle Testknoten danach gelöscht):**
-   - `POST` **ohne** `contentDate` ⇒ **201**, die Antwort trägt `contentDate =
-     2026-10-13T19:47:36.123Z` — also **`DateTimeOriginal` + `SubSecTimeOriginal`** aus der Datei.
-     Nicht genommen wurden das bewusst abweichend gesetzte EXIF-`ModifyDate` (`2026-10-20`), die mtime
-     (heute) und die Upload-Zeit (`createdDate`/`modifiedDate` = `2026-10-16T09:02:…Z`).
-   - `POST` **mit** unserem damaligen Wert `…T19:47:36.000Z` ⇒ **201**, Wert **wörtlich übernommen**
-     ⇒ wir haben die korrekte Server-Ableitung überschrieben.
-   - Der Server legt die EXIF-**Wanduhrzeit naiv als `Z`** ab (keine Offset-Umrechnung) — dieselbe
-     Konvention wie wir, nur mit echten Sub-Sekunden.
-   - `PUT /v2/upload/<nodeId>` **ohne** `contentDate` (nach einem 409 `NameAlreadyExists`) ⇒ **200**,
-     gleiche Node-Id, Inhalt getauscht (Größe/MD5), `contentDate` bleibt stehen.
-   - Nur lesend: die Knoten unseres Upload-Ordners tragen volle Aufnahmezeiten mit echten
-     dreistelligen Sub-Sekunden (`.083`, `.002`, `.046` …), **keine** Mitternachts-Werte — die
-     Mitternachts-Form aus `docs/PROTOCOL.md` §2.17 war der **EXIF-lose** Sonderfall (PNG).
-   **Entscheidung (User 2026-10-16, Weg „erst Live-Test, dann Code"):** `contentDate` wird **gar
-   nicht mehr gesendet** — Parität zum Original, die Ableitung bleibt beim Server; die eigene
-   Ermittlung (EXIF-Priorität, Dateizeit-Rückfall, 10-Minuten-Sperre) entfällt damit. **In Umsetzung**
-   (Auftrag 2026-10-16, Doku in `docs/SPEC_CAPTURE_DATE.md`). Die **Ursache** der ursprünglichen
-   Falsch-Sortierung ist als **Mechanismus** belegt (unser Wert gewinnt wörtlich; der
-   Dateizeit-Rückfall setzt einen Export auf den **Export**-Tag), am konkreten Bild des Users aber
-   **nicht** reproduziert — das bleibt als ehrliche Restunsicherheit stehen.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
@@ -186,7 +139,12 @@ Ausdrücklich **ohne** Starttermin:
 - Sortierung/Filter der Tabelle; Spalte „Größe" + relative Zeit (`datetimeago_*`).
 - Tray-Status-Popup mit Statistiken (`statuspopup_stats_*`).
 - Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte Drosselung; Logout während
-  laufendem Upload; Nav-Accessibility; `.app`-Icon.
+  laufendem Upload; Nav-Accessibility.
+- **Toter Dependency-Eintrag `kamadak-exif`** (Befund des Verifiers der contentDate-Runde,
+  2026-10-16): seit `fcbc14d` liest kein Code mehr EXIF, der Eintrag in `Cargo.toml` steht aber
+  weiter und wird mitgebaut. Entfernen wäre ein eigener kleiner Auftrag (`Cargo.toml` +
+  `Cargo.lock`, `cargo build`/`cargo test` als Gate) — bewusst **nicht** in der contentDate-Runde
+  mitgemacht, damit dort ein Auftrag = ein Commit bleibt.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
   `docs/SPEC_SCOPE_INVENTORY.md`; Sync, Downloads/Restore, Datei-Management, Apple-Photos-Import,
   Videos, Autoplay, Upsell-/Quota-Banner, Auto-Update, Proxy, ausgeblendete Dateien,
