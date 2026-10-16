@@ -12,13 +12,13 @@ gelöscht.
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
 2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
-   Reihenfolge: **D → E → DMG** (C und D fertig, verifiziert APPROVE).
-   - **D** (Byte-Fortschritt pro Datei): **fertig, committet `69b30c5`** (168 Tests). Live-Beleg:
-     der Upload-Host lehnt `Transfer-Encoding: chunked` mit **400** ab und verlangt
-     `Content-Length` (⇒ 201); `upload_body` setzt ihn jetzt explizit, lokaler Listener-Test +
-     Negativprobe. **Offen:** der App-gesteuerte Ende-zu-Ende-Live-Test (Keychain-Dialog im
-     Dev-Build) — Abnahme beim nächsten manuellen Test/DMG.
-   - **E** (forced pause, T1–T5 aus `docs/SPEC_MISSING_SOURCE.md`): **läuft** — Umsetzer-Subagent
+   Reihenfolge: **D → E → DMG** — C, D und E sind **fertig und verifiziert** (`c6003ff`,
+   `69b30c5`, `615d009`).
+   - **Offen vor dem DMG:** der App-gesteuerte **Ende-zu-Ende-Live-Test** (Runde D) — blockiert,
+     solange der Mac gesperrt ist (Keychain-Dialog unbedienbar). Nach dem Entsperren: Testdatei in
+     einen überwachten Ordner legen, **signiertes** Bundle starten, Upload im Log/Konto beobachten,
+     Knoten danach löschen. Live-Beleg der Korrektur bisher: der Host lehnt `chunked` mit **400**
+     ab und verlangt `Content-Length` (⇒ 201); lokaler Listener-Test + Negativprobe.
    - **DMG** (Release-Build + Install): `cargo build --release` + `packaging/make-app.sh` (signiert
      mit **„Prime Photos Local Signer"**), `hdiutil create -volname "Prime Photos" -srcfolder
      <staging> -ov -format UDZO`, Installation nach `/Applications` + `xattr -dr
@@ -32,30 +32,14 @@ App aus `02e0fca` installiert und gestartet; Start sauber (**keine** Warnung/kei
 Default-Filter `warn`, `src/logging.rs:74`), Dedup-Index unverworfen mit **591 Zeilen** — Echtbeleg
 für die Selbstheilung aus 5.4. Der Test ist **geschlossen**: die Rückmeldungen 1–3, 5, 6, 8–14 sind
 umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen stehen in `AGENTS.md`
-→ „UI-Politur nach dem manuellen Test 2026-10-16". **Offen sind nur noch:**
-7. [ ] **Nicht angeschlossene Quelle (externe Festplatte) — Zielverhalten „forced pause".** Ein
-   nicht erreichbarer Quellordner soll das Ziel **anhalten** statt in einen Fehler zu laufen
-   (Zustand wie eine Pause, AMBER, **keine** Wassermarke, **kein** Datenverlust, beim
-   Wiederanschließen läuft es weiter) — wie das Original (`PauseSource.SystemPaused`). Recon und
-   alle Belege: `docs/SPEC_MISSING_SOURCE.md`. Offene TODOs:
-   - **T1 (vor Release)** `FolderStatus::Paused` bei fehlendem Ordner — Kaltstart, Watcher **und**
-     manueller Rescan.
-   - **T2 (vor Release)** Wasserzeichen-Guard. **Teil-entwarnt:** der Kaltstart-Pass überspringt
-     einen nicht-stat-baren Ordner (`src/backup.rs:593-595`) ⇒ keine Wassermarke; offen nur der
-     **Event-Pfad** (`watch_loop`) und der **manuelle Rescan**.
-   - **T3 (vor Release)** UI-Hinweis „Angehalten (X%)" in AMBER (existiert, nur zuweisen).
-   - **T4 (vor Release)** Wiederanschließen aktiv erkennen statt 30-s-Polling.
-   - **T5 (vor Release)** verständliche Meldung statt „Keine Fotos gefunden", wenn der Ordner fehlt.
-   - **T6–T9 (Post-MVP)** Volume-GUID wie das Original; `HandleDeviceArrival`/`Removal` als aktive
-     Hardware-Erkennung; der Bearbeiten-Dialog prüft den Pfad wie der Anlegen-Dialog; ein
-     `ScheduleError`-Äquivalent „Ordner nicht verfügbar".
-8. [ ] **Upload-Ziel-Spiegelung wie das Original (offen nach der Spec).** Das Zielfeld ist aus dem
-   Dialog **entfernt** (Befund 9, Welle 5.7); die App wählt das Ziel heute automatisch
-   (`Pictures/Web`, `src/prime_photos.rs:820-843`). Offen ist der **eigene Auftrag** nach
+→ „UI-Politur nach dem manuellen Test 2026-10-16". **Offen ist nur noch:**
+
+1. [ ] **Upload-Ziel-Spiegelung wie das Original (offen nach der Spec).** Das Zielfeld ist aus dem
+   Dialog **entfernt** (Welle 5.7); die App wählt das Ziel heute automatisch (`Pictures/Web`,
+   `src/prime_photos.rs:820-843`). Offen ist der **eigene Auftrag** nach
    `docs/SPEC_UPLOAD_DESTINATION.md`: die Original-Spiegelung `Backup/<Macname>/<Quellpfad>`
-   (Segmente bei Bedarf anlegen). **Offene Frage:** kann unser Cookie-Host Ordner überhaupt anlegen
-   (`POST /drive/v1/nodes`, `kind: "FOLDER"`) — heute wird nur gesucht? Bestehende Uploads in
-   `Pictures/Web` bleiben, wo sie sind.
+   (Segmente bei Bedarf anlegen). **Offene Frage:** kann unser Cookie-Host Ordner anlegen
+   (`POST /drive/v1/nodes`, `kind: "FOLDER"`)? Bestehende Uploads in `Pictures/Web` bleiben.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
@@ -65,13 +49,6 @@ umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen
   continue;` in `src/upload.rs`). Belegbar an einer **fremden** Datei gleichen Namens — sie muss
   danach **unverändert** im Konto stehen (kein Datenverlust). Sinnvoll in **einem** Lauf mit der
   PUT-Abnahme oben (derselbe Namenskonflikt, einmal **mit** Bindung ⇒ PUT, einmal **ohne** ⇒ RENAME).
-- [ ] **Zwei Befunde aus der Hänger-Diagnose (angelegt, nicht beauftragt).** (a) Ein Ziel, dessen
-  Dateien **alle** fehlschlagen, behält `status = "uploading"` dauerhaft:
-  `finalize_background_store` (`src/backup.rs`) schreibt Done/Error nur für Indizes aus
-  `folder_done` — bei 0 Erfolgen fehlt der Index. (b) `FolderStore::load()` (`src/folders.rs`)
-  macht bei **jedem** TOML-Parse-Fehler `unwrap_or_default()`: **ein** fehlerhafter Eintrag in
-  `folders.toml` leert **still** den ganzen Store — danach läuft **kein** Hintergrund-Lauf mehr,
-  ohne eine einzige Meldung.
 - [ ] **Kein Test deckt die drei Vorbelegungsstellen** (`add_backup_folder`, transiente Einmal-Zeile,
   `UploadPlan::from_files`): der Verifier hat jede einzeln auf `true` zurückgedreht — alle 95 Tests
   blieben grün. Ursache: `PrimePhotoApp` braucht egui-Kontext bzw. Datei-Dialog. Ein **reiner
@@ -83,10 +60,7 @@ umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen
   `remember_checkbox_label` gated nur auf „Store kennt den Index", `remember_conflict_in_folder`
   zusätzlich auf `file_path.starts_with(&folder.path)`. Im Sonderfall eines verschobenen Index
   *mit* fremdem Pfad benennt das Häkchen einen Ordner, in den nichts geschrieben würde.
-- [ ] **i18n-Hygiene:** toter Key „Als neue Dateien speichern" (`src/i18n.rs`) außerhalb der Tabelle
-  unbenutzt; dazu **Doppel-Keys** in der Tabelle — `"Ersetzen"` (zweimal) und `"Ignorieren"`
-  (zweimal), je eine Kopie ist toter Text (gleicher Wert, daher harmlos). Es gibt keine
-  Eindeutigkeitsprüfung — Kandidat für eine Prüfung im Test.
+
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 
 Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.**
@@ -154,9 +128,6 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 - [ ] Rest aus `Amazon Photos.dll`: Quota-Form, exakter Extension-Filter, Watcher-Intervall,
   Konfliktbehandlung, Video-Support.
 - [ ] Echte „Speichernutzung"-Anzeige (nur Prime; bis dahin bewusst nichts anzeigen).
-- [ ] **`pct` in der Ordner-Zeile kappen** (`src/backup.rs` rechnet `done/total` ungekappt): ein
-  inkonsistenter Alt-Zustand (`total_files` < `uploaded_files` — genau so wurden einmal „320 %"
-  angezeigt) würde wieder über 100 % anzeigen.
 - [ ] **Win/Linux: In-App-„Beenden".** Ohne sichtbares Tray-Icon gibt es dort keinen Weg zurück
   (macOS ist safe, ⌘Q) — Residuum aus PORT-3.
 - [ ] **Gezeichnete UI-Glyphen ersetzen:** `nav_icon`, Flagge und Logo auf die Material-Symbols-
