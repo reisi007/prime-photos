@@ -49,12 +49,25 @@ Fehler" (`c019528`; Regel in `AGENTS.md`).
    die letzten Zeilen sind nicht erreichbar (Screenshot „Letzter Upload: 54/54 erfolgreich" mit
    abgeschnittenen OK-Zeilen).
 
-6. **Aufnahmedatum / Sortierung bei Lightroom-Exporten.** Offene Frage: werden Fotos mit dem
-   **Aufnahmedatum** (EXIF `DateTimeOriginal`) hochgeladen? Die Sortierung im Konto passt bei von
-   Lightroom exportierten Bildern nicht; der User berichtet, es habe **gestern funktioniert** und
-   „heute nur noch falsch" gewesen — also vermutlich ein Unterschied in den EXIF-Feldern der Exporte.
-   Zu prüfen: welches Feld wir auf `contentDate` setzen (`src/upload.rs`/`src/urls.rs`) und was
-   Lightroom mitschreibt.
+6. **Aufnahmedatum / Online-Sortierung (User-Anliegen 2026-10-15, präzisiert 2026-10-16: „das
+   Wichtige ist, dass die Sortierung online nach Aufnahmedatum geht").** Offene Frage: landen Fotos
+   im Konto mit dem **Aufnahmedatum** (EXIF `DateTimeOriginal`)?
+   **Lokale Belege (2026-10-16, `exiftool` über die letzten Importe in `Pictures/Sport`):** die
+   Lightroom-Classic-Exporte tragen `DateTimeOriginal` = `CreateDate` = **Aufnahmezeit** (109 JPEGs,
+   z. B. `2026:10:13 19:47:36`, Aufnahmestunden 18–20) und `ModifyDate` = **Exportzeit**
+   (`2026:10:14 15:40`); die Dateizeit (mtime) ist ebenfalls die Exportzeit.
+   **Unser Weg heute** (`src/prime_photos.rs::upload_picture`): `DateTimeDigitized` →
+   `DateTimeOriginal` → `DateTime`, danach Dateizeit (10-Minuten-Sperre), formatiert als **lokale**
+   Zeit mit `Z` (`…T19:47:36.000Z`) — die belegten `OffsetTime*` (`+02:00`) werden **ignoriert**.
+   Sub-Sekunden sind **immer** `.000`: `kamadak-exif-0.6.1` setzt `nanosecond` nur in
+   `parse_subsec`, und **kein** Reader-Aufruf ruft das auf (belegt im Crate-Quelltext; die Warnung
+   in `docs/SPEC_UPLOAD.md` §2.4 dazu ist damit latenter Code, **nicht** die Ursache).
+   **Damit ausgeschlossen:** die Sub-Sekunden-Überlänge. **Nicht aussagekräftig für diese Dateien:**
+   die Tag-Priorität — bei den Exporten sind `DateTimeOriginal` und `DateTimeDigitized` **gleich**.
+   **Noch offen:** (a) wie das Original die Aufnahmezeit ableitet (Tag-Priorität, Zeitzone,
+   `fallbackContentDate`, Normalisierung) — Recon läuft (REA am Bundle, 2026-10-16); (b) **was das
+   Konto tatsächlich als `contentDate`/Sortierschlüssel ablegt** — dafür ist ein **Live-Lauf** nötig
+   (Knoten eines frisch hochgeladenen Exports abfragen und mit der Aufnahmezeit vergleichen).
 
 8. **Sichere Ersetz-Regel — in Umsetzung (Implementierung fertig, Verifikation läuft).**
    Anlass: der Default `Replace` überschreibt bei einem **Namenskonflikt mit anderem Inhalt** das
@@ -116,13 +129,15 @@ Verifier APPROVE). Geblieben ist **offene** Arbeit:
   unbenutzt; dazu **Doppel-Keys** in der Tabelle — `"Ersetzen"` (zweimal) und `"Ignorieren"`
   (zweimal), je eine Kopie ist toter Text (gleicher Wert, daher harmlos). Es gibt keine
   Eindeutigkeitsprüfung — Kandidat für eine Prüfung im Test.
-- [ ] **`docs/SPEC_DUPLICATES.md` drei stale Zeilen** (Verifier-Funde, echt): (1)+(2) die
-  **Empfehlungszellen** neben „Global dedup default setting" bzw. `:269` sagen noch „Optional. Only
-  worth it if a preferences screen lands" — auf den Nachbarzeilen-Stil („Done") ziehen;
-  (3) `:268` „**Conflict default**" nennt noch `SaveAsNew` und lässt den **Application Default
-  `Replace`** weg (widerspricht dem eigenen § 5); `:273` „**`Replace` wire value**" führt unseren Weg
-  als `PUT …?conflictResolution=NONE` — genau die Form, die derselbe Absatz als 400
-  `MissingFileSize` verwirft; auf den POST-Query-Satz umstellen.
+- [ ] **`docs/SPEC_DUPLICATES.md` zwei stale Empfehlungszellen + eine neue Zeile** (Verifier-Funde,
+  echt): (1)+(2) die **Empfehlungszellen** neben „Global dedup default setting" bzw. `:269` sagen
+  noch „Optional. Only worth it if a preferences screen lands" — auf den Nachbarzeilen-Stil („Done")
+  ziehen. (3) **neu (2026-10-16, vom Umsetzer gemeldet):** die Zeile `:275` „**Global conflict
+  setting** | *Does not exist* | **We also have none**" ist auf unserer Seite überholt — seit
+  `Config.conflict_resolution_default` gibt es die globale Konflikt-Standardwahl (Einstellungen →
+  Upload); die Original-Spalte bleibt „gibt es dort nicht". **Erledigt und damit aus dieser Liste
+  raus** (Runde 2026-10-16, Commit `83376ba`): die Zeilen `:268` und `:273`/`:278` (App-Default
+  `Replace`, voller POST-Query-Satz) sowie der §5-Text.
 
 ## Offene Kandidaten derselben Absturzklasse (2026-10-14) — **ungeprüft**
 
@@ -146,6 +161,11 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   nicht angezeigt. Soll: Login-/Upload-Status zurücksetzen, Fehler sichtbar machen.
 - [ ] **Nav-Accessibility.** Selbstgezeichnete `nav_item`-Zeilen (`allocate_exact_size`) haben keine
   Keyboard-Fokus-/Accessibility-Semantik; optional `Sense`-Widget/`widget_info` ergänzen.
+- [ ] **Deutsche Doku-Kommentare in `src/notify.rs`** (Altbestand in HEAD, Verifier-Befund
+  2026-10-16, kosmetisch): dort stehen deutsche `///`-Doku-Texte, während der Projektstil in `src/`
+  englische Kommentare vorsieht — die inline-`//`-Kommentare sind außerhalb von `i18n.rs`/`tr(...)`
+  inzwischen **frei** von Deutsch (Runde `83376ba`). Kein eigener Auftrag; beim nächsten Anfassen
+  von `notify.rs` mitziehen.
 
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
