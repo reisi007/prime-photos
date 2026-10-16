@@ -132,8 +132,10 @@ pub enum FolderStatus {
 /// A file's identity is its **content** (user decision 2026-10-14): the same
 /// content is skipped — the server rejects an MD5 duplicate with HTTP 409 and
 /// `errorCode = "DuplicatesConflictError"` — while different content is
-/// uploaded, renamed when the name is already taken. The default is therefore
-/// `SaveAsNew`.
+/// uploaded, renamed when the name is already taken. The **enum's** default is
+/// therefore `SaveAsNew` — the **file** fallback for a `folders.toml` entry
+/// without the key; newly created targets are pre-set with the **application**
+/// default `Replace` (`Config::conflict_resolution_default`).
 ///
 /// Mirrors the original client's four options ("Umgang mit Dateinamenkonflikten",
 /// `docs/SPEC_DEDUP.md` §4.1) and maps onto the wire parameter `conflictResolution`.

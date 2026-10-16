@@ -634,10 +634,11 @@ pub(crate) async fn upload_worker(
                         break FileOutcome::Failed(e);
                     };
                     conflict_cause = crate::prime_photos::conflict_cause(&e).map(str::to_owned);
-                    // Namenskonflikt unter `Replace`, den der Index nicht an diesen Pfad bindet:
-                    // eine fremde Datei gleichen Namens darf nicht überschrieben werden
-                    // (User-Entscheidung 2026-10-16) — einmalig umbenennen statt ersetzen.
-                    // Ein Inhaltsduplikat bleibt "bereits im Konto" (der Block unten).
+                    // Name conflict under `Replace` that the index does not bind to
+                    // this path: a foreign file with the same name must not be
+                    // overwritten (user decision 2026-10-16) — rename once instead
+                    // of replacing. A content duplicate stays "bereits im Konto"
+                    // (the block below).
                     let content_duplicate = conflict_cause
                         .as_deref()
                         .is_some_and(crate::prime_photos::is_content_duplicate_code);

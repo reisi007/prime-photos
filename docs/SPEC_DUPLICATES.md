@@ -227,7 +227,11 @@ not produce a 409 at all.
 > `cloud.db` and therefore never reaches the server with a content duplicate. **Our**
 > path is server-driven: a **content** duplicate (`errorCode = "DuplicatesConflictError"`)
 > yields a **409 even with `RENAME`** (live proven) — `SaveAsNew` avoids a *name* clash,
-> not a *content* duplicate. Our default is now **`SaveAsNew`** (was `Ignore`). The
+> not a *content* duplicate. Our **application** default is now **`Replace`** (user
+> decision 2026-10-15, confirmed 2026-10-16; `SaveAsNew` remains only the enum/file
+> fallback for a `folders.toml` entry without the key, see §5). Content identity is
+> preserved: a content duplicate is **never** renamed — it stays "bereits im Konto"/409
+> — while a *name* conflict with **different** content is replaced. The
 > local cross-path MD5 check (`DedupIndex::content_seen`) demotes that 409 to a safety
 > net; if it does fire, the worker reads the cause and records the path as
 > `uploads.origin = 'content_skip'` — "bereits im Konto", like the local skip, not
@@ -250,8 +254,9 @@ Our current state (read-only): persistent MD5 index (`src/dedup.rs`, `uploads` t
 `ix_uploads_md5`), skip rules = (path, size, mtime) → (path, MD5) → **MD5 across paths**
 (`DedupIndex::content_seen`, hit ⇒ "bereits im Konto", remembered as
 `uploads.origin = 'content_skip'`); four conflict options per target (`src/folders.rs`
-`ConflictResolution`, application default `Replace` since 2026-10-15, enum `#[default]`
-`SaveAsNew` as the `folders.toml`-without-key fallback — was `Ignore`);
+`ConflictResolution`: the **application** default `Replace` (since 2026-10-15, confirmed
+2026-10-16) sits next to the enum's `#[default]` `SaveAsNew`, which is only the **file**
+fallback for a `folders.toml` entry without the key — was `Ignore`);
 server 409 treated as "already there" (`src/upload.rs` `FileOutcome::ConflictSkipped`,
 `src/prime_photos.rs::conflict_node_id`/`conflict_cause`); interactive **per-file** prompt
 (`src/upload.rs` `resolve_conflict`, `src/backup.rs` `conflict_dialog`) whose "don't ask again"
@@ -265,12 +270,12 @@ run-only.
 | **Cross-path content dedup** (different path, same MD5) | Wired: `GetNodeByMd5` over `cloud.db`; the identity is content, not path | **Implemented** (2026-10-14) — `DedupIndex::content_seen` queries the existing `ix_uploads_md5` before the network; a hit is skipped locally as "bereits im Konto" and **remembered** in `uploads.origin = 'content_skip'` (column + migration, `src/dedup.rs`), so the next scan's stat fast path applies without re-reading and the outcome stays "bereits im Konto" in every run | — | **Done.** The `origin` column keeps "unverändert" (`'uploaded'`) and "bereits im Konto" (`'content_skip'`) apart on the two fast paths. |
 | **Dedup option granularity** | `DeduplicateOptions` flags exist, UI only boolean | Boolean `dedup` per folder — same practical surface | — | **No change.** The flags are dead weight in the original too. |
 | **Dedup default** | Onboarding → on; post-onboarding → off (global default) | `default_true()` → **on** | — | **Keep.** Our default is the friendlier one; documented in AGENTS.md. |
-| **Conflict default** | `None` = "Jedes Mal nachfragen" | `SaveAsNew` (was `Ignore`; changed 2026-10-14, AGENTS.md) | — | **Keep.** A file's identity is its content; `SaveAsNew` + `dedup` is the deliberate default. Note the divergence so nobody "fixes" it to Ask. |
+| **Conflict default** | `None` = "Jedes Mal nachfragen" | **Application** default `Replace` (2026-10-15, confirmed 2026-10-16); the enum's `#[default]` stays `SaveAsNew` as the **file** fallback for a `folders.toml` entry without the key (was `Ignore`) | — | **Keep.** A file's identity is its content: a content duplicate is never renamed (409/"bereits im Konto"), a *name* conflict with different content is replaced. `Replace` overwrites automatically only when the **local** index binds the path to exactly that node (`uploads.node_id`); otherwise it renames, and an explicit "Ersetzen" in the dialog lifts that check (user decision 2026-10-16). Note the divergence so nobody "fixes" it to Ask. |
 | **Global dedup default setting** | `EnableDeduplicationForPhotosAndVideos` in preferences, seeds new backups | **Implemented** (2026-10-15, 2.4a) — `Config.dedup_default` (default `true`) in *Einstellungen → Upload*; preselects new backup targets and the one-time queue | **S** | Optional. Only worth it if a preferences screen lands; a single config field + default for new folders. |
 | **Global conflict setting** | **Does not exist** | We also have none | — | **No change** — parity already. |
 | **Name conflict detected client-side** | Via `cloud.db` name+parent lookup, before upload | **Missing** — we only learn of it from the server 409 | **L** | Not worth it without a local node cache (we have none by design, AGENTS.md). Our 409-driven path is the pragmatic equivalent. |
 | **409 cause split (MD5-match vs NameAlreadyExists)** | Split: MD5 → Ignored; NameAlreadyExists → `FileConflict` error | **Implemented** (2026-10-15) — the marker carries the response's `errorCode` (`src/prime_photos.rs` `conflict_cause`); `DuplicatesConflictError`/`MD5_DUPLICATE` (case-insensitive) still skip, but enter the index as `Origin::ContentSkip`; `NameAlreadyExists`/unknown keep the old `record_upload` | — | **Done.** A content duplicate was never uploaded *from that path*, so it must keep reading "bereits im Konto" instead of degrading to "unverändert" on the next run. |
-| **`Replace` wire value** | `overwrite = true` + existing `nodeId`; wire enum has no `OVERWRITE` | **Implemented** (2026-10-15) — `POST` with `conflictResolution=NONE`, then `PUT /v2/upload/<nodeId>?conflictResolution=NONE` on the 409's `conflictNodeIds[0]` (`src/urls.rs` `replace_upload_url`, `src/prime_photos.rs` `replace_picture`) | — | **Done.** `OVERWRITE` is rejected by our endpoint (live probe 2026-10-15: 404, empty body) and is no longer sent. We learn the target node from the 409 rather than a local cache, so `Replace` costs two requests instead of one direct `PUT`. |
+| **`Replace` wire value** | `overwrite = true` + existing `nodeId`; wire enum has no `OVERWRITE` | **Implemented** (2026-10-15) — `POST` with `conflictResolution=NONE`, then `PUT /v2/upload/<nodeId>` on the 409's `conflictNodeIds[0]`, **carrying the POST's full query set** (`conflictResolution`, `fileSize`, `name`, `parentNodeId`, `contentDate`); without `fileSize` the host answers **400 `MissingFileSize`** (`src/urls.rs` `replace_upload_url`, `src/prime_photos.rs` `replace_picture`) | — | **Done.** `OVERWRITE` is rejected by our endpoint (live probe 2026-10-15: 404, empty body) and is never sent. We learn the target node from the 409 rather than a local cache, so `Replace` costs two requests instead of one direct `PUT`. |
 | **Per-media dedup (Photos only / Videos only)** | Enum exists, UI never exposes it | none | — | **No change** — deliberately not exposed by the original either. |
 | **Apple Photos `.heic` JPEG-BOM heuristic** | Present (iOS-duplicate guard) | **Missing** | **L** | **Out of scope** — only meaningful for an Apple Photos library import, which is out of MVP (AGENTS.md "Scope-Grenzen"). |
 | **Dedup state after a 409** | Node cached, record `Ignored` | `record_upload` on `ConflictSkipped` so the next scan skips cheaply — **except** a content duplicate (`DuplicatesConflictError`), which is remembered as `content_skip` (2026-10-15) | — | **Keep** — our behaviour is the equivalent and avoids a repeat 409; the origin split keeps the two outcomes ("unverändert" vs "bereits im Konto") honest. |
