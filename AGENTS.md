@@ -428,6 +428,51 @@ Linksklick; außerdem zweifelte er die Zahl „480 fertig" an („passt die Anza
   Anzeige im Frame zwischen Lauf-Ende und `finalize` kurz auf „Fehler". Anlass: eine Zeile stand auf
   „Fehler", während der Upload noch lief.
 
+## UI-Politur nach dem manuellen Test 2026-10-16 (Welle 5.6–5.8, alle Verifier APPROVE)
+
+Entscheidungen aus den Rückmeldungen des Users am echten Fenster (App `02e0fca`). Die zugehörigen
+Ledger-Einträge sind nach Umsetzung + Verify gelöscht; **hier** steht das Dauerhafte.
+
+- **App-Logo überall (F1, Welle 5.6, `50b834a`).** Seitenleiste (24 px), About (64), Login-Kopf (30)
+  und das große Login-Logo (84) zeigen `assets/logo-small.svg` über den **gemeinsamen**
+  Textur-Cache (kein Pro-Frame-Dekodieren); die im Code gezeichnete Kugel `upload_logo` ist **weg**.
+- **Inhaltsfilter wie das Original (F2, Welle 5.7, `0d486e2`).** Zwei Checkboxen mit
+  Original-Labels „Fotos sichern" (an, wählbar) / „Videos sichern" (sichtbar, **deaktiviert**);
+  „Alles" ist im Original nicht wählbar. Neuer Typ `ContentFilter` in `folders.rs` (serde
+  lowercase, Default `Photos`, `from_selection` wie das Original), **pro Ziel** persistiert.
+  Wirksam bleibt `is_supported_image` — das Feld ist Parität + Zukunft.
+- **Einstellungen ohne Speichern-Knopf (F5, Welle 5.6).** Die Sektion „Erweitert (Konto)" (Konfig-
+  pfad, Marktplatz, Zone, User-Agent) ist **entfernt**; jede Änderung wird **sofort** persistiert
+  (Muster `if changed { save_config() }`). Folge: den Marktplatz wählt man nur noch beim Anmelden.
+  `slow_mode` bleibt bewusst **transient**.
+- **Concurrency/Rate in `Config` (F6, Welle 5.6).** `concurrency`/`limit_enabled`/`limit_kbps` als
+  Config-Felder (serde-Defaults, alte `config.toml` lädt weiter); Klammerung **1..=8** bleibt.
+- **Zielfeld aus dem Dialog (F9, Welle 5.7).** „Ziel für Datensicherung:" samt „Ändern …" ist
+  **entfernt**; das Ziel wird automatisch bestimmt (heute `Pictures/Web`). Die **Original-Spiegelung**
+  (`Backup/<Macname>/<Quellpfad>`) ist ein **eigener Auftrag** nach `docs/SPEC_UPLOAD_DESTINATION.md`.
+  **Verworfen:** das Feld behalten und bei `Pictures/Web` bleiben.
+- **„Nichts hochzuladen" ⇒ abgeschlossener Zustand (F3, Welle 5.8, `c6003ff`).** Ein Ordner, der am
+  Lauf teilnahm, aber nichts zu tun hatte, wird über `folder_total` **finalisiert** (Done, 0/0); nie
+  gescannte Ordner bleiben **unberührt**. Bei 100 % lautet der Wortlaut **„Vollständig"**
+  (Original-Wortlaut), nicht „100% hochgeladen".
+- **Responsive Höhen (F8/F11, Welle 5.8).** `page_heights` als **eine** Quelle; die **Ordnerliste
+  zuerst**, die **Warteschlange ≤ 50 %** der freien Höhe. Nur das gemessene Chrome
+  (`QUEUE_BELOW_H`, `QUEUE_HEADER_H`, `QUEUE_FOOTER_H`) und der Karten-Floor bleiben absolut.
+  **Verworfen:** ziehbare Trennlinie (Position überlebt den Neustart nicht); eigener Reiter für die
+  Warteschlange (widerspricht „Warteschlange und Fortschrittsleiste gehören zusammen", Welle 3a).
+- **Scroll-Bug (F12, Welle 5.8).** Zwei `ScrollArea::vertical()` im selben Eltern-`Ui` teilten sich
+  den Scroll-Zustand: egui setzt ohne `id_salt` die **Konstante** `Id::new("scroll_area")`
+  (`scroll_area.rs:534`). Fix: **jede** ScrollArea ein eigenes `id_salt` (`"queue"`, `"folders"`).
+- **Ordner in der Warteschlange (F13, Welle 5.8).** Ordner-**Spalte** je Zeile **und** im
+  Gruppenkopf; bei **zwei Ordnern mit gleichem Namen** Name **+ Pfad** (Mehrdeutigkeit einmal pro
+  Frame berechnet), voller Pfad im Tooltip. Ersetzt den früheren Wunsch „Ordnerpfad im Zeilennamen".
+- **Ordner-Karte Variant A (F14, Welle 5.8).** Zeile 1 = Name links, **Statuswort** rechts (farbig,
+  je `BackupStatusAlertLevel`) + die drei Zeilen-Symbole; Zeile 2 klein = **Pfad · Fortschritt ·
+  Zuletzt aktualisiert**. Jeder Baustein steht **einmal** (vorher doppelte Prozentzahl), der Pfad
+  ist immer sichtbar. Sechs `FolderStatus`-Werte mit Wort und Farbe (Paused → AMBER).
+  **Verworfen:** Variant B (kompakt, eine Zeile, Pfad nur bei Mehrdeutigkeit); Variant C (nur die
+  Dopplung entfernen, Pfad in die graue Zeile).
+
 ## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
 
 Bewusste, absichtliche Abgrenzung. Die vollständige Feature-für-Feature-Liste mit Beleg-Keys/-Symbolen
@@ -596,15 +641,19 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   **lesen/untersuchen** (Code, Logs, Original-Binary) und schreibt nur `AGENTS.md`,
   `AGENTS.todo.md`, `AGENTS.skills.md`.
 - Der Hauptagent ist **Orchestrator**: er selbst schreibt nur `AGENTS.md`, `AGENTS.todo.md` und `AGENTS.skills.md`. Alle anderen Dateien bearbeiten Subagenten.
-- **Ledger-Hygiene (User-Entscheidung 2026-10-15):** `AGENTS.todo.md` ist das Protokoll der **offenen**
-  Arbeit, nicht die Geschichtsschreibung. Sobald ein Eintrag umgesetzt **und** unabhängig verifiziert
-  ist (Verifier `APPROVE` + Commit), wird er **gelöscht** — nicht als „✅ erledigt" stehen gelassen;
-  die Historie lebt in den Commits. **Vor dem Löschen** wird geprüft, ob der Eintrag Wissen trägt,
-  das **nur dort** steht: solches Wissen wandert **zuerst** in die passende Datei unter `docs/`
-  (Clean-Room-Spec zum Thema, `docs/PROTOCOL.md` für Endpunkte, `docs/features/LIVE_ACCEPTANCE.md`
-  für Live-Befunde, `docs/DEV_NOTES.md` für Fallstricke unserer Codebase), erst dann wird gelöscht.
-  **Niemals gelöscht:** offene Punkte, bewusst Zurückgestelltes und der ganze Abschnitt „Verworfen"
-  (damit keine verworfenen Ansätze erneut gebaut werden).
+- **Ledger-Hygiene (User-Entscheidung 2026-10-15, verschärft 2026-10-16):** `AGENTS.todo.md` ist
+  **nur** das Protokoll der **offenen** Arbeit — eine **kurze Checkliste** (offener Punkt + ein Satz
+  Begründung), **keine Dokumentation, keine Recon, keine Geschichtsschreibung**.
+  - **Sobald ein Eintrag umgesetzt UND unabhängig verifiziert ist (Verifier `APPROVE` + Commit),
+    wird er gelöscht** — nicht als „✅ erledigt" stehen gelassen; die Historie lebt in den Commits.
+  - **Kein Platz für Doku (User-Regel 2026-10-16):** langes Wissen, Recon, Herleitungen und
+    „Erledigt und gelöscht"-Nacherzählungen gehören **nicht** in `AGENTS.todo.md`. Ziel:
+    `docs/` — Clean-Room-Spec zum Thema, `docs/PROTOCOL.md` (Endpunkte),
+    `docs/features/LIVE_ACCEPTANCE.md` (Live-Befunde), `docs/DEV_NOTES.md` (Fallstricke unserer
+    Codebase); **Dauer-Entscheidungen** → `AGENTS.md`. **Vor** dem Löschen eines Eintrags wird sein
+    nur-dort-Wissen dorthin ausgelagert, erst dann gelöscht.
+  - **Niemals gelöscht:** offene Punkte, bewusst Zurückgestelltes und der ganze Abschnitt „Verworfen"
+    (damit keine verworfenen Ansätze erneut gebaut werden).
 - **Umsetzer:** `general`-Subagent mit Modell **`opencode-go/deepseek-v4.1-flash`**
   (User-Entscheidung 2026-10-16: „bitte ab jetzt für subagenten deepseek v4.1 flash nehmen").
   Modell-Geschichte dieses Projekts:

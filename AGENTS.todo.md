@@ -1,16 +1,10 @@
 # TODO / decisions ledger
 
-Regel (User-Entscheidung 2026-10-15, steht in `AGENTS.md` → „Arbeitsablauf"): dieses Protokoll
-hält **nur offene Arbeit**. Umgesetztes **und** unabhängig Verifiziertes wird **gelöscht**, nicht
-abgehakt — die Historie steht in den Commits. Wissen, das **nur** hier stand, ist vor dem Löschen
-in `docs/` ausgelagert (Stand 2026-10-15: `docs/PROTOCOL.md` § 5, `docs/SPEC_SCOPE_INVENTORY.md`,
-`docs/DEV_NOTES.md`, `docs/features/LIVE_ACCEPTANCE.md`, `docs/RELEASE.md` § 10). „Verworfen" wird
-**nie** gelöscht.
+**Nur offene Arbeit** — kurze Checkliste, **keine Doku**. Regel: `AGENTS.md` → „Arbeitsablauf" →
+„Ledger-Hygiene". Doku/Recon → `docs/`; Dauer-Entscheidungen → `AGENTS.md`. „Verworfen" wird **nie**
+gelöscht.
 
 ## Aktueller Auftrag (2026-10-15, Restbestand)
-
-Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon erst nach Login
-(`746392d`, Verifier APPROVE), Fortschritts-Leiste volle Breite (`0363bf1`, Verifier APPROVE).
 
 1. [ ] **`docs/`-Gerüst:** bestehende Spec-Dateien in Unterverzeichnisse sortieren
    (`docs/original/`, `docs/protocol/`, `docs/dev/` …), ein `docs/README.md` als Index — **alle**
@@ -18,9 +12,7 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
 2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
-   Reihenfolge: **C → D → E → DMG**.
-   - **C** (Layout/Ordner-Karte/Scroll/Ordner-Spalte/Nichts-hochzuladen): **fertig, verifiziert
-     APPROVE** (164 Tests, 0 Warnungen), Commit `c6003ff`.
+   Reihenfolge: **D → E → DMG** (C fertig, verifiziert APPROVE, `c6003ff`).
    - **D** (Byte-Fortschritt pro Datei + Live-Test am Konto): **läuft** — Umsetzer-Subagent
      (`opencode-go/deepseek-v4.1-flash`, Session `ses_eba5d0c34ffeqoWOsdjHyUFbip`) mit Brief in
      `$TMPDIR/round_d_brief.md`: `src/prime_photos.rs` (Streaming-Body + `Arc<AtomicU64>`-Counter,
@@ -37,193 +29,38 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
      »refresh-token« verwenden" muss einmalig mit **„Immer erlauben"** bestätigen (stabiles
      Zertifikat, daher nur einmal).
 
-## Manueller Test 2026-10-16 — Rückmeldungen des Users am echten Fenster
+## Manueller Test 2026-10-16 — abgeschlossen, offene Reste
 
-App aus `02e0fca` installiert und gestartet. Der Start war sauber: **keine** Warnung/kein Fehler im
-Log (Default-Filter `warn`, `src/logging.rs:74`) und der Dedup-Index steht unverworfen mit **591
-Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung aus 5.4: der Fehlalarm
-(„gesunder Index wird verworfen") ist auf echten Daten nicht eingetreten.
-
-1. [ ] **Logo (User-Entscheidung: App-Logo überall).** Die Seitenleiste zeigt eine **im Code
-   gezeichnete** teal Kugel (`src/icons.rs::upload_logo`), nicht unser App-Logo. Unser Logo liegt
-   brach: `assets/logo.svg` → Dock-Icon (`logo.png`, 1024 px) und die **ungenutzte** kleine Variante
-   `assets/logo-small.svg` (256 px; `logo-small-black` ebenfalls ungenutzt — `build.rs` rastert
-   beide, kein `include_bytes!`). Umsetzung: Sidebar (24 px), About (64), Login-Kopf (30) und das
-   große Login-Logo (84) zeigen das App-Logo; die gezeichnete Kugel entfällt samt Code.
-2. [ ] **Inhaltsfilter (User-Entscheidung: zwei Checkboxen wie das Original).** Unser Dialog zeigt
-   **drei deaktivierte Buttons** („Alles" vorausgewählt); die Recon belegt: das Original zeigt
-   **zwei Checkboxen** mit den Labels **„Fotos sichern"** / **„Videos sichern"**, und „Alles" ist
-   dort **nicht** wählbar (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1). Umsetzung: zwei
-   Checkboxen mit Original-Labels, „Fotos sichern" an und wählbar, „Videos sichern" sichtbar aber
-   deaktiviert mit ehrlichem Hinweis; Auswahl **pro Ziel** persistiert (Parität zu
-   `schedules.content_filter`, serde-Default = Fotos).
-3. [ ] **Kein Fortschritt, wenn nichts hochzuladen ist.** User-Erwartung: dort steht dann
-   **„100% hochgeladen"**. Heute rendert `status_text` für `Idle` mit `total == 0` einen **leeren**
-   Text. **Falle:** ein nie gescannter Ordner hat ebenfalls `total == 0` — „100%" darf dort nicht
-   stehen, sonst behauptet ein frisch angelegter Ordner Fortschritt.
-4. [ ] **Upload-Ort wie das Original — Spec läuft** (User-Auftrag 2026-10-16: „Upload Ort soll
-   gleich sein wie bei der Originalen App, bitte einem subagenten ein clean room spec schreiben
-   lassen"). Deliverable `docs/SPEC_UPLOAD_DESTINATION.md`. Grundlage:
-   `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3 (F3) — dort steht bereits „**F3 komplett offen** …
-   größte Architektur-Lücke: wir haben weder `BackupPathMapper` noch `destination_node_id` noch den
-   Cloud-Picker". **Erst nach der Spec** entscheidet der User über die Umsetzung.
-5. [ ] **Einstellungen (User-Entscheidung: Sektion weg + sofort speichern).** Die Sektion
-   „Erweitert (Konto)" fällt **samt Inhalt** weg (Konfigurationspfad, Marktplatz, Zone, User-Agent);
-   der **Speichern-Knopf** in beiden Reitern entfällt, jede Änderung wird **sofort** gespeichert.
-   **Bewusste Folge:** den Marktplatz kann nur noch beim Anmelden wählen, wer ihn später ändern
-   will, muss sich ab- und wieder anmelden.
-6. [ ] **Zusatzbefund (User-Entscheidung: mitbeheben).** „Gleichzeitige Uploads" und die Upload-Rate
-   liegen **nur im Speicher** (`src/app.rs:225-228`), `Config` kennt sie **gar nicht** — der
-   Speichern-Knopf hat sie **nie** gespeichert; nach einem Neustart standen sie auf dem Default. Sie
-   kommen als Felder in `Config` (serde-Default, damit eine alte `config.toml` weiter lädt).
-7. [ ] **Nicht angeschlossene Quelle (externe Festplatte) — Analyse läuft** (User-Auftrag
-   2026-10-16: „was wenn ich eine externe Festplatte synce und die nicht immer angeschlossen ist?
-   wie verhalten wir uns da, wie verhält sich die original App? cleanroom spec schreiben und TODOs
-   ableiten"). Deliverable `docs/SPEC_MISSING_SOURCE.md` + **abgeleitete TODOs** (die wandern nach
-   der Spec hierher). Berührt den Watcher (`Re-arm bei Fehler`), den Kaltstart-Wasserzeichen-Pass,
-   den manuellen Rescan, den manuellen Rescan und die Zeilen-Anzeige — **eine besondere Falle:** die
-   Wassermarke darf **nicht** vorrücken, wenn der Ordner weg war, sonst gelten die Dateien nach dem
-   Anschließen als „unverändert".
-   **Zielverhalten (User-Entscheidung 2026-10-16): „forced pause".** Ein nicht erreichbarer
-   Quellordner soll das Ziel **anhalten** statt in einen Fehler zu laufen: Zustand wie eine Pause
-   (`FolderStatus::Paused` existiert bereits, „Angehalten ({pct}%)", AMBER), **keine** Wassermarke,
-   **kein** Datenverlust, und beim Wiederanschließen läuft es weiter. Die Spec soll dieses Ziel
-   gegen das Verhalten des Originals stellen und die TODOs dorthin ableiten. **Achtung:** das ist
-   mehr als Kosmetik — „Pause pro Ordner" ist heute **Post-MVP** (Original hat ein Zeilen-Symbol);
-   der Unterschied ist, dass diese Pause **automatisch** aus dem fehlenden Ordner folgt.
-   **Am Code belegt (Spec 2026-10-16, 293 → 456 Zeilen):** das Original hat genau das — bei
-   Laufwerksentfernung setzt `BackupScannerWorker.HandleDeviceRemoval` **`PauseSource.SystemPaused`**,
-   beim Wiederanschließen hebt `HandleDeviceArrival` sie auf (`EnableAutoConnect`); erkannt wird das
-   über `ObservableHardwareChangeWatcher` (`NSWorkspace`-Mount/Unmount), die Laufwerksidentität liegt
-   in `.AmazonDriveConfig` als GUID. **Abgeleitete TODOs (aus der Spec, hierher übernommen):**
-   - **T1 (vor Release)** `FolderStatus::Paused` bei fehlendem Ordner zuweisen — Kaltstart, Watcher
-     **und** manueller Rescan.
-   - **T2 (vor Release)** Wasserzeichen-Guard: `record_folder_scan` **nur** bei vorhandenem Ordner.
-     **Teil-Entwarnung (Hauptagent, 2026-10-16):** der Kaltstart-Pass **überspringt** einen Ordner,
-     den er nicht stat-en kann (`src/backup.rs:593-595`: `let Some(current) = folders::max_mtime(&f.path)
-     else { continue };` — der Ordner landet damit **nicht** in `scans`, und `start_background_run`
-     schreibt für ihn **keine** Wassermarke). Die Falle ist dort **nicht** vorhanden; meine frühere
-     Zuschreibung „T2 ist Datensicherheit" war zu scharf. **Offen zu prüfen:** der **Event-Pfad**
-     (`watch_loop`) und der **manuelle Rescan** — dort den Guard ggf. ergänzen.
+App aus `02e0fca` installiert und gestartet; Start sauber (**keine** Warnung/kein Fehler im Log,
+Default-Filter `warn`, `src/logging.rs:74`), Dedup-Index unverworfen mit **591 Zeilen** — Echtbeleg
+für die Selbstheilung aus 5.4. Der Test ist **geschlossen**: die Rückmeldungen 1–3, 5, 6, 8–14 sind
+umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen stehen in `AGENTS.md`
+→ „UI-Politur nach dem manuellen Test 2026-10-16". **Offen sind nur noch:**
+7. [ ] **Nicht angeschlossene Quelle (externe Festplatte) — Zielverhalten „forced pause".** Ein
+   nicht erreichbarer Quellordner soll das Ziel **anhalten** statt in einen Fehler zu laufen
+   (Zustand wie eine Pause, AMBER, **keine** Wassermarke, **kein** Datenverlust, beim
+   Wiederanschließen läuft es weiter) — wie das Original (`PauseSource.SystemPaused`). Recon und
+   alle Belege: `docs/SPEC_MISSING_SOURCE.md`. Offene TODOs:
+   - **T1 (vor Release)** `FolderStatus::Paused` bei fehlendem Ordner — Kaltstart, Watcher **und**
+     manueller Rescan.
+   - **T2 (vor Release)** Wasserzeichen-Guard. **Teil-entwarnt:** der Kaltstart-Pass überspringt
+     einen nicht-stat-baren Ordner (`src/backup.rs:593-595`) ⇒ keine Wassermarke; offen nur der
+     **Event-Pfad** (`watch_loop`) und der **manuelle Rescan**.
    - **T3 (vor Release)** UI-Hinweis „Angehalten (X%)" in AMBER (existiert, nur zuweisen).
    - **T4 (vor Release)** Wiederanschließen aktiv erkennen statt 30-s-Polling.
    - **T5 (vor Release)** verständliche Meldung statt „Keine Fotos gefunden", wenn der Ordner fehlt.
    - **T6–T9 (Post-MVP)** Volume-GUID wie das Original; `HandleDeviceArrival`/`Removal` als aktive
      Hardware-Erkennung; der Bearbeiten-Dialog prüft den Pfad wie der Anlegen-Dialog; ein
      `ScheduleError`-Äquivalent „Ordner nicht verfügbar".
-   **UNKNOWN geblieben:** Netzwerk-Laufwerk-Sonderfall, Latenz des Wiederanschließens, was das
-   Original mit Dateien macht, die **während** eines Laufs verschwinden, und Windows/Linux-Verhalten
-   (`NSWorkspace` ist macOS-only).
-8. [ ] **Warteschlange zu hoch (User-Entscheidung: feste Regel „Ordner zuerst, Warteschlange
-   max. 50 %").** Ursache im Code belegt: `table_h = free − QUEUE_BELOW_H(88) −
-   FOLDER_LIST_MIN_H(200)` (`src/backup.rs:1751`) — die Warteschlange bekommt **jeden Überschuss**,
-   während die Ordnerliste bei `FOLDER_LIST_MAX_H = 320` gedeckelt ist (`:94`). Auf einem hohen
-   Fenster (Screenshot ~1050 px) wächst dadurch nur die Warteschlange (~610 px), die Ordnerliste
-   bleibt auf ihrer Untergrenze. **Neue Regel:** die Ordnerliste bekommt ihren Platz **zuerst** (bis
-   320 px, danach scrollt sie), die Warteschlange den Rest, aber **höchstens 50 % der freien Höhe**
-   (`QUEUE_MIN_H = 120` bleibt Untergrenze); beim Fenster-Minimum 760×520 darf nichts abgeschnitten
-   werden. **Verworfen:** ziehbare Trennlinie (mehr Mechanik, Position überlebt den Neustart
-   ohnehin nicht); eigener Reiter für die Warteschlange (widerspricht der früheren Entscheidung
-   „Warteschlange und Fortschrittsleiste gehören zusammen", Welle 3a/Bug 4).
-9. [ ] **Ziel der Datensicherung aus dem Dialog entfernen (User-Auftrag 2026-10-16).** Wörtlich:
-   „Im Dialog ‚Ziel der Datensicherung' → genau gleich wie in den Settings. Das soll weg und genauso
-   wie global automatisch berechnet werden." Also: das Feld „Ziel für Datensicherung:" samt
-   deaktiviertem „Ändern …"-Knopf (`src/backup_config.rs:71-75`) **fällt weg**, das Ziel wird
-   **automatisch** bestimmt — dieselbe Behandlung wie die eben entfernte Einstellungs-Sektion
-   (Befund 5). **Die Umsetzung hängt an der Spec aus Punkt 4** (`docs/SPEC_UPLOAD_DESTINATION.md`):
-   dort steht, wie das Original das Ziel ableitet (`Backup/<Macname>/<Pfad>`, Segmente werden bei
-   Bedarf angelegt) und dass der User es „normalerweise nie ändern" muss.
-   **User-Entscheidung 2026-10-16: „Feld jetzt weg, Spiegelung nach der Spec."** Das Feld samt
-   Knopf fällt **sofort** aus dem Dialog (die App entscheidet wie heute automatisch, heute
-   `Pictures/Web` — `src/prime_photos.rs:820-843` sucht die beiden Ordner und lädt dort hinein).
-   Die **Spiegelung wie das Original** (`Backup/<Macname>/<Quellpfad>`) wird als eigener Auftrag
-   **nach** der Spec gebaut; offene Frage dort: **kann unser Cookie-Host Ordner überhaupt anlegen**
-   (heute wird nur gesucht)? Bestehende Uploads in `Pictures/Web` bleiben, wo sie sind.
-   **Verworfen:** Feld dauerhaft behalten und bei `Pictures/Web` bleiben (widerspricht dem
-   Paritäts-Auftrag „Upload Ort soll gleich sein wie bei der Originalen App").
-10. [ ] **Clean-Room-Spec „Wie erkennt das Original, dass eine Datei dieselbe ist?"** (User-Auftrag
-   2026-10-16). Deliverable `docs/SPEC_FILE_IDENTITY.md`. Recon existiert bereits
-   (`docs/SPEC_DEDUP.md`, `docs/SPEC_DUPLICATES.md`, `docs/SPEC_FILENAME_ENCODING.md`,
-   `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §1.3) — der Auftrag ist **Nachprüfen und Verdichten**,
-   Widersprüche zwischen den Docs aufdecken, **nicht** abschreiben.
-11. [ ] **Höhe: responsiv statt absolut, Ordner wichtiger als die Warteschlange** (User-Auftrag
-   2026-10-16: „bitte keine absoluten höhen nehmen, responsive und nicht absolute höhe, Ordner sind
-   wichtiger als Warteschlange"). Die Aufteilung wird **relativ** (Anteile der freien Höhe) statt
-   über die absoluten Konstanten `QUEUE_BELOW_H = 88`, `FOLDER_LIST_MIN_H = 200`,
-   `FOLDER_LIST_MAX_H = 320`, `QUEUE_MIN_H = 120` (`src/backup.rs:77-97`); die Ordnerliste bekommt
-   den **größeren** Anteil. Zeilen-/Kopfhöhen bleiben absolut (`show_rows` braucht sie) — gemeint
-   sind die Bereichshöhen. Dazu zwei Wünsche:
-   - [ ] **Prozent pro Datei** in den „In Bearbeitung"-Zeilen — **User-Entscheidung: vor dem DMG
-     bauen.** Heute unmöglich: wir senden den Body am Stück (`.body(contents_vec)`,
-     `src/prime_photos.rs:997`/`:1228`) ⇒ kein Byte-Zähler. Die Recon hat es vorweggenommen
-     (`docs/SPEC_UPLOAD_PROGRESS.md` §4.2: „ob reqwest dort einen Byte-/Chunk-Progress liefert, ist
-     **nicht belegt**"). Umsetzung: **streamender** Body (`Body::wrap_stream` über einen
-     Chunk-Reader mit Zähler, `Content-Length` explizit setzen), Zähler je Datei in `UploadShared`,
-     Zeile zeigt „45 %". **Berührt den heikelsten Pfad** ⇒ eigener Auftrag + **Live-Test am Konto
-     durch den Hauptagent** (Testdatei hochladen, Knoten danach löschen).
-   - [ ] **Ordnerpfad im Namen der Warteschlangen-Zeile** (User-Wunsch: „Beim Namen eventuell auch
-     Ordner Pfad anzeigen?"). Heute steht dort nur der Dateiname, der volle Pfad nur im Tooltip.
-12. [ ] **Mausrad scrollt beide Container gleichzeitig** (User-Befund 2026-10-16: „Scrollen mit
-   Mausrad scrollt gleichzeitig die Ordner ansicht und die Warteschlange obwohl das nicht der
-   gleiche Scroll COntainer ist"). Zwei `ScrollArea::vertical()` **ohne eigene ID**
-   (`src/backup.rs:1754` Warteschlange, `:1919` Ordnerliste). **Ursache an der egui-Quelle belegt
-   (2026-10-16):** `scroll_area.rs:534` setzt ohne eigenes `id_salt` die **Konstante**
-   `Id::new("scroll_area")` und bildet daraus `ui.make_persistent_id(id_salt)` — zwei ScrollAreas im
-   **selben Eltern-`Ui`** erhalten also **dieselbe ID** und teilen sich den Scroll-Zustand (egui
-   verlangt für den zweiten ausdrücklich ein `id_salt`). Das erklärt „beide scrollen gleichzeitig"
-   exakt: ein Rad-Ereignis bewegt **einen** Zustand, den beide zeichnen. **Fix:** jeder der beiden
-   Bereiche bekommt ein **eigenes** `id_salt`; **vorher messen** (beide IDs bzw. Zustände
-   gegenüberstellen), damit der Fix belegt ist und nicht geraten.
-13. [ ] **Ordner in der Warteschlange sichtbar machen** (User-Klarstellung 2026-10-16 zu Befund 11:
-   „Ich sehe in der Warteschlange keine Spalte für die Gruppe, aber ja der Ordner Name oder wenn der
-   Ordner Name nicht eindeutig ist Ordner + Pfad"). Also **nicht** nur den Tooltip: die
-   Warteschlangen-Zeilen zeigen den **Ordner je Zeile** (kompakte Spalte/Beigabe), und wenn **zwei
-   Sicherungsordner denselben Namen** tragen, wird **Name + Pfad** angezeigt (klein/gekürzt), damit
-   die Zeilen unterscheidbar bleiben. Der Gruppenkopf bekommt dieselbe Regel (heute nur der Name).
-   Damit ist Befund 11s Wunsch „Ordnerpfad im Zeilennamen" präzisiert und **ersetzt** ihn.
-14. [ ] **Ordner-Karte: Variant A (User-Entscheidung 2026-10-16).** Anlass: die Karte zeigt
-   **zweimal** dieselbe Prozentzahl (grau unter dem Namen, farbig rechts) — weil beide Stellen
-   `status_text` benutzen. Das Original hat dort **drei Bausteine**
-   (`docs/SPEC_UPLOAD_PROGRESS.md` §2.2): **Status** („Datensicherung abgeschlossen" /
-   „Upload-Vorgang läuft" / „ANGEHALTEN" / „Warten" / „Konfiguration wird durchgeführt"),
-   **Fortschrittszeile** („Vollständig" / „{0}% hochgeladen" / „Angehalten bei {0} %") und
-   **„Zuletzt aktualisiert: {0}"** (Original **relativ**, „Vor 1 Min.").
-   **Variant A:** Zeile 1 = Name links, **Statuswort** rechts (farbig, je `BackupStatusAlertLevel`),
-   daneben die drei Zeilen-Symbole; Zeile 2 klein = **Pfad · Fortschritt · Zuletzt aktualisiert**.
-   Beispiel: „Sport … Datensicherung abgeschlossen" / „/Users/…/Pictures/Sport · Vollständig ·
-   Zuletzt aktualisiert: 15.10.2026 21:56".
-   **User-Vorgabe: „Zuletzt aktualisiert" bleibt.** Damit steht jeder Baustein **einmal**; der Pfad
-   ist immer sichtbar.
-   **Verworfen:** Variant B (kompakt, eine Zeile, Pfad nur bei Mehrdeutigkeit); Variant C (nur die
-   Dopplung entfernen, Pfad wandert in die graue Zeile).
-   **Offene Wortlaut-Frage:** bei 100 % nennt das Original **„Vollständig"**, wir bisher
-   „100% hochgeladen" — die Spec ist die Vorgabe, also „Vollständig" (User kann das beim Test
-   umdrehen).
-
-## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
-
-Erledigt und gelöscht (jeweils implementiert, unabhängig verifiziert = Verifier APPROVE, committet):
-Bug 1 „Where is `use_default?" (`2899bc5`; Wissen in `docs/DEV_NOTES.md` § 1), Bug 7 „Klick auf den
-leeren Bereich = Nichts" (nichts zu bauen — Belege in `docs/DEV_NOTES.md` § 6), Bug 9 „Warnungen als
-Fehler" (`c019528`; Regel in `AGENTS.md`), Bug 8 „Sichere Ersetz-Regel" (`2e2f183`; Regel in
-`AGENTS.md` → „Sichere Ersetz-Regel", Belege in `docs/SPEC_DUPLICATES.md` § 5 und
-`docs/SPEC_CONFLICT_OPTIONS.md`), Bug 3 „Logo neben „Prime Photos" in der Seitenleiste" (`ecb9bb8`;
-nur `src/app.rs`, Verifier APPROVE) und Bug 6 „Aufnahmedatum/Online-Sortierung" (`fcbc14d`; Regel in
-`AGENTS.md` → „Aufnahmedatum", Live-Belege in `docs/SPEC_CAPTURE_DATE.md` § 12, PUT-Abnahme in
-`docs/features/LIVE_ACCEPTANCE.md`), Bug 2 „Dock-Icon fehlt" (`02f5aa3`; iconset im Build →
-`iconutil` in `packaging/make-app.sh`, Entscheidung in `AGENTS.md` → „Assets") sowie Bug 4
-„Warteschlange und Fortschrittsleiste gehören zusammen" und Bug 5 „Protokoll-Bereich unten
-abgeschnitten" (`4c0f337` = Welle 3a, `a55f8e3`/`a22c713` = 3b, `b9141dd` = Panel-Reihenfolge;
-Wissen in `AGENTS.md` → „Panel-Reihenfolge", „Virtuelle Liste", „Live-Status der Ordner-Zeile"
-und `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8).
-
-**Prio 1 ist damit vollständig abgearbeitet — hier ist nichts offen.**
+8. [ ] **Upload-Ziel-Spiegelung wie das Original (offen nach der Spec).** Das Zielfeld ist aus dem
+   Dialog **entfernt** (Befund 9, Welle 5.7); die App wählt das Ziel heute automatisch
+   (`Pictures/Web`, `src/prime_photos.rs:820-843`). Offen ist der **eigene Auftrag** nach
+   `docs/SPEC_UPLOAD_DESTINATION.md`: die Original-Spiegelung `Backup/<Macname>/<Quellpfad>`
+   (Segmente bei Bedarf anlegen). **Offene Frage:** kann unser Cookie-Host Ordner überhaupt anlegen
+   (`POST /drive/v1/nodes`, `kind: "FOLDER"`) — heute wird nur gesucht? Bestehende Uploads in
+   `Pictures/Web` bleiben, wo sie sind.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
-
-Die Umsetzung selbst ist abgeschlossen und gelöscht (Commits `42149bb`, `4ec98e7`, `f3c773b`,
-`db68cff`, `a71191b`, `261501e`, `36aee39`, `40cf024`, `506df58`, `b0fa4c4`, `2803aa9` — alle
-Verifier APPROVE). Geblieben ist **offene** Arbeit:
 
 - [ ] **Live-Abnahme der Rückfall-Regel (2026-10-16).** Ebenfalls nur durch Tests gepinnt, nicht
   durch die Leitung: ein `Replace`-Ziel, dessen Pfad der Index **nicht** an die vom 409 benannte
@@ -259,17 +96,7 @@ Verifier APPROVE). Geblieben ist **offene** Arbeit:
   ziehen. (3) **neu (2026-10-16, vom Umsetzer gemeldet):** die Zeile `:275` „**Global conflict
   setting** | *Does not exist* | **We also have none**" ist auf unserer Seite überholt — seit
   `Config.conflict_resolution_default` gibt es die globale Konflikt-Standardwahl (Einstellungen →
-  Upload); die Original-Spalte bleibt „gibt es dort nicht". **Erledigt und damit aus dieser Liste
-  raus** (Runde 2026-10-16, Commit `83376ba`): die Zeilen `:268` und `:273`/`:278` (App-Default
-  `Replace`, voller POST-Query-Satz) sowie der §5-Text.
-
-## Offene Kandidaten derselben Absturzklasse (2026-10-14)
-
-Regel aus dem Absturz am Laufende (2026-10-14, behoben; Details in `docs/DEV_NOTES.md` § 1):
-**keine synchrone AppKit-/RunLoop-API direkt aus `update`.**
-**Erledigt (2026-10-16, `e36488d`):** der letzte Kandidat `rfd::FileDialog::pick_folder()` ist auf
-`AsyncFileDialog` + `self.rt` umgestellt — der synchrone Pfad blockierte das UI und gehörte in genau
-diese Klasse. Offen ist hier **nichts**; die Regel bleibt als Prüfmaßstab für neue AppKit-Aufrufe.
+  Upload); die Original-Spalte bleibt „gibt es dort nicht".
 
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 
@@ -286,11 +113,6 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   englische Kommentare vorsieht — die inline-`//`-Kommentare sind außerhalb von `i18n.rs`/`tr(...)`
   inzwischen **frei** von Deutsch (Runde `83376ba`). Kein eigener Auftrag; beim nächsten Anfassen
   von `notify.rs` mitziehen.
-
-**Erledigt und damit raus (2026-10-16):** die **Logout-Residuen** (laufender Upload: Abbruch-Flag
-`2a3b636`; `config_error` verständlich und auf dem Login-Screen: dito; die Login-WebView-Residue war
-hinfällig, der Login-Screen ersetzt die Haupt-UI) und die **Nav-Accessibility** (`widget_info`,
-`e36488d`).
 
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
@@ -318,22 +140,11 @@ Ausdrücklich **ohne** Starttermin:
   Videos, Autoplay, Upsell-/Quota-Banner, Auto-Update, Proxy, ausgeblendete Dateien,
   iOS-Dedupe-Prompt, Crash-Relaunch bleiben draußen.
 
-## Referenz: was **nicht** neu erfunden werden darf
-
-Alle Rechte-/Verhaltensfragen sind entweder aus den Clean-Room-Specs belegt oder als UNKNOWN
-markiert (`docs/SPEC_*.md`, `docs/PROTOCOL.md`, `docs/openapi.yaml`). Wo eine Spec einen
-Original-Wert nennt, gilt er als Vorgabe, nicht als Ratewert. Unser **eigenes** Verhalten —
-Fallstricke, Ops-Tricks, Gates — steht in `docs/DEV_NOTES.md`; Live-Nachweise in
-`docs/features/LIVE_ACCEPTANCE.md`.
-
 ## Geplante Wellen — **NUR PLAN**, keine Welle startet ohne ausdrücklichen Auftrag
 
-Geschnitten nach **gemeinsamem Umfeld/Dateien**, damit jede Welle in einem Durchgang ohne
-Merge-Konflikt läuft; die Reihenfolge ist eine Empfehlung.
-
-**Wellen 1–5 sind abgeschlossen** (jeweils umgesetzt, unabhängig verifiziert und committet; die
-Historie steht in den Commits, die Entscheidungen in `AGENTS.md`). Offen ist nur **Welle 6** unten
-— und die nicht-blockierenden Reste in den Listen weiter oben.
+Geschnitten nach **gemeinsamem Umfeld/Dateien**. **Wellen 1–5 sind abgeschlossen** (Historie in den
+Commits, Entscheidungen in `AGENTS.md`); offen ist nur **Welle 6** — plus die Reste in den Listen
+weiter oben.
 
 ### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
 Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,
@@ -352,10 +163,7 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 3. **macOS-Signatur:** die selbstsignierte Identität „Prime Photos Local Signer" ist importiert und
    getrustt (damit der Keychain-Dialog nur **einmal** erscheint). Offen bleibt, ob **Benachrichtigungen**
    im signierten Bundle erscheinen und ob `--options runtime` für ad-hoc nötig ist.
-4. **Logout während laufendem Upload:** `logout()` löscht die Auth-Cookies, stoppt aber den
-   laufenden Lauf nicht. Soll der Upload stoppen/pausieren oder weiterlaufen und mit 401 scheitern?
-   (Eine saubere Antwort bräuchte einen Abbruch-Kanal in der Upload-Pipeline.)
-5. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung).
+4. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung).
 
 ## Offen (Backlog)
 
@@ -366,7 +174,7 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 - [ ] Menüleisten-Status-Item (Status-Popup: Status, Benachrichtigungen, Speicher, §9).
 - [ ] Videos hochladen (bisher nur Fotos). Offene Fragen dazu: `docs/SPEC_SCOPE_INVENTORY.md`.
 - [ ] „Startseite"/Übersichtsseite? (Strings vorhanden, im Build ungenutzt.)
-- [ ] `.app`-Icon für das Bundle (siehe Prio-1-Bug 2) — gehört zu `packaging/make-app.sh`.
+- [ ] `.app`-Icon für das Bundle — gehört zu `packaging/make-app.sh`.
 - [ ] Rest aus `Amazon Photos.dll`: Quota-Form, exakter Extension-Filter, Watcher-Intervall,
   Konfliktbehandlung, Video-Support.
 - [ ] Echte „Speichernutzung"-Anzeige (nur Prime; bis dahin bewusst nichts anzeigen).
@@ -409,7 +217,7 @@ Kein Eintrag hier darf nachträglich „doch noch" umgesetzt werden — verworfe
   zurückgenommen):** lief genau einen Tag, ohne dass ein Fehler oder Gate daran schuld war — der
   User hat schlicht wieder zurückgestellt. Ein erneuter Wechsel auf ein Gratis-/Billig-Modell für
   Subagenten braucht eine **neue** User-Entscheidung, nicht den alten Eintrag. Gegenwärtig gilt
-  `opencode/mimo-v2.6-flash-free` für beide Rollen.
+  `opencode-go/deepseek-v4.1-flash` für beide Rollen (siehe `AGENTS.md` → „Umsetzer").
 - **`SaveAsNew` als Application Default** (galt 2026-10-14 bis 2026-10-15). Wer ihn zurückdreht,
   ändert eine getroffene Entscheidung. Der Enum-`#[default]` bleibt trotzdem `SaveAsNew`
   (Datei-Fallback für `folders.toml`-Einträge ohne Schlüssel) — **zwei verschiedene Defaults, nicht
