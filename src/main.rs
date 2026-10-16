@@ -42,6 +42,7 @@ fn window_icon() -> egui::IconData {
 
 fn main() -> eframe::Result<()> {
     logging::init();
+    notify::init();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

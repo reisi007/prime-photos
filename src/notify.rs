@@ -14,11 +14,45 @@
 //!
 //! Off macOS there is no run-loop re-entrancy problem; the notification is
 //! posted directly on the calling (UI) thread, exactly as before.
+//!
+//! Second macOS pitfall: the backend must know which application the
+//! notification belongs to, otherwise it asks the OS for an app named
+//! „use_default" — the OS then opens the system panel „Choose Application —
+//! Where is use_default?" at the end of an upload run. `init()` calls
+//! `set_application` once at startup, before the first notification; an `Err`
+//! is harmless, because the backend's `Once` is completed either way and the
+//! lookup never runs again.
 
 use crate::i18n::{tr, tr1, tr2};
 #[cfg(target_os = "macos")]
 use dispatch2::DispatchQueue;
 use log::warn;
+
+/// Bundle-Identifier unseres eigenen Bundles (`packaging/Info.plist`).
+///
+/// Zusätzlich `test`, damit der Abgleich mit der Info.plist-Vorlage auch auf
+/// Nicht-macOS-Zielen gebaut wird; ohne den Test-Zweig wäre die Konstante dort
+/// toter Code (und unter `warnings = "deny"` ein Build-Fehler).
+#[cfg(any(target_os = "macos", test))]
+const BUNDLE_ID: &str = "de.reisinger.prime-photos";
+
+/// Einmalige Initialisierung beim Start.
+///
+/// Auf macOS MUSS `set_application` vor der ersten Benachrichtigung laufen:
+/// sonst fragt der Backend beim Senden nach einer Anwendung namens
+/// „use_default" und das OS zeigt das Panel „Where is use_default?".
+/// Auch ein `Err` ist hier harmlos — der `Once` im Backend ist danach
+/// abgeschlossen und der Lookup entfällt (Details s. Modul-Doku).
+#[cfg(target_os = "macos")]
+pub fn init() {
+    if let Err(e) = notify_rust::set_application(BUNDLE_ID) {
+        warn!("Benachrichtigungs-Anwendung konnte nicht gesetzt werden: {e}");
+    }
+}
+
+/// Auf allen anderen Zielen gibt es weder den Lookup noch das Panel.
+#[cfg(not(target_os = "macos"))]
+pub fn init() {}
 
 /// Summary and body of the notification for a finished upload run.
 ///
@@ -124,5 +158,14 @@ mod tests {
         let (_, ok) = notification_texts(5, 0, 5);
         let (_, err) = notification_texts(5, 1, 6);
         assert_ne!(ok, err, "the failure wording must differ");
+    }
+
+    #[test]
+    fn bundle_id_matches_the_info_plist_template() {
+        let plist = include_str!("../packaging/Info.plist");
+        assert!(
+            plist.contains(&format!("<string>{BUNDLE_ID}</string>")),
+            "BUNDLE_ID und packaging/Info.plist sind auseinandergelaufen: {BUNDLE_ID}"
+        );
     }
 }
