@@ -308,11 +308,16 @@ pub struct FolderStore {
 }
 
 impl FolderStore {
-    pub fn load() -> Self {
-        match std::fs::read_to_string(store_path()) {
-            Ok(s) => toml::from_str(&s).unwrap_or_default(),
-            Err(_) => Self::default(),
-        }
+    /// Load the persisted store.
+    ///
+    /// A missing file is a normal first run (`Ok` with an empty store). A parse
+    /// error is **not** silently swallowed any more (user decision 2026-10-16):
+    /// the damaged file is moved aside to `folders.toml.corrupt-<unix>` in the
+    /// same folder — so the original is preserved for manual recovery and never
+    /// overwritten — and the error is returned. The caller treats it like a
+    /// logout; the technical detail never reaches the UI.
+    pub fn load() -> std::io::Result<Self> {
+        load_from(&store_path())
     }
 
     pub fn save(&self) -> std::io::Result<()> {
@@ -349,6 +354,46 @@ impl FolderStore {
     }
 }
 
+/// Testable core of [`FolderStore::load`]: the path is passed in so a test can
+/// point it at a scratch file without touching the real config directory.
+fn load_from(path: &Path) -> std::io::Result<FolderStore> {
+    let s = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FolderStore::default()),
+        Err(e) => return Err(e),
+    };
+    match toml::from_str::<FolderStore>(&s) {
+        Ok(store) => Ok(store),
+        Err(e) => {
+            log::error!("folders.toml konnte nicht gelesen werden: {e}");
+            // Set the damaged file aside (same directory, unique name) so it is
+            // preserved for the user and the default store never overwrites it.
+            let aside = corrupt_path(path);
+            if let Err(re) = std::fs::rename(path, &aside) {
+                log::error!("Beschädigte folders.toml konnte nicht beiseitegelegt werden: {re}");
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            ))
+        }
+    }
+}
+
+/// `folders.toml` → `folders.toml.corrupt-<unix-timestamp>` (same folder).
+fn corrupt_path(path: &Path) -> PathBuf {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "folders.toml".to_string());
+    name.push_str(&format!(".corrupt-{ts}"));
+    path.with_file_name(name)
+}
+
 pub fn store_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -369,6 +414,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn load_missing_file_is_an_empty_store() {
+        let dir = scratch("load-missing");
+        let path = dir.join("folders.toml");
+        let store = load_from(&path).expect("a missing file is a normal first run");
+        assert!(store.folders.is_empty());
+    }
+
+    #[test]
+    fn load_broken_toml_sets_the_file_aside_and_errors() {
+        let dir = scratch("load-broken");
+        let path = dir.join("folders.toml");
+        // Invalid TOML (bare keys may not contain spaces) ⇒ a parse error.
+        std::fs::write(&path, b"this is not = valid toml [[[").unwrap();
+        let err = load_from(&path).expect_err("a parse error must be reported");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        // The original name is gone — the file was moved aside, not overwritten.
+        assert!(!path.exists(), "the damaged file must not stay in place");
+        let kept: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().starts_with("folders.toml.corrupt-"))
+                    .unwrap_or(false)
+            })
+            .collect();
+        assert_eq!(kept.len(), 1, "exactly one preserved copy");
+        // The preserved copy still holds the original bytes.
+        let bytes = std::fs::read_to_string(&kept[0]).unwrap();
+        assert!(bytes.contains("this is not"));
     }
 
     #[test]

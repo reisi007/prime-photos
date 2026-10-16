@@ -550,7 +550,10 @@ fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
             s.folder_failed.clone(),
         )
     };
-    let mut store = FolderStore::load();
+    let mut store = match load_store_logged() {
+        Some(store) => store,
+        None => return,
+    };
     let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
     for (i, f) in store.folders.iter_mut().enumerate() {
         // `folder_total` — the run's plan — is the trigger, not `folder_done`:
@@ -687,6 +690,23 @@ fn overlay_session_cookies(cfg: &mut Config, session: &Arc<Mutex<Session>>) {
     cfg.cookie_x_amz_access_token = cookies.cookie_x_amz_access_token;
 }
 
+/// Load the persisted store for the detached supervisor, reporting a damaged
+/// one on the log facade and yielding `None`.
+///
+/// `FolderStore::load` already sets a damaged file aside; the supervisor must
+/// not keep running against the resulting empty default store, so every caller
+/// treats `None` as "no store this pass" (user decision 2026-10-16). The
+/// technical detail stays in the log, never in the UI.
+fn load_store_logged() -> Option<FolderStore> {
+    match FolderStore::load() {
+        Ok(store) => Some(store),
+        Err(e) => {
+            log::error!("Sicherungsziele konnten nicht geladen werden: {e}");
+            None
+        }
+    }
+}
+
 /// The start-time safety net (user decision 2026-10-14): one **metadata-only**
 /// walk per enabled folder decides whether anything changed since the last run.
 /// A folder whose maximum mtime did not grow costs no hash, no per-file DB query
@@ -716,8 +736,13 @@ async fn background_sync_pass(
         return;
     }
 
-    // Enabled folders come from the persisted store (saved on every change).
-    let mut store = FolderStore::load();
+    // Enabled folders come from the persisted store (saved on every change). A
+    // damaged store was set aside by `FolderStore::load`; without it there is
+    // nothing to sync, so the pass ends here instead of running against an
+    // empty default store (user decision 2026-10-16).
+    let Some(mut store) = load_store_logged() else {
+        return;
+    };
     let indices = store.enabled_indices();
     if indices.is_empty() {
         return;
@@ -931,7 +956,9 @@ fn sync_watchers(
         && !cfg.session_id.is_empty()
         && !cfg.cookie_x_acb.is_empty()
     {
-        Some(FolderStore::load())
+        // A damaged store was set aside by `FolderStore::load`; without it there
+        // is nothing to watch (the error is already logged).
+        load_store_logged()
     } else {
         None
     };
@@ -1035,7 +1062,12 @@ async fn watch_loop(
         // just the parked stock — merged with itself (a no-op) so no path is taken
         // up twice, then started if a run is allowed now.
         if !pending.is_empty() {
-            let mut store = FolderStore::load();
+            // A damaged store was set aside by `FolderStore::load`; without it
+            // there is nothing to attribute the parked paths to, so this pass is
+            // skipped (the error is already logged).
+            let Some(mut store) = load_store_logged() else {
+                continue;
+            };
             handle_files(
                 std::iter::empty(),
                 &mut pending,
@@ -1072,7 +1104,9 @@ async fn watch_loop(
                 watchers.clear();
             }
         }
-        let mut store = FolderStore::load();
+        let Some(mut store) = load_store_logged() else {
+            continue;
+        };
         let files = map_to_folders(&store, &paths);
         // Merge the new burst with the parked stock and start one run for all of
         // it if one is allowed. Merging (not replacing) is what keeps an earlier

@@ -160,6 +160,10 @@ const EN: &[(&str, &str)] = &[
         "Die Einstellungen konnten nicht geladen werden.",
         "The settings could not be loaded.",
     ),
+    (
+        "Die Sicherungsziele konnten nicht geladen werden. Die beschädigte Datei wurde gesichert.",
+        "The backup targets could not be loaded. The damaged file was preserved.",
+    ),
     ("Letzter Upload: {} erfolgreich", "Last upload: {} successful"),
     ("Login – Prime Photos", "Sign in – Prime Photos"),
     ("Nicht angemeldet", "Not signed in"),

@@ -203,6 +203,12 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) rt: Arc<Runtime>,
     pub(crate) config: Config,
     pub(crate) config_error: Option<String>,
+    /// A damaged `folders.toml` was set aside at start (user decision
+    /// 2026-10-16). While set, the app behaves like a logout: it shows the
+    /// login screen and the message in `config_error`. Recoverable — a finished
+    /// or cancelled login drops it again (see `update`). The keychain token is
+    /// **not** touched, so the state is never destructive.
+    pub(crate) folders_error: bool,
     pub(crate) login: login::WebviewLogin,
     /// In-memory session shared with the background refresh worker (S-C): the
     /// refresh token (mirrored from the OS keychain), the access token and the
@@ -333,8 +339,23 @@ impl PrimePhotoApp {
         if let Some(e) = &load_error {
             log::warn!("Einstellungen konnten nicht geladen werden: {e}");
         }
-        let config_error = load_error
+        let mut config_error = load_error
             .map(|_| tr("Die Einstellungen konnten nicht geladen werden.").to_string());
+        // Backup-target store (user decision 2026-10-16): a damaged `folders.toml`
+        // is set aside by `FolderStore::load` and the app is treated like a
+        // logout — the login screen is shown and a plain-language message is
+        // surfaced (the technical detail only goes to the log). The keychain
+        // token is left untouched; a finished or cancelled login drops the flag.
+        let (store, folders_error) = match FolderStore::load() {
+            Ok(store) => (store, false),
+            Err(e) => {
+                log::warn!("Sicherungsziele konnten nicht geladen werden: {e}");
+                if config_error.is_none() {
+                    config_error = Some(folders_load_message());
+                }
+                (FolderStore::default(), true)
+            }
+        };
         // On first run, preselect the marketplace from the system language.
         let first_run = Config::get_config_path()
             .map(|p| !p.exists())
@@ -449,7 +470,8 @@ impl PrimePhotoApp {
             sized: false,
             page: Page::Backup,
             settings_tab: SettingsTab::General,
-            store: FolderStore::load(),
+            store,
+            folders_error,
             upload: Arc::new(Mutex::new(UploadShared::default())),
             paused,
             slow_mode: false,
@@ -956,6 +978,11 @@ impl eframe::App for PrimePhotoApp {
             }
         }
 
+        // Remember whether a login attempt was in flight at the start of the
+        // frame: a transition to "not running" below means it concluded
+        // (success, rejection or the header's "Abbrechen") — used to drop the
+        // `folders_error` flag again.
+        let login_was_running = self.login.running;
         self.poll_login();
         // Session upkeep (S-C): starts/stops the background refresh worker and
         // reacts to an invalidated session or freshly minted cookies.
@@ -1045,7 +1072,13 @@ impl eframe::App for PrimePhotoApp {
         // open) show the login flow in this same window. A stored refresh
         // token counts as a pending session: no login flash on restart — the
         // worker mints the cookies in the background (like the original).
-        if self.login.running || !(self.is_logged_in() || self.has_pending_session()) {
+        // A damaged `folders.toml` forces the login screen too (user decision
+        // 2026-10-16, "like a logout"); `folders_error` is dropped again once a
+        // login attempt concludes.
+        if self.login.running
+            || !(self.is_logged_in() || self.has_pending_session())
+            || self.folders_error
+        {
             self.login_ui(ctx);
         } else {
             // Start a one-time queue restored from the DB at app start (user
@@ -1185,6 +1218,20 @@ impl eframe::App for PrimePhotoApp {
             }
         }
 
+        // A damaged `folders.toml` keeps the app on the login screen like a
+        // logout (user decision 2026-10-16). The state is recoverable and never
+        // destructive: as soon as a login attempt concludes — success, rejection
+        // or the header's "Abbrechen" — the flag and its message are dropped, so
+        // the app cannot stay stuck on the login screen. The keychain refresh
+        // token is deliberately left untouched.
+        if self.folders_error && login_was_running && !self.login.running {
+            self.folders_error = false;
+            let msg = folders_load_message();
+            if self.config_error.as_deref() == Some(msg.as_str()) {
+                self.config_error = None;
+            }
+        }
+
         // Tray glyph (idle/active/paused/done/error). Runs on every frame —
         // also before sign-in and while the window is hidden — but re-sets the
         // icon only on change.
@@ -1214,7 +1261,10 @@ impl eframe::App for PrimePhotoApp {
         }
 
         // Keep the window title clear about what this window is.
-        let title = if self.login.running || !(self.is_logged_in() || self.has_pending_session()) {
+        let title = if self.login.running
+            || !(self.is_logged_in() || self.has_pending_session())
+            || self.folders_error
+        {
             tr("Login – Prime Photos")
         } else {
             tr("Prime Photos")
@@ -1230,6 +1280,15 @@ impl eframe::App for PrimePhotoApp {
             Self::drop_overlay(ctx);
         }
     }
+}
+
+/// The plain-language message shown when `folders.toml` could not be parsed and
+/// was set aside (user decision 2026-10-16). Contains no file name, path or
+/// error code — the technical detail only goes to the log (user rule: no
+/// technical messages in the end-user UI).
+fn folders_load_message() -> String {
+    tr("Die Sicherungsziele konnten nicht geladen werden. Die beschädigte Datei wurde gesichert.")
+        .to_string()
 }
 
 /// Draw the fetched avatar as a round 30 px badge with the same presence dot as
