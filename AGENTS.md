@@ -511,26 +511,28 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   für Live-Befunde, `docs/DEV_NOTES.md` für Fallstricke unserer Codebase), erst dann wird gelöscht.
   **Niemals gelöscht:** offene Punkte, bewusst Zurückgestelltes und der ganze Abschnitt „Verworfen"
   (damit keine verworfenen Ansätze erneut gebaut werden).
-- **Umsetzer:** `general`-Subagent mit Modell **`opencode/deepseek-v4.1-flash-free`** (User-Entscheidung
-  2026-10-16, „deepseek v4.1 flash free für subagenten nutzen"). Modell-Geschichte dieses Projekts:
+- **Umsetzer:** `general`-Subagent mit Modell **`opencode-go/deepseek-v4.1-flash`** (User-Entscheidung
+  2026-10-16, „bitte das normale deepseek v4.1 flash für subagenten nehmen" — der **bezahlte**
+  Hauptagent-Zwilling, Abo-Credits, **1M ctx**). Modell-Geschichte dieses Projekts:
   `step-5-preview-free` → `deepseek-v4.1-flash` (2026-10-14) → `step-5-preview-free` (2026-10-15)
-  → `mimo-v2.6-flash-free` (2026-10-15) → **`deepseek-v4.1-flash-free`** (2026-10-16). Bekommt
-  Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task. **Kein `#variant`-Suffix.**
-  **Kein** Wechsel ohne neue User-Entscheidung — auch nicht „zurück", wenn ein Modell mal streikt
-  (dann Fallback auf einen anderen Rollen-Task, nicht auf eine Modelländerung).
+  → `mimo-v2.6-flash-free` (2026-10-15) → `deepseek-v4.1-flash-free` (2026-10-16, $0-Zwilling)
+  → **`opencode-go/deepseek-v4.1-flash`** (2026-10-16). Bekommt Ziel-Dateien und die vollständige
+  Spezifikation, frische Session pro Task. **Kein `#variant`-Suffix.**
+  **Anlass des Wechsels:** der $0-Zwilling `opencode/deepseek-v4.1-flash-free` lief am 2026-10-16
+  **zweimal** in ein Rate-Limit (Verifikationsrunden brachen ab, ohne Ergebnis); der bezahlte
+  Zwilling ist verfügbar und hat 1M statt 200k Kontext. **Kein** Wechsel ohne neue
+  User-Entscheidung.
 - **Verifier:** ein **anderer** `general`-Subagent mit **derselben** Vorgabe
-  (`opencode/deepseek-v4.1-flash-free`), frische Session pro Runde; prüft die Substanz (Diff gegen
+  (`opencode-go/deepseek-v4.1-flash`), frische Session pro Runde; prüft die Substanz (Diff gegen
   Auftrag, Invarianten, Blast Radius), nicht die Gates.
-  **Konsequenz des Gratis-Modells:** Briefings an Subagenten enthalten **keine** Live-Werte
+  **Live-Werte bleiben beim Hauptagent:** Briefings an Subagenten enthalten **keine** Live-Werte
   (Cookies, Account-Parameter, Probe-Payloads) — Live-Probes gegen das Amazon-Konto laufen
-  ausschließlich über den Hauptagent. **Abweichung zur globalen Config (bewusst):** die globale
-  Vorgabe (2026-10-16) nimmt für die Hauptagenten `opencode-go/deepseek-v4.1-flash` (**paid**,
-  Abo-Credits) und für Fan-out `opencode-go/longcat-2.5-preview-free`; dieses Projekt bleibt für
-  Subagenten beim **$0**-Zwilling `opencode/deepseek-v4.1-flash-free`. Der Free-Zwilling existiert
-  **nur** unter `opencode/` (unter `opencode-go/` gibt es nur den bezahlten) und hat **200k ctx**
-  statt 1M — für auf einen Auftrag begrenzte Subagenten-Läufe ausreichend, für lange
-  Kontext-Aufträge ggf. nicht. `step-5-preview-free` ist **tot** (vom Anbieter 2026-10-15 entfernt)
-  und darf nicht zurückkommen.
+  ausschließlich über den Hauptagent. Das war ursprünglich die Folge des Gratis-Modells
+  (Trainings-Vorbehalt) und bleibt als **praktische Regel** bestehen, unabhängig vom Modell.
+  **Stand 2026-10-16:** Subagenten nutzen damit **dasselbe** Modell wie die Hauptagenten (paid) —
+  die frühere bewusste Abweichung (Subagenten auf dem $0-Zwilling) ist **aufgehoben**. Der
+  $0-Zwilling existiert **nur** unter `opencode/`; `step-5-preview-free` ist **tot** (vom Anbieter
+  2026-10-15 entfernt) und darf nicht zurückkommen.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
 - **CI/Release (User-Entscheidung 2026-10-13, hebt „Kein Push, kein CI" auf):** Ziel ist ein
   öffentliches GitHub-Repo (bei öffentlichen Repos sind die macOS/Windows/Linux-Runner kostenlos).
