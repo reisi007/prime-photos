@@ -6,11 +6,11 @@ gelöscht.
 
 ## Aktueller Auftrag (2026-10-15, Restbestand)
 
-1. [ ] **`docs/`-Gerüst:** bestehende Spec-Dateien in Unterverzeichnisse sortieren
-   (`docs/original/`, `docs/protocol/`, `docs/dev/` …), ein `docs/README.md` als Index — **alle**
-   Referenzen in `AGENTS.md`, `AGENTS.todo.md`, `docs/` und Code mitziehen. Anlass: User-Wunsch
-   „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
-   nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
+1. [ ] **`docs/`-Gerüst:** **läuft** — Umsetzer-Subagent (Session `ses_eba0c2dc6ffe4UJVr8HQTYZZWx`):
+   `git mv` der Specs nach `docs/original/`, `PROTOCOL`/`openapi` nach `docs/protocol/`,
+   `BUILD`/`DEV_NOTES`/`I18N`/`RELEASE`/`THIRD_PARTY` nach `docs/dev/`, `docs/features/` bleibt,
+   plus `docs/README.md`-Index. **Alle** Referenzen mitziehen (`src/` ~58 Treffer in ~15 Dateien,
+   `AGENTS*.md`, `README.md`, `packaging/`, `docs/` selbst) + Link-Check.
 2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
    Reihenfolge: **D → E → DMG** — C, D und E sind **fertig und verifiziert** (`c6003ff`,
    `69b30c5`, `615d009`).
@@ -49,17 +49,6 @@ umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen
   continue;` in `src/upload.rs`). Belegbar an einer **fremden** Datei gleichen Namens — sie muss
   danach **unverändert** im Konto stehen (kein Datenverlust). Sinnvoll in **einem** Lauf mit der
   PUT-Abnahme oben (derselbe Namenskonflikt, einmal **mit** Bindung ⇒ PUT, einmal **ohne** ⇒ RENAME).
-- [ ] **Kein Test deckt die drei Vorbelegungsstellen** (`add_backup_folder`, transiente Einmal-Zeile,
-  `UploadPlan::from_files`): der Verifier hat jede einzeln auf `true` zurückgedreht — alle 95 Tests
-  blieben grün. Ursache: `PrimePhotoApp` braucht egui-Kontext bzw. Datei-Dialog. Ein **reiner
-  Helfer** („Config ⇒ (dedup, conflict) für die Einmal-Queue") würde die Entscheidung testbar machen.
-- [ ] **Ein Label-Test prüft deutschen Wortlaut** (`remember_label_names_the_folder`): unter
-  `Lang::En` wäre er rot. Unkritisch, solange die Tests mit Deutsch laufen — beim nächsten Anfassen
-  sprachneutral formulieren.
-- [ ] **Das Häkchen-Gating ist eine Stufe großzügiger als das Schreiben:**
-  `remember_checkbox_label` gated nur auf „Store kennt den Index", `remember_conflict_in_folder`
-  zusätzlich auf `file_path.starts_with(&folder.path)`. Im Sonderfall eines verschobenen Index
-  *mit* fremdem Pfad benennt das Häkchen einen Ordner, in den nichts geschrieben würde.
 
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 
