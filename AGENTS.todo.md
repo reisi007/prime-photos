@@ -17,13 +17,14 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    Referenzen in `AGENTS.md`, `AGENTS.todo.md`, `docs/` und Code mitziehen. Anlass: User-Wunsch
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
-2. [ ] **Release-Build + Install:** `cargo build --release` + `packaging/make-app.sh`, lokal mit
-   **„Prime Photos Local Signer"** signiert, in eine **DMG** verpacken
-   (`hdiutil create -volname "Prime Photos" -srcfolder <staging> -ov -format UDZO`), nach
-   `/Applications` installieren und `xattr -dr com.apple.quarantine` setzen, damit der User sie
-   sofort nutzen kann. **Voraussetzung:** der Keychain-Dialog „… möchte den Schlüssel
-   »refresh-token« verwenden" muss einmalig mit **„Immer erlauben"** bestätigt sein (stabiles
-   Zertifikat, daher nur einmal).
+2. [ ] **Release-Build + Install (DMG).** Am 2026-10-16 einmal gelaufen: `cargo build --release` +
+   `packaging/make-app.sh` (signiert mit **„Prime Photos Local Signer"**),
+   `hdiutil create -volname "Prime Photos" -srcfolder <staging> -ov -format UDZO`, Installation nach
+   `/Applications` + `xattr -dr com.apple.quarantine`. **Dieser Stand ist inzwischen veraltet** —
+   Welle 3a–3c haben die UI geändert (Warteschlange, Log-Panel, Nav-Icons). **Offen: nach Welle 4/5
+   neu bauen**, DMG nach `target/dist/` legen und installieren. **Voraussetzung:** der
+   Keychain-Dialog „… möchte den Schlüssel »refresh-token« verwenden" muss einmalig mit **„Immer
+   erlauben"** bestätigt sein (stabiles Zertifikat, daher nur einmal).
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
@@ -35,28 +36,14 @@ Fehler" (`c019528`; Regel in `AGENTS.md`), Bug 8 „Sichere Ersetz-Regel" (`2e2f
 `docs/SPEC_CONFLICT_OPTIONS.md`), Bug 3 „Logo neben „Prime Photos" in der Seitenleiste" (`ecb9bb8`;
 nur `src/app.rs`, Verifier APPROVE) und Bug 6 „Aufnahmedatum/Online-Sortierung" (`fcbc14d`; Regel in
 `AGENTS.md` → „Aufnahmedatum", Live-Belege in `docs/SPEC_CAPTURE_DATE.md` § 12, PUT-Abnahme in
-`docs/features/LIVE_ACCEPTANCE.md`).
+`docs/features/LIVE_ACCEPTANCE.md`), Bug 2 „Dock-Icon fehlt" (`02f5aa3`; iconset im Build →
+`iconutil` in `packaging/make-app.sh`, Entscheidung in `AGENTS.md` → „Assets") sowie Bug 4
+„Warteschlange und Fortschrittsleiste gehören zusammen" und Bug 5 „Protokoll-Bereich unten
+abgeschnitten" (`4c0f337` = Welle 3a, `a55f8e3`/`a22c713` = 3b, `b9141dd` = Panel-Reihenfolge;
+Wissen in `AGENTS.md` → „Panel-Reihenfolge", „Virtuelle Liste", „Live-Status der Ordner-Zeile"
+und `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8).
 
-2. **Dock-/Taskbar-Icon fehlt (verkleinertes Logo nicht dargestellt).** `packaging/Info.plist`
-   kennt **keinen** `CFBundleIconFile` und `Contents/Resources` enthält **keine** `.icns` — macOS
-   zeigt ein generisches Platzhalter-Icon im Dock und im verkleinerten Zustand. Die Logos liegen
-   als SVG-Quellen in `assets/` und werden über `build.rs`/`resvg` bereits gerastert; fehlt ist nur
-   die `.icns`-Bündelung (mehrere Größen) und der Schlüssel im Info.plist.
-   **In Umsetzung (User-Entscheidung 2026-10-16):** die `.icns` wird **im Build** aus
-   `assets/logo.svg` erzeugt — `build.rs` schreibt die zehn iconset-Größen nach
-   `target/pp-appicon.iconset`, `packaging/make-app.sh` bündelt sie per `iconutil` (macOS-Bordmittel)
-   zu `Contents/Resources/AppIcon.icns`, `CFBundleIconFile = AppIcon`. **Kein** eingechecktes
-   Binary, keine neue Abhängigkeit. Die Form bleibt **vollflächig** (belegt: auch das Original-Bundle
-   `Contents/Resources/AppIcon.icns` ist vollflächig — kein Rand/Squircle-Umbau).
-
-4. **Warteschlange und Fortschrittsleiste gehören physisch zusammen.** „▸ Warteschlange (n)" sitzt
-   oben im Kopfbereich, die Gesamt-Leiste unten in der Fußzeile — der User erwartet beide
-   zusammenhängend.
-
-5. **Protokoll-Bereich unten abgeschnitten.** Die Log-Ausliste wird am unteren Fensterrand gekappt,
-   die letzten Zeilen sind nicht erreichbar (Screenshot „Letzter Upload: 54/54 erfolgreich" mit
-   abgeschnittenen OK-Zeilen).
-
+**Prio 1 ist damit vollständig abgearbeitet — hier ist nichts offen.**
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
@@ -163,24 +150,15 @@ Fallstricke, Ops-Tricks, Gates — steht in `docs/DEV_NOTES.md`; Live-Nachweise 
 Geschnitten nach **gemeinsamem Umfeld/Dateien**, damit jede Welle in einem Durchgang ohne
 Merge-Konflikt läuft; die Reihenfolge ist eine Empfehlung.
 
-### Welle 3 — Progress-/UI-Umbau + Layout-Punkte aus `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8
-- **3.1** Detail in den **Hauptbereich**, Klapp-Panel „Warteschlange" (`CollapsingHeader` in
-  `src/backup.rs`) entfernen — Baum/Liste mit Spalten wie im Recon.
-- **3.2** `CollapsingHeader`-Zustand hält nicht: feste ID (`id_salt`); dieselbe Fehlerklasse bei
-  **jedem** `CollapsingHeader` mit dynamischen Zahlen prüfen (`docs/DEV_NOTES.md` § 3).
-- **3.3** Zeile zeigt „Fehler" statt „Upload läuft": Status **live** ableiten (läuft `folder_total`
-  für dieses Ziel ⇒ „Upload läuft"; erst nach `finalize` gilt der persistierte Ausgang).
-- **3.4** Die zwei noch **gezeichneten** Glyphen (Nav-Icons, Flagge) auf Material Symbols umstellen
-  (User-Regel: nichts selbst zeichnen außer dem Logo).
-- **3.5** Layout-Punkte aus § 7.8, die der User ausdrücklich mit in diese Welle genommen hat:
-  feste Spaltenköpfe, **Kürzen + Tooltip** bei langen Namen, Liste füllt die Höhe, 300-Zeilen-Kappe
-  entfällt, leerer Zustand zentriert.
-- **Ein Paket:** 3.1–3.5 zusammen in **einen** UI-Umbau — die Zustandsfehler (3.2/3.3) und der
-  Fortschritt (3.1) sitzen an denselben Stellen.
-
 ### Welle 4 — Release-Pflicht: About + Third-Party-Lizenzen
-Recon liegt vor (`docs/SPEC_ABOUT.md`), Attributionen sind gepflegt (`docs/THIRD_PARTY.md`, u. a.
-Material Symbols). Das Original hat **keine** Lizenzliste — wir erzeugen sie selbst.
+Entscheidungen vom 2026-10-16 stehen in `AGENTS.md` → „About + Drittanbieter-Lizenzen"; Recon in
+`docs/SPEC_ABOUT.md`. Zwei Pakete:
+- **4a** Daten + eigene Lizenz: `LICENSE-MIT`/`LICENSE-APACHE`, `license = "MIT OR Apache-2.0"` in
+  `Cargo.toml`, Generator `packaging/gen-third-party-licenses.sh` → `assets/third-party-licenses.txt`
+  (alle Abhängigkeiten aus `Cargo.lock`, vollständige Lizenztexte, deterministisch, offline).
+- **4b** UI + Menü: About-Fenster (Logo, Version, Kurztext, Copyright „© <Jahr> Prime Photos"),
+  eigenes scrollbares Lizenz-Fenster (generierte Liste **und** `docs/THIRD_PARTY.md`), Eintrag
+  „Über Prime Photos" im Tray- **und** App-Menü (AppKit-Eintrag über ein ObjC-Zielobjekt).
 
 ### Welle 5 — Robustheit & Politur (klein, unabhängig)
 - **5.1** `rfd::FileDialog::pick_folder()` auf `AsyncFileDialog` (siehe „Offene Kandidaten" oben).

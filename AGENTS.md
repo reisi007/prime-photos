@@ -391,6 +391,12 @@ Linksklick; außerdem zweifelte er die Zahl „480 fertig" an („passt die Anza
   Neustart steht dort weiterhin nur die Gesamtzahl. **Ort (User-Entscheidung 2026-10-14):** die
   **Fußzeile aggregiert** über alle Ziele **und** die **einzelne Ordner-Zeile** zeigt ihre eigenen drei
   Zahlen; das Datei-Detail bleibt wie heute (beide Skip-Fälle teilen sich dort einen Zustand).
+- **Live-Status der Ordner-Zeile (Welle 3.3, 2026-10-16):** ob eine Zeile „Upload läuft" oder „Fehler"
+  zeigt, wird **live** abgeleitet — läuft für dieses Ziel gerade ein Lauf, gilt „läuft"; der
+  **persistierte** Ausgang zählt erst **nach** `finalize`. Umsetzung: die Live-Prüfungen hängen an
+  **`folder_total` UND `s.active`** (zwei Stellen in `src/backup.rs`); fehlt das `s.active`, kippt die
+  Anzeige im Frame zwischen Lauf-Ende und `finalize` kurz auf „Fehler". Anlass: eine Zeile stand auf
+  „Fehler", während der Upload noch lief.
 
 ## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
 
