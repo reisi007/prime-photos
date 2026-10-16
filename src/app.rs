@@ -960,12 +960,20 @@ impl eframe::App for PrimePhotoApp {
                     // open state on each update (docs/DEV_NOTES.md §3).
                     .id_salt("log_panel")
                     .show(ui, |ui| {
-                        // Size the scroll area to the height the panel actually
-                        // has left: a fixed height overflows the resizable panel
-                        // and gets clipped at the bottom window edge.
-                        let available = ui.available_height();
+                        // Definite body height given to the scroll area as a
+                        // *floor*. With `max_height(available_height)` alone the
+                        // loop settled on the scroll area's `min_scrolled_size`
+                        // (64 px) and pinned the viewport to 64 px. With the
+                        // floor the expanded panel is header + 200 px, and since
+                        // the scroll area still fills whatever the panel hands
+                        // it, a height enlarged by dragging persists; shrinking
+                        // below the floor is not possible. Capped by the window
+                        // so header + body always fit.
+                        let body_h = 200.0_f32
+                            .min(ui.ctx().screen_rect().height() - 120.0)
+                            .max(64.0);
                         egui::ScrollArea::vertical()
-                            .max_height(available)
+                            .min_scrolled_height(body_h)
                             .show(ui, |ui| {
                                 for line in &s.log {
                                     ui.label(line);
