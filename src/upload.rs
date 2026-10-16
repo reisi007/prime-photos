@@ -143,29 +143,57 @@ impl UploadShared {
     }
 }
 
-pub(crate) fn status_text(status: FolderStatus, pct: f32, total: usize) -> (String, Color32) {
+/// The folder card's status word (Variant A, user decision 2026-10-16): our six
+/// `FolderStatus` values mapped onto the original client's row vocabulary
+/// (`docs/SPEC_UPLOAD_PROGRESS.md` §2.2, `docs/UI_FLOWS.md` §11.2), coloured by
+/// the same alert-level logic with our palette
+/// (Success→GREEN, Error→RED, Info→TEAL, Warning→AMBER, Normal→MUTED):
+///
+/// | Status | Word | Level → colour |
+/// |---|---|---|
+/// | `Uploading` | „Upload-Vorgang läuft" | Info → TEAL |
+/// | `Done` | „Datensicherung abgeschlossen" | Success → GREEN |
+/// | `Paused` | „ANGEHALTEN" | Warning → AMBER |
+/// | `Error` | „Fehler" | Error → RED |
+/// | `Scanning` | „Konfiguration wird durchgeführt" | Info → TEAL |
+/// | `Idle`, `total > 0` | „Warten" (the original's cold-boot waiting word) | Info → TEAL |
+/// | `Idle`, `total == 0` | — (empty) | — |
+///
+/// The empty arm is the never-scanned trap (user decision 2026-10-16): a
+/// folder that was never scanned has `total == 0` just like a scanned folder
+/// with nothing to upload, and only the run's finalizers know which is which —
+/// they settle a scanned-empty folder as `Done` (see `finalize_upload`), so an
+/// `Idle` folder with `total == 0` was never scanned and must not claim any
+/// state. The percentage lives in the card's second line
+/// ([`folder_progress_text`]), not here — the original's primary status carries
+/// no number either.
+pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, Color32) {
     match status {
-        FolderStatus::Uploading => (
-            tr1("{}% hochgeladen", format!("{:.0}", pct * 100.0)),
-            theme::TEAL,
-        ),
-        FolderStatus::Done => (tr("100% hochgeladen").to_string(), theme::GREEN),
-        FolderStatus::Paused => (
-            tr1("Angehalten ({}%)", format!("{:.0}", pct * 100.0)),
-            theme::AMBER,
-        ),
+        FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), theme::TEAL),
+        FolderStatus::Done => (tr("Datensicherung abgeschlossen").to_string(), theme::GREEN),
+        FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), theme::AMBER),
         FolderStatus::Error => (tr("Fehler").to_string(), theme::RED),
-        FolderStatus::Scanning => (tr("Wird vorbereitet …").to_string(), theme::MUTED),
-        FolderStatus::Idle => {
-            if total > 0 {
-                (
-                    tr1("{}% hochgeladen", format!("{:.0}", pct * 100.0)),
-                    theme::MUTED,
-                )
-            } else {
-                (String::new(), theme::MUTED)
-            }
-        }
+        FolderStatus::Scanning => (tr("Konfiguration wird durchgeführt").to_string(), theme::TEAL),
+        FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), theme::TEAL),
+        FolderStatus::Idle => (String::new(), theme::MUTED),
+    }
+}
+
+/// Progress fragment of the folder card's second line (Variant A): the
+/// original's Fortschrittszeile (`docs/SPEC_UPLOAD_PROGRESS.md` §2.2) —
+/// `{0}% hochgeladen` while running, the original's own completion word
+/// `Vollständig` at 100 % (`docs/UI_FLOWS.md` §11.5), `Angehalten bei {0} %`
+/// while paused. Empty when the target has no total: a never-scanned folder
+/// must not claim any progress (same trap as [`status_text`]'s empty arm).
+pub(crate) fn folder_progress_text(status: FolderStatus, done: usize, total: usize) -> String {
+    if total == 0 {
+        return String::new();
+    }
+    let pct = format!("{:.0}", done as f32 / total as f32 * 100.0);
+    match status {
+        FolderStatus::Paused => tr1("Angehalten bei {} %", pct),
+        _ if done >= total => tr("Vollständig").to_string(),
+        _ => tr1("{}% hochgeladen", pct),
     }
 }
 
@@ -1103,6 +1131,76 @@ mod tests {
             "SomethingElse",
             "N1"
         )));
+    }
+
+    // -- status word + progress fragment of the folder card (Variant A) -----
+
+    #[test]
+    fn status_words_map_our_statuses_onto_the_original_vocabulary() {
+        // The mapping is the original's row vocabulary (UI_FLOWS.md §11.2);
+        // each word is asserted exactly once, so a renamed key cannot drift.
+        assert_eq!(status_text(FolderStatus::Uploading, 0).0, tr("Upload-Vorgang läuft"));
+        assert_eq!(
+            status_text(FolderStatus::Done, 0).0,
+            tr("Datensicherung abgeschlossen")
+        );
+        assert_eq!(status_text(FolderStatus::Paused, 0).0, tr("ANGEHALTEN"));
+        assert_eq!(status_text(FolderStatus::Error, 0).0, tr("Fehler"));
+        assert_eq!(
+            status_text(FolderStatus::Scanning, 0).0,
+            tr("Konfiguration wird durchgeführt")
+        );
+    }
+
+    #[test]
+    fn idle_words_waiting_only_when_the_folder_knows_a_total() {
+        // Cold boot with a known file count: the original's waiting word.
+        assert_eq!(status_text(FolderStatus::Idle, 42).0, tr("Warten"));
+        // The never-scanned trap: `total == 0` must claim nothing.
+        let (empty, _) = status_text(FolderStatus::Idle, 0);
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn status_colours_follow_the_alert_levels() {
+        use theme::{AMBER, GREEN, RED, TEAL};
+        assert_eq!(status_text(FolderStatus::Uploading, 0).1, TEAL);
+        assert_eq!(status_text(FolderStatus::Done, 0).1, GREEN);
+        assert_eq!(status_text(FolderStatus::Paused, 0).1, AMBER);
+        assert_eq!(status_text(FolderStatus::Error, 0).1, RED);
+        assert_eq!(status_text(FolderStatus::Scanning, 0).1, TEAL);
+    }
+
+    #[test]
+    fn progress_is_empty_without_a_total() {
+        // Same trap as the status word: no total, no claim.
+        assert_eq!(folder_progress_text(FolderStatus::Done, 0, 0), "");
+        assert_eq!(folder_progress_text(FolderStatus::Uploading, 0, 0), "");
+    }
+
+    #[test]
+    fn progress_reports_a_percentage_while_running() {
+        assert_eq!(
+            folder_progress_text(FolderStatus::Uploading, 1, 2),
+            tr1("{}% hochgeladen", "50")
+        );
+    }
+
+    #[test]
+    fn progress_says_vollstaendig_at_hundred_percent() {
+        // The original's own completion word, not "100% hochgeladen"
+        // (UI_FLOWS.md §11.5).
+        assert_eq!(folder_progress_text(FolderStatus::Done, 10, 10), tr("Vollständig"));
+        // Reaching 100 % mid-run already counts as complete.
+        assert_eq!(folder_progress_text(FolderStatus::Uploading, 7, 7), tr("Vollständig"));
+    }
+
+    #[test]
+    fn progress_keeps_the_paused_wording() {
+        assert_eq!(
+            folder_progress_text(FolderStatus::Paused, 1, 4),
+            tr1("Angehalten bei {} %", "25")
+        );
     }
 }
 

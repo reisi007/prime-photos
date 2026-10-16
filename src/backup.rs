@@ -8,8 +8,8 @@ use crate::icons;
 use crate::login::Session;
 use crate::theme;
 use crate::upload::{
-    outcome_text, run_upload, status_text, upload_progress_text, FileState, QueueEntry,
-    UploadShared,
+    folder_progress_text, outcome_text, run_upload, status_text, upload_progress_text, FileState,
+    QueueEntry, UploadShared,
 };
 use eframe::egui::{self, RichText};
 // NOTE: `notify` is the filesystem-event crate — not `crate::notify`, the
@@ -63,38 +63,124 @@ fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
         })
 }
 
+/// Label of a backup folder in the queue (rows and group headers): the folder
+/// name, plus the parent path in parentheses when **more than one** backup
+/// folder carries that name (`ambiguous`) — two folders both named "Sport"
+/// would otherwise be indistinguishable in the queue (user decision
+/// 2026-10-16). The ambiguity is computed once per frame over the whole
+/// store, so the rule is stable while the queue is open. The name is shown
+/// NFC-normalised, like every other displayed path in the app.
+fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> String {
+    let name = crate::text::nfc(name);
+    if !ambiguous.contains(&name) {
+        return name;
+    }
+    match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => {
+            format!("{} ({})", name, crate::text::nfc(&p.display().to_string()))
+        }
+        // No parent to disambiguate with: the plain name stays.
+        _ => name,
+    }
+}
+
+/// The set of folder names the store carries more than once — the input of
+/// [`queue_folder_label`]. Cheap (the store holds a handful of folders) and
+/// built once per frame, not per queue row. Names are NFC-normalised so the
+/// set matches the displayed form.
+fn ambiguous_folder_names(folders: &[folders::BackupFolder]) -> HashSet<String> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for f in folders {
+        *counts.entry(crate::text::nfc(&f.name)).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .filter(|(_, c)| *c > 1)
+        .map(|(name, _)| name)
+        .collect()
+}
+
 /// Fixed geometry of the live queue table (docs/SPEC_UPLOAD_PROGRESS.md §7.8):
-/// the name column takes the remaining width, size and status are fixed, the row
-/// height is fixed. The header uses the same widths, so both line up.
+/// the name column takes the remaining width, folder/size/status are fixed, the
+/// row height is fixed. The header uses the same widths, so both line up.
 const QUEUE_ROW_H: f32 = 20.0;
 const QUEUE_HEADER_H: f32 = 20.0;
+/// Compact column carrying the backup folder of each queue row (user decision
+/// 2026-10-16): without it the files of several targets are indistinguishable.
+const QUEUE_FOLDER_W: f32 = 120.0;
 const QUEUE_SIZE_W: f32 = 72.0;
 const QUEUE_STATUS_W: f32 = 104.0;
 const QUEUE_MIN_NAME_W: f32 = 80.0;
 /// Height of the centred empty-state block while the queue is empty.
 const QUEUE_EMPTY_H: f32 = 72.0;
-/// Lower bound of the queue table's height.
-const QUEUE_MIN_H: f32 = 120.0;
-/// Fixed chrome the queue table must leave **below itself** so the rest of the
-/// page stays reachable (measured headless with egui 0.31.1): the aggregate
+/// Floor of the queue table's height as a fraction of the page's free height
+/// (user decision 2026-10-16: no absolute heights — the queue is the
+/// secondary column and shrinks with the window).
+const QUEUE_MIN_FRAC: f32 = 0.20;
+/// Ceiling of the queue table's height as a fraction of the free height: the
+/// queue never takes more than half of the page — the folders matter more.
+const QUEUE_MAX_FRAC: f32 = 0.50;
+/// **Measured** chrome the queue table must leave **below itself** so the rest
+/// of the page stays reachable (headless with egui 0.31.1): the aggregate
 /// progress bar with its 6 px gap (56 px to the folder heading, i.e. the bar,
 /// a 12 px gap and the "Automatisch gesicherte Ordner:" heading) plus the folder
 /// list's own footer room ([`QUEUE_FOOTER_H`]). 80 px measured, 88 px with a
-/// small margin. The Backup page has no scroll area of its own, so the table may
-/// never eat this space; the list below then gets what is left. Because
-/// `table_h` is always `<= free - QUEUE_BELOW_H`, the footer keeps at least
-/// `QUEUE_BELOW_H - 56 - QUEUE_FOOTER_H = 2 px` of its own — the page cannot
-/// overflow at any window size.
+/// small margin. This is measured content, not a panel share — it stays
+/// absolute on purpose; only the *range caps/floors* of the two scroll areas
+/// are relative. The Backup page has no scroll area of its own, so the table
+/// may never eat this space; the list below then gets what is left.
 const QUEUE_BELOW_H: f32 = 88.0;
 /// Height the folder list must leave for the footer below it (8 px gap + line).
 const QUEUE_FOOTER_H: f32 = 30.0;
-/// Preferred height of the folder list. It shrinks below this in a small window,
-/// which is why the table only reserves a *floor* ([`FOLDER_LIST_MIN_H`]), not
-/// this full height.
-const FOLDER_LIST_MAX_H: f32 = 320.0;
-/// Floor the queue table must leave for the folder list at its draw time: the
-/// list holds ~3 folder cards before it scrolls.
-const FOLDER_LIST_MIN_H: f32 = 200.0;
+/// Height of one folder card (Variant A), **measured headless** with egui
+/// 0.31.1 at the default font: name line + small path/progress/updated line +
+/// outcome line + frame margins. The list's floor is derived from it — three
+/// cards plus their gaps stay visible before the list scrolls.
+const FOLDER_CARD_H: f32 = 60.0;
+/// Vertical gap between two folder cards (the frame's outer margin, 4 + 4).
+const FOLDER_CARD_GAP: f32 = 8.0;
+/// Floor the folder list claims before the queue is laid out: three measured
+/// cards with their gaps — derived from the card height, not a round number.
+const FOLDER_LIST_MIN_H: f32 = 3.0 * FOLDER_CARD_H + 2.0 * FOLDER_CARD_GAP;
+/// Ceiling of the folder list as a fraction of the free height (user decision
+/// 2026-10-16: relative, not the old fixed 320 px).
+const FOLDER_LIST_MAX_FRAC: f32 = 0.45;
+
+/// Vertical budget of the Backup page's two scroll areas for a given free
+/// height — the single source both draw sites use, so the queue (drawn first)
+/// leaves exactly what the folder list was promised.
+///
+/// Priority (user decision 2026-10-16): the **folder list claims its height
+/// first**; the queue takes the rest, but never more than half of the free
+/// height. All caps and floors are fractions of `free` except the measured
+/// chrome ([`QUEUE_BELOW_H`], [`QUEUE_FOOTER_H`], [`QUEUE_HEADER_H`]) and the
+/// list's card-derived floor, which stay absolute.
+///
+/// Guarantees for every `free >= 0`:
+/// - `queue_h + list_h + QUEUE_HEADER_H + QUEUE_BELOW_H <= free` — nothing
+///   runs off the bottom edge (the 2 px margin inside `QUEUE_BELOW_H` covers
+///   the header being 2 px more conservative than the measured 106 px);
+/// - `queue_h <= QUEUE_MAX_FRAC * free` — the queue stays at or below 50 %;
+/// - `list_h >= min(FOLDER_LIST_MIN_H, …)` — three cards fit whenever the
+///   window is tall enough to give the queue its floor too.
+fn page_heights(free: f32) -> (f32, f32) {
+    // The queue's fixed chrome: its own column header plus everything below
+    // the table (aggregate bar zone + footer room).
+    let chrome = QUEUE_HEADER_H + QUEUE_BELOW_H;
+    // 1) The folder list first: its card-derived floor, capped by its fraction
+    //    of the free height — and never so much that the queue loses its floor
+    //    or the chrome is eaten.
+    let list_h = FOLDER_LIST_MIN_H
+        .min(FOLDER_LIST_MAX_FRAC * free)
+        .min((free - chrome - QUEUE_MIN_FRAC * free).max(0.0));
+    // 2) The queue takes what is left, capped at half the free height; its
+    //    floor only applies when it actually fits.
+    let rest = (free - chrome - list_h).max(0.0);
+    let queue_h = rest
+        .min(QUEUE_MAX_FRAC * free)
+        .max((QUEUE_MIN_FRAC * free).min(rest));
+    (queue_h, list_h)
+}
 
 /// One line of the live queue table: a backup-folder group header or a file row.
 /// Both are drawn at the same fixed height, so `ScrollArea::show_rows` can still
@@ -418,15 +504,29 @@ fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
     if shared.lock().unwrap().cancelled {
         return;
     }
-    let (folder_done, folder_failed) = {
+    let (folder_total, folder_done, folder_failed) = {
         let s = shared.lock().unwrap();
-        (s.folder_done.clone(), s.folder_failed.clone())
+        (
+            s.folder_total.clone(),
+            s.folder_done.clone(),
+            s.folder_failed.clone(),
+        )
     };
     let mut store = FolderStore::load();
     let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
     for (i, f) in store.folders.iter_mut().enumerate() {
-        if let Some(&done) = folder_done.get(&i) {
-            f.uploaded_files = done;
+        // `folder_total` — the run's plan — is the trigger, not `folder_done`:
+        // it holds every folder the run took part in, **including** one whose
+        // scan found nothing to upload (user decision 2026-10-16). Such a
+        // folder never gets a `folder_done` entry, so a `folder_done` trigger
+        // would leave it without a total and without a state forever — the row
+        // would keep claiming nothing was ever done. A folder absent from
+        // `folder_total` was never part of the run and stays untouched; that is
+        // also what keeps a **never-scanned** folder (equally `total == 0`)
+        // from showing a completed state.
+        if let Some(&total) = folder_total.get(&i) {
+            f.total_files = total;
+            f.uploaded_files = folder_done.get(&i).copied().unwrap_or(0);
             f.last_updated = now.clone();
             f.status = if folder_failed.get(&i).copied().unwrap_or(0) > 0 {
                 FolderStatus::Error
@@ -1433,15 +1533,23 @@ impl PrimePhotoApp {
         };
         let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
         for (i, f) in self.store.folders.iter_mut().enumerate() {
-            if let Some(&done) = folder_done.get(&i) {
+            // `folder_total` — the run's plan — is the trigger, not
+            // `folder_done` (user decision 2026-10-16): it holds every folder
+            // the run took part in, **including** one whose scan found nothing
+            // to upload — a folder with no pending file never gets a
+            // `folder_done` entry, so the old trigger left it unsettled and the
+            // row kept showing an empty state. Such a folder is now recorded as
+            // `Done` ("gescannt + nichts zu tun ⇒ abgeschlossen"). The trap
+            // this must not fall into: a **never-scanned** folder also has
+            // `total == 0`, but it is absent from `folder_total` (only plan
+            // folders are), so it is untouched and keeps claiming nothing.
+            if let Some(&total) = folder_total.get(&i) {
                 // The run's own file count goes with it: `uploaded_files` alone
                 // was written back, which left `total_files` from an earlier scan
                 // or run and made the row read "480 von 150". Only targets that
                 // really took part in the run are touched.
-                if let Some(&total) = folder_total.get(&i) {
-                    f.total_files = total;
-                }
-                f.uploaded_files = done;
+                f.total_files = total;
+                f.uploaded_files = folder_done.get(&i).copied().unwrap_or(0);
                 f.last_updated = now.clone();
                 f.status = if folder_failed.get(&i).copied().unwrap_or(0) > 0 {
                     FolderStatus::Error
@@ -1608,6 +1716,10 @@ impl PrimePhotoApp {
         // cached and only rebuilt when the run's *file states* changed
         // (`UploadShared::rev`): a 5 000-file run otherwise cloned every file
         // name on every frame, for nothing — only the counters move.
+        // Names the store carries more than once: those queue rows and group
+        // headers show "Name (Pfad)" so same-named folders stay
+        // distinguishable (user decision 2026-10-16).
+        let ambiguous = ambiguous_folder_names(&self.store.folders);
         let rev = self.upload.lock().unwrap().rev;
         if self.queue_cache_rev != rev || self.queue_cache.1.is_empty() {
             let groups: Vec<(String, Vec<(String, FileState)>)> = {
@@ -1624,7 +1736,7 @@ impl PrimePhotoApp {
                         self.store
                             .folders
                             .get(e.folder)
-                            .map(|f| crate::text::nfc(&f.name))
+                            .map(|f| queue_folder_label(&f.name, &f.path, &ambiguous))
                             .unwrap_or_default()
                     };
                     let idx = match slot.get(&e.folder).copied() {
@@ -1708,25 +1820,46 @@ impl PrimePhotoApp {
         ui.label(RichText::new(tr1("Warteschlange ({})", remaining)).strong().size(14.0));
 
         // Shared geometry: header and rows derive the name width the same way so
-        // the three columns line up. The scroll bar's width is reserved only when
+        // the four columns line up. The scroll bar's width is reserved only when
         // it is not floating (egui's default `ScrollStyle` floats ⇒ 0).
         let avail = ui.available_width();
         let spacing_x = ui.spacing().item_spacing.x;
         let bar_w = ui.spacing().scroll.allocated_width();
-        let name_w = (avail - bar_w - QUEUE_SIZE_W - QUEUE_STATUS_W - 2.0 * spacing_x)
-            .max(QUEUE_MIN_NAME_W);
+        let name_w = (avail
+            - bar_w
+            - QUEUE_FOLDER_W
+            - QUEUE_SIZE_W
+            - QUEUE_STATUS_W
+            - 3.0 * spacing_x)
+        .max(QUEUE_MIN_NAME_W);
+
+        // The page's vertical budget, decided **before** the queue is drawn: the
+        // folder list claims its height first, the queue takes the rest — but
+        // never more than half of the free height (user decision 2026-10-16).
+        // `list_h` is used again at the folder list's own draw time; the
+        // function is pure, so both sites agree.
+        let free = ui.available_height();
+        let (table_h, list_h) = page_heights(free);
 
         if layout.is_empty() {
-            // Centred empty state (Welle 3.1) instead of an empty table.
-            ui.allocate_ui(egui::vec2(avail, QUEUE_EMPTY_H), |ui| {
+            // Centred empty state (Welle 3.1) instead of an empty table. The
+            // block may not be taller than the table it replaces (plus the
+            // header it saves), or it would eat the list's promised height in a
+            // very small window.
+            let empty_h = QUEUE_EMPTY_H.min(QUEUE_HEADER_H + table_h + 2.0);
+            ui.allocate_ui(egui::vec2(avail, empty_h), |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.label(theme::muted(tr("Keine Uploads in der Warteschlange")));
                 });
             });
         } else {
-            // Fixed column header (Name · Größe · Status), above the scroll area
-            // so it never scrolls away.
+            // Fixed column header (Ordner · Name · Größe · Status), above the
+            // scroll area so it never scrolls away.
             ui.horizontal(|ui| {
+                ui.add_sized(
+                    [QUEUE_FOLDER_W, QUEUE_HEADER_H],
+                    egui::Label::new(RichText::new(tr("Ordner")).strong().size(11.0)),
+                );
                 ui.add_sized(
                     [name_w, QUEUE_HEADER_H],
                     egui::Label::new(RichText::new(tr("Name")).strong().size(11.0)),
@@ -1740,20 +1873,17 @@ impl PrimePhotoApp {
                     egui::Label::new(RichText::new(tr("Status")).strong().size(11.0)),
                 );
             });
-            // Height split for a page that has no scroll area of its own. The
-            // table takes the surplus over the fixed chrome below it
-            // (`QUEUE_BELOW_H`) and a floor for the folder list
-            // (`FOLDER_LIST_MIN_H`) — but never more than what is actually free,
-            // so at the minimum window size nothing runs off the bottom. The list
-            // is then capped to the real leftover at its own draw time (see its
-            // `max_height`), so a small window shrinks the list instead of
-            // pushing it off the edge, while a large window gives the table the
-            // free height (§7.8).
-            let free = ui.available_height();
-            let table_h = (free - QUEUE_BELOW_H - FOLDER_LIST_MIN_H)
-                .max(QUEUE_MIN_H)
-                .min((free - QUEUE_BELOW_H).max(0.0));
+            // A page that has no scroll area of its own: the table gets exactly
+            // the height `page_heights` reserved for it — never more than what
+            // is free, so at the minimum window size nothing runs off the
+            // bottom. The list below keeps whatever was promised to it.
             egui::ScrollArea::vertical()
+                // Own scroll state (user decision 2026-10-16): egui keys a
+                // ScrollArea's offset by `make_persistent_id("scroll_area")`
+                // when no `id_salt` is given, so the queue and the folder list
+                // — both drawn on this page — would share one offset and any
+                // wheel scroll would move both at once.
+                .id_salt("queue")
                 .max_height(table_h)
                 // Honor the cap even when it is tiny: the default
                 // `min_scrolled_height` (64 px) would otherwise overrule a
@@ -1783,8 +1913,11 @@ impl PrimePhotoApp {
                                     egui::vec2(row_w, QUEUE_ROW_H),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
+                                        // The group's folder spans the Ordner and
+                                        // Name columns — the group *is* the
+                                        // folder, so the file column stays empty.
                                         ui.add_sized(
-                                            [name_w, QUEUE_ROW_H],
+                                            [QUEUE_FOLDER_W + name_w, QUEUE_ROW_H],
                                             egui::Label::new(
                                                 RichText::new(label.as_str()).strong().size(12.0),
                                             )
@@ -1808,6 +1941,24 @@ impl PrimePhotoApp {
                                 // A long name is truncated in the cell; the full
                                 // path shows on hover (§7.3).
                                 let full = e.path.display().to_string();
+                                // The row's backup folder — the same label the
+                                // group header carries (disambiguated when the
+                                // store holds the name twice).
+                                let folder_label = if e.folder == ONE_TIME_IDX {
+                                    tr("Einmalige Sicherung").to_string()
+                                } else {
+                                    self.store
+                                        .folders
+                                        .get(e.folder)
+                                        .map(|f| queue_folder_label(&f.name, &f.path, &ambiguous))
+                                        .unwrap_or_default()
+                                };
+                                let folder_tip = self
+                                    .store
+                                    .folders
+                                    .get(e.folder)
+                                    .map(|f| f.path.display().to_string())
+                                    .unwrap_or_default();
                                 // Allocated at exactly `QUEUE_ROW_H` so the row
                                 // advances by `QUEUE_ROW_H + item_spacing.y`,
                                 // matching the group rows and `show_rows` (see
@@ -1817,6 +1968,14 @@ impl PrimePhotoApp {
                                     egui::vec2(row_w, QUEUE_ROW_H),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
+                                        ui.add_sized(
+                                            [QUEUE_FOLDER_W, QUEUE_ROW_H],
+                                            egui::Label::new(
+                                                RichText::new(folder_label).size(12.0),
+                                            )
+                                            .truncate(),
+                                        )
+                                        .on_hover_text(folder_tip);
                                         ui.add_sized(
                                             [name_w, QUEUE_ROW_H],
                                             egui::Label::new(
@@ -1913,12 +2072,16 @@ impl PrimePhotoApp {
             )));
         }
 
-        // The folder list is capped to the real leftover (and its preferred
-        // height), so it can never push the footer off the bottom edge — the
-        // queue above only reserved a floor for it. This also covers the
-        // empty-queue case, where the fixed empty-state block sits above.
-        let list_h = (ui.available_height() - QUEUE_FOOTER_H).clamp(0.0, FOLDER_LIST_MAX_H);
+        // The folder list gets exactly the height `page_heights` promised it
+        // before the queue was drawn (user decision 2026-10-16: the folders
+        // matter more than the queue). The draw-time clamp keeps the footer
+        // reachable even if the queue section consumed more than its
+        // reservation (the empty-queue block in a very small window).
+        let list_h = list_h.min((ui.available_height() - QUEUE_FOOTER_H).max(0.0));
         egui::ScrollArea::vertical()
+            // Own scroll state, for the same reason as the queue's salt above:
+            // without it both areas share one offset and scroll together.
+            .id_salt("folders")
             .max_height(list_h)
             // Honor a shrinking cap: `ScrollArea`'s default `min_scrolled_height`
             // (64 px) would otherwise override a smaller `max_height` and push the
@@ -1931,12 +2094,7 @@ impl PrimePhotoApp {
                     ui.disable();
                 }
                 for r in &rows {
-                    let pct = if r.total > 0 {
-                        r.done as f32 / r.total as f32
-                    } else {
-                        0.0
-                    };
-                    let (status_txt, status_col) = status_text(r.status, pct, r.total);
+                    let (status_txt, status_col) = status_text(r.status, r.total);
                     egui::Frame::new()
                         .fill(theme::CARD_BG)
                         .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
@@ -1946,13 +2104,28 @@ impl PrimePhotoApp {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
                                     ui.label(RichText::new(crate::text::nfc(&r.name)).strong().size(15.0));
-                                    ui.label(
-                                        RichText::new(tr1(
-                                            "{}% hochgeladen",
-                                            format!("{:.0}", pct * 100.0),
-                                        ))
-                                        .size(12.0),
-                                    );
+                                    // Line 2 (Variant A, user decision 2026-10-16):
+                                    // the original's three building blocks, each
+                                    // exactly once — the path (always visible), the
+                                    // progress line and "Zuletzt aktualisiert".
+                                    // Empty parts are omitted, so a never-scanned
+                                    // folder shows nothing but its path.
+                                    let mut line2 =
+                                        crate::text::nfc(&r.path.display().to_string());
+                                    let progress =
+                                        folder_progress_text(r.status, r.done, r.total);
+                                    if !progress.is_empty() {
+                                        line2.push_str(" · ");
+                                        line2.push_str(&progress);
+                                    }
+                                    if !r.last_updated.is_empty() {
+                                        line2.push_str(" · ");
+                                        line2.push_str(&tr1(
+                                            "Zuletzt aktualisiert: {}",
+                                            &r.last_updated,
+                                        ));
+                                    }
+                                    ui.label(theme::muted(line2).size(11.0));
                                     // The target's own outcome breakdown (user
                                     // decision 2026-10-14). Only shown when the
                                     // run produced at least one result for it —
@@ -1961,22 +2134,6 @@ impl PrimePhotoApp {
                                         outcome_text(r.new, r.existing, r.unchanged, r.failed);
                                     if !outcome.is_empty() {
                                         ui.label(theme::muted(outcome).size(11.0));
-                                    }
-                                    if !r.last_updated.is_empty() {
-                                        ui.label(
-                                            theme::muted(tr1(
-                                                "Zuletzt aktualisiert: {}",
-                                                &r.last_updated,
-                                            ))
-                                            .size(11.0),
-                                        );
-                                    } else {
-                                        ui.label(
-                                            theme::muted(crate::text::nfc(
-                                                &r.path.display().to_string(),
-                                            ))
-                                            .size(11.0),
-                                        );
                                     }
                                 });
                                 ui.with_layout(
