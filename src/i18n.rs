@@ -178,6 +178,12 @@ const EN: &[(&str, &str)] = &[
     ("Datensicherung hinzufügen …", "Add backup …"),
     ("Datensicherung stoppen", "Stop backup"),
     ("Datensicherung gestoppt: {}", "Backup stopped: {}"),
+    // Forced pause (user decision 2026-10-16): a missing source folder must not
+    // read as "no photos found" — the understandable cause is the message.
+    (
+        "Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).",
+        "The source folder is currently unreachable (e.g. an external drive is not connected).",
+    ),
     ("Einmalige Sicherung", "One-time backup"),
     ("Es läuft bereits ein Upload.", "An upload is already running."),
     (
