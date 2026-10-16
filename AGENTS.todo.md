@@ -158,6 +158,13 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    Log-Panel ein `id_salt`, `docs/DEV_NOTES.md` §3) **oder** überlappende Viewport-Rects.
    **Erst messen** (headless: beide Rects + Scroll-Offsets), dann fixen — nicht auf Verdacht
    umbauen.
+13. [ ] **Ordner in der Warteschlange sichtbar machen** (User-Klarstellung 2026-10-16 zu Befund 11:
+   „Ich sehe in der Warteschlange keine Spalte für die Gruppe, aber ja der Ordner Name oder wenn der
+   Ordner Name nicht eindeutig ist Ordner + Pfad"). Also **nicht** nur den Tooltip: die
+   Warteschlangen-Zeilen zeigen den **Ordner je Zeile** (kompakte Spalte/Beigabe), und wenn **zwei
+   Sicherungsordner denselben Namen** tragen, wird **Name + Pfad** angezeigt (klein/gekürzt), damit
+   die Zeilen unterscheidbar bleiben. Der Gruppenkopf bekommt dieselbe Regel (heute nur der Name).
+   Damit ist Befund 11s Wunsch „Ordnerpfad im Zeilennamen" präzisiert und **ersetzt** ihn.
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
