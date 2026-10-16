@@ -1,7 +1,6 @@
 use crate::app::{PrimePhotoApp, SettingsTab};
-use crate::countries::{country_label, COUNTRIES};
 use crate::folders::ConflictResolution;
-use crate::i18n::{self, tr, tr1};
+use crate::i18n::{self, tr};
 use crate::theme;
 use eframe::egui;
 
@@ -24,7 +23,12 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn general_settings(&mut self, ui: &mut egui::Ui) {
-        // Language: applied immediately, persisted by "Speichern".
+        // Every change is persisted immediately (user decision 2026-10-16: no
+        // "Speichern" button anymore). One `changed` flag per tab saves **once**
+        // per frame at the end — a slider drag or text edit fires `changed()`
+        // on many frames, and per-widget saves would write the file each time.
+        let mut changed = false;
+        // Language: applied immediately, persisted below.
         ui.horizontal(|ui| {
             ui.label(tr("Sprache"));
             let selected = match self.config.language.as_deref().and_then(i18n::Lang::from_code) {
@@ -61,6 +65,7 @@ impl PrimePhotoApp {
                     .unwrap_or_else(i18n::system_lang);
                 i18n::set_lang(lang);
                 self.apply_tray_labels();
+                changed = true;
             }
         });
         // No sign-in block here: the login is our own device flow, started
@@ -70,16 +75,20 @@ impl PrimePhotoApp {
         ui.heading(tr("Upload"));
         ui.horizontal(|ui| {
             ui.label(tr("Album (optional):"));
-            ui.text_edit_singleline(&mut self.album_name);
+            changed |= ui.text_edit_singleline(&mut self.album_name).changed();
         });
-        ui.checkbox(
-            &mut self.config.notifications,
-            tr("Desktop-Benachrichtigungen (Upload fertig / Fehler)"),
-        );
-        ui.checkbox(
-            &mut self.config.background_sync,
-            tr("Hintergrund-Synchronisierung"),
-        );
+        changed |= ui
+            .checkbox(
+                &mut self.config.notifications,
+                tr("Desktop-Benachrichtigungen (Upload fertig / Fehler)"),
+            )
+            .changed();
+        changed |= ui
+            .checkbox(
+                &mut self.config.background_sync,
+                tr("Hintergrund-Synchronisierung"),
+            )
+            .changed();
         ui.label(theme::muted(tr(
             "Sucht automatisch nach neuen Dateien in den aktiven Sicherungszielen. Läuft nur, solange Prime Photos geöffnet ist.",
         )));
@@ -87,65 +96,51 @@ impl PrimePhotoApp {
             ui.checkbox(&mut self.autostart_enabled, tr("Nach dem Anmelden starten"));
         if autostart_resp.changed() {
             self.set_autostart(self.autostart_enabled);
+            changed = true;
         }
         ui.label(theme::muted(tr(
             "Startet Prime Photos automatisch, wenn du dich am System anmeldest.",
         )));
+        // `slow_mode` stays transient on purpose (documented below the checkbox):
+        // it must never reach `Config`, so it does not set `changed`.
         ui.checkbox(&mut self.slow_mode, tr("Slow-Mode (1 Datei gleichzeitig)"));
         ui.label(theme::muted(tr("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.")));
 
-        ui.separator();
-        ui.collapsing(tr("Erweitert (Konto)"), |ui| {
-            ui.label(theme::muted(tr1(
-                "Konfiguration: {}",
-                crate::text::nfc(&self.config_path),
-            )));
-            egui::Grid::new("cfg").num_columns(2).show(ui, |ui| {
-                ui.label(tr("Amazon-Marktplatz"));
-                let current = self.config.country.clone();
-                egui::ComboBox::from_id_salt("settings-country")
-                    .selected_text(country_label(&current))
-                    .show_ui(ui, |ui| {
-                        for &(code, _) in COUNTRIES {
-                            ui.selectable_value(
-                                &mut self.config.country,
-                                code.to_string(),
-                                country_label(code),
-                            );
-                        }
-                    });
-                ui.end_row();
-                ui.label(tr("Zone"));
-                ui.text_edit_singleline(&mut self.config.zone);
-                ui.end_row();
-                ui.label(tr("User-Agent"));
-                ui.text_edit_singleline(&mut self.config.user_agent);
-                ui.end_row();
-            });
-        });
-
-        ui.add_space(10.0);
-        if ui.add(theme::primary_button(tr("Speichern"))).clicked() {
+        // No "Erweitert (Konto)" section anymore (user decision 2026-10-16):
+        // the marketplace is chosen at sign-in only, and zone / user agent are
+        // protocol internals derived from it — nothing to configure here.
+        if changed {
             self.save_config();
         }
     }
 
     pub(crate) fn bandwidth_settings(&mut self, ui: &mut egui::Ui) {
+        // Same immediate-persistence pattern as the general tab: one save per
+        // frame at the end, never one per widget (see `general_settings`).
+        let mut changed = false;
         ui.heading(tr("Uploads"));
-        ui.add(
-            egui::Slider::new(&mut self.concurrency, 1..=8)
-                .text(tr("Gleichzeitige Uploads"))
-                .integer(),
-        );
+        changed |= ui
+            .add(
+                egui::Slider::new(&mut self.config.concurrency, 1..=8)
+                    .text(tr("Gleichzeitige Uploads"))
+                    .integer(),
+            )
+            .changed();
         ui.add_space(8.0);
         ui.label(tr("Upload-Rate pro Datei"));
-        ui.radio_value(&mut self.limit_enabled, false, tr("Nicht begrenzen"));
+        changed |= ui
+            .radio_value(&mut self.config.limit_enabled, false, tr("Nicht begrenzen"))
+            .changed();
         ui.horizontal(|ui| {
-            ui.radio_value(&mut self.limit_enabled, true, tr("Begrenzen auf"));
-            ui.add_enabled(
-                self.limit_enabled,
-                egui::DragValue::new(&mut self.limit_kbps).speed(10.0),
-            );
+            changed |= ui
+                .radio_value(&mut self.config.limit_enabled, true, tr("Begrenzen auf"))
+                .changed();
+            changed |= ui
+                .add_enabled(
+                    self.config.limit_enabled,
+                    egui::DragValue::new(&mut self.config.limit_kbps).speed(10.0),
+                )
+                .changed();
             ui.label(tr("KB/Sekunde"));
         });
         ui.add_space(6.0);
@@ -157,39 +152,49 @@ impl PrimePhotoApp {
         // a new backup target and the policy of the one-time (drag & drop)
         // queue — the same role the conflict default below plays, which is why
         // the two are shown as one block and share the closing note. Persisted
-        // with "Speichern".
+        // immediately like every other setting here.
         ui.add_space(6.0);
         ui.label(theme::muted(tr("Standard für neue Upload-Ziele")));
-        ui.checkbox(&mut self.config.dedup_default, tr("Duplikate überspringen"));
+        changed |= ui
+            .checkbox(&mut self.config.dedup_default, tr("Duplikate überspringen"))
+            .changed();
         ui.label(theme::muted(tr(
             "Dateien, die sich bereits in meinem Konto befinden, nicht sichern",
         )));
 
         // Application default for the name-conflict policy (user decision
         // 2026-10-15): the preselection of a new backup target and the policy
-        // of the one-time (drag & drop) queue. Persisted with "Speichern".
+        // of the one-time (drag & drop) queue. Persisted immediately.
         ui.add_space(6.0);
         ui.label(theme::muted(tr("Standard bei Dateikonflikten")));
-        ui.radio_value(
-            &mut self.config.conflict_resolution_default,
-            ConflictResolution::Ask,
-            tr("Jedes Mal nachfragen"),
-        );
-        ui.radio_value(
-            &mut self.config.conflict_resolution_default,
-            ConflictResolution::Ignore,
-            tr("Ignorieren"),
-        );
-        ui.radio_value(
-            &mut self.config.conflict_resolution_default,
-            ConflictResolution::SaveAsNew,
-            tr("Neue Datei automatisch umbenennen"),
-        );
-        ui.radio_value(
-            &mut self.config.conflict_resolution_default,
-            ConflictResolution::Replace,
-            tr("Ersetzen"),
-        );
+        changed |= ui
+            .radio_value(
+                &mut self.config.conflict_resolution_default,
+                ConflictResolution::Ask,
+                tr("Jedes Mal nachfragen"),
+            )
+            .changed();
+        changed |= ui
+            .radio_value(
+                &mut self.config.conflict_resolution_default,
+                ConflictResolution::Ignore,
+                tr("Ignorieren"),
+            )
+            .changed();
+        changed |= ui
+            .radio_value(
+                &mut self.config.conflict_resolution_default,
+                ConflictResolution::SaveAsNew,
+                tr("Neue Datei automatisch umbenennen"),
+            )
+            .changed();
+        changed |= ui
+            .radio_value(
+                &mut self.config.conflict_resolution_default,
+                ConflictResolution::Replace,
+                tr("Ersetzen"),
+            )
+            .changed();
         ui.add_space(6.0);
         ui.label(theme::muted(tr(
             "Gilt für neue Upload-Ziele und für Drag&Drop.",
@@ -201,8 +206,7 @@ impl PrimePhotoApp {
             "Downloads sind in diesem Port noch nicht implementiert.",
         )));
 
-        ui.add_space(10.0);
-        if ui.add(theme::primary_button(tr("Speichern"))).clicked() {
+        if changed {
             self.save_config();
         }
     }

@@ -1049,9 +1049,9 @@ impl PrimePhotoApp {
             self.log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
             return;
         };
-        let concurrency = if self.slow_mode { 1 } else { self.concurrency };
-        let limit = if self.limit_enabled {
-            self.limit_kbps
+        let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
+        let limit = if self.config.limit_enabled {
+            self.config.limit_kbps
         } else {
             0
         };
@@ -1215,9 +1215,9 @@ impl PrimePhotoApp {
             self.config.conflict_resolution_default,
             files,
         );
-        let concurrency = if self.slow_mode { 1 } else { self.concurrency };
-        let limit = if self.limit_enabled {
-            self.limit_kbps
+        let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
+        let limit = if self.config.limit_enabled {
+            self.config.limit_kbps
         } else {
             0
         };
@@ -1376,9 +1376,9 @@ impl PrimePhotoApp {
         // disk; the detached supervisor gets the shared in-memory session.
         let session = self.session.clone();
         let cfg = self.config.clone();
-        let concurrency = if self.slow_mode { 1 } else { self.concurrency };
-        let limit = if self.limit_enabled {
-            self.limit_kbps
+        let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
+        let limit = if self.config.limit_enabled {
+            self.config.limit_kbps
         } else {
             0
         };

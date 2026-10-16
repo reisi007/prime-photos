@@ -7,7 +7,7 @@ use crate::countries::system_country;
 use crate::dedup::DedupIndex;
 use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
-use crate::icons::{draw_flag_badge, nav_backup_icon, nav_settings_icon, upload_logo};
+use crate::icons::{app_logo, draw_flag_badge, nav_backup_icon, nav_settings_icon};
 use crate::login;
 use crate::notify;
 use crate::theme;
@@ -202,7 +202,6 @@ pub(crate) fn should_fetch_avatar(attempts: u8, last_failed: bool) -> bool {
 pub(crate) struct PrimePhotoApp {
     pub(crate) rt: Arc<Runtime>,
     pub(crate) config: Config,
-    pub(crate) config_path: String,
     pub(crate) config_error: Option<String>,
     pub(crate) login: login::WebviewLogin,
     /// In-memory session shared with the background refresh worker (S-C): the
@@ -222,12 +221,8 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) store: FolderStore,
     pub(crate) upload: Arc<Mutex<UploadShared>>,
     pub(crate) paused: watch::Sender<bool>,
-    pub(crate) concurrency: usize,
     pub(crate) slow_mode: bool,
-    pub(crate) limit_enabled: bool,
-    pub(crate) limit_kbps: u32,
     pub(crate) album_name: String,
-    pub(crate) zone_override: String,
     pub(crate) was_active: bool,
     /// Open "Datensicherungseinstellungen" window (Create or Edit), if any.
     pub(crate) config_form: Option<BackupConfigForm>,
@@ -366,9 +361,6 @@ impl PrimePhotoApp {
                 );
             }
         }
-        let config_path = Config::get_config_path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|e| e.to_string());
         let autostart = Autostart::new();
         // Seed the checkbox from the OS state (is the login item already
         // registered?); `false` when unsupported or the state is unreadable.
@@ -448,7 +440,6 @@ impl PrimePhotoApp {
         let app = Self {
             rt,
             config,
-            config_path,
             config_error,
             login: login::WebviewLogin::new(),
             session: Arc::new(Mutex::new(login::Session::default())),
@@ -460,12 +451,8 @@ impl PrimePhotoApp {
             store: FolderStore::load(),
             upload: Arc::new(Mutex::new(UploadShared::default())),
             paused,
-            concurrency: 3,
             slow_mode: false,
-            limit_enabled: false,
-            limit_kbps: 100,
             album_name: String::new(),
-            zone_override: String::new(),
             was_active: false,
             config_form: None,
             about_open: false,
@@ -518,14 +505,14 @@ impl PrimePhotoApp {
         !self.config.session_id.is_empty() && !self.config.cookie_x_acb.is_empty()
     }
 
+    /// Persist the configuration. **Silent** on success (user decision
+    /// 2026-10-16: settings save immediately on every change now, so a
+    /// per-write "saved" log line would flood the protocol; only failures are
+    /// logged and surfaced through `config_error`).
     pub(crate) fn save_config(&mut self) {
-        if !self.zone_override.trim().is_empty() {
-            self.config.zone = self.zone_override.trim().to_string();
-        }
         match self.config.save() {
             Ok(_) => {
                 self.config_error = None;
-                self.log(tr("Einstellungen gespeichert."));
             }
             Err(e) => {
                 log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
@@ -806,7 +793,7 @@ impl PrimePhotoApp {
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            upload_logo(ui, 24.0);
+            ui.add(app_logo(ui, 24.0));
             ui.add_space(6.0);
             ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
         });

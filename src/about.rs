@@ -99,7 +99,7 @@ pub(crate) fn about_window(ctx: &egui::Context, open: &mut bool, license_open: &
         .default_size(egui::vec2(360.0, 260.0))
         .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
-                icons::upload_logo(ui, 64.0);
+                ui.add(icons::app_logo(ui, 64.0));
                 ui.add_space(8.0);
                 ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
                 ui.add_space(4.0);

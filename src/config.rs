@@ -25,6 +25,19 @@ fn default_replace() -> ConflictResolution {
     ConflictResolution::Replace
 }
 
+/// Serde default of `Config::concurrency` (user decision 2026-10-16: the
+/// worker count is persisted so it survives a restart). Matches the app's
+/// previous hard-coded initial value.
+fn default_concurrency() -> usize {
+    3
+}
+
+/// Serde default of `Config::limit_kbps` (user decision 2026-10-16: persisted
+/// like `concurrency`). Matches the app's previous hard-coded initial value.
+fn default_limit_kbps() -> u32 {
+    100
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub country: String,
@@ -98,6 +111,25 @@ pub struct Config {
     /// switched to overwriting.
     #[serde(default = "default_replace")]
     pub conflict_resolution_default: ConflictResolution,
+    /// Concurrent upload workers (user decision 2026-10-16: persisted so the
+    /// setting survives a restart — before, it lived only in memory and reset
+    /// to the default on every start). The UI allows 1..=8; a value read from
+    /// disk is clamped at the read site ([`Self::concurrency`]) so a
+    /// hand-written `config.toml` cannot start an arbitrary number of workers.
+    /// `#[serde(default = "default_concurrency")]` (3) so an existing
+    /// `config.toml` without this key still loads.
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+    /// Per-file upload rate limit switch (user decision 2026-10-16: persisted
+    /// like `concurrency`). `#[serde(default)]` (false) so an existing
+    /// `config.toml` without this key still loads — unlimited.
+    #[serde(default)]
+    pub limit_enabled: bool,
+    /// Per-file upload rate limit in KB/s (user decision 2026-10-16: persisted
+    /// like `concurrency`). `#[serde(default = "default_limit_kbps")]` (100) so
+    /// an existing `config.toml` without this key still loads.
+    #[serde(default = "default_limit_kbps")]
+    pub limit_kbps: u32,
     /// Device serial of the device login flow (user decision 2026-10-15): 32
     /// hex characters, generated **once** by [`crate::auth::new_device_serial`]
     /// and then stable. This is the one identity value that is ours — every
@@ -134,6 +166,14 @@ impl Config {
             // If no config file exists, return a default configuration
             Ok(Self::default())
         }
+    }
+
+    /// The upload worker count actually used, clamped to the UI range 1..=8.
+    /// A hand-written `config.toml` carrying an out-of-range value (e.g. 99)
+    /// must not start that many workers; the clamp happens here, at the read
+    /// site, so every upload path is covered.
+    pub fn concurrency(&self) -> usize {
+        self.concurrency.clamp(1, 8)
     }
 
     /// Save the configuration to the file system.
@@ -178,6 +218,9 @@ impl Config {
             // an entry without the key) is deliberately different — see
             // `default_replace` and the field comment.
             conflict_resolution_default: ConflictResolution::Replace,
+            concurrency: 3,
+            limit_enabled: false,
+            limit_kbps: 100,
             // Empty = "not generated yet"; the device login flow fills it once.
             device_serial: String::new(),
         }
@@ -287,6 +330,48 @@ cookie_x_amz_access_token = ""
             back.conflict_resolution_default,
             ConflictResolution::Replace
         );
+    }
+
+    #[test]
+    fn config_without_worker_keys_loads_with_previous_defaults() {
+        // A `config.toml` predating the persisted worker settings (user
+        // decision 2026-10-16) loads with the values the app used to
+        // hard-code: 3 workers, no rate limit, 100 KB/s.
+        let config: Config = toml::from_str(LEGACY_TOML).unwrap();
+        assert_eq!(config.concurrency(), 3);
+        assert!(!config.limit_enabled);
+        assert_eq!(config.limit_kbps, 100);
+    }
+
+    #[test]
+    fn config_concurrency_is_clamped_to_the_ui_range() {
+        // A hand-written `config.toml` with an out-of-range value must not
+        // start that many workers: the read site clamps to 1..=8.
+        let toml = r#"
+country = "de"
+zone = "eu"
+user_agent = "ua"
+concurrency = 99
+limit_enabled = true
+limit_kbps = 500
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.concurrency(), 8);
+        assert!(config.limit_enabled);
+        assert_eq!(config.limit_kbps, 500);
+    }
+
+    #[test]
+    fn config_worker_settings_roundtrip() {
+        let mut config = Config::default();
+        config.concurrency = 5;
+        config.limit_enabled = true;
+        config.limit_kbps = 250;
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let back: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(back.concurrency(), 5);
+        assert!(back.limit_enabled);
+        assert_eq!(back.limit_kbps, 250);
     }
 
     #[test]

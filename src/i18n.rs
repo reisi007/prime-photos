@@ -152,7 +152,6 @@ const EN: &[(&str, &str)] = &[
     ("Angemeldet als:", "Signed in as:"),
     ("Bereit", "Ready"),
     ("Einstellungen", "Settings"),
-    ("Einstellungen gespeichert.", "Settings saved."),
     (
         "Die Einstellungen konnten nicht gespeichert werden.",
         "The settings could not be saved.",
@@ -241,7 +240,6 @@ const EN: &[(&str, &str)] = &[
     // -- settings -------------------------------------------------------
     ("Album (optional):", "Album (optional):"),
     ("Allgemeines", "General"),
-    ("Amazon-Marktplatz", "Amazon marketplace"),
     ("Anmeldung", "Sign-in"),
     ("Automatisch (System)", "Automatic (system)"),
     ("Bandbreite", "Bandwidth"),
@@ -256,7 +254,6 @@ const EN: &[(&str, &str)] = &[
         "Downloads sind in diesem Port noch nicht implementiert.",
         "Downloads are not implemented in this port yet.",
     ),
-    ("Erweitert (Konto)", "Advanced (account)"),
     (
         "Gilt für neue Upload-Ziele und für Drag&Drop.",
         "Applies to new upload targets and to drag & drop.",
@@ -267,7 +264,6 @@ const EN: &[(&str, &str)] = &[
         "Note: the limit is applied per file after the upload.",
     ),
     ("KB/Sekunde", "KB/second"),
-    ("Konfiguration: {}", "Configuration: {}"),
 
     ("Nach dem Anmelden starten", "Launch at login"),
     ("Hintergrund-Synchronisierung", "Background sync"),
@@ -296,8 +292,6 @@ const EN: &[(&str, &str)] = &[
     ("Upload", "Upload"),
     ("Upload-Rate pro Datei", "Upload rate per file"),
     ("Uploads", "Uploads"),
-    ("User-Agent", "User agent"),
-    ("Zone", "Zone"),
     // -- login ----------------------------------------------------------
     ("Abgemeldet.", "Signed out."),
     (

@@ -27,7 +27,6 @@ use crate::app::{PrimePhotoApp, HEADER_H};
 use crate::auth::{self, Pkce, TokenStore};
 use crate::countries::{country_label, COUNTRIES, ParsedCookies};
 use crate::i18n::tr;
-use crate::icons::upload_logo;
 use crate::login;
 use crate::theme;
 use eframe::egui::{self, RichText};
@@ -796,7 +795,7 @@ impl PrimePhotoApp {
                 )
                 .show(ctx, |ui| {
                     ui.horizontal_centered(|ui| {
-                        upload_logo(ui, 30.0);
+                        ui.add(crate::icons::app_logo(ui, 30.0));
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
                             ui.label(RichText::new(tr("Prime Photos")).strong().size(15.0));
@@ -838,7 +837,7 @@ impl PrimePhotoApp {
     pub(crate) fn login_screen_ui(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(56.0);
-            upload_logo(ui, 84.0);
+            ui.add(crate::icons::app_logo(ui, 84.0));
             ui.add_space(12.0);
             ui.label(RichText::new(tr("Prime Photos")).size(28.0).strong());
             ui.add_space(4.0);

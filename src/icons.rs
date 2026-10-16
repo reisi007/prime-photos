@@ -1,9 +1,9 @@
 //! UI icons.
 //!
-//! Two kinds live here:
+//! Three kinds live here:
 //!
-//! * Hand-drawn vector glyphs for the app chrome (`upload_logo`,
-//!   `draw_flag_badge` and the flag painters). These stay as they are.
+//! * Hand-drawn vector glyphs for the app chrome (`draw_flag_badge` and the
+//!   flag painters). These stay as they are.
 //! * The sidebar navigation icons ([`nav_backup_icon`], [`nav_settings_icon`])
 //!   and the backup row actions ([`kebab_icon`], [`refresh_icon`]). These are
 //!   **not** drawn here: they are Material Symbols SVGs (Apache-2.0, see
@@ -12,46 +12,6 @@
 
 use crate::theme;
 use eframe::egui::{self, Color32};
-
-/// Our own upload logo: a teal circle with a white upload arrow and tray.
-pub(crate) fn upload_logo(ui: &mut egui::Ui, diameter: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(diameter, diameter), egui::Sense::hover());
-    let painter = ui.painter();
-    let c = rect.center();
-    painter.circle_filled(c, diameter / 2.0, theme::TEAL);
-    let white = Color32::WHITE;
-    // Geometry scaled from the 84 pt reference size.
-    let s = diameter / 84.0;
-    let w = 4.0 * s;
-    let cx = c.x;
-    let arrow_top = c.y - 16.0 * s;
-    let arrow_bottom = c.y + 6.0 * s;
-    painter.line_segment(
-        [egui::pos2(cx, arrow_bottom), egui::pos2(cx, arrow_top)],
-        egui::Stroke::new(w, white),
-    );
-    painter.line_segment(
-        [
-            egui::pos2(cx, arrow_top),
-            egui::pos2(cx - 11.0 * s, arrow_top + 11.0 * s),
-        ],
-        egui::Stroke::new(w, white),
-    );
-    painter.line_segment(
-        [
-            egui::pos2(cx, arrow_top),
-            egui::pos2(cx + 11.0 * s, arrow_top + 11.0 * s),
-        ],
-        egui::Stroke::new(w, white),
-    );
-    painter.line_segment(
-        [
-            egui::pos2(cx - 18.0 * s, c.y + 19.0 * s),
-            egui::pos2(cx + 18.0 * s, c.y + 19.0 * s),
-        ],
-        egui::Stroke::new(w, white),
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Sidebar navigation + backup row-action icons (Material Symbols, rastered by
@@ -63,6 +23,7 @@ pub(crate) fn upload_logo(ui: &mut egui::Ui, diameter: f32) {
 //   assets/icon-settings.svg  ⇒ $OUT_DIR/icon-settings.png  (64 px, white)
 //   assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
 //   assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
+//   assets/logo-small.svg     ⇒ $OUT_DIR/logo-small.png     (256 px, colour)
 // The rasters are deliberately white: the buttons and the sidebar tint them to
 // the theme colour, so one raster per icon covers light and dark themes.
 
@@ -75,6 +36,8 @@ const NAV_SETTINGS_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-s
 const MORE_VERT_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-more-vert.png"));
 /// The refresh ("scan and upload now") row-action icon, as a build-time PNG.
 const REFRESH_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-refresh.png"));
+/// The app logo (`assets/logo-small.svg`, 256 px, coloured), as a build-time PNG.
+const LOGO_SMALL_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo-small.png"));
 
 /// Logical display size of a sidebar navigation icon, in points. The sidebar
 /// icon column is 18 px wide; the row-action icons' 17 pt are a different
@@ -103,6 +66,14 @@ pub(crate) fn kebab_icon(ui: &egui::Ui) -> egui::Image<'static> {
 /// The refresh icon for the visible "scan and upload now" row button.
 pub(crate) fn refresh_icon(ui: &egui::Ui) -> egui::Image<'static> {
     row_icon(ui, "refresh", REFRESH_PNG)
+}
+
+/// The app logo at an exact square size. Unlike the navigation icons this is
+/// **not** tinted: the logo is coloured and carries the brand identity.
+pub(crate) fn app_logo(ui: &egui::Ui, size: f32) -> egui::Image<'static> {
+    let texture = icon_texture(ui.ctx(), "logo", LOGO_SMALL_PNG);
+    egui::Image::new(egui::load::SizedTexture::from_handle(&texture))
+        .fit_to_exact_size(egui::vec2(size, size))
 }
 
 /// Build an [`egui::Image`] for one sidebar navigation icon at [`NAV_ICON_PX`].
