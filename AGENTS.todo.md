@@ -6,12 +6,7 @@ gelöscht.
 
 ## Aktueller Auftrag (2026-10-15, Restbestand)
 
-1. [ ] **`docs/`-Gerüst:** **läuft** — Umsetzer-Subagent (Session `ses_eba0c2dc6ffe4UJVr8HQTYZZWx`):
-   `git mv` der Specs nach `docs/original/`, `PROTOCOL`/`openapi` nach `docs/protocol/`,
-   `BUILD`/`DEV_NOTES`/`I18N`/`RELEASE`/`THIRD_PARTY` nach `docs/dev/`, `docs/features/` bleibt,
-   plus `docs/README.md`-Index. **Alle** Referenzen mitziehen (`src/` ~58 Treffer in ~15 Dateien,
-   `AGENTS*.md`, `README.md`, `packaging/`, `docs/` selbst) + Link-Check.
-2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
+1. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
    Reihenfolge: **D → E → DMG** — C, D und E sind **fertig und verifiziert** (`c6003ff`,
    `69b30c5`, `615d009`).
    - **Offen vor dem DMG:** der App-gesteuerte **Ende-zu-Ende-Live-Test** (Runde D) — blockiert,
