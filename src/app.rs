@@ -917,6 +917,13 @@ impl eframe::App for PrimePhotoApp {
             // decision 2026-10-14) once the folder-cold-start guards allow it.
             // Cheap per frame: it is a no-op unless a queue was restored.
             self.resume_one_time();
+            // Panels come **before** the `CentralPanel` (egui's standard order):
+            // a bottom panel added after the central one overlaps the page,
+            // because `CentralPanel` does not shrink the available rect (it is
+            // allowed to be covered by windows), so the log panel would sit on
+            // the page's last pixels. Shown first, it reserves its strip and the
+            // page ends above it. The side panel stays first of all so the log
+            // panel keeps its horizontal extent (right of the sidebar).
             egui::SidePanel::left("nav")
                 .exact_width(220.0)
                 .resizable(false)
@@ -926,11 +933,6 @@ impl eframe::App for PrimePhotoApp {
                         .inner_margin(egui::Margin::symmetric(12, 16)),
                 )
                 .show(ctx, |ui| self.sidebar(ui));
-
-            egui::CentralPanel::default().show(ctx, |ui| match self.page {
-                Page::Backup => self.backup_ui(ui),
-                Page::Settings => self.settings_ui(ui),
-            });
 
             // Bottom log panel (collapsible) for transparency.
             egui::TopBottomPanel::bottom("log")
@@ -980,6 +982,11 @@ impl eframe::App for PrimePhotoApp {
                                 }
                             });
                     });
+            });
+
+            egui::CentralPanel::default().show(ctx, |ui| match self.page {
+                Page::Backup => self.backup_ui(ui),
+                Page::Settings => self.settings_ui(ui),
             });
 
             let active = self.upload.lock().unwrap().active;
