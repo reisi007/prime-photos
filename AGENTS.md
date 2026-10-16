@@ -190,6 +190,49 @@ sichtbar vom Original ab.
 MVP-Zielbild des Users: **polished** — Autostart (Default **an**, siehe §Autostart), effizienter
 funktionierender Upload (Event-Watcher + Stat-Check + Wasserzeichen) und echte Tray-/Logo-Assets.
 
+## About + Drittanbieter-Lizenzen (Welle 4, User-Entscheidungen 2026-10-16)
+
+Recon: `docs/SPEC_ABOUT.md`. Kernbefund: das Original hat **keine** eingebettete Lizenzliste — nur
+einen Link auf eine Web-Seite; About ist ein Sheet mit Logo, Version, **Geräte-Seriennummer**,
+Send-Logs-Knopf, drei Rechtslinks und Copyright. Wir bauen das About **ohne** Amazon-Bezüge
+(Projektregel „Name & Branding").
+
+- **Eigene Lizenz: `MIT OR Apache-2.0`** (User-Entscheidung 2026-10-16) — `LICENSE-MIT` +
+  `LICENSE-APACHE` im Repo, `license = "MIT OR Apache-2.0"` in `Cargo.toml`. Vorher hatte das Repo
+  **gar keine** Lizenz: für ein öffentliches Release war das eine offene Lücke.
+- **Lizenzliste = alle Abhängigkeiten aus `Cargo.lock`** (User-Entscheidung: „alle Deps"), bewusst
+  **übervollständig** — auch transitiv und auch Windows-/Linux-only-Crates, die nicht im
+  macOS-Binary landen. Erzeugt per `cargo metadata --format-version 1 --locked` aus
+  **`packaging/gen-third-party-licenses.sh`** nach **`assets/third-party-licenses.txt`**;
+  das Skript ist **deterministisch** (kein Zeitstempel) und läuft **offline**. `cargo-license`/
+  `cargo-about` sind **nicht** installiert und werden **nicht** aufgenommen.
+- **Vollständige Lizenztexte gehören mit hinein** (User-Entscheidung): Apache-2.0 §4 und MIT
+  verlangen das **Beilegen** der Lizenz. Die Texte werden aus den **lokalen Crate-Kopien** gesammelt
+  (über `manifest_path` der Metadaten), identische Texte per sha256 **dedupliziert**; fehlt ein Text,
+  wird das **ausgewiesen** statt erfunden. Kein Netzwerk im Generator.
+- **Darstellung:** eigenes, **scrollbares Lizenz-Fenster**, erreichbar über einen Knopf im
+  **About**-Fenster (bei ~760 Komponenten die einzige lesbare Form). Zwei Quellen werden gezeigt:
+  die generierte Liste **und** die kuratierte Icon-Attribution aus `docs/THIRD_PARTY.md`
+  (dort steht: „Die About-/Lizenzseite (Welle 4) liest aus dieser Datei" — eine Quelle der Wahrheit).
+- **Auslöser: Tray-Menü + macOS-App-Menü**, Eintrag „**Über Prime Photos**", **ohne** Tastenkürzel —
+  genau die zwei Pfade des Originals (`clouddrive_desktop_contextmenu_support_about`), nur mit
+  unserem Namen. Im App-Menü ist er der **erste** Eintrag (wie im Original). **Neue Mechanik dafür:**
+  ein winziges ObjC-Zielobjekt (`objc2::define_class!`, objc2 0.6 ist bereits Dependency) setzt ein
+  statisches Flag und weckt die UI — die AppKit-Menüpunkte haben `nil`-Target und laufen über die
+  Responder-Chain, ein eigener Selektor braucht deshalb ein eigenes Target. Kein `muda`-Umbau des
+  Hauptmenüs (das würde die per Responder-Chain funktionierende Bearbeiten-Gruppe riskieren).
+- **Copyright-Zeile: „© <Jahr> Prime Photos"**, Jahr zur Laufzeit aus der Systemzeit (wie das
+  Original sein laufendes Jahr einsetzt). Die Amazon-Formulierung wird **nicht** übernommen.
+- **Version:** `CARGO_PKG_VERSION`; die Commit-ID nur, wenn sie zur Build-Zeit verfügbar ist —
+  sonst weglassen, **nichts erfinden** (das Original zeigt `AssemblyVersion.CommitId`).
+- **Bewusst nicht nachgebaut** (Branding-Regel bzw. Post-MVP): Nutzungsbedingungen- und
+  Datenschutz-Link (zeigen im Original auf Amazon-Seiten), der Drittanbieter-**Web**-Link,
+  die **Geräte-Seriennummer**, „Protokolle senden" und die Versionshinweise (`SPEC_ABOUT.md` §9).
+- **Verworfen:** nur die **direkten** Abhängigkeiten listen (erfüllt die Attributionspflicht für
+  transitive Crates nicht); die Liste als **Textdatei ins Bundle** legen statt sie zu rendern;
+  About nur im **App-Menü**; **ohne** Copyright-Zeile; nur Komponentenliste **ohne** Lizenztexte;
+  die eigene Lizenz später zu klären.
+
 ## Autostart (User-Entscheidung 2026-10-14) — Default **an**
 
 Der Login-Item-Schalter „Nach dem Anmelden starten" ist bei erster Nutzung **ein** (PORT-4 baute
