@@ -652,11 +652,24 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   vollständig lesbar** (`CFBundleShortVersionString = 11.3.0`, `CommitId = 1d7941b5`, 812 Einträge in
   `Contents/Resources`, `Contents/MonoBundle/Amazon Photos.dll` lesbar). Die frühere Warnung „liegt
   derzeit im Papierkorb" (2026-10-14) war **falsch** — wahr ist nur, dass `~/.Trash` per **TCC** nicht
-  lesbar und leer ist. **Ein neues Decompile geht derzeit nicht:** `ilspycmd` liegt in
-  `~/.dotnet/tools`, die .NET-Runtime fehlt („You must install .NET to run this application") — die
-  Specs stützen sich daher auf die dekompilierte Assembly und die zuvor gesicherten
-  Ressourcen-Dumps. Vor jedem Recon also **prüfen**, ob das Bundle am dokumentierten Ort liegt,
+  lesbar und leer ist. Vor jedem Recon also **prüfen**, ob das Bundle am dokumentierten Ort liegt,
   sonst laufen die Aufträge ins Leere.
+  **Decompile läuft wieder (Befund + Fix 2026-10-16):** die frühere Notiz „.NET-Runtime fehlt" ist
+  **veraltet** — `dotnet` ist installiert (Homebrew, Runtime 10.0.12), `ilspycmd` (11.1.0.9782,
+  ICSharpCode.Decompiler 11.1.0.9782) liegt in `~/.dotnet/tools`. Es scheiterte nur am
+  `DOTNET_ROOT`: der arm64-App-Host sucht `DOTNET_ROOT_ARM64`. **Dafür gibt es jetzt einen Wrapper
+  `ilspycmd` in `~/.local/bin`** (im PATH, funktioniert auch in **nicht-interaktiven** Shells, wo
+  `~/.zshrc` nicht geladen wird — wichtig für Subagenten). Aufrufe:
+  `ilspycmd -l c "<dll>"` (Klassen, 2486), `ilspycmd -t <Vollständiger.Typname> "<dll>"`
+  (ein Typ), `ilspycmd -o <dir> "<dll>"` (alles). DLL:
+  `/Applications/Amazon Photos.app/Contents/MonoBundle/Amazon Photos.dll`.
+  **REA ist für diese Assembly kein Ersatz:** `inspect_managed_artifact` liefert
+  `metadata-not-admitted` („Managed metadata exceeds the 67108864 byte representation budget"),
+  und `search_android_classes` ist der falsche Weg (jadx/APK).
+  **Recon-Regel:** neue Specs **belegen am Code** (Typ/Methode) und markieren jede Aussage als „am
+  Code geprüft" vs. „aus älteren Dumps"; jede Spec trägt einen Anhang „Wie diese Spec geprüft
+  wurde" mit dem exakten Aufruf. Die Specs stützen sich daher auf die dekompilierte Assembly und
+  die zuvor gesicherten Ressourcen-Dumps.
   Das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten
   (beobachtetes Verhalten in eigenen Worten/Tabellen, keine verbatimen Code-Auszüge, keine
   Personendaten) — analog zu `docs/UI_FLOWS.md` / `docs/UI_STATES.md`. Erst danach Umsetzer-Briefing.
