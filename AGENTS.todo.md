@@ -101,6 +101,26 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    gegen das Verhalten des Originals stellen und die TODOs dorthin ableiten. **Achtung:** das ist
    mehr als Kosmetik — „Pause pro Ordner" ist heute **Post-MVP** (Original hat ein Zeilen-Symbol);
    der Unterschied ist, dass diese Pause **automatisch** aus dem fehlenden Ordner folgt.
+8. [ ] **Warteschlange zu hoch (User-Entscheidung: feste Regel „Ordner zuerst, Warteschlange
+   max. 50 %").** Ursache im Code belegt: `table_h = free − QUEUE_BELOW_H(88) −
+   FOLDER_LIST_MIN_H(200)` (`src/backup.rs:1751`) — die Warteschlange bekommt **jeden Überschuss**,
+   während die Ordnerliste bei `FOLDER_LIST_MAX_H = 320` gedeckelt ist (`:94`). Auf einem hohen
+   Fenster (Screenshot ~1050 px) wächst dadurch nur die Warteschlange (~610 px), die Ordnerliste
+   bleibt auf ihrer Untergrenze. **Neue Regel:** die Ordnerliste bekommt ihren Platz **zuerst** (bis
+   320 px, danach scrollt sie), die Warteschlange den Rest, aber **höchstens 50 % der freien Höhe**
+   (`QUEUE_MIN_H = 120` bleibt Untergrenze); beim Fenster-Minimum 760×520 darf nichts abgeschnitten
+   werden. **Verworfen:** ziehbare Trennlinie (mehr Mechanik, Position überlebt den Neustart
+   ohnehin nicht); eigener Reiter für die Warteschlange (widerspricht der früheren Entscheidung
+   „Warteschlange und Fortschrittsleiste gehören zusammen", Welle 3a/Bug 4).
+9. [ ] **Ziel der Datensicherung aus dem Dialog entfernen (User-Auftrag 2026-10-16).** Wörtlich:
+   „Im Dialog ‚Ziel der Datensicherung' → genau gleich wie in den Settings. Das soll weg und genauso
+   wie global automatisch berechnet werden." Also: das Feld „Ziel für Datensicherung:" samt
+   deaktiviertem „Ändern …"-Knopf (`src/backup_config.rs:71-75`) **fällt weg**, das Ziel wird
+   **automatisch** bestimmt — dieselbe Behandlung wie die eben entfernte Einstellungs-Sektion
+   (Befund 5). **Die Umsetzung hängt an der Spec aus Punkt 4** (`docs/SPEC_UPLOAD_DESTINATION.md`):
+   dort steht, wie das Original das Ziel ableitet (`Backup/<Macname>/<Pfad>`, Segmente werden bei
+   Bedarf angelegt) und dass der User es „normalerweise nie ändern" muss. Offen: ob wir die
+   Original-Ableitung nachbauen oder bei unserem heutigen festen Ziel bleiben (Frage an den User).
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
