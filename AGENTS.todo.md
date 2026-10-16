@@ -128,6 +128,36 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    (heute wird nur gesucht)? Bestehende Uploads in `Pictures/Web` bleiben, wo sie sind.
    **Verworfen:** Feld dauerhaft behalten und bei `Pictures/Web` bleiben (widerspricht dem
    Paritäts-Auftrag „Upload Ort soll gleich sein wie bei der Originalen App").
+10. [ ] **Clean-Room-Spec „Wie erkennt das Original, dass eine Datei dieselbe ist?"** (User-Auftrag
+   2026-10-16). Deliverable `docs/SPEC_FILE_IDENTITY.md`. Recon existiert bereits
+   (`docs/SPEC_DEDUP.md`, `docs/SPEC_DUPLICATES.md`, `docs/SPEC_FILENAME_ENCODING.md`,
+   `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §1.3) — der Auftrag ist **Nachprüfen und Verdichten**,
+   Widersprüche zwischen den Docs aufdecken, **nicht** abschreiben.
+11. [ ] **Höhe: responsiv statt absolut, Ordner wichtiger als die Warteschlange** (User-Auftrag
+   2026-10-16: „bitte keine absoluten höhen nehmen, responsive und nicht absolute höhe, Ordner sind
+   wichtiger als Warteschlange"). Die Aufteilung wird **relativ** (Anteile der freien Höhe) statt
+   über die absoluten Konstanten `QUEUE_BELOW_H = 88`, `FOLDER_LIST_MIN_H = 200`,
+   `FOLDER_LIST_MAX_H = 320`, `QUEUE_MIN_H = 120` (`src/backup.rs:77-97`); die Ordnerliste bekommt
+   den **größeren** Anteil. Zeilen-/Kopfhöhen bleiben absolut (`show_rows` braucht sie) — gemeint
+   sind die Bereichshöhen. Dazu zwei Wünsche:
+   - [ ] **Prozent pro Datei** in den „In Bearbeitung"-Zeilen — **User-Entscheidung: vor dem DMG
+     bauen.** Heute unmöglich: wir senden den Body am Stück (`.body(contents_vec)`,
+     `src/prime_photos.rs:997`/`:1228`) ⇒ kein Byte-Zähler. Die Recon hat es vorweggenommen
+     (`docs/SPEC_UPLOAD_PROGRESS.md` §4.2: „ob reqwest dort einen Byte-/Chunk-Progress liefert, ist
+     **nicht belegt**"). Umsetzung: **streamender** Body (`Body::wrap_stream` über einen
+     Chunk-Reader mit Zähler, `Content-Length` explizit setzen), Zähler je Datei in `UploadShared`,
+     Zeile zeigt „45 %". **Berührt den heikelsten Pfad** ⇒ eigener Auftrag + **Live-Test am Konto
+     durch den Hauptagent** (Testdatei hochladen, Knoten danach löschen).
+   - [ ] **Ordnerpfad im Namen der Warteschlangen-Zeile** (User-Wunsch: „Beim Namen eventuell auch
+     Ordner Pfad anzeigen?"). Heute steht dort nur der Dateiname, der volle Pfad nur im Tooltip.
+12. [ ] **Mausrad scrollt beide Container gleichzeitig** (User-Befund 2026-10-16: „Scrollen mit
+   Mausrad scrollt gleichzeitig die Ordner ansicht und die Warteschlange obwohl das nicht der
+   gleiche Scroll COntainer ist"). Zwei `ScrollArea::vertical()` **ohne eigene ID**
+   (`src/backup.rs:1754` Warteschlange, `:1919` Ordnerliste). Verdacht: **gemeinsamer
+   Scroll-Zustand** (egui leitet die ID aus dem Eltern-`Ui` ab — genau deshalb bekam das
+   Log-Panel ein `id_salt`, `docs/DEV_NOTES.md` §3) **oder** überlappende Viewport-Rects.
+   **Erst messen** (headless: beide Rects + Scroll-Offsets), dann fixen — nicht auf Verdacht
+   umbauen.
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
