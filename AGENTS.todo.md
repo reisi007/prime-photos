@@ -30,7 +30,9 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
 Erledigt und gelöscht (jeweils implementiert, unabhängig verifiziert = Verifier APPROVE, committet):
 Bug 1 „Where is `use_default?" (`2899bc5`; Wissen in `docs/DEV_NOTES.md` § 1), Bug 7 „Klick auf den
 leeren Bereich = Nichts" (nichts zu bauen — Belege in `docs/DEV_NOTES.md` § 6), Bug 9 „Warnungen als
-Fehler" (`c019528`; Regel in `AGENTS.md`).
+Fehler" (`c019528`; Regel in `AGENTS.md`), Bug 8 „Sichere Ersetz-Regel" (`2e2f183`; Regel in
+`AGENTS.md` → „Sichere Ersetz-Regel", Belege in `docs/SPEC_DUPLICATES.md` § 5 und
+`docs/SPEC_CONFLICT_OPTIONS.md`).
 
 2. **Dock-/Taskbar-Icon fehlt (verkleinertes Logo nicht dargestellt).** `packaging/Info.plist`
    kennt **keinen** `CFBundleIconFile` und `Contents/Resources` enthält **keine** `.icns` — macOS
@@ -64,31 +66,44 @@ Fehler" (`c019528`; Regel in `AGENTS.md`).
    in `docs/SPEC_UPLOAD.md` §2.4 dazu ist damit latenter Code, **nicht** die Ursache).
    **Damit ausgeschlossen:** die Sub-Sekunden-Überlänge. **Nicht aussagekräftig für diese Dateien:**
    die Tag-Priorität — bei den Exporten sind `DateTimeOriginal` und `DateTimeDigitized` **gleich**.
-   **Noch offen:** (a) wie das Original die Aufnahmezeit ableitet (Tag-Priorität, Zeitzone,
-   `fallbackContentDate`, Normalisierung) — Recon läuft (REA am Bundle, 2026-10-16); (b) **was das
-   Konto tatsächlich als `contentDate`/Sortierschlüssel ablegt** — dafür ist ein **Live-Lauf** nötig
-   (Knoten eines frisch hochgeladenen Exports abfragen und mit der Aufnahmezeit vergleichen).
-
-8. **Sichere Ersetz-Regel — in Umsetzung (Implementierung fertig, Verifikation läuft).**
-   Anlass: der Default `Replace` überschreibt bei einem **Namenskonflikt mit anderem Inhalt** das
-   vorhandene Foto im Konto — Datenverlust. Der User: „nie was oben ist löschen, außer es ist die
-   gleiche Datei physisch relativ zum gesicherten Pfad, dann überschreiben".
-   **Regel:** der `PUT /v2/upload/<nodeId>` feuert **nur noch**, wenn dieselbe **lokale Datei
-   (gleicher Pfad)** im MD5-Index bereits mit dieser Node verknüpft ist — dann wurde sie lokal
-   geändert, also zu Recht ersetzt. Ein Name aus einem **anderen** Pfad wird **nie** ersetzt,
-   sondern umbenannt (`SaveAsNew` / Wire `RENAME`). Gilt für **alle** Ziele, auch bestehende.
-   Belegte Grundlage: der Index (`src/dedup.rs`) kennt bereits Pfad, MD5 und Node-ID — die
-   Entscheidung liegt lokal, **vor** dem Netz.
-   **Zum Vergleich: das Original trennt strikt** (Recon 2026-10-15, `docs/SPEC_CONTENT_FILTER_DESTINATION.md`
-   F1 + `docs/SPEC_CONFLICT_OPTIONS.md` § 1.2/§ 7): Inhalts-Dedupe gewinnt **immer** — identischer
-   Inhalt wird als „Zuvor hochgeladen" übersprungen und **nie** umbenannt; `Replace` hat **keinen**
-   Wire-Wert (es setzt `overwrite=true` + `nodeId` ⇒ `PUT v2/upload/<nodeId>`), `SaveAsNew` sendet
-   **unbedingt** `overwrite=false` ⇒ `RENAME`.
-   **Lokale Settings — Stand 2026-10-16 (User-Entscheidung „alles auf replace"):** beide Ablagen
-   stehen auf `Replace` — `config.toml` (`conflict_resolution_default = "replace"`) und „Sport"
-   (`conflict_resolution = "replace"`, von Hand umgestellt, kein Migrationscode). Die frühere
-   Absicht, den Application Default dafür auf `saveasnew` zu setzen, ist damit **hinfällig**: die
-   Sicherheit kommt aus der **Bindung** (Spalte `node_id`), nicht aus einem anderen Default.
+   **REA-Befund (2026-10-16, Original-Bundle `Amazon Photos.app` 11.3.0 / Commit `1d7941b5`,
+   DLL-SHA-256 `34a616e7…cedc0`):** Der Original-Client **sendet gar kein `contentDate`**.
+   `UploadRequest.ContentDate` und `InitiateMultipartUploadRequest.ContentDate`/`FallbackContentDate`
+   existieren als Felder, werden aber **an keiner Stelle zugewiesen**; der Query-Bauer verwirft
+   `null`-Properties, und `fallbackContentDate` hat genau **einen** Treffer (die Attribut-Deklaration).
+   Eine EXIF-/Metadaten-Bibliothek referenziert die Assembly **nicht** (kein `DateTimeOriginal`,
+   `SubSecTime`, `OffsetTime` im dekompilierten Code) — die Aufnahmezeit leitet also **der Server**
+   aus den hochgeladenen Bytes ab. Serverseitiger Sortierschlüssel (belegt):
+   `sort=['contentProperties.contentDate …']`; lokal liegt er in der Tabelle `nodes`, Spalte
+   `content_date`. **Methode/Blocker:** die Managed-Route von REA war blockiert
+   (`metadata-not-admitted`, 64-MiB-Budget) und wurde über `ilspycmd` 11.1.0.9782 + Literal-Scan
+   ersetzt; Session mit `close_binary` beendet, nichts im Repo verändert.
+   **Folge für uns:** unser Cookie-Client **überschreibt** die Server-Ableitung aktiv — er sendet die
+   EXIF-**Lokalzeit** mit `Z` (also als UTC deklariert) und ignoriert die belegten `OffsetTime*`.
+   Damit ist der wahrscheinlichste Träger der falschen Sortierung **unser eigenes `contentDate`**,
+   nicht die Tag-Priorität.
+   **Live-Nachweis (2026-10-16, gegen das eigene Konto über den Cookie-Host
+   `content-eu.drive.amazonaws.com/v2/upload`; alle Testknoten danach gelöscht):**
+   - `POST` **ohne** `contentDate` ⇒ **201**, die Antwort trägt `contentDate =
+     2026-10-13T19:47:36.123Z` — also **`DateTimeOriginal` + `SubSecTimeOriginal`** aus der Datei.
+     Nicht genommen wurden das bewusst abweichend gesetzte EXIF-`ModifyDate` (`2026-10-20`), die mtime
+     (heute) und die Upload-Zeit (`createdDate`/`modifiedDate` = `2026-10-16T09:02:…Z`).
+   - `POST` **mit** unserem damaligen Wert `…T19:47:36.000Z` ⇒ **201**, Wert **wörtlich übernommen**
+     ⇒ wir haben die korrekte Server-Ableitung überschrieben.
+   - Der Server legt die EXIF-**Wanduhrzeit naiv als `Z`** ab (keine Offset-Umrechnung) — dieselbe
+     Konvention wie wir, nur mit echten Sub-Sekunden.
+   - `PUT /v2/upload/<nodeId>` **ohne** `contentDate` (nach einem 409 `NameAlreadyExists`) ⇒ **200**,
+     gleiche Node-Id, Inhalt getauscht (Größe/MD5), `contentDate` bleibt stehen.
+   - Nur lesend: die Knoten unseres Upload-Ordners tragen volle Aufnahmezeiten mit echten
+     dreistelligen Sub-Sekunden (`.083`, `.002`, `.046` …), **keine** Mitternachts-Werte — die
+     Mitternachts-Form aus `docs/PROTOCOL.md` §2.17 war der **EXIF-lose** Sonderfall (PNG).
+   **Entscheidung (User 2026-10-16, Weg „erst Live-Test, dann Code"):** `contentDate` wird **gar
+   nicht mehr gesendet** — Parität zum Original, die Ableitung bleibt beim Server; die eigene
+   Ermittlung (EXIF-Priorität, Dateizeit-Rückfall, 10-Minuten-Sperre) entfällt damit. **In Umsetzung**
+   (Auftrag 2026-10-16, Doku in `docs/SPEC_CAPTURE_DATE.md`). Die **Ursache** der ursprünglichen
+   Falsch-Sortierung ist als **Mechanismus** belegt (unser Wert gewinnt wörtlich; der
+   Dateizeit-Rückfall setzt einen Export auf den **Export**-Tag), am konkreten Bild des Users aber
+   **nicht** reproduziert — das bleibt als ehrliche Restunsicherheit stehen.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
@@ -96,11 +111,6 @@ Die Umsetzung selbst ist abgeschlossen und gelöscht (Commits `42149bb`, `4ec98e
 `db68cff`, `a71191b`, `261501e`, `36aee39`, `40cf024`, `506df58`, `b0fa4c4`, `2803aa9` — alle
 Verifier APPROVE). Geblieben ist **offene** Arbeit:
 
-- [ ] **Live-Abnahme des `PUT` (2.2b).** Die Tests pinnen URL-Bau und Dispatch, **nicht** die Leitung
-  (POST → 409 `NameAlreadyExists` → PUT → 200, gleiche Node-Id, Inhalt danach nachweislich der neue
-  — Größe/MD5/Version). Braucht frische Cookies und einen **echten** Namenskonflikt; ein
-  Inhaltsduplikat darf nie per PUT ersetzt werden (Server antwortet darauf mit 409). Danach Knoten
-  und Testziel wieder entfernen (`DELETE …/drive/v1/nodes/<id>` ⇒ 202, siehe `docs/PROTOCOL.md` § 5).
 - [ ] **Live-Abnahme der Rückfall-Regel (2026-10-16).** Ebenfalls nur durch Tests gepinnt, nicht
   durch die Leitung: ein `Replace`-Ziel, dessen Pfad der Index **nicht** an die vom 409 benannte
   Node bindet, setzt den Lauf als **`RENAME`** fort (lokaler Zweig `resolution = SaveAsNew;
