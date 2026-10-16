@@ -421,6 +421,7 @@ impl PrimePhotoApp {
                     // could diverge (e.g. Replace vs. SaveAsNew).
                     dedup: config.dedup_default,
                     conflict_resolution: config.conflict_resolution_default,
+                    content_filter: crate::folders::ContentFilter::Photos,
                     total_files: files.len(),
                     uploaded_files: 0,
                     last_updated: String::new(),
@@ -688,6 +689,9 @@ impl PrimePhotoApp {
                     // 2026-10-15); a value changed in the dialog belongs to the
                     // created target only, it is not written back.
                     conflict_resolution: self.config.conflict_resolution_default,
+                    // Content filter: photos only today ("Videos sichern" is
+                    // disabled); the effective filter stays `is_supported_image`.
+                    content_filter: crate::folders::ContentFilter::Photos,
                     mode: ConfigFormMode::Create,
                     error: None,
                 });

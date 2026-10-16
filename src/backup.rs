@@ -1002,6 +1002,7 @@ impl PrimePhotoApp {
                         path: f.path.clone(),
                         dedup: f.dedup,
                         conflict_resolution: f.conflict_resolution,
+                        content_filter: f.content_filter,
                         mode: ConfigFormMode::Edit(f.path.clone()),
                         error: None,
                     };
@@ -1201,6 +1202,7 @@ impl PrimePhotoApp {
             enabled: true,
             dedup: self.config.dedup_default,
             conflict_resolution: self.config.conflict_resolution_default,
+            content_filter: folders::ContentFilter::Photos,
             total_files: files.len(),
             uploaded_files: 0,
             last_updated: String::new(),

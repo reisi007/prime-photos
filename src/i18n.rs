@@ -211,7 +211,6 @@ const EN: &[(&str, &str)] = &[
     ("{} Datei(en) werden hochgeladen …", "{} file(s) being uploaded …"),
     ("{}% hochgeladen", "{}% uploaded"),
     // -- backup configuration dialog ------------------------------------
-    ("Alles", "Everything"),
     (
         "Datensicherung für lokalen Pfad existiert bereits",
         "A backup for this local path already exists",
@@ -221,8 +220,7 @@ const EN: &[(&str, &str)] = &[
         "Avoid duplicates: do not back up photos and videos already in my account",
     ),
     ("Ersetzen", "Replace"),
-    ("Fotos", "Photos"),
-    ("Fotos und Videos", "Photos and videos"),
+    ("Fotos sichern", "Back up photos"),
     ("Gesicherter Ordner:", "Backed up folder:"),
     ("Ignorieren", "Ignore"),
     ("Jedes Mal nachfragen", "Ask every time"),
@@ -232,9 +230,12 @@ const EN: &[(&str, &str)] = &[
     ("Ordner ist nicht mehr vorhanden", "Folder no longer exists"),
     ("Sofort", "Immediately"),
     ("Umgang mit Dateinamenkonflikten:", "Handling of file name conflicts:"),
-    ("Was soll gesichert werden:", "What to back up:"),
+    ("Videos sichern", "Back up videos"),
+    (
+        "Videos werden noch nicht hochgeladen",
+        "Videos are not uploaded yet",
+    ),
     ("Wöchentlich aktiviert", "Weekly enabled"),
-    ("Ziel für Datensicherung:", "Backup destination:"),
     ("Änderungen hochladen:", "Upload changes:"),
     ("um", "at"),
     // -- settings -------------------------------------------------------

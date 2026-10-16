@@ -1,5 +1,5 @@
 use crate::app::{FolderPickerTarget, PrimePhotoApp};
-use crate::folders::ConflictResolution;
+use crate::folders::{ConflictResolution, ContentFilter};
 use crate::i18n::{tr, tr1};
 use crate::theme;
 use eframe::egui::{self, RichText};
@@ -30,6 +30,10 @@ pub(crate) struct BackupConfigForm {
     pub(crate) path: PathBuf,
     pub(crate) dedup: bool,
     pub(crate) conflict_resolution: ConflictResolution,
+    /// Content filter — the original's two "Fotos sichern"/"Videos sichern"
+    /// checkboxes (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1). `Photos` by
+    /// default; the effective filter stays `is_supported_image`.
+    pub(crate) content_filter: ContentFilter,
     pub(crate) mode: ConfigFormMode,
     /// Inline validation message; keeps the window open after an invalid Save.
     pub(crate) error: Option<String>,
@@ -67,22 +71,22 @@ impl PrimePhotoApp {
         });
         ui.add_space(10.0);
 
-        // Destination (not implemented yet).
-        ui.label(tr("Ziel für Datensicherung:"));
-        ui.horizontal(|ui| {
-            ui.add_enabled(false, theme::secondary_button(tr("Ändern …")))
-                .on_disabled_hover_text(unavailable);
-        });
-        ui.add_space(10.0);
-
-        // Content filter (not implemented yet).
-        ui.label(tr("Was soll gesichert werden:"));
-        ui.horizontal(|ui| {
-            for (i, label) in ["Alles", "Fotos und Videos", "Fotos"].iter().enumerate() {
-                ui.add_enabled(false, egui::Button::new(tr(label)).selected(i == 0))
-                    .on_disabled_hover_text(unavailable);
-            }
-        });
+        // Destination is derived automatically: today the upload target is
+        // resolved below Pictures/Web (`src/prime_photos.rs` looks up the two
+        // folders). The original instead mirrors the source path into a cloud
+        // node (`Backup/<Macname>/<path>`) behind a cloud picker — that is a
+        // separate task (`docs/SPEC_UPLOAD_DESTINATION.md`), not built here.
+        // Content filter: the original's two checkboxes ("Fotos sichern"/
+        // "Videos sichern", `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1).
+        // "Videos sichern" is visible but disabled — the app uploads photos
+        // only, so the effective filter stays `is_supported_image`. This field
+        // is parity + future, it changes no behaviour today.
+        let mut photos = form.content_filter.photos();
+        let mut videos = form.content_filter.videos();
+        ui.checkbox(&mut photos, tr("Fotos sichern"));
+        ui.add_enabled(false, egui::Checkbox::new(&mut videos, tr("Videos sichern")))
+            .on_disabled_hover_text(tr("Videos werden noch nicht hochgeladen"));
+        form.content_filter = ContentFilter::from_selection(photos, videos, form.content_filter);
         ui.add_space(10.0);
 
         // Upload interval (not implemented yet).
@@ -180,9 +184,15 @@ impl PrimePhotoApp {
                 self.spawn_folder_picker(FolderPickerTarget::ConfigForm, ctx);
             }
             ConfigFormAction::Save => {
-                let Some((mode, path, dedup, conflict)) =
+                let Some((mode, path, dedup, conflict, content_filter)) =
                     self.config_form.as_ref().map(|f| {
-                        (f.mode.clone(), f.path.clone(), f.dedup, f.conflict_resolution)
+                        (
+                            f.mode.clone(),
+                            f.path.clone(),
+                            f.dedup,
+                            f.conflict_resolution,
+                            f.content_filter,
+                        )
                     })
                 else {
                     return;
@@ -211,6 +221,7 @@ impl PrimePhotoApp {
                         if let Some(f) = self.store.folders.get_mut(idx) {
                             f.dedup = dedup;
                             f.conflict_resolution = conflict;
+                            f.content_filter = content_filter;
                         }
                         let _ = self.store.save();
                         self.log(tr1(
@@ -231,6 +242,7 @@ impl PrimePhotoApp {
                                 if let Some(f) = self.store.folders.get_mut(idx) {
                                     f.dedup = dedup;
                                     f.conflict_resolution = conflict;
+                                    f.content_filter = content_filter;
                                 }
                                 let _ = self.store.save();
                                 self.config_form = None;

@@ -189,6 +189,57 @@ impl ConflictResolution {
     }
 }
 
+/// Which content types a backup target uploads, mirroring the original client's
+/// `ContentFilter` flags (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.2:
+/// `None=0`, `Photos=2`, `Videos=4`, `Other=8`, `PhotosAndVideo=6`,
+/// `Everything=14`).
+///
+/// Only the three UI-reachable values are modelled (`Photos`, `Videos`,
+/// `PhotosAndVideo`): `None` is never reachable — the original reverts both
+/// checkboxes off by restoring the persisted filter
+/// (`ScheduledBackupItem.UpdateContentFilter`), `Other` is never evaluated by
+/// `Matches`, and `Everything` is written back to `PhotosAndVideo` as soon as
+/// the dialog opens (§2.1/§2.5). The **effective** filter stays
+/// [`is_supported_image`] — the app uploads photos only, the "Videos sichern"
+/// checkbox is disabled — so this field is parity + future and must not change
+/// behaviour yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ContentFilter {
+    /// "Fotos sichern" only. The default: an existing `folders.toml` without
+    /// the key keeps uploading photos.
+    #[default]
+    Photos,
+    /// "Videos sichern" only — reachable once video upload exists.
+    Videos,
+    /// Both checkboxes ("Fotos sichern" + "Videos sichern").
+    PhotosAndVideo,
+}
+
+impl ContentFilter {
+    /// The original's `IsPhotosSelected`.
+    pub fn photos(self) -> bool {
+        matches!(self, ContentFilter::Photos | ContentFilter::PhotosAndVideo)
+    }
+
+    /// The original's `IsVideosSelected`.
+    pub fn videos(self) -> bool {
+        matches!(self, ContentFilter::PhotosAndVideo)
+    }
+
+    /// Combine the two checkboxes into the filter, with the original's `None`
+    /// guard: when both are off the selection is restored from `persisted`
+    /// instead of producing `None` (`ScheduledBackupItem.UpdateContentFilter`).
+    pub fn from_selection(photos: bool, videos: bool, persisted: Self) -> Self {
+        match (photos, videos) {
+            (true, true) => ContentFilter::PhotosAndVideo,
+            (true, false) => ContentFilter::Photos,
+            (false, true) => ContentFilter::Videos,
+            (false, false) => persisted,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BackupFolder {
     pub path: PathBuf,
@@ -203,6 +254,14 @@ pub struct BackupFolder {
     /// Name-conflict policy for this upload target.
     #[serde(default)]
     pub conflict_resolution: ConflictResolution,
+    /// Which content types this target uploads — the original's two
+    /// "Fotos sichern"/"Videos sichern" checkboxes
+    /// (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1/§2.2). Default `Photos`,
+    /// so an existing `folders.toml` without the key keeps uploading photos.
+    /// The **effective** filter is still [`is_supported_image`]; this field is
+    /// parity + future and must not change behaviour yet.
+    #[serde(default = "default_content_filter")]
+    pub content_filter: ContentFilter,
     #[serde(default)]
     pub total_files: usize,
     #[serde(default)]
@@ -217,6 +276,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_content_filter() -> ContentFilter {
+    ContentFilter::Photos
+}
+
 impl BackupFolder {
     pub fn new(path: PathBuf) -> Self {
         let name = path
@@ -229,6 +292,7 @@ impl BackupFolder {
             enabled: true,
             dedup: true,
             conflict_resolution: ConflictResolution::default(),
+            content_filter: ContentFilter::Photos,
             total_files: 0,
             uploaded_files: 0,
             last_updated: String::new(),
@@ -385,5 +449,67 @@ name = "Fotos"
         )
         .unwrap();
         assert_eq!(folder.conflict_resolution, ConflictResolution::SaveAsNew);
+    }
+
+    #[test]
+    fn content_filter_defaults_to_photos() {
+        // A `folders.toml` entry without the key must keep uploading photos.
+        assert_eq!(ContentFilter::default(), ContentFilter::Photos);
+    }
+
+    #[test]
+    fn old_store_without_content_filter_gets_photos() {
+        let folder: BackupFolder = toml::from_str(
+            r#"
+path = "/tmp/photos"
+name = "Fotos"
+"#,
+        )
+        .unwrap();
+        assert_eq!(folder.content_filter, ContentFilter::Photos);
+    }
+
+    #[test]
+    fn content_filter_round_trips_through_toml() {
+        for filter in [
+            ContentFilter::Photos,
+            ContentFilter::Videos,
+            ContentFilter::PhotosAndVideo,
+        ] {
+            let folder = BackupFolder {
+                content_filter: filter,
+                ..BackupFolder::new(PathBuf::from("/tmp/photos"))
+            };
+            let text = toml::to_string(&folder).unwrap();
+            let back: BackupFolder = toml::from_str(&text).unwrap();
+            assert_eq!(back.content_filter, filter);
+        }
+    }
+
+    #[test]
+    fn content_filter_selection_never_yields_none() {
+        // The original's guard: both checkboxes off restores the persisted
+        // filter, so `None` is never reachable
+        // (`ScheduledBackupItem.UpdateContentFilter`).
+        assert_eq!(
+            ContentFilter::from_selection(false, false, ContentFilter::Photos),
+            ContentFilter::Photos
+        );
+        assert_eq!(
+            ContentFilter::from_selection(false, false, ContentFilter::PhotosAndVideo),
+            ContentFilter::PhotosAndVideo
+        );
+        assert_eq!(
+            ContentFilter::from_selection(true, false, ContentFilter::Photos),
+            ContentFilter::Photos
+        );
+        assert_eq!(
+            ContentFilter::from_selection(false, true, ContentFilter::Photos),
+            ContentFilter::Videos
+        );
+        assert_eq!(
+            ContentFilter::from_selection(true, true, ContentFilter::Photos),
+            ContentFilter::PhotosAndVideo
+        );
     }
 }
