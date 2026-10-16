@@ -135,11 +135,14 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
 12. [ ] **Mausrad scrollt beide Container gleichzeitig** (User-Befund 2026-10-16: „Scrollen mit
    Mausrad scrollt gleichzeitig die Ordner ansicht und die Warteschlange obwohl das nicht der
    gleiche Scroll COntainer ist"). Zwei `ScrollArea::vertical()` **ohne eigene ID**
-   (`src/backup.rs:1754` Warteschlange, `:1919` Ordnerliste). Verdacht: **gemeinsamer
-   Scroll-Zustand** (egui leitet die ID aus dem Eltern-`Ui` ab — genau deshalb bekam das
-   Log-Panel ein `id_salt`, `docs/DEV_NOTES.md` §3) **oder** überlappende Viewport-Rects.
-   **Erst messen** (headless: beide Rects + Scroll-Offsets), dann fixen — nicht auf Verdacht
-   umbauen.
+   (`src/backup.rs:1754` Warteschlange, `:1919` Ordnerliste). **Ursache an der egui-Quelle belegt
+   (2026-10-16):** `scroll_area.rs:534` setzt ohne eigenes `id_salt` die **Konstante**
+   `Id::new("scroll_area")` und bildet daraus `ui.make_persistent_id(id_salt)` — zwei ScrollAreas im
+   **selben Eltern-`Ui`** erhalten also **dieselbe ID** und teilen sich den Scroll-Zustand (egui
+   verlangt für den zweiten ausdrücklich ein `id_salt`). Das erklärt „beide scrollen gleichzeitig"
+   exakt: ein Rad-Ereignis bewegt **einen** Zustand, den beide zeichnen. **Fix:** jeder der beiden
+   Bereiche bekommt ein **eigenes** `id_salt`; **vorher messen** (beide IDs bzw. Zustände
+   gegenüberstellen), damit der Fix belegt ist und nicht geraten.
 13. [ ] **Ordner in der Warteschlange sichtbar machen** (User-Klarstellung 2026-10-16 zu Befund 11:
    „Ich sehe in der Warteschlange keine Spalte für die Gruppe, aber ja der Ordner Name oder wenn der
    Ordner Name nicht eindeutig ist Ordner + Pfad"). Also **nicht** nur den Tooltip: die
