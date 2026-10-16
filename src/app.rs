@@ -291,7 +291,7 @@ impl PrimePhotoApp {
         // result: a broken/unreadable file yields `Config::default()` (with
         // empty cookies) in memory, and that fallback must never be written
         // over the still-present, hand-fixable `config.toml` (PKG-3 guard).
-        let (mut config, config_error, config_loaded_ok) = match Config::load() {
+        let (mut config, load_error, config_loaded_ok) = match Config::load() {
             Ok(c) => (c, None, true),
             Err(e) => (Config::default(), Some(e.to_string()), false),
         };
@@ -303,6 +303,14 @@ impl PrimePhotoApp {
             .and_then(i18n::Lang::from_code)
             .unwrap_or_else(i18n::system_lang);
         i18n::set_lang(lang);
+        // Build the load failure in the UI language (the language is only known
+        // now) and log the technical detail — it never reaches the UI (user
+        // decision 2026-10-15: no technical messages for the end user).
+        if let Some(e) = &load_error {
+            log::warn!("Einstellungen konnten nicht geladen werden: {e}");
+        }
+        let config_error = load_error
+            .map(|_| tr("Die Einstellungen konnten nicht geladen werden.").to_string());
         // On first run, preselect the marketplace from the system language.
         let first_run = Config::get_config_path()
             .map(|p| !p.exists())
@@ -489,7 +497,11 @@ impl PrimePhotoApp {
                 self.config_error = None;
                 self.log(tr("Einstellungen gespeichert."));
             }
-            Err(e) => self.config_error = Some(e.to_string()),
+            Err(e) => {
+                log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
+                self.config_error =
+                    Some(tr("Die Einstellungen konnten nicht gespeichert werden.").to_string());
+            }
         }
     }
 
@@ -568,7 +580,9 @@ impl PrimePhotoApp {
                 // start (including a deliberate "off").
                 self.config.autostart_enabled = Some(self.autostart_enabled);
                 if let Err(e) = self.config.save() {
-                    self.config_error = Some(e.to_string());
+                    log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
+                    self.config_error =
+                        Some(tr("Die Einstellungen konnten nicht gespeichert werden.").to_string());
                 }
             }
             Err(e) => {
@@ -1047,17 +1061,24 @@ impl eframe::App for PrimePhotoApp {
                     Duration::from_secs(1)
                 });
                 if self.was_active && !active {
-                    self.finalize_upload();
-                    let (done, failed, total) = {
-                        let s = self.upload.lock().unwrap();
-                        (s.done, s.failed, s.total)
-                    };
-                    // Tray: remember how the run ended so the glyph can show
-                    // "error" (sticky until the next run) or "done" (briefly).
-                    self.tray_last_run_failed = failed > 0;
-                    self.tray_done_at = Some(Instant::now());
-                    if self.config.notifications {
-                        notify::run_finished(done, failed, total);
+                    // A cancelled run (sign-out) is not a finished run: no
+                    // finalize, no "done" notification, no tray "done" glyph
+                    // (user decision 2026-10-16). The uploaded part stays in the
+                    // dedup index and the rest is picked up on the next start.
+                    let cancelled = self.upload.lock().unwrap().cancelled;
+                    if !cancelled {
+                        self.finalize_upload();
+                        let (done, failed, total) = {
+                            let s = self.upload.lock().unwrap();
+                            (s.done, s.failed, s.total)
+                        };
+                        // Tray: remember how the run ended so the glyph can show
+                        // "error" (sticky until the next run) or "done" (briefly).
+                        self.tray_last_run_failed = failed > 0;
+                        self.tray_done_at = Some(Instant::now());
+                        if self.config.notifications {
+                            notify::run_finished(done, failed, total);
+                        }
                     }
                     self.was_active = false;
                 }

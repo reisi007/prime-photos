@@ -406,6 +406,11 @@ impl PrimePhotoApp {
     /// warning, the local sign-out still happens.
     pub(crate) fn logout(&mut self) {
         self.config_form = None;
+        // Cancel a running upload (user decision 2026-10-16): the worker holds
+        // its own `Config` clone with the old cookies and would keep failing
+        // against the revoked session. It stops at its next wait point; a
+        // request already in flight is allowed to finish.
+        self.upload.lock().unwrap().cancelled = true;
         // Remember what the server call needs before the session is cleared.
         let access_token = self.session.lock().unwrap().access_token.clone();
         let country = self.config.country.clone();
@@ -430,7 +435,11 @@ impl PrimePhotoApp {
         self.config.cookie_x_amz_access_token.clear();
         match self.config.save() {
             Ok(_) => self.log(tr("Abgemeldet.")),
-            Err(e) => self.config_error = Some(e.to_string()),
+            Err(e) => {
+                log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
+                self.config_error =
+                    Some(tr("Die Einstellungen konnten nicht gespeichert werden.").to_string());
+            }
         }
         // Deregister on the server when we still had an access token; never on
         // the UI thread.
@@ -496,7 +505,9 @@ impl PrimePhotoApp {
             self.config.cookie_ubid_acb = String::new();
             self.config.cookie_x_amz_access_token = String::new();
             if let Err(e) = self.config.save() {
-                self.config_error = Some(e.to_string());
+                log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
+                self.config_error =
+                    Some(tr("Die Einstellungen konnten nicht gespeichert werden.").to_string());
             }
             self.log(tr("Sitzung abgelaufen – bitte erneut anmelden."));
         }
@@ -605,7 +616,13 @@ impl PrimePhotoApp {
                     }
                     match self.config.save() {
                         Ok(_) => self.log(tr("Login erfolgreich – Refresh-Token gespeichert.")),
-                        Err(e) => self.config_error = Some(e.to_string()),
+                        Err(e) => {
+                            log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
+                            self.config_error = Some(
+                                tr("Die Einstellungen konnten nicht gespeichert werden.")
+                                    .to_string(),
+                            );
+                        }
                     }
                     self.login.cancel();
                     return;
@@ -843,6 +860,13 @@ impl PrimePhotoApp {
                 self.pending_login = true;
             }
             if let Some(e) = &self.login.error {
+                ui.add_space(6.0);
+                ui.colored_label(theme::RED, e);
+            }
+            // A failed config save (e.g. right after signing out) must stay
+            // visible on the sign-in screen — the sidebar that normally shows
+            // `config_error` is not rendered here (user decision 2026-10-16).
+            if let Some(e) = &self.config_error {
                 ui.add_space(6.0);
                 ui.colored_label(theme::RED, e);
             }

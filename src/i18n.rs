@@ -153,6 +153,14 @@ const EN: &[(&str, &str)] = &[
     ("Bereit", "Ready"),
     ("Einstellungen", "Settings"),
     ("Einstellungen gespeichert.", "Settings saved."),
+    (
+        "Die Einstellungen konnten nicht gespeichert werden.",
+        "The settings could not be saved.",
+    ),
+    (
+        "Die Einstellungen konnten nicht geladen werden.",
+        "The settings could not be loaded.",
+    ),
     ("Letzter Upload: {} erfolgreich", "Last upload: {} successful"),
     ("Login – Prime Photos", "Sign in – Prime Photos"),
     ("Nicht angemeldet", "Not signed in"),
@@ -359,6 +367,10 @@ const EN: &[(&str, &str)] = &[
     ("FEHLER {}: {}", "ERROR {}: {}"),
     ("Fehlgeschlagen", "Failed"),
     ("Fertig: {} erfolgreich, {} fehlgeschlagen.", "Done: {} succeeded, {} failed."),
+    (
+        "Abgebrochen: {} erfolgreich, {} fehlgeschlagen, {} offen.",
+        "Cancelled: {} succeeded, {} failed, {} open.",
+    ),
     ("In Bearbeitung", "In progress"),
     ("Schätzung läuft …", "Estimating …"),
     ("Slow-Mode aktiv: 1 Datei gleichzeitig.", "Slow mode active: 1 file at a time."),

@@ -406,6 +406,12 @@ static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
 /// only reached through the UI hook for manual runs (`was_active` in `update`),
 /// so the background chain writes the same folder state itself.
 fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
+    // A cancelled run (sign-out) is not a finished run: no folder status, no
+    // counters, no `last_updated` (user decision 2026-10-16). The uploaded part
+    // stays in the dedup index; the rest is picked up by the next start.
+    if shared.lock().unwrap().cancelled {
+        return;
+    }
     let (folder_done, folder_failed) = {
         let s = shared.lock().unwrap();
         (s.folder_done.clone(), s.folder_failed.clone())
@@ -488,6 +494,12 @@ fn start_background_run(
         )
         .await;
         finalize_background_store(&after);
+        // A cancelled run must not advance the watermark: leaving it at its old
+        // value makes the next start re-scan (and re-upload) the files this run
+        // never got to (user decision 2026-10-16).
+        if after.lock().unwrap().cancelled {
+            return;
+        }
         // Advance the watermark of every folder this pass scanned — but not of
         // one that failed: leaving it at its old value makes the next start
         // re-scan those files instead of walking past them.
@@ -1394,6 +1406,14 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn finalize_upload(&mut self) {
+        // A cancelled run (sign-out) is not a finished run: no folder status, no
+        // counters, no `last_updated`, no store save, and the one-time queue is
+        // kept so the next start resumes it (user decision 2026-10-16). The
+        // already-uploaded part stays in the dedup index — nothing is uploaded
+        // twice.
+        if self.upload.lock().unwrap().cancelled {
+            return;
+        }
         let (folder_done, folder_failed, folder_total) = {
             let s = self.upload.lock().unwrap();
             (

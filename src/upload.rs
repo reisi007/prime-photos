@@ -50,6 +50,12 @@ pub(crate) struct UploadShared {
     pub(crate) total: usize,
     pub(crate) done: usize,
     pub(crate) failed: usize,
+    /// Set by `logout` (user decision 2026-10-16): signing out must stop a
+    /// running upload — the worker holds its own `Config` clone with the old
+    /// cookies and would keep failing against a revoked session. Checked at
+    /// every wait point; a request already in flight is allowed to finish.
+    /// Cleared by `run_upload` before a new run's workers start.
+    pub(crate) cancelled: bool,
     /// Wall-clock start of the current run; `None` when idle or finished. Basis
     /// for the ETA estimate (rate = done / elapsed).
     pub(crate) started: Option<Instant>,
@@ -307,6 +313,9 @@ enum FileOutcome {
 /// "nicht noch einmal fragen". A hard timeout guarantees a hidden window can
 /// never stall the whole run — the dedup-friendly `Ignore` is the fallback.
 ///
+/// Returns `None` when the run was cancelled (sign-out) while waiting: the
+/// worker then stops instead of hanging up to the 60 s timeout.
+///
 /// `idx` and `file_path` describe the queue entry the prompt is about; they are
 /// snapshot into the shared state with the name, so the dialog can persist a
 /// "don't ask again" into that folder's own policy.
@@ -315,15 +324,20 @@ async fn resolve_conflict(
     idx: usize,
     file_name: &str,
     file_path: &Path,
-) -> ConflictResolution {
+) -> Option<ConflictResolution> {
     const POLL: Duration = Duration::from_millis(150);
     const TIMEOUT: Duration = Duration::from_secs(60);
     loop {
+        // A sign-out cancels the run: stop waiting for an answer instead of
+        // holding the worker (and the pending prompt) for up to 60 s.
+        if shared.lock().unwrap().cancelled {
+            return None;
+        }
         // A run-wide decision (or a previous answer) needs no prompt.
         let ask_now = {
             let mut s = shared.lock().unwrap();
             if let Some(o) = s.conflict_override {
-                return o;
+                return Some(o);
             }
             if s.pending_conflict.is_none() {
                 s.pending_conflict = Some(file_name.to_string());
@@ -350,6 +364,14 @@ async fn resolve_conflict(
         loop {
             tokio::time::sleep(POLL).await;
             let mut s = shared.lock().unwrap();
+            if s.cancelled {
+                // Drop the prompt so no orphaned dialog survives the abort.
+                s.pending_conflict = None;
+                s.pending_conflict_idx = None;
+                s.pending_conflict_path = None;
+                s.touch_queue();
+                return None;
+            }
             if let Some(answer) = s.conflict_answer.take() {
                 s.pending_conflict = None;
                 s.pending_conflict_idx = None;
@@ -358,7 +380,7 @@ async fn resolve_conflict(
                     s.conflict_override = Some(answer);
                 }
                 s.touch_queue();
-                return answer;
+                return Some(answer);
             }
             if Instant::now() >= deadline {
                 s.pending_conflict = None;
@@ -366,7 +388,7 @@ async fn resolve_conflict(
                 s.pending_conflict_path = None;
                 s.touch_queue();
                 s.log(tr("Keine Antwort auf den Konflikt — wird übersprungen."));
-                return ConflictResolution::Ignore;
+                return Some(ConflictResolution::Ignore);
             }
         }
     }
@@ -391,7 +413,18 @@ pub(crate) async fn upload_worker(
     let mut token_renewed_once = false;
     loop {
         while *pause_rx.borrow_and_update() {
+            // A paused run parks here: without this check a sign-out could never
+            // end it (the worker would wait forever for a resume).
+            if shared.lock().unwrap().cancelled {
+                return;
+            }
             tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        // A sign-out cancels the run: stop before starting another file. A
+        // request already in flight is allowed to finish — never abort a
+        // transfer mid-way.
+        if shared.lock().unwrap().cancelled {
+            return;
         }
         if need_token_renew {
             need_token_renew = false;
@@ -667,11 +700,15 @@ pub(crate) async fn upload_worker(
                     // file itself — the two facts the dialog needs to persist a
                     // "don't ask again" into that folder's policy.
                     let answer = match resolve_conflict(&shared, idx, &name, &path).await {
+                        // A sign-out cancelled the run while the prompt was open:
+                        // stop the worker here (the run must not resume after a
+                        // logout).
+                        None => return,
                         // The prompt can only answer with a concrete policy;
                         // normalise defensively so `Ask` can never bounce the
                         // file through this loop a second time.
-                        ConflictResolution::Ask => ConflictResolution::Ignore,
-                        a => a,
+                        Some(ConflictResolution::Ask) => ConflictResolution::Ignore,
+                        Some(a) => a,
                     };
                     if answer == ConflictResolution::Ignore {
                         existing_conflict_id = Some(existing.to_string());
@@ -841,6 +878,9 @@ pub(crate) async fn upload_worker(
                 let mut remaining = target - elapsed;
                 while remaining > Duration::ZERO {
                     while *pause_rx.borrow_and_update() {
+                        if shared.lock().unwrap().cancelled {
+                            return;
+                        }
                         tokio::time::sleep(slice).await;
                     }
                     let step = remaining.min(slice);
@@ -866,6 +906,10 @@ pub(crate) async fn run_upload(
     let count = items.len();
     let queue = Arc::new(Mutex::new(VecDeque::from(items)));
     let workers = concurrency.max(1).min(count.max(1));
+
+    // A new run clears a previous cancellation: without this, a run started
+    // after a sign-out-cancelled one would return at its first wait point.
+    shared.lock().unwrap().cancelled = false;
 
     // One shared persistent MD5 index for the whole run (opened here, lives in
     // ~/Library/Application Support/prime_photos/dedup.sqlite3).
@@ -897,17 +941,45 @@ pub(crate) async fn run_upload(
         }
     }
 
-    let (done, failed) = {
+    let (done, failed, total, cancelled) = {
         let mut s = shared.lock().unwrap();
         s.active = false;
         s.started = None;
         s.current.clear();
-        (s.done, s.failed)
+        (s.done, s.failed, s.total, s.cancelled)
     };
-    shared
-        .lock()
-        .unwrap()
-        .log(tr2("Fertig: {} erfolgreich, {} fehlgeschlagen.", done, failed));
+    if cancelled {
+        // Files a worker returned on are still marked `Uploading`; reset them so
+        // the table does not show a stuck "running" row after the abort.
+        {
+            let mut s = shared.lock().unwrap();
+            reset_in_flight(&mut s.queue);
+            s.touch_queue();
+        }
+        let open = total.saturating_sub(done + failed);
+        shared.lock().unwrap().log(tr3(
+            "Abgebrochen: {} erfolgreich, {} fehlgeschlagen, {} offen.",
+            done,
+            failed,
+            open,
+        ));
+    } else {
+        shared
+            .lock()
+            .unwrap()
+            .log(tr2("Fertig: {} erfolgreich, {} fehlgeschlagen.", done, failed));
+    }
+}
+
+/// Reset queue entries still marked [`FileState::Uploading`] to
+/// [`FileState::Waiting`] — a cancelled run leaves the file a worker returned on
+/// in that state, which would otherwise render as a stuck "running" row.
+fn reset_in_flight(queue: &mut [QueueEntry]) {
+    for e in queue {
+        if e.state == FileState::Uploading {
+            e.state = FileState::Waiting;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -960,6 +1032,48 @@ mod tests {
         assert!(!text.contains("0"), "zero category leaked: {text}");
         assert!(text.contains(tr1("{} neu hochgeladen", 1).as_str()));
         assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
+    }
+
+    #[test]
+    fn reset_in_flight_returns_uploading_entries_to_waiting() {
+        // A cancelled run leaves the file a worker returned on in `Uploading`;
+        // that row must not stay stuck as "running" after the abort. Settled
+        // entries (Done/Failed/Skipped) are untouched.
+        let mut queue = vec![
+            QueueEntry {
+                folder: 0,
+                name: "a.jpg".into(),
+                state: FileState::Uploading,
+                size: 1,
+                path: PathBuf::from("/a.jpg"),
+            },
+            QueueEntry {
+                folder: 0,
+                name: "b.jpg".into(),
+                state: FileState::Done,
+                size: 2,
+                path: PathBuf::from("/b.jpg"),
+            },
+            QueueEntry {
+                folder: 1,
+                name: "c.jpg".into(),
+                state: FileState::Uploading,
+                size: 3,
+                path: PathBuf::from("/c.jpg"),
+            },
+            QueueEntry {
+                folder: 1,
+                name: "d.jpg".into(),
+                state: FileState::Failed,
+                size: 4,
+                path: PathBuf::from("/d.jpg"),
+            },
+        ];
+        reset_in_flight(&mut queue);
+        assert!(queue[0].state == FileState::Waiting);
+        assert!(queue[2].state == FileState::Waiting);
+        assert!(queue[1].state == FileState::Done);
+        assert!(queue[3].state == FileState::Failed);
     }
 
     #[test]
