@@ -97,6 +97,7 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   manuellen Test** (Schritt 2 der Auftragsliste) — der Recon liefert für die Nav-Zeile keine
   Icon-Maße, und nach Welle 3c sitzen die Icons in einem festen 18×18-Rect. Ein blindes „Ausrichten"
   würde ändern, was der User noch gar nicht beurteilt hat.
+
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
 Ausdrücklich **ohne** Starttermin:
@@ -145,9 +146,6 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 
 ## Offen (Backlog)
 
-- [ ] **Optional/Branding:** Account-Block zeigt unter „Angemeldet als:" noch die Zeile „Amazon
-  Photos" (Label des angemeldeten Amazon-Kontos, kein Eigen-Branding). Falls keine Amazon-Wortmarke
-  im eigenen Fenster gewünscht ist: durch die Domain (`amazon.<cc>`) ersetzen.
 - [ ] „Details anzeigen"-Panel (verschachtelt/flach wie das Original, `docs/UI_FLOWS.md` §4.7).
 - [ ] Menüleisten-Status-Item (Status-Popup: Status, Benachrichtigungen, Speicher, §9).
 - [ ] Videos hochladen (bisher nur Fotos). Offene Fragen dazu: `docs/SPEC_SCOPE_INVENTORY.md`.
