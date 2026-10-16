@@ -28,21 +28,21 @@ use crate::i18n::{tr, tr1, tr2};
 use dispatch2::DispatchQueue;
 use log::warn;
 
-/// Bundle-Identifier unseres eigenen Bundles (`packaging/Info.plist`).
+/// Bundle identifier of our own bundle (`packaging/Info.plist`).
 ///
-/// Zusätzlich `test`, damit der Abgleich mit der Info.plist-Vorlage auch auf
-/// Nicht-macOS-Zielen gebaut wird; ohne den Test-Zweig wäre die Konstante dort
-/// toter Code (und unter `warnings = "deny"` ein Build-Fehler).
+/// Additionally `test`, so the comparison against the Info.plist template is
+/// also built on non-macOS targets; without the test branch the constant would
+/// be dead code there (and a build error under `warnings = "deny"`).
 #[cfg(any(target_os = "macos", test))]
 const BUNDLE_ID: &str = "de.reisinger.prime-photos";
 
-/// Einmalige Initialisierung beim Start.
+/// One-time initialization at startup.
 ///
-/// Auf macOS MUSS `set_application` vor der ersten Benachrichtigung laufen:
-/// sonst fragt der Backend beim Senden nach einer Anwendung namens
-/// „use_default" und das OS zeigt das Panel „Where is use_default?".
-/// Auch ein `Err` ist hier harmlos — der `Once` im Backend ist danach
-/// abgeschlossen und der Lookup entfällt (Details s. Modul-Doku).
+/// On macOS `set_application` MUST run before the first notification: otherwise
+/// the backend asks for an application named „use_default" when sending, and
+/// the OS shows the „Where is use_default?" panel. An `Err` is harmless here
+/// too — the backend's `Once` is completed afterwards and the lookup is skipped
+/// (details see module docs).
 #[cfg(target_os = "macos")]
 pub fn init() {
     if let Err(e) = notify_rust::set_application(BUNDLE_ID) {
@@ -50,7 +50,7 @@ pub fn init() {
     }
 }
 
-/// Auf allen anderen Zielen gibt es weder den Lookup noch das Panel.
+/// On all other targets there is neither the lookup nor the panel.
 #[cfg(not(target_os = "macos"))]
 pub fn init() {}
 
