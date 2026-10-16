@@ -12,16 +12,13 @@ gelöscht.
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
 2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
-   Reihenfolge: **D → E → DMG** (C fertig, verifiziert APPROVE, `c6003ff`).
-   - **D** (Byte-Fortschritt pro Datei + Live-Test am Konto): **läuft** — Umsetzer-Subagent
-     (`opencode-go/deepseek-v4.1-flash`, Session `ses_eba5d0c34ffeqoWOsdjHyUFbip`) mit Brief in
-     `$TMPDIR/round_d_brief.md`: `src/prime_photos.rs` (Streaming-Body + `Arc<AtomicU64>`-Counter,
-     `bytes = "1"` als direct dep), `src/upload.rs` (`QueueEntry.bytes_sent` + Polling-Task),
-     `src/backup.rs` (pro-Datei-% in der Warteschlange). **Hauptagent** macht den Live-Test.
-   - **E** (forced pause, TODOs T1–T5 aus `docs/SPEC_MISSING_SOURCE.md`): `FolderStatus::Paused`
-     bei fehlendem Ordner (Kaltstart/Watcher/Rescan), Wasserzeichen-Guard (T2, teil-entwarnt),
-     UI-Hinweis „Angehalten (X%)" AMBER (T3), Wiederanschließen-Erkennung (T4), verständliche
-     Meldung statt „Keine Fotos gefunden" (T5).
+   Reihenfolge: **D → E → DMG** (C und D fertig, verifiziert APPROVE).
+   - **D** (Byte-Fortschritt pro Datei): **fertig, committet `69b30c5`** (168 Tests). Live-Beleg:
+     der Upload-Host lehnt `Transfer-Encoding: chunked` mit **400** ab und verlangt
+     `Content-Length` (⇒ 201); `upload_body` setzt ihn jetzt explizit, lokaler Listener-Test +
+     Negativprobe. **Offen:** der App-gesteuerte Ende-zu-Ende-Live-Test (Keychain-Dialog im
+     Dev-Build) — Abnahme beim nächsten manuellen Test/DMG.
+   - **E** (forced pause, T1–T5 aus `docs/SPEC_MISSING_SOURCE.md`): **läuft** — Umsetzer-Subagent
    - **DMG** (Release-Build + Install): `cargo build --release` + `packaging/make-app.sh` (signiert
      mit **„Prime Photos Local Signer"**), `hdiutil create -volname "Prime Photos" -srcfolder
      <staging> -ov -format UDZO`, Installation nach `/Applications` + `xattr -dr
