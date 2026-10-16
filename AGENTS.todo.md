@@ -17,7 +17,21 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    Referenzen in `AGENTS.md`, `AGENTS.todo.md`, `docs/` und Code mitziehen. Anlass: User-Wunsch
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
-2. [ ] **Release-Build + Install (DMG).** Am 2026-10-16 einmal gelaufen: `cargo build --release` +
+2. [ ] **Manueller Test VOR dem DMG** (User-Vorgabe 2026-10-16: „vor DMG neu bauen bitte manuellen
+   test einplanen"). Nach Welle 4b/5 die App lokal bauen und nach `/Applications` installieren,
+   dann **vom User am echten Fenster** prüfen lassen — headless ist nur die Geometrie belegt, nicht
+   die Optik:
+   - **About** aus dem **Tray-Menü** *und* dem **macOS-App-Menü** öffnen (der AppKit-Pfad ist
+     headless grundsätzlich nicht beweisbar): Version-/Commit-Anzeige, „Schließen", Fenster-✕.
+   - **Lizenz-Fenster:** beide Reiter, Scrollen durch Komponentenliste und Lizenztexte, Lesbarkeit,
+     **Ruckeln?** (1,2 MB dürfen nur sichtbar gesetzt werden), Fenster vergrößern/verkleinern.
+   - **Nav-Icons** (gefüllte Wolke + Zahnrad) bei 18 px — sitzen sie sauber in der Icon-Spalte?
+   - **Warteschlange** (Welle 3a): Gruppenköpfe, feste Spaltenköpfe, lange Namen mit Tooltip,
+     leerer Zustand, Liste füllt die Höhe, Scrollen bis zur letzten Zeile.
+   - **Protokoll-Panel** (Welle 3b): ziehbar, nichts abgeschnitten, **kein** Überlappen des
+     Seiteninhalts; Fenster auf das Minimum 760×520 ziehen.
+   Rückmeldungen abarbeiten — **erst danach** Schritt 3.
+3. [ ] **Release-Build + Install (DMG).** Am 2026-10-16 einmal gelaufen: `cargo build --release` +
    `packaging/make-app.sh` (signiert mit **„Prime Photos Local Signer"**),
    `hdiutil create -volname "Prime Photos" -srcfolder <staging> -ov -format UDZO`, Installation nach
    `/Applications` + `xattr -dr com.apple.quarantine`. **Dieser Stand ist inzwischen veraltet** —
