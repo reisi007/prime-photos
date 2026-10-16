@@ -1,9 +1,11 @@
 //! Cross-platform tray / menu-bar icon (PORT-3).
 //!
-//! Provides a three-entry menu — "Fenster anzeigen", "Anhalten"/"Fortsetzen",
-//! "Beenden" — plus the icon itself. The `Tray` value owns the live
-//! `TrayIcon`; dropping it removes the icon from the menu bar, so `main.rs`
-//! keeps it for the whole app lifetime.
+//! Provides a three-entry menu — "Fenster anzeigen", "Alle anhalten"/"Alle
+//! fortsetzen", "Beenden" — plus the icon itself. The tooltip carries the brand
+//! name plus the current status ("Prime Photos – …", like the original) and is
+//! re-applied whenever the tray state or the UI language changes. The `Tray`
+//! value owns the live `TrayIcon`; dropping it removes the icon from the menu
+//! bar, so `main.rs` keeps it for the whole app lifetime.
 //!
 //! ## Event delivery (deviation from the original brief, on purpose)
 //!
@@ -45,6 +47,9 @@ pub struct Tray {
     pub quit_item: tray_icon::menu::MenuItem,
     /// Decoded build-time glyphs, keyed by [`TrayState::index`].
     icons: TrayIcons,
+    /// Last state applied via [`Tray::set_state`]; `set_labels` refreshes the
+    /// tooltip from it after a language change.
+    state: TrayState,
 }
 
 /// Build the tray icon and menu, wiring menu/tray events so the given egui
@@ -55,7 +60,7 @@ pub struct Tray {
 pub fn build(ctx: egui::Context) -> Option<Tray> {
     let menu = tray_icon::menu::Menu::new();
     let show_item = tray_icon::menu::MenuItem::new(tr("Fenster anzeigen"), true, None);
-    let pause_item = tray_icon::menu::MenuItem::new(tr("Anhalten"), true, None);
+    let pause_item = tray_icon::menu::MenuItem::new(tr("Alle anhalten"), true, None);
     let about_item = tray_icon::menu::MenuItem::new(tr("Über Prime Photos"), true, None);
     let quit_item = tray_icon::menu::MenuItem::new(tr("Beenden"), true, None);
     // Separators like the original: "Über Prime Photos" sits between the pause
@@ -80,7 +85,7 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
 
     let builder = tray_icon::TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip(tr("Prime Photos"));
+        .with_tooltip(tray_tooltip(TrayState::Idle));
     let tray = match builder.build() {
         Ok(tray) => tray,
         Err(e) => {
@@ -99,13 +104,14 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
     // Wake the UI on tray-icon interaction (click/enter/leave…).
     tray_icon::TrayIconEvent::set_event_handler(Some(move |_| ctx.request_repaint()));
 
-    let tray = Tray {
+    let mut tray = Tray {
         _tray: tray,
         show_item,
         pause_item,
         about_item,
         quit_item,
         icons: TrayIcons::build(),
+        state: TrayState::Idle,
     };
     // Show the idle glyph right away; later frames re-apply only on change.
     tray.set_state(TrayState::Idle, theme);
@@ -118,31 +124,35 @@ pub fn drain_events() -> Vec<tray_icon::menu::MenuEvent> {
 }
 
 impl Tray {
-    /// Reflect the global pause state in the menu label:
-    /// "Fortsetzen" while paused, "Anhalten" otherwise.
+    /// Reflect the global pause state in the menu label (original wording, see
+    /// `docs/original/SPEC_OS_INTEGRATION.md` §4): "Alle fortsetzen" while
+    /// paused, "Alle anhalten" otherwise.
     pub fn set_paused(&self, paused: bool) {
         self.pause_item
-            .set_text(if paused { tr("Fortsetzen") } else { tr("Anhalten") });
+            .set_text(if paused { tr("Alle fortsetzen") } else { tr("Alle anhalten") });
     }
 
     /// Re-apply every menu label in the current language (called after a
-    /// language change). The tooltip is the brand name and never changes.
+    /// language change). The tooltip carries the current status, which is
+    /// translated too, so it is refreshed from the last applied state.
     pub fn set_labels(&self, paused: bool) {
         self.show_item.set_text(tr("Fenster anzeigen"));
         self.set_paused(paused);
         self.about_item.set_text(tr("Über Prime Photos"));
         self.quit_item.set_text(tr("Beenden"));
+        let _ = self._tray.set_tooltip(Some(tray_tooltip(self.state)));
     }
 
-    /// Apply the glyph for `state`. Callers re-apply only when the state (or
-    /// the OS theme) actually changed — see `PrimePhotoApp::update_tray_icon`.
+    /// Apply the glyph and the tooltip for `state`. Callers re-apply only when
+    /// the state (or the OS theme) actually changed — see
+    /// `PrimePhotoApp::update_tray_icon`.
     ///
     /// **macOS** draws a *template* image (alpha only, recoloured by the
     /// system), so the black 64-px ("@2x") source is used there — more bitmap
     /// per point keeps the menu-bar glyph retina-sharp. Everywhere else the
     /// glyph follows the OS appearance: dark ⇒ white, light ⇒ black, unknown
     /// ⇒ the coloured logo, which stays legible on any background.
-    pub(crate) fn set_state(&self, state: TrayState, theme: Option<egui::Theme>) {
+    pub(crate) fn set_state(&mut self, state: TrayState, theme: Option<egui::Theme>) {
         let idx = state.index();
         #[cfg(target_os = "macos")]
         {
@@ -160,6 +170,9 @@ impl Tray {
             };
             let _ = self._tray.set_icon(Some(icon));
         }
+        // The tooltip follows the state (original: "Amazon Photos - {Status}").
+        let _ = self._tray.set_tooltip(Some(tray_tooltip(state)));
+        self.state = state;
     }
 }
 
@@ -206,6 +219,21 @@ impl TrayState {
             TrayState::Error => 4,
         }
     }
+}
+
+/// The tray tooltip: the brand name, plus the current status when there is one
+/// to show — the original puts the status in the status-item tooltip
+/// (`docs/original/SPEC_NOTIFICATIONS.md` §2.4). `Idle` has no status to add,
+/// so there the tooltip is the brand name alone.
+pub(crate) fn tray_tooltip(state: TrayState) -> String {
+    let status = match state {
+        TrayState::Idle => return tr("Prime Photos").to_string(),
+        TrayState::Paused => tr("Angehalten"),
+        TrayState::Active => tr("In Bearbeitung"),
+        TrayState::Error => tr("Mit Fehlern abgeschlossen"),
+        TrayState::Done => tr("Abgeschlossen"),
+    };
+    format!("{} – {}", tr("Prime Photos"), status)
 }
 
 /// How long a finished, error-free run keeps the "done" glyph before the tray
@@ -381,6 +409,32 @@ mod tests {
     #[test]
     fn tray_state_idle_when_nothing_ever_ran() {
         assert_eq!(tray_state(false, false, false, None), TrayState::Idle);
+    }
+
+    /// The tooltip carries the brand plus the status — except when idle, where
+    /// the original shows the brand alone. The English half also pins the EN
+    /// rows: a missing table entry would silently fall back to German.
+    #[test]
+    fn tray_tooltip_shows_brand_and_status() {
+        assert_eq!(tray_tooltip(TrayState::Idle), "Prime Photos");
+        assert_eq!(tray_tooltip(TrayState::Paused), "Prime Photos – Angehalten");
+        assert_eq!(tray_tooltip(TrayState::Active), "Prime Photos – In Bearbeitung");
+        assert_eq!(
+            tray_tooltip(TrayState::Error),
+            "Prime Photos – Mit Fehlern abgeschlossen"
+        );
+        assert_eq!(tray_tooltip(TrayState::Done), "Prime Photos – Abgeschlossen");
+
+        crate::i18n::set_lang(crate::i18n::Lang::En);
+        assert_eq!(tray_tooltip(TrayState::Idle), "Prime Photos");
+        assert_eq!(tray_tooltip(TrayState::Paused), "Prime Photos – Paused");
+        assert_eq!(tray_tooltip(TrayState::Active), "Prime Photos – In progress");
+        assert_eq!(
+            tray_tooltip(TrayState::Error),
+            "Prime Photos – Finished with errors"
+        );
+        assert_eq!(tray_tooltip(TrayState::Done), "Prime Photos – Completed");
+        crate::i18n::set_lang(crate::i18n::Lang::De);
     }
 
     /// The build-time `* { color: … }` override really lands in the raster: the

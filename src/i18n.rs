@@ -412,10 +412,15 @@ const EN: &[(&str, &str)] = &[
         "Upload finished with errors: {} of {} file(s) failed.",
     ),
     // -- tray / menu bar ------------------------------------------------
-    ("Anhalten", "Pause"),
+    // Pause labels follow the original's status-menu wording
+    // (`docs/original/SPEC_OS_INTEGRATION.md` §4); the status texts follow the
+    // original's tooltip (`docs/original/SPEC_NOTIFICATIONS.md` §2.4).
+    ("Alle anhalten", "Pause all"),
+    ("Alle fortsetzen", "Resume all"),
+    ("Angehalten", "Paused"),
     ("Beenden", "Quit"),
     ("Fenster anzeigen", "Show window"),
-    ("Fortsetzen", "Resume"),
+    ("Mit Fehlern abgeschlossen", "Finished with errors"),
     // -- about / third-party licenses (Welle 4b) ------------------------
     ("Über Prime Photos", "About Prime Photos"),
     ("Version: {}", "Version: {}"),

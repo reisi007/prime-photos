@@ -579,7 +579,9 @@ impl PrimePhotoApp {
         let theme = ctx.system_theme();
         if self.tray_icon_state != Some((state, theme)) {
             self.tray_icon_state = Some((state, theme));
-            if let Some(tray) = self.tray.as_ref() {
+            // `set_state` also re-applies the (now dynamic) tooltip, so the
+            // status shows up there on every state change.
+            if let Some(tray) = self.tray.as_mut() {
                 tray.set_state(state, theme);
             }
         }
@@ -1013,7 +1015,7 @@ impl eframe::App for PrimePhotoApp {
                     self.tray_build_failed = true;
                 }
                 // The glyph cache refers to a concrete tray: a fresh one has
-                // never been drawn and its pause item starts at "Anhalten"
+                // never been drawn and its pause item starts at "Alle anhalten"
                 // (the per-frame label sync above already ran this frame).
                 self.tray_icon_state = None;
                 let paused_now = *self.paused.borrow();
