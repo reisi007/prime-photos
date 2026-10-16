@@ -165,6 +165,24 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    Sicherungsordner denselben Namen** tragen, wird **Name + Pfad** angezeigt (klein/gekürzt), damit
    die Zeilen unterscheidbar bleiben. Der Gruppenkopf bekommt dieselbe Regel (heute nur der Name).
    Damit ist Befund 11s Wunsch „Ordnerpfad im Zeilennamen" präzisiert und **ersetzt** ihn.
+14. [ ] **Ordner-Karte: Variant A (User-Entscheidung 2026-10-16).** Anlass: die Karte zeigt
+   **zweimal** dieselbe Prozentzahl (grau unter dem Namen, farbig rechts) — weil beide Stellen
+   `status_text` benutzen. Das Original hat dort **drei Bausteine**
+   (`docs/SPEC_UPLOAD_PROGRESS.md` §2.2): **Status** („Datensicherung abgeschlossen" /
+   „Upload-Vorgang läuft" / „ANGEHALTEN" / „Warten" / „Konfiguration wird durchgeführt"),
+   **Fortschrittszeile** („Vollständig" / „{0}% hochgeladen" / „Angehalten bei {0} %") und
+   **„Zuletzt aktualisiert: {0}"** (Original **relativ**, „Vor 1 Min.").
+   **Variant A:** Zeile 1 = Name links, **Statuswort** rechts (farbig, je `BackupStatusAlertLevel`),
+   daneben die drei Zeilen-Symbole; Zeile 2 klein = **Pfad · Fortschritt · Zuletzt aktualisiert**.
+   Beispiel: „Sport … Datensicherung abgeschlossen" / „/Users/…/Pictures/Sport · Vollständig ·
+   Zuletzt aktualisiert: 15.10.2026 21:56".
+   **User-Vorgabe: „Zuletzt aktualisiert" bleibt.** Damit steht jeder Baustein **einmal**; der Pfad
+   ist immer sichtbar.
+   **Verworfen:** Variant B (kompakt, eine Zeile, Pfad nur bei Mehrdeutigkeit); Variant C (nur die
+   Dopplung entfernen, Pfad wandert in die graue Zeile).
+   **Offene Wortlaut-Frage:** bei 100 % nennt das Original **„Vollständig"**, wir bisher
+   „100% hochgeladen" — die Spec ist die Vorgabe, also „Vollständig" (User kann das beim Test
+   umdrehen).
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
