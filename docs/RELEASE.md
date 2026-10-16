@@ -199,7 +199,17 @@ Eingriff und auf dem Entwicklungsrechner (macOS) nicht testbar.
 
 ---
 
-## 11. Referenzen
+## 11. Lizenz
+
+Prime Photos steht unter **`MIT OR Apache-2.0`** (Rust-Standard); die beiden Texte liegen als
+`LICENSE-MIT` und `LICENSE-APACHE` im Repo-Wurzelverzeichnis, und `Cargo.toml` trägt das Feld
+`license = "MIT OR Apache-2.0"`. Die Lizenzen **aller** Abhängigkeiten aus `Cargo.lock`
+(inkl. vollständiger Lizenztexte) stehen in `assets/third-party-licenses.txt`; neu erzeugt wird
+die Datei mit `packaging/gen-third-party-licenses.sh`.
+
+---
+
+## 12. Referenzen
 
 - `docs/BUILD.md` — System-Voraussetzungen macOS/Windows/Linux.
 - `packaging/README.md` — `make-app.sh`, `Info.plist`, ad-hoc vs. eigene Identität.
