@@ -14,6 +14,7 @@ use crate::theme;
 use crate::tray;
 use crate::upload::{eta_suffix, FileState, UploadShared};
 use eframe::egui::{self, Color32, RichText};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
@@ -156,6 +157,31 @@ pub(crate) struct AvatarFetch {
     pub(crate) failed: bool,
 }
 
+/// Which consumer the one in-flight asynchronous folder picker is answering for
+/// (Welle 5.1). The slot carries the target so a late answer cannot land in the
+/// wrong field: the Create form and the open "Datensicherungseinstellungen"
+/// window both want a folder, but a different one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FolderPickerTarget {
+    /// The "Datensicherung hinzufügen …" button: opens the Create form with the
+    /// picked folder.
+    NewBackup,
+    /// The "Ändern …" button of the open "Datensicherungseinstellungen" window:
+    /// replaces the form's source folder.
+    ConfigForm,
+}
+
+/// Shared slot between the background folder picker and the UI thread.
+///
+/// `open` is the re-entry guard (one native dialog at a time) and doubles as the
+/// answer's target; `result` is taken once by `poll_folder_picker`. A cancelled
+/// dialog clears `open` without leaving a `result`.
+#[derive(Default)]
+pub(crate) struct FolderPicker {
+    open: Option<FolderPickerTarget>,
+    result: Option<(FolderPickerTarget, PathBuf)>,
+}
+
 /// Whether another account fetch (name + avatar) may be started. The fetch gets
 /// **exactly one** retry after a failed attempt — at most 2 attempts in total:
 ///
@@ -278,6 +304,9 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) avatar_texture: Option<egui::TextureHandle>,
     /// Shared slot written by the background account fetch, polled in `update`.
     pub(crate) avatar_fetch: Arc<Mutex<AvatarFetch>>,
+    /// Shared slot written by the background folder picker, polled in `update`
+    /// (Welle 5.1: the native dialog runs off the UI thread).
+    pub(crate) folder_picker: Arc<Mutex<FolderPicker>>,
 }
 
 impl PrimePhotoApp {
@@ -462,6 +491,7 @@ impl PrimePhotoApp {
             avatar_name: None,
             avatar_texture: None,
             avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
+            folder_picker: Arc::new(Mutex::new(FolderPicker::default())),
             queue_cache: (0, Vec::new()),
             queue_cache_rev: u64::MAX,
         };
@@ -630,6 +660,60 @@ impl PrimePhotoApp {
         }
     }
 
+    // -- folder picker (Welle 5.1) ------------------------------------------
+
+    /// Open the native folder picker **without blocking the UI**. The modal runs
+    /// through `rfd::AsyncFileDialog` on the existing tokio runtime and reports
+    /// back through `folder_picker`; `update` picks the result up on a later
+    /// frame. Only one dialog at a time — a second request while one is open is
+    /// dropped, so the answer can never be ambiguous.
+    pub(crate) fn spawn_folder_picker(&self, target: FolderPickerTarget, ctx: &egui::Context) {
+        {
+            let mut slot = self.folder_picker.lock().unwrap();
+            if slot.open.is_some() {
+                return;
+            }
+            slot.open = Some(target);
+        }
+        let slot = self.folder_picker.clone();
+        let ctx = ctx.clone();
+        self.rt
+            .spawn(async move { run_folder_picker(slot, target, ctx).await });
+    }
+
+    /// Pick up a finished folder-picker result and hand it to the matching
+    /// consumer. Called every frame; cheap while nothing was published.
+    pub(crate) fn poll_folder_picker(&mut self) {
+        let Some((target, path)) = self.folder_picker.lock().unwrap().result.take() else {
+            return;
+        };
+        match target {
+            FolderPickerTarget::NewBackup => {
+                // Open the shared "Datensicherungseinstellungen" window in Create
+                // mode instead of adding + uploading right away.
+                self.config_form = Some(BackupConfigForm {
+                    path,
+                    // Global dedupe default as the preselection (user decision
+                    // 2026-10-15), the same role the conflict default below
+                    // plays.
+                    dedup: self.config.dedup_default,
+                    // Application default as the preselection (user decision
+                    // 2026-10-15); a value changed in the dialog belongs to the
+                    // created target only, it is not written back.
+                    conflict_resolution: self.config.conflict_resolution_default,
+                    mode: ConfigFormMode::Create,
+                    error: None,
+                });
+            }
+            FolderPickerTarget::ConfigForm => {
+                if let Some(f) = self.config_form.as_mut() {
+                    f.path = path;
+                    f.error = None;
+                }
+            }
+        }
+    }
+
     // -- rendering ----------------------------------------------------------
 
     pub(crate) fn nav_item(
@@ -668,6 +752,12 @@ impl PrimePhotoApp {
             egui::FontId::proportional(15.0),
             theme::INK,
         );
+        // Report the hand-drawn row as a selectable button (Welle 5.2c): without
+        // this the row has no accessibility role and no label. Purely semantic —
+        // nothing about the drawing above changes.
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+        });
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             *current = value;
         }
@@ -956,6 +1046,9 @@ impl eframe::App for PrimePhotoApp {
             self.spawn_avatar_fetch(ctx);
         }
         self.poll_avatar(ctx);
+        // Folder picker (Welle 5.1): hand a finished native-dialog answer to its
+        // consumer before the pages that read it are drawn this frame.
+        self.poll_folder_picker();
 
         // Onboarding: until the user is signed in (or while the sign-in page is
         // open) show the login flow in this same window. A stored refresh
@@ -1097,7 +1190,7 @@ impl eframe::App for PrimePhotoApp {
                     });
             }
             if let Some(action) = form_action {
-                self.handle_config_form_action(action);
+                self.handle_config_form_action(action, ctx);
             }
         }
 
@@ -1252,6 +1345,32 @@ async fn fetch_account_avatar(cfg: Config, shared: Arc<Mutex<AvatarFetch>>, ctx:
         Ok(_) => log::warn!("Profilbild: Antwort ist kein gültiges Bild."),
         Err(_) => log::warn!("Profilbild: Abruf fehlgeschlagen."),
     }
+}
+
+/// Background folder picker (Welle 5.1): run the native modal off the UI thread
+/// and publish the answer (if any) into the shared slot.
+///
+/// The macOS `rfd` backend starts the sheet inside
+/// `AsyncFileDialog::pick_folder` itself (eagerly, via `run_on_main`) and wakes
+/// the polling task from the sheet's completion handler — it needs no dedicated
+/// executor and no main-thread polling, so the existing tokio runtime can drive
+/// it. `request_repaint` makes the UI pick the result up on the next frame; a
+/// cancelled dialog clears the guard without publishing a path.
+async fn run_folder_picker(
+    slot: Arc<Mutex<FolderPicker>>,
+    target: FolderPickerTarget,
+    ctx: egui::Context,
+) {
+    let picked = rfd::AsyncFileDialog::new().pick_folder().await;
+    let path = picked.map(|handle| handle.path().to_path_buf());
+    {
+        let mut s = slot.lock().unwrap();
+        s.open = None;
+        if let Some(path) = path {
+            s.result = Some((target, path));
+        }
+    }
+    ctx.request_repaint();
 }
 
 #[cfg(test)]

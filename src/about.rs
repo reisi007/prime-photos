@@ -152,6 +152,16 @@ pub(crate) fn license_window(ctx: &egui::Context, open: &mut bool, tab: &mut Lic
         .collapsible(false)
         .resizable(true)
         .default_size(egui::vec2(760.0, 560.0))
+        // Minimum width so the widest license line is never clipped. The text is
+        // wrapped to `WRAP_COLS` (100) monospace characters, measured 700.25 px
+        // wide (7.0025 px per character); the default floating scroll bar (10 px
+        // plus a 4 px inner margin) floats over the right edge and would cover
+        // the last characters. `min_width` sets the inner content width — the
+        // scroll area fills it and a floating bar allocates no space — so
+        // 700.25 + 14 ≈ 715 px, rounded up to 720 px for a small margin. There is
+        // only vertical scrolling, so without this a user could shrink the window
+        // until the line is cut off.
+        .min_width(720.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.selectable_value(
@@ -197,12 +207,15 @@ fn current_year() -> String {
 /// galley.
 ///
 /// Deliberately not `ui.text_style_height(&TextStyle::Monospace)`: at the 12 px
-/// monospace style the font's `row_height` is 13.97 px, while an actually laid
-/// out line occupies 14 px (measured headlessly). `show_rows` needs the real
-/// value — the font metric would drift ~0.03 px per row, ~757 px over the 24k
-/// lines, so the declared content height would be too small and the last ~34
-/// rows would never be reachable (headless-verified, `AGENTS.md` „Virtuelle
-/// Liste").
+/// monospace style the font's `row_height` is 13.96875 px, while an actually
+/// laid out line occupies 14 px (measured headlessly) — a 0.03125 px difference
+/// per row, ~777 px over the 24 874 wrapped lines.
+///
+/// That shortfall is **sub-pixel in its consequence**, not tens of unreachable
+/// rows: egui positions every row by its real layout height, so only the virtual
+/// list's skip offset uses the declared `row_h`. A `row_h` that is 0.03 px too
+/// small therefore clips the last line by well under a pixel; the measured value
+/// still avoids even that (headless-verified, `AGENTS.md` „Virtuelle Liste").
 fn monospace_row_height(ui: &egui::Ui) -> f32 {
     let font_id = egui::TextStyle::Monospace.resolve(ui.style());
     ui.fonts(|f| {

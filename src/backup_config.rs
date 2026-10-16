@@ -1,9 +1,8 @@
-use crate::app::PrimePhotoApp;
+use crate::app::{FolderPickerTarget, PrimePhotoApp};
 use crate::folders::ConflictResolution;
 use crate::i18n::{tr, tr1};
 use crate::theme;
 use eframe::egui::{self, RichText};
-use rfd::FileDialog;
 use std::path::PathBuf;
 
 /// Whether the "Datensicherungseinstellungen" window is configuring a new
@@ -20,6 +19,10 @@ pub(crate) enum ConfigFormMode {
 pub(crate) enum ConfigFormAction {
     Save,
     Cancel,
+    /// The "Ändern …" button: ask the app to open the asynchronous native folder
+    /// picker (Welle 5.1). The picked folder is applied back to this form via
+    /// `poll_folder_picker`.
+    PickFolder,
 }
 
 /// State of the "Datensicherungseinstellungen" window, shared by Create and Edit.
@@ -56,10 +59,10 @@ impl PrimePhotoApp {
             ui.label(theme::muted(crate::text::nfc(&form.path.display().to_string())));
             let change = ui.add_enabled(!editing, theme::secondary_button(tr("Ändern …")));
             if change.clicked() {
-                if let Some(p) = FileDialog::new().pick_folder() {
-                    form.path = p;
-                    form.error = None;
-                }
+                // Do not block the UI with the native dialog (Welle 5.1): the
+                // app opens it asynchronously and writes the picked folder back
+                // into this form (`poll_folder_picker`).
+                action = Some(ConfigFormAction::PickFolder);
             }
         });
         ui.add_space(10.0);
@@ -166,9 +169,16 @@ impl PrimePhotoApp {
 
     /// Applies a Save/Cancel from the configuration window. Validation failures
     /// keep the window open with an inline error; a valid Save closes it.
-    pub(crate) fn handle_config_form_action(&mut self, action: ConfigFormAction) {
+    pub(crate) fn handle_config_form_action(
+        &mut self,
+        action: ConfigFormAction,
+        ctx: &egui::Context,
+    ) {
         match action {
             ConfigFormAction::Cancel => self.config_form = None,
+            ConfigFormAction::PickFolder => {
+                self.spawn_folder_picker(FolderPickerTarget::ConfigForm, ctx);
+            }
             ConfigFormAction::Save => {
                 let Some((mode, path, dedup, conflict)) =
                     self.config_form.as_ref().map(|f| {

@@ -1,4 +1,4 @@
-use crate::app::{Page, ONE_TIME_IDX, PrimePhotoApp};
+use crate::app::{FolderPickerTarget, Page, ONE_TIME_IDX, PrimePhotoApp};
 use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::config::Config;
 use crate::dedup::DedupIndex;
@@ -16,7 +16,6 @@ use eframe::egui::{self, RichText};
 // desktop-notification module (they are unrelated and both stay).
 use notify;
 use notify::Watcher;
-use rfd::FileDialog;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -338,12 +337,19 @@ fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: 
     s.log(msg);
 }
 
-/// Mark the plan's persisted folders as uploading (folder-targets only). The
-/// one-time target is transient, so it never reaches this and never gets saved.
+/// Record the plan's file count on its persisted folders (folder-targets only).
+/// The one-time target is transient, so it never reaches this and never gets
+/// saved.
+///
+/// The persisted **status** is deliberately not written here (Welle 5.1 rest):
+/// the row renders "uploading" **live** from `UploadShared::active` +
+/// `folder_total` (see `backup_ui`), so a persisted `Uploading` would be a
+/// second, redundant claim — and a false one after a cancelled run or a quit in
+/// the middle of a run, because both finalizers return early on `cancelled` and
+/// never reset it. A file count is a number, not a claim.
 fn publish_folder_status(plan: &UploadPlan, store: &mut FolderStore) {
     for (&i, &count) in &plan.per_folder {
         if let Some(f) = store.folders.get_mut(i) {
-            f.status = FolderStatus::Uploading;
             f.total_files = count;
         }
     }
@@ -957,23 +963,11 @@ fn remember_checkbox_label(folder_name: Option<&str>) -> String {
 impl PrimePhotoApp {
     // -- folders ------------------------------------------------------------
 
-    pub(crate) fn add_backup_folder(&mut self) {
-        if let Some(folder) = FileDialog::new().pick_folder() {
-            // Open the shared "Datensicherungseinstellungen" window in Create
-            // mode instead of adding + uploading right away.
-            self.config_form = Some(BackupConfigForm {
-                path: folder,
-                // Global dedupe default as the preselection (user decision
-                // 2026-10-15), the same role the conflict default below plays.
-                dedup: self.config.dedup_default,
-                // Application default as the preselection (user decision
-                // 2026-10-15); a value changed in the dialog belongs to the
-                // created target only, it is not written back.
-                conflict_resolution: self.config.conflict_resolution_default,
-                mode: ConfigFormMode::Create,
-                error: None,
-            });
-        }
+    /// Ask for a folder for a **new** backup target. The native dialog is opened
+    /// asynchronously (Welle 5.1) — the UI keeps running; `poll_folder_picker`
+    /// opens the Create form once a folder was picked.
+    pub(crate) fn add_backup_folder(&mut self, ctx: &egui::Context) {
+        self.spawn_folder_picker(FolderPickerTarget::NewBackup, ctx);
     }
 
     pub(crate) fn apply_action(&mut self, action: FolderAction) {
@@ -1492,7 +1486,7 @@ impl PrimePhotoApp {
                 .add(theme::primary_button(tr("Datensicherung hinzufügen …")))
                 .clicked()
             {
-                self.add_backup_folder();
+                self.add_backup_folder(ui.ctx());
             }
             let all_paused = *self.paused.borrow();
             let label = if all_paused {

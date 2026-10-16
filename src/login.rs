@@ -482,6 +482,13 @@ impl PrimePhotoApp {
         // the spawn branch sees `refresh_token == None` and cannot start a worker
         // for the token we just discarded in the very same frame.
         if self.session.lock().unwrap().invalid {
+            // An invalidated session is exactly the sign-out case (user decision
+            // 2026-10-16): the running upload holds its own `Config` clone with
+            // the now-dead cookies and would keep failing against the revoked
+            // session. Cancel it the same way `logout` does — the worker stops at
+            // its next wait point, a request already in flight is allowed to
+            // finish.
+            self.upload.lock().unwrap().cancelled = true;
             if let Err(e) = auth::KeyringTokenStore.clear() {
                 log::warn!("Refresh-Token konnte nicht gelöscht werden: {e}");
             }
