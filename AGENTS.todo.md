@@ -119,8 +119,15 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    **automatisch** bestimmt — dieselbe Behandlung wie die eben entfernte Einstellungs-Sektion
    (Befund 5). **Die Umsetzung hängt an der Spec aus Punkt 4** (`docs/SPEC_UPLOAD_DESTINATION.md`):
    dort steht, wie das Original das Ziel ableitet (`Backup/<Macname>/<Pfad>`, Segmente werden bei
-   Bedarf angelegt) und dass der User es „normalerweise nie ändern" muss. Offen: ob wir die
-   Original-Ableitung nachbauen oder bei unserem heutigen festen Ziel bleiben (Frage an den User).
+   Bedarf angelegt) und dass der User es „normalerweise nie ändern" muss.
+   **User-Entscheidung 2026-10-16: „Feld jetzt weg, Spiegelung nach der Spec."** Das Feld samt
+   Knopf fällt **sofort** aus dem Dialog (die App entscheidet wie heute automatisch, heute
+   `Pictures/Web` — `src/prime_photos.rs:820-843` sucht die beiden Ordner und lädt dort hinein).
+   Die **Spiegelung wie das Original** (`Backup/<Macname>/<Quellpfad>`) wird als eigener Auftrag
+   **nach** der Spec gebaut; offene Frage dort: **kann unser Cookie-Host Ordner überhaupt anlegen**
+   (heute wird nur gesucht)? Bestehende Uploads in `Pictures/Web` bleiben, wo sie sind.
+   **Verworfen:** Feld dauerhaft behalten und bei `Pictures/Web` bleiben (widerspricht dem
+   Paritäts-Auftrag „Upload Ort soll gleich sein wie bei der Originalen App").
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
