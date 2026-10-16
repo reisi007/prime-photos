@@ -57,10 +57,20 @@ already usable.
 | The 10-minute EXIF guard rejects an EXIF-less file that is younger than 10 minutes **before** an upload URL is even built — live-reproduced on 2026-10-15 and **original parity** (`docs/SPEC_UPLOAD.md`), not an invention of ours | for live test runs, age the file first: `SetFile -d "01/01/2020 12:00:00" -m "01/01/2020 12:00:00"`. Without that, the run shows an error line in the UI log only and the row keeps `status = uploading`; a later event/watermark run picks the file up once it is old enough |
 | A stray node is removed with `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>` ⇒ **202 `{}`**; `PUT …/drive/v1/trash/<id>` does **not** exist on the cookie host (⇒ 404) | test targets and leftover nodes are cleaned up with the DELETE (verbs collected in `docs/PROTOCOL.md` § 5) |
 
-## Not accepted yet
+## Replace `PUT` accepted live (2026-10-16)
 
-The `PUT /v2/upload/<nodeId>` replace path (Welle 2, item 2.2b) has **not**
-been exercised against the live account: it needs a genuine name conflict and
-would overwrite an existing photo, so it must never be triggered unprompted.
-Its query-parameter requirement is already proven (`fileSize` missing ⇒
-400 `MissingFileSize`).
+The `PUT /v2/upload/<nodeId>` replace path (Welle 2, item 2.2b) **is now
+exercised against the live account** — deliberately, on throwaway test nodes
+only, with a genuine name conflict, and cleaned up afterwards.
+
+| Step | Call | Result |
+|---|---|---|
+| 1 | `POST …/v2/upload` a new file ⇒ node C (no `contentDate`) | **201**, response `contentDate = …T19:47:36.123Z` |
+| 2 | `POST …/v2/upload` the **same name**, different bytes | **409** `NameAlreadyExists`; `errorDetails.conflictNodeIds[0]` names C |
+| 3 | `PUT /v2/upload/<C>` with the POST's query set, **without** `contentDate` | **200**, **same** node id, content swapped (size + MD5 of the second file), node's `contentDate` **unchanged** `…36.123Z` |
+| 4 | cleanup: `DELETE …/drive/v1/nodes/<id>` | **202**; a re-query over the folder children finds none of the test names |
+
+So the `PUT` works **without** a `contentDate` and leaves the node's capture date
+standing. The earlier query-parameter requirement stands as recorded
+(`fileSize` missing ⇒ 400 `MissingFileSize`). Full write-up:
+`docs/SPEC_CAPTURE_DATE.md` § 12.3; endpoint: `docs/PROTOCOL.md` § 2.17.

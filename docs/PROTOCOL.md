@@ -531,11 +531,35 @@ newly created node:
 
 Notes:
 * The server derives `contentType`/`extension`/`image` dimensions itself.
-* `contentDate` is normalised to midnight of the file's date
-  (`2026-10-13T00:00:00.000Z`), **not** the capture time.
+* `contentDate` for a **PNG without EXIF** (the capture above) is normalised to
+  **midnight of the file's date** (`2026-10-13T00:00:00.000Z`), **not** the capture
+  time. That is **only the no-EXIF case** — corrected in a live test on 2026-10-16:
+  with readable EXIF the server returns the **full** capture time **including
+  sub-seconds** (e.g. `…T19:47:36.123Z`), derived from `DateTimeOriginal` +
+  `SubSecTimeOriginal` — **not** from `ModifyDate`, the file mtime or the upload time.
+  It stores the EXIF **wall-clock** time naively as `Z` (no `OffsetTime*` conversion).
+  Details: `docs/SPEC_CAPTURE_DATE.md` §12.
+* A **client-supplied** `contentDate` query value is echoed back **verbatim** and
+  **overrides** that derivation (live 2026-10-16: request `…T19:47:36.000Z` ⇒ response
+  `…T19:47:36.000Z`, although the file carries `.123`). This is why a client that always
+  sends the parameter can overwrite the server's capture date — see
+  `docs/SPEC_CAPTURE_DATE.md` §12.2.
 * Characters in `name` are URL-encoded with `+` for spaces.
 * All 3 uploads in `upload-capture.mitm` returned `201` with `x-amzn-RequestId`
   echoing the request's `x-amzn-RequestId`.
+
+**Live-checked on the cookie upload host (2026-10-16)** — same endpoint shape on
+`content-<zone>.drive.amazonaws.com/v2/upload`:
+
+| Call | Result |
+|---|---|
+| `POST …/v2/upload` with EXIF, **no** `contentDate` | **201**, response `contentDate` = full `DateTimeOriginal` + `SubSecTimeOriginal` (naive `Z`) |
+| `POST …/v2/upload` with `contentDate=…T19:47:36.000Z` | **201**, response `contentDate` = the **sent** value, verbatim |
+| `PUT …/v2/upload/<nodeId>` (the `Replace` path) **without** `contentDate` | **200**, **same** node id, content swapped (size + MD5), node's `contentDate` **unchanged** |
+
+The `Replace` acceptance is recorded in `docs/features/LIVE_ACCEPTANCE.md`; the full
+write-up is `docs/SPEC_CAPTURE_DATE.md` §12.3. Test nodes were removed with
+`DELETE …/drive/v1/nodes/<id>` ⇒ **202**.
 
 ### 2.18 `POST https://cdws.eu-west-1.amazonaws.com/drive/v2/memories/v1/collage/narratives`
 

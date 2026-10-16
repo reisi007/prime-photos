@@ -122,13 +122,17 @@ außerhalb des Artefakts).
 er kein Datum baut. Der frühere Befund, dass unsere Crate `kamadak-exif-0.6.1` die Sub-Sekunde
 nur über `parse_subsec` setzt und **kein** Reader-Aufruf das aufruft, betrifft **unseren** Code und
 ist hier nur die Kontrastfolie — der Original-Client hat dieselbe Frage anders beantwortet: er
-stellt sie gar nicht.
+stellt sie gar nicht. **Präzisiert (2026-10-16):** weil kein Reader-Aufruf `parse_subsec` erreicht,
+bleibt das Feld `nanosecond` ungesetzt ⇒ die von **uns** gesendete Sub-Sekunde ist **immer**
+`.000`. Der Server dagegen trägt echte dreistellige Sub-Sekunden (Live-Test, §12.1/§12.2).
 
-**Beleg.** Negative Symbolsuche (`SubSecTime`, `Subsec`, `nanosecond`); `docs/SPEC_UPLOAD.md` §2.4
+**Beleg.** Negative Symbolsuche (`SubSecTime`, `Subsec`, `nanosecond`); `kamadak-exif-0.6.1`
+(`parse_subsec` als einziger Setzer von `nanosecond`, kein Aufrufer); `docs/SPEC_UPLOAD.md` §2.4
 (unser Stand).
 
 **Einordnung.** **belegt** für den Client (keine Sub-Sekunden-Übernahme, weil kein Datum).
-Ob/wie der Server Sub-Sekunden übernimmt → **UNKNOWN**.
+Ob/wie der Server Sub-Sekunden übernimmt → **beantwortet** (Live-Test §12.2: er übernimmt die
+EXIF-Sub-Sekunde aus `SubSecTimeOriginal`; ein gesendeter Wert wird wörtlich genommen).
 
 ---
 
@@ -282,18 +286,31 @@ dieses Artefakts.
 
 ## 9. Offene Fragen / was ein Live-Mitschnitt klären müsste
 
-1. **Server-seitige Tag-Priorität.** Welches EXIF-/XMP-Feld der Server nimmt, wenn mehrere
-   vorhanden sind (`DateTimeOriginal` vs. `DateTimeDigitized` vs. `DateTime`), und ob er
+> **Stand 2026-10-16:** Die Punkte 1, 2 (teilweise) und 3 sowie die Projektfrage, ob der
+> `Replace`-`PUT` ein `contentDate` braucht bzw. das Knoten-Datum verändert, sind durch den
+> Live-Test in **§12** beantwortet. Sie bleiben als Frage stehen, damit sie nicht erneut
+> aufgeworfen werden. **Offen** bleiben Punkt 4 (`fallbackContentDate`) und Punkt 5
+> (Galerie-Sortierung der BFF).
+
+1. **Server-seitige Tag-Priorität. → beantwortet (§12.2).** Welches EXIF-/XMP-Feld der Server nimmt,
+   wenn mehrere vorhanden sind (`DateTimeOriginal` vs. `DateTimeDigitized` vs. `DateTime`), und ob er
    `SubSecTime*` / `OffsetTime*` berücksichtigt — außerhalb des Artefakts. *Mitschnitt:* ein
    Upload je Testdatei-Variante, Vergleich der Antwort-`contentDate`.
-2. **Fallback bei EXIF-los.** Ob die Mitternachts-`contentDate` aus dem **Datei**-Datum, aus
-   `clientProperties.dateCreated` oder aus einem Server-Default stammt. Der Client liefert mit
-   `clientProperties.dateCreated/dateUpdated` (Dateisystem-Zeiten) eine Kandidatenquelle, aber
-   **nicht** `contentDate` und **nicht** `fallbackContentDate`. *Mitschnitt:* eine EXIF-lose Datei
-   mit bewusst abweichender mtime hochladen und die Antwort-`contentDate` gegen beide Zeiten
-   stellen.
-3. **Zeitzonen-Interpretation.** Ob eine EXIF-Lokalzeit mit `OffsetTime*` umgerechnet wird
-   (Antwortformat ist stets `…Z`; die Eingangsinterpretation ist unbelegt).
+   **Ergebnis:** der Server nimmt `DateTimeOriginal` + `SubSecTimeOriginal`; `ModifyDate`, mtime und
+   Upload-Zeit waren **nicht** die Quelle, und `OffsetTime*` rechnet er **nicht** um (naiv `Z`).
+2. **Fallback bei EXIF-los. → teilweise beantwortet (§12.1/§12.4).** Ob die Mitternachts-`contentDate`
+   aus dem **Datei**-Datum, aus `clientProperties.dateCreated` oder aus einem Server-Default stammt.
+   Der Client liefert mit `clientProperties.dateCreated/dateUpdated` (Dateisystem-Zeiten) eine
+   Kandidatenquelle, aber **nicht** `contentDate` und **nicht** `fallbackContentDate`. *Mitschnitt:*
+   eine EXIF-lose Datei mit bewusst abweichender mtime hochladen und die Antwort-`contentDate` gegen
+   beide Zeiten stellen.
+   **Teilergebnis:** die Mitternachts-Form ist der **EXIF-lose** Fall (§12.4) — **nicht** eine
+   allgemeine Normalisierung. Woher genau der Tagesanteil kommt, bleibt offen: der Live-Test führte
+   **keinen** EXIF-losen Upload.
+3. **Zeitzonen-Interpretation. → beantwortet (§12.2).** Ob eine EXIF-Lokalzeit mit `OffsetTime*`
+   umgerechnet wird (Antwortformat ist stets `…Z`; die Eingangsinterpretation ist unbelegt).
+   **Ergebnis:** die EXIF-Wanduhrzeit wird **naiv als `Z`** abgelegt, **nicht** mit `OffsetTime*`
+   nach UTC umgerechnet (`19:47:36` bleibt `19:47:36Z` bei `OffsetTimeOriginal = +02:00`).
 4. **`fallbackContentDate`-Semantik.** Ob eine **ältere** Client-Version den Parameter gesendet hat
    (in 11.3.0/36 ist er tot) — nur über einen Mitschnitt einer anderen Version oder über die
    Server-Doku zu klären.
@@ -320,11 +337,14 @@ dieses Artefakts.
 | Zeitzone | — | keine Umrechnung (lokale Zeit wird als `Z` ausgegeben) |
 
 **Wichtig:** Diese Abweichungen sind **kein** Widerspruch zum Original-Befund, sondern dessen
-Spiegelbild — das Original überlässt das Feld dem Server, wir besetzen es selbst. Ob der Server
-unsere volle Zeit übernimmt oder auf Tagesgranularität kürzt, ist aus dem Artefakt **nicht**
-entscheidbar (§5, §9.2). Zwei Punkte sind zusätzlich als **eigener** Code-Fund markiert und
-gehören nicht in diese Spec-Korrektur: die naiv-lokale Zeit und die Sub-Sekunden-Überlänge
-(vgl. `docs/SPEC_UPLOAD.md` §2.4).
+Spiegelbild — das Original überlässt das Feld dem Server, wir besetzen es selbst. Aus dem Artefakt
+allein ist **nicht** entscheidbar, ob der Server unsere volle Zeit übernimmt oder kürzt (§5,
+§9.2) — der Live-Test §12.2 hat es entschieden: ein **mitgesendeter** `contentDate`-Wert wird
+**wörtlich** übernommen und **überschreibt** die Server-Ableitung, und der Server nimmt **ohne**
+gesendeten Wert die **volle** EXIF-Aufnahmezeit (inkl. Sub-Sekunde). Unsere (naiv-lokalen,
+`.000`-)Werte stehen also deshalb so im Konto, weil **wir** sie senden. Zwei Punkte sind zusätzlich
+als **eigener** Code-Fund markiert und gehören nicht in diese Spec-Korrektur: die naiv-lokale Zeit
+und die Sub-Sekunden-Überlänge (vgl. `docs/SPEC_UPLOAD.md` §2.4).
 
 ---
 
@@ -359,3 +379,107 @@ gehören nicht in diese Spec-Korrektur: die naiv-lokale Zeit und die Sub-Sekunde
 * **Bundle:** `Contents/Info.plist` (`CFBundleShortVersionString` = `11.3.0`,
   `CFBundleVersion` = `36`, `CommitId` = `1d7941b5`), `Contents/MonoBundle/Amazon Photos.dll`
   (SHA-256 `34a616e7…`).
+
+---
+
+## 12. Live-Test 2026-10-16: wie `contentDate` tatsächlich entsteht
+
+**Methode.** Eine eigene, in derselben Sitzung aus dem **Refresh-Token** gemintete Cookie-Session
+(der Geräteweg aus `docs/SPEC_LOGIN.md` § 3.8) gegen das echte Konto, ausschließlich gegen
+Testordner/-knoten, die anschließend gelöscht wurden. Schreibtests liefen gegen
+`POST content-<zone>.drive.amazonaws.com/v2/upload` bzw. `PUT /v2/upload/<nodeId>`; der lesende
+Test gegen `…/drive/v1/nodes/<folder>/children`. **Keine Live-Werte** (keine Cookies, keine
+Node-IDs, keine Kontonamen) werden hier übernommen; Testdateinamen wie `_pptest_a.jpg` bleiben.
+
+**Trennregel für diesen Abschnitt.** *Beobachtet* = HTTP-Status und Antwortfelder; *Schluss-
+folgerung* = die Deutung, **welche** Quelle der Server benutzt. Was der Test nicht berührt, bleibt
+ausdrücklich offen (`UNKNOWN`).
+
+### 12.1 Test 1 — lesender `GET` auf den Upload-Ordner (beobachtet)
+
+`GET …/drive/v1/nodes/<folder>/children` auf unseren eigenen Upload-Ordner. Die Knoten tragen
+`contentProperties.contentDate` mit **voller** Aufnahmezeit **und** echten **dreistelligen**
+Sub-Sekunden. Belegte Beispielwerte aus dem Bestand:
+
+| `contentDate` (beobachtet) |
+|---|
+| `2025-05-31T19:42:30.083Z` |
+| `2025-03-02T18:05:11.002Z` |
+| `2025-06-10T20:04:31.046Z` |
+
+Keiner dieser Werte steht auf Mitternacht, und die Sub-Sekunde ist echt (nicht `.000`).
+
+**Schlussfolgerung.** Für Bilder **mit** auswertbarem EXIF steht im Konto die **volle**
+Aufnahmezeit samt Sub-Sekunde — es gibt **keine** verallgemeinerbare Mitternachts-Normalisierung
+(vgl. §12.4).
+
+### 12.2 Test 2 — A/B gegen `POST /v2/upload` (beobachtet)
+
+Zwei synthetische JPEGs mit **identischem** EXIF, bewusst **abweichendem** `ModifyDate` und
+verschiedenen Bytes (`_pptest_a.jpg`, `_pptest_b.jpg`):
+
+| EXIF-Feld | Wert |
+|---|---|
+| `DateTimeOriginal` | `2026:10:13 19:47:36` |
+| `SubSecTimeOriginal` | `123` |
+| `ModifyDate` | `2026:10:20 08:00:00` (bewusst abweichend) |
+| `OffsetTimeOriginal` | `+02:00` |
+
+| Test | Query | HTTP | Antwort-`contentDate` |
+|---|---|---|---|
+| A | **ohne** `contentDate` | **201** | `2026-10-13T19:47:36.123Z` |
+| B | mit `contentDate=2026-10-13T19:47:36.000Z` | **201** | `2026-10-13T19:47:36.000Z` |
+
+Weitere beobachtete Antwortfelder bei A: `createdDate`/`modifiedDate` = das heutige
+Upload-Datum (`2026-10-16T09:02:…Z`) — **nicht** das, was in `contentDate` steht.
+
+**Schlussfolgerung (A).** Ohne gesendeten Wert leitet der Server `contentDate` aus dem
+**`DateTimeOriginal` + `SubSecTimeOriginal`** der Datei ab. Er nahm **nicht** `ModifyDate`
+(`2026-10-20`), **nicht** die Datei-mtime (heute) und **nicht** die Upload-Zeit
+(`createdDate`/`modifiedDate`).
+
+**Schlussfolgerung (B).** Ein **mitgesendeter** `contentDate`-Wert wird **wörtlich übernommen** und
+überschreibt die Server-Ableitung — die Sub-Sekunde bleibt `.000`, obwohl die Datei `.123` trägt.
+
+**Zeitzone (beobachtet + Schlussfolgerung).** Der Server legt die EXIF-**Wanduhrzeit** naiv als `Z`
+ab: `19:47:36` bleibt `19:47:36Z`, obwohl die Datei `OffsetTimeOriginal = +02:00` trägt. Er rechnet
+**nicht** nach UTC um.
+
+### 12.3 Test 3 — der `PUT`-Weg (`Replace`) (beobachtet)
+
+| # | Aufruf | Ergebnis |
+|---|---|---|
+| 1 | `POST /v2/upload` **ohne** `contentDate` ⇒ Knoten C | **201**, `contentDate = 2026-10-13T19:47:36.123Z` |
+| 2 | `POST /v2/upload` mit **gleichem Namen**, andere Bytes | **409** `NameAlreadyExists`; `errorDetails.conflictNodeIds[0]` benennt C |
+| 3 | `PUT /v2/upload/<C>` mit dem POST-Query-Satz **ohne** `contentDate` | **200**, **gleiche** Node-Id; Inhalt nachweislich getauscht (Größe **und** MD5 der zweiten Datei), `contentDate` **unverändert** `…36.123Z` (auch nach 3 s unabhängig nachgelesen) |
+| 4 | Aufräumen: `DELETE …/drive/v1/nodes/<id>` je Testknoten | **202**; eine Nachkontrolle über die `children`-Abfrage findet keinen der Testnamen mehr |
+
+**Schlussfolgerung.** Der `PUT` funktioniert **ohne** `contentDate` und lässt das Datum des Knotens
+**stehen** — die Ersetzung ist ein reiner Inhalts-Tausch, kein neues Aufnahmedatum. (Damit ist die
+seit Welle 2 offene Live-Abnahme des `Replace`-PUT geführt; Beleg in
+`docs/features/LIVE_ACCEPTANCE.md`.)
+
+### 12.4 Korrektur eines früheren Befunds (§5, `docs/PROTOCOL.md` §2.17)
+
+`docs/PROTOCOL.md` §2.17 hielt fest, die Server-Antwort normalisiere `contentDate` „auf Mitternacht
+des Dateidatums". Das ist **nur der EXIF-lose Fall** — die damalige Beobachtung war ein **PNG ohne**
+EXIF. Mit auswertbarem EXIF liefert der Server die **volle** Aufnahmezeit samt Sub-Sekunden
+(Test 1 + 2). Die Mitternachts-Aussage bleibt für **EXIF-lose** Dateien gültig, ist aber **keine**
+allgemeine Normalisierung.
+
+### 12.5 Was das für unseren Client bedeutet (nur beschrieben, nicht geändert)
+
+Die Umsetzung ist beauftragt und wird in `docs/SPEC_UPLOAD.md` §2.4 dokumentiert; hier steht sie
+**nur als Entscheidung**, nicht als gelieferter Code: unser Client soll `contentDate` **gar nicht
+mehr senden** und die Ableitung dem Server überlassen. Was der Live-Test dafür stützt:
+
+* **Ein gesendeter Wert gewinnt wörtlich** (Test 2 B): unser eigenes Datum hat die Server-Ableitung
+  also nur deshalb überschrieben, weil wir es überhaupt gesendet haben.
+* **Unsere Sub-Sekunde war immer `.000`.** Wir lesen sie über `kamadak-exif-0.6.1`; das Feld
+  `nanosecond` wird dort nur in `parse_subsec` gesetzt, und **kein** Reader-Aufruf ruft
+  `parse_subsec` auf (belegt im Crate-Quelltext, vgl. §3). Der Server dagegen übernimmt die echte
+  Sub-Sekunde (Test 2 A, `.123`).
+* **Zwei Schwachstellen unserer eigenen Ermittlung:** (a) Priorität `DateTimeDigitized` **vor**
+  `DateTimeOriginal` — der Server nutzt `DateTimeOriginal`; (b) **Rückfall auf die Dateizeit**, wenn
+  kein EXIF gelesen werden kann — bei einem Lightroom-Export ist das die **Export**zeit, nicht die
+  Aufnahmezeit.
