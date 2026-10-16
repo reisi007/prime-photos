@@ -27,24 +27,10 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
 
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
-1. **„Choose Application — Where is use_default?" — Ursache gefunden, Fix noch nicht umgesetzt.**
-   Der String steht **nicht** in unserem Code, sondern in der Abhängigkeit
-   `mac-notification-sys-0.6.15` (`src/lib.rs:132-138`): `ensure_application_set()` ruft
-   `get_bundle_identifier_or_default("use_default")`, was beim OS nach einer **Anwendung namens
-   „use_default"** fragt. Weil es die nicht gibt, zeigt macOS das Panel; erst im Fehlerfall fällt
-   die Funktion auf `com.apple.Finder` zurück (`lib.rs:122`). Der Dialog kommt also **aus unserem
-   Prozess**, nur nicht aus unserem Code. Ausgelöst wird er beim **Abschluss eines Upload-Laufs**;
-   unser `src/notify.rs` verschiebt die Benachrichtigung auf die Main-Dispatch-Queue, sie trifft
-   deshalb **nach** einem Klick ein — der Klick war Zufall. Dass es „gestern noch ging", erklärt
-   sich über den LaunchServices-Cache.
-   **Gewünschtes Verhalten (User-Klärung 2026-10-15):** das Panel soll **gar nicht erst erscheinen**
-   — ein Klick (auch dorthin, wo „use_default" steht) ist **reines Nichts**; **Finder wird nicht
-   geöffnet aktuell und es soll auch keiner geöffnet werden**.
-   **Fix:** einmalig beim Start `notify_rust::mac::set_application("de.reisinger.prime-photos")`
-   rufen — das setzt `INIT_APPLICATION_SET`, `ensure_application_set()` steigt sofort aus, es gibt
-   **keinen** Lookup und **keinen** Dialog, und die Benachrichtigung ist richtig attribuiert.
-   **Verworfen (bleibt verworfen):** den Fehlschlag „stehen bleibt `com.apple.Finder`" als Ursache —
-   der Dialog entsteht **vor** dem Fallback; siehe auch `docs/DEV_NOTES.md`.
+Erledigt und gelöscht (jeweils implementiert, unabhängig verifiziert = Verifier APPROVE, committet):
+Bug 1 „Where is `use_default?" (`2899bc5`; Wissen in `docs/DEV_NOTES.md` § 1), Bug 7 „Klick auf den
+leeren Bereich = Nichts" (nichts zu bauen — Belege in `docs/DEV_NOTES.md` § 6), Bug 9 „Warnungen als
+Fehler" (`c019528`; Regel in `AGENTS.md`).
 
 2. **Dock-/Taskbar-Icon fehlt (verkleinertes Logo nicht dargestellt).** `packaging/Info.plist`
    kennt **keinen** `CFBundleIconFile` und `Contents/Resources` enthält **keine** `.icns` — macOS
@@ -70,25 +56,7 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    Zu prüfen: welches Feld wir auf `contentDate` setzen (`src/upload.rs`/`src/urls.rs`) und was
    Lightroom mitschreibt.
 
-7. **Klick auf den leeren Bereich darf NICHTS auslösen (User-Auftrag 2026-10-15, Klärung: aktuell
-   öffnet sich KEIN Finder — und keiner soll es).** Wortlaut: „Bitte nicht bei Klick auf leeren
-   Sachen den Finder öffnen, nur Drag & Drop von Bildern anbieten, es gibt keine UX dafür bei einem
-   Klick auf den leeren Bereich, dass da was passieren soll" sowie „Finder wird nicht geöffnet
-   aktuell und es soll bei einem Klick nichts passieren".
-   **Spezifikation:** ein Klick in den leeren Bereich (unterhalb der Zielliste, leere Spalten,
-   Seitenleisten-Rand) ist **reines Nichts** — kein Finder, kein Ordner-Panel, keine Aktion, kein
-   sichtbares Feedback. **Einzige** erlaubte Interaktion mit „leerem" Raum bleibt **Drag & Drop**
-   von Bildern (`hovered_files`/`dropped_files` in `src/app.rs`, Overlay `drop_overlay`).
-   **Ist-Zustand (Code-Suche):** bereits erfüllt — im gesamten `src/` gibt es **genau einen**
-   `Sense::click()` auf einer größeren Fläche: `nav_item` in `src/app.rs` (die Seitenleiste);
-   `src/icons.rs` nutzt nur `Sense::hover()`. Finder-/Panel-Pfade hängen **ausschließlich** an
-   Widgets: Kebab-Popup „Im Dateimanager anzeigen" (`src/backup.rs`), Button „Datensicherung
-   hinzufügen" (`FileDialog::pick_folder()`), „Durchsuchen" (`src/backup_config.rs`).
-   **Damit ist nichts zu bauen** — der verbleibende Rest ist Bug 1, der beim Laufende ausgelöste
-   Panel-Dialog. Nach dessen Fix gilt Punkt 7 als erledigt. **Kein** zusätzlicher Klick-Handler,
-   **keine** Aktion auf Leeres. Details/Belege: `docs/DEV_NOTES.md` § 6.
-
-8. **Sichere Ersetz-Regel (User-Entscheidung 2026-10-15, noch nicht implementiert).**
+8. **Sichere Ersetz-Regel — in Umsetzung (Implementierung fertig, Verifikation läuft).**
    Anlass: der Default `Replace` überschreibt bei einem **Namenskonflikt mit anderem Inhalt** das
    vorhandene Foto im Konto — Datenverlust. Der User: „nie was oben ist löschen, außer es ist die
    gleiche Datei physisch relativ zum gesicherten Pfad, dann überschreiben".
@@ -103,23 +71,11 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    Inhalt wird als „Zuvor hochgeladen" übersprungen und **nie** umbenannt; `Replace` hat **keinen**
    Wire-Wert (es setzt `overwrite=true` + `nodeId` ⇒ `PUT v2/upload/<nodeId>`), `SaveAsNew` sendet
    **unbedingt** `overwrite=false` ⇒ `RENAME`.
-   **Lokale Settings (User-Auftrag „bearbeite die lokalen Settings"):** geprüft — `folders.toml`
-   trägt für „Sport" bereits `conflict_resolution = "saveasnew"` (**kein** Handlungsbedarf);
-   `config.toml` hingegen trägt `conflict_resolution_default = "replace"` — das ist unter der neuen
-   Regel der falsche Default und wird auf `"saveasnew"` gesetzt.
-
-9. **Cargo-Warnungen als Fehler behandeln (User-Auftrag 2026-10-15; Umsetzung noch OFFEN).**
-   Entschieden: `[lints.rust] warnings = "deny"` in `Cargo.toml` (einzige Änderung dort, kein
-   `[workspace]`, keine Deps) — damit ist jede Warnung in `src/`, `build.rs` und den Tests ein
-   harter Build-Fehler; die bisherige **Baseline 0** wird erstmals **maschinell** erzwungen.
-   **Vor dem Umsetzen prüfen:** der Build ist heute bei 0 Warnungen, `[lints]` ändert also nichts
-   am Ist-Zustand — ein roter Build nach dem Eintrag wäre ein echter, bisher übersehener Befund
-   (dann im selben Task beheben, **kein** `#[allow]`). Zusätzlich zu belegen: `cargo check
-   --all-targets` und der Cross-Compile-Check der anderen Ziel-Plattformen, weil `[lints]` auch für
-   cfg-gateden Code der Windows-/Linux-Ziele greift.
-   **Verworfen (bleibt verworfen):** `rustflags = ["-Dwarnings"]` in `.cargo/config.toml` (hart
-   auch für Deps, deren Warnungen wir nicht beheben können) und die Erzwingung **nur** in der CI
-   (kein Workflow vorhanden, lokal bliebe es weich).
+   **Lokale Settings — Stand 2026-10-16 (User-Entscheidung „alles auf replace"):** beide Ablagen
+   stehen auf `Replace` — `config.toml` (`conflict_resolution_default = "replace"`) und „Sport"
+   (`conflict_resolution = "replace"`, von Hand umgestellt, kein Migrationscode). Die frühere
+   Absicht, den Application Default dafür auf `saveasnew` zu setzen, ist damit **hinfällig**: die
+   Sicherheit kommt aus der **Bindung** (Spalte `node_id`), nicht aus einem anderen Default.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
@@ -132,6 +88,12 @@ Verifier APPROVE). Geblieben ist **offene** Arbeit:
   — Größe/MD5/Version). Braucht frische Cookies und einen **echten** Namenskonflikt; ein
   Inhaltsduplikat darf nie per PUT ersetzt werden (Server antwortet darauf mit 409). Danach Knoten
   und Testziel wieder entfernen (`DELETE …/drive/v1/nodes/<id>` ⇒ 202, siehe `docs/PROTOCOL.md` § 5).
+- [ ] **Live-Abnahme der Rückfall-Regel (2026-10-16).** Ebenfalls nur durch Tests gepinnt, nicht
+  durch die Leitung: ein `Replace`-Ziel, dessen Pfad der Index **nicht** an die vom 409 benannte
+  Node bindet, setzt den Lauf als **`RENAME`** fort (lokaler Zweig `resolution = SaveAsNew;
+  continue;` in `src/upload.rs`). Belegbar an einer **fremden** Datei gleichen Namens — sie muss
+  danach **unverändert** im Konto stehen (kein Datenverlust). Sinnvoll in **einem** Lauf mit der
+  PUT-Abnahme oben (derselbe Namenskonflikt, einmal **mit** Bindung ⇒ PUT, einmal **ohne** ⇒ RENAME).
 - [ ] **Zwei Befunde aus der Hänger-Diagnose (angelegt, nicht beauftragt).** (a) Ein Ziel, dessen
   Dateien **alle** fehlschlagen, behält `status = "uploading"` dauerhaft:
   `finalize_background_store` (`src/backup.rs`) schreibt Done/Error nur für Indizes aus
@@ -321,8 +283,10 @@ Kein Eintrag hier darf nachträglich „doch noch" umgesetzt werden — verworfe
 - **`SaveAsNew` als Application Default** (galt 2026-10-14 bis 2026-10-15). Wer ihn zurückdreht,
   ändert eine getroffene Entscheidung. Der Enum-`#[default]` bleibt trotzdem `SaveAsNew`
   (Datei-Fallback für `folders.toml`-Einträge ohne Schlüssel) — **zwei verschiedene Defaults, nicht
-  verschmelzen**. *Anmerkung 2026-10-15:* die sichere Ersetz-Regel (Prio-1 Bug 8) kann den
-  Application Default erneut zur Diskussion stellen — erst dann entscheiden, nicht still ändern.
+  verschmelzen**. *Aufgelöst 2026-10-16:* die sichere Ersetz-Regel ist entschieden (Bug 8) — der
+  Application Default **bleibt `Replace`** (bestätigt, „alles auf replace"), die Sicherheit kommt aus
+  der **Bindung** (`node_id` an den Pfad), nicht aus einem anderen Default; der Enum-`#[default]`
+  bleibt `SaveAsNew`. **Verworfen:** `Replace` nur wegen Bug 8 zurückdrehen.
 - **Den Application Default beim Drag&Drop still zu überschreiben** (statt nur run-weit zu merken).
 - **„Nicht noch einmal fragen" pro Datei als neues persistiertes Feld.** Geltende Regel: die Antwort
   wird in das **bestehende** `BackupFolder.conflict_resolution` des Ordners der gefragten Datei
