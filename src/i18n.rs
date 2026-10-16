@@ -375,6 +375,10 @@ const EN: &[(&str, &str)] = &[
         "Cancelled: {} succeeded, {} failed, {} open.",
     ),
     ("In Bearbeitung", "In progress"),
+    // Per-file percentage while a row is uploading (Befund 11c). The whole
+    // visible string is one key, so a translator can reorder it freely.
+    ("In Bearbeitung · {}%", "In progress · {}%"),
+    ("{} von {}", "{} of {}"),
     ("Schätzung läuft …", "Estimating …"),
     ("Slow-Mode aktiv: 1 Datei gleichzeitig.", "Slow mode active: 1 file at a time."),
     ("UEBERSPRUNGEN {}: bereits hochgeladen", "SKIPPED {}: already uploaded"),

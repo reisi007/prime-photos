@@ -8,8 +8,8 @@ use crate::icons;
 use crate::login::Session;
 use crate::theme;
 use crate::upload::{
-    folder_progress_text, outcome_text, run_upload, status_text, upload_progress_text, FileState,
-    QueueEntry, UploadShared,
+    FileState, QueueEntry, UploadShared, calculate_pct, folder_progress_text, outcome_text,
+    run_upload, status_text, upload_progress_text,
 };
 use eframe::egui::{self, RichText};
 // NOTE: `notify` is the filesystem-event crate — not `crate::notify`, the
@@ -280,6 +280,7 @@ impl UploadPlan {
                     state: FileState::Waiting,
                     size,
                     path: p.clone(),
+                    bytes_sent: 0,
                 });
                 plan.items.push((row, i, p));
             }
@@ -317,6 +318,7 @@ impl UploadPlan {
                 state: FileState::Waiting,
                 size,
                 path: p.clone(),
+                bytes_sent: 0,
             });
             plan.items.push((row, idx, p));
         }
@@ -348,6 +350,7 @@ impl UploadPlan {
                 state: FileState::Waiting,
                 size,
                 path: p.clone(),
+                bytes_sent: 0,
             });
             plan.items.push((row, *i, p.clone()));
         }
@@ -1931,12 +1934,30 @@ impl PrimePhotoApp {
                                 let Some(e) = s.queue.get(*queue_idx) else {
                                     continue;
                                 };
-                                let (txt, col) = match e.state {
-                                    FileState::Waiting => (tr("Warten"), theme::MUTED),
-                                    FileState::Uploading => (tr("In Bearbeitung"), theme::TEAL),
-                                    FileState::Done => (tr("Abgeschlossen"), theme::GREEN),
-                                    FileState::Failed => (tr("Fehlgeschlagen"), theme::RED),
-                                    FileState::Skipped => (tr("Übersprungen"), theme::MUTED),
+                                // Befund 11c: an `Uploading` row additionally shows
+                                // the real per-file percentage once bytes have gone
+                                // out, so progress is visible per file and not only
+                                // as the coarse state. The whole visible string is
+                                // one i18n key — never assembled from two parts.
+                                let (txt, col): (String, egui::Color32) = match e.state {
+                                    FileState::Waiting => (tr("Warten").to_string(), theme::MUTED),
+                                    FileState::Uploading => {
+                                        let pct = calculate_pct(e.size, e.bytes_sent);
+                                        if pct > 0 {
+                                            (tr1("In Bearbeitung · {}%", pct), theme::TEAL)
+                                        } else {
+                                            (tr("In Bearbeitung").to_string(), theme::TEAL)
+                                        }
+                                    }
+                                    FileState::Done => {
+                                        (tr("Abgeschlossen").to_string(), theme::GREEN)
+                                    }
+                                    FileState::Failed => {
+                                        (tr("Fehlgeschlagen").to_string(), theme::RED)
+                                    }
+                                    FileState::Skipped => {
+                                        (tr("Übersprungen").to_string(), theme::MUTED)
+                                    }
                                 };
                                 // A long name is truncated in the cell; the full
                                 // path shows on hover (§7.3).
@@ -1991,12 +2012,21 @@ impl PrimePhotoApp {
                                                     .size(12.0),
                                             ),
                                         );
-                                        ui.add_sized(
+                                        let status = ui.add_sized(
                                             [QUEUE_STATUS_W, QUEUE_ROW_H],
                                             egui::Label::new(
                                                 RichText::new(txt).color(col).size(12.0),
                                             ),
                                         );
+                                        // Optional byte detail while a transfer is
+                                        // live (Befund 11c).
+                                        if e.state == FileState::Uploading && e.size > 0 {
+                                            status.on_hover_text(tr2(
+                                                "{} von {}",
+                                                crate::text::format_size(e.bytes_sent),
+                                                crate::text::format_size(e.size),
+                                            ));
+                                        }
                                     },
                                 );
                             }

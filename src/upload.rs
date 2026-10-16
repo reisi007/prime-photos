@@ -8,7 +8,10 @@ use eframe::egui::Color32;
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -18,8 +21,10 @@ use tokio::task::JoinSet;
 // Shared upload state (written by the async workers, read by the UI)
 // ---------------------------------------------------------------------------
 
-/// Coarse per-file state of a queue entry. The cookie upload path reads the
-/// file as a whole, so there is no byte-level progress (docs/SPEC_UPLOAD_PROGRESS.md §4.2).
+/// Coarse per-file state of a queue entry. The upload path streams the body and
+/// counts the bytes it hands to the transport, so an `Uploading` row also shows
+/// a real per-file percentage (Befund 11c); `docs/SPEC_UPLOAD_PROGRESS.md` §4.2
+/// described the older whole-file behaviour.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileState {
     Waiting,
@@ -42,6 +47,22 @@ pub(crate) struct QueueEntry {
     /// Full path, shown as the name column's hover tooltip
     /// (docs/SPEC_UPLOAD_PROGRESS.md §7.3).
     pub(crate) path: PathBuf,
+    /// Bytes handed to the transport for this file so far (Befund 11c), copied
+    /// from the upload's progress counter by a 100 ms polling task. `0` before a
+    /// transfer starts; `size` once the file is settled without a transfer (a
+    /// dedup skip) or has finished. Only meaningful for `Uploading` rows, where
+    /// the Backup page derives the per-file percentage from it.
+    pub(crate) bytes_sent: u64,
+}
+
+/// Per-file upload percentage for a queue row: sent bytes over the file size,
+/// clamped to `0..=100`. `0` while either side is unknown (`size == 0`), so the
+/// row falls back to the plain state text instead of showing a bogus `0%`.
+pub(crate) fn calculate_pct(size: u64, bytes_sent: u64) -> u64 {
+    if size == 0 {
+        return 0;
+    }
+    (bytes_sent.saturating_mul(100) / size).min(100)
 }
 
 #[derive(Default)]
@@ -472,11 +493,14 @@ pub(crate) async fn upload_worker(
         let Some((row, idx, path)) = item else { break };
 
         // Mark the file as being worked on (guarded so an out-of-range row can
-        // never panic; the queue is only mutated while `shared` is held).
+        // never panic; the queue is only mutated while `shared` is held). A row
+        // can be worked on more than once (token-renewal requeue), so the
+        // progress counter is reset here, not just at plan build time.
         {
             let mut s = shared.lock().unwrap();
             if let Some(e) = s.queue.get_mut(row) {
                 e.state = FileState::Uploading;
+                e.bytes_sent = 0;
             }
             s.touch_queue();
         }
@@ -530,6 +554,9 @@ pub(crate) async fn upload_worker(
             }
             if let Some(en) = s.queue.get_mut(row) {
                 en.state = FileState::Skipped;
+                // No transfer happened: the file counts as fully "sent" so the
+                // row never reads as partially uploaded (Befund 11c).
+                en.bytes_sent = size;
             }
             // Settled for progress, but not transferred: it must not raise the
             // measured byte rate.
@@ -685,6 +712,34 @@ pub(crate) async fn upload_worker(
         // Set when the user explicitly answers "Ersetzen" in the conflict dialog:
         // that consent for *this* file bypasses the binding check.
         let mut replace_confirmed = false;
+        // Per-file byte progress (Befund 11c): the POST streams the file and
+        // counts the bytes handed to the transport. A small polling task copies
+        // that counter into the queue row every 100 ms, so the Backup page can
+        // show a real percentage while the row is `Uploading`. The task stops as
+        // soon as `file_done` is set; the worker writes the authoritative final
+        // value after joining it.
+        let current_bytes = Arc::new(AtomicU64::new(0));
+        let file_done = Arc::new(AtomicBool::new(false));
+        let mut progress_task = tokio::spawn({
+            let current_bytes = current_bytes.clone();
+            let file_done = file_done.clone();
+            let shared = shared.clone();
+            async move {
+                loop {
+                    {
+                        let mut s = shared.lock().unwrap();
+                        if let Some(en) = s.queue.get_mut(row) {
+                            en.bytes_sent = current_bytes.load(Ordering::Relaxed);
+                        }
+                        s.touch_queue();
+                    }
+                    if file_done.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        });
         let outcome = loop {
             let basis = if replace_confirmed {
                 ReplaceBasis::Confirmed
@@ -692,7 +747,14 @@ pub(crate) async fn upload_worker(
                 ReplaceBasis::Automatic(indexed_node_id.as_deref())
             };
             match uploader
-                .upload_picture(&path, Some(&bytes), Some(&md5sum), resolution, basis)
+                .upload_picture(
+                    &path,
+                    Some(&bytes),
+                    Some(&md5sum),
+                    resolution,
+                    basis,
+                    Some(current_bytes.clone()),
+                )
                 .await
             {
                 Ok(id) => break FileOutcome::Uploaded(id),
@@ -730,8 +792,13 @@ pub(crate) async fn upload_worker(
                     let answer = match resolve_conflict(&shared, idx, &name, &path).await {
                         // A sign-out cancelled the run while the prompt was open:
                         // stop the worker here (the run must not resume after a
-                        // logout).
-                        None => return,
+                        // logout). The progress task is stopped first — a detached
+                        // task would keep writing to the queue forever.
+                        None => {
+                            file_done.store(true, Ordering::Relaxed);
+                            let _ = (&mut progress_task).await;
+                            return;
+                        }
                         // The prompt can only answer with a concrete policy;
                         // normalise defensively so `Ask` can never bounce the
                         // file through this loop a second time.
@@ -752,6 +819,20 @@ pub(crate) async fn upload_worker(
                 }
             }
         };
+        // The transfer (and any conflict retries) is over: stop the polling task
+        // and pin the row's progress to the file's real size, so a settled row
+        // never reads as partially sent (Befund 11c). The join waits for at most
+        // one poll interval; the final value is written by the worker itself and
+        // therefore wins over anything the task wrote.
+        file_done.store(true, Ordering::Relaxed);
+        let _ = (&mut progress_task).await;
+        {
+            let mut s = shared.lock().unwrap();
+            if let Some(en) = s.queue.get_mut(row) {
+                en.bytes_sent = size;
+            }
+            s.touch_queue();
+        }
         let mut requeued = false;
         match outcome {
             FileOutcome::Uploaded(id) => {
@@ -1074,6 +1155,7 @@ mod tests {
                 state: FileState::Uploading,
                 size: 1,
                 path: PathBuf::from("/a.jpg"),
+                bytes_sent: 0,
             },
             QueueEntry {
                 folder: 0,
@@ -1081,6 +1163,7 @@ mod tests {
                 state: FileState::Done,
                 size: 2,
                 path: PathBuf::from("/b.jpg"),
+                bytes_sent: 0,
             },
             QueueEntry {
                 folder: 1,
@@ -1088,6 +1171,7 @@ mod tests {
                 state: FileState::Uploading,
                 size: 3,
                 path: PathBuf::from("/c.jpg"),
+                bytes_sent: 0,
             },
             QueueEntry {
                 folder: 1,
@@ -1095,6 +1179,7 @@ mod tests {
                 state: FileState::Failed,
                 size: 4,
                 path: PathBuf::from("/d.jpg"),
+                bytes_sent: 0,
             },
         ];
         reset_in_flight(&mut queue);
@@ -1102,6 +1187,23 @@ mod tests {
         assert!(queue[2].state == FileState::Waiting);
         assert!(queue[1].state == FileState::Done);
         assert!(queue[3].state == FileState::Failed);
+    }
+
+    #[test]
+    fn calculate_pct_is_clamped_and_needs_a_known_size() {
+        // Befund 11c: the per-file percentage shown next to "In Bearbeitung".
+        // An unknown size (0) must yield 0 — never a division or a bogus 100 %.
+        assert_eq!(calculate_pct(0, 123), 0);
+        assert_eq!(calculate_pct(0, 0), 0);
+        // Nothing sent yet, half sent, fully sent.
+        assert_eq!(calculate_pct(100, 0), 0);
+        assert_eq!(calculate_pct(100, 42), 42);
+        assert_eq!(calculate_pct(100, 100), 100);
+        // Overshoot (a retry can briefly count more) clamps to 100, it never
+        // reports more than "done".
+        assert_eq!(calculate_pct(100, 250), 100);
+        // Integer truncation, not rounding.
+        assert_eq!(calculate_pct(3, 1), 33);
     }
 
     #[test]

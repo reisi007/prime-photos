@@ -2,10 +2,18 @@ use std::{
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use futures::Stream;
 use log::{debug, error, warn};
 use reqwest::{Client, Url, header::HeaderMap};
 use serde::{Deserialize, Serialize};
@@ -322,6 +330,79 @@ const UPLOAD_MAX_ATTEMPTS: u32 = 4;
 const UPLOAD_BACKOFF_BASE_MS: u64 = 500;
 /// Upper bound for any single backoff / `Retry-After` sleep.
 const UPLOAD_BACKOFF_MAX_MS: u64 = 8_000;
+
+/// Chunk size of the streamed upload body (Befund 11c). Small enough to give
+/// the queue row a visibly moving percentage on a slow link, large enough that
+/// the per-chunk bookkeeping stays negligible next to the transport cost.
+const UPLOAD_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Streams a file's bytes in [`UPLOAD_CHUNK_BYTES`] chunks and adds each chunk's
+/// length to `counter` as it is polled — i.e. as the transport takes it. This is
+/// what turns the cookie upload path from "whole file, no byte-level progress"
+/// (`docs/SPEC_UPLOAD_PROGRESS.md` §4.2) into a per-file percentage: the caller
+/// hands in a shared counter, the worker's polling task copies it into the queue
+/// entry every 100 ms.
+///
+/// The same buffer is shared behind an `Arc`, so a retry of the POST re-polls
+/// the identical bytes without copying the file.
+struct ChunkedBody {
+    data: Arc<Vec<u8>>,
+    pos: usize,
+    counter: Arc<AtomicU64>,
+}
+
+impl Stream for ChunkedBody {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.pos >= this.data.len() {
+            return Poll::Ready(None);
+        }
+        let end = (this.pos + UPLOAD_CHUNK_BYTES).min(this.data.len());
+        // `copy_from_slice` keeps the chunk owning its bytes; the `Arc<Vec<u8>>`
+        // itself is never handed out, so the whole file is not cloned per poll.
+        let chunk = Bytes::copy_from_slice(&this.data[this.pos..end]);
+        this.pos = end;
+        this.counter.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+        Poll::Ready(Some(Ok(chunk)))
+    }
+}
+
+/// Build the POST body for one upload attempt.
+///
+/// With `progress_bytes` set the body is streamed in [`UPLOAD_CHUNK_BYTES`]
+/// chunks and the counter is reset to `0` (a retry re-sends the whole file) —
+/// and the `Content-Length` header is set **explicitly**. That header is not
+/// cosmetic: a streamed body has `BodyLength::Unknown`, and hyper only skips
+/// chunked encoding when a length header is present
+/// (`hyper/src/proto/h1/role.rs`, `Some(BodyLength::Unknown)` ⇒ `Encoder::length`).
+/// Without it the request goes out as `Transfer-Encoding: chunked` and the
+/// upload host rejects it with HTTP 400 (live-proven, see
+/// `docs/features/LIVE_ACCEPTANCE.md`, Runde D).
+///
+/// Without `progress_bytes` the whole buffer is sent and reqwest sets the length
+/// itself.
+fn upload_body(
+    request: reqwest::RequestBuilder,
+    data: Arc<Vec<u8>>,
+    progress_bytes: Option<Arc<AtomicU64>>,
+) -> reqwest::RequestBuilder {
+    match progress_bytes {
+        Some(counter) => {
+            counter.store(0, Ordering::Relaxed);
+            request
+                // `HeaderValue` does not convert from `usize`, hence the string.
+                .header(reqwest::header::CONTENT_LENGTH, data.len().to_string())
+                .body(reqwest::Body::wrap_stream(ChunkedBody {
+                    data,
+                    pos: 0,
+                    counter,
+                }))
+        }
+        None => request.body(data.as_ref().clone()),
+    }
+}
 
 /// Marker prefix for an upload conflict reported by the upload endpoint (HTTP 409,
 /// `docs/SPEC_DEDUP.md` §4.1). The upload worker resolves it per the folder's
@@ -918,6 +999,12 @@ impl PrimePhotos {
     /// `conflict` is the folder's (or the run's) conflict policy; `basis` says how
     /// a `Replace` came about, so the replace `PUT` is only sent when replacing is
     /// allowed (see [`should_replace_after_conflict`], user decision 2026-10-16).
+    ///
+    /// `progress_bytes` is the per-file progress counter (Befund 11c): when set,
+    /// the body is streamed in [`UPLOAD_CHUNK_BYTES`] chunks and the counter is
+    /// advanced by every chunk the transport takes, reset to `0` at the start of
+    /// each attempt (a retry re-sends the file from the beginning). `None` keeps
+    /// the previous whole-buffer body.
     pub async fn upload_picture(
         &mut self,
         pic_path: &Path,
@@ -925,6 +1012,7 @@ impl PrimePhotos {
         md5sum: Option<&str>,
         conflict: ConflictResolution,
         basis: ReplaceBasis<'_>,
+        progress_bytes: Option<Arc<AtomicU64>>,
     ) -> Result<String, String> {
         if self.web_dir_node.is_none() && !self.dry_run {
             self.update_web_pictures_dir_node().await?;
@@ -948,6 +1036,11 @@ impl PrimePhotos {
                     attr.len() as usize,
                 )
             };
+
+        // Share the buffer behind an `Arc` so the streamed body can re-poll the
+        // identical bytes on a retry without copying the file; the replace path
+        // below borrows the same buffer.
+        let contents_vec = Arc::new(contents_vec);
 
         let parent_node = match self.dry_run {
             false => &self.web_dir_node.as_ref().unwrap().id,
@@ -990,14 +1083,9 @@ impl PrimePhotos {
         let mut attempt: u32 = 0;
         let response = loop {
             attempt += 1;
-            match self
-                .client
-                .post(url.clone())
-                .headers(headers.clone())
-                .body(contents_vec.clone())
-                .send()
-                .await
-            {
+            let request = self.client.post(url.clone()).headers(headers.clone());
+            let request = upload_body(request, contents_vec.clone(), progress_bytes.clone());
+            match request.send().await {
                 Ok(resp) => {
                     let status_code = resp.status().as_u16();
                     let transient_status =
@@ -1136,7 +1224,7 @@ impl PrimePhotos {
                                 &file_name,
                                 parent_node,
                                 &headers,
-                                &contents_vec,
+                                contents_vec.as_slice(),
                                 pic_path,
                             )
                             .await;
@@ -1385,6 +1473,123 @@ impl PrimePhotos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_body_sends_every_byte_and_counts_it() {
+        // Befund 11c: the streamed upload body must hand out the file's bytes
+        // exactly once and advance the progress counter by exactly the number
+        // sent. The size is deliberately above one 64 KiB chunk and not a
+        // multiple of it, so more than one poll happens and the final partial
+        // chunk is covered.
+        let data: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let counter = Arc::new(AtomicU64::new(0));
+        let mut body = ChunkedBody {
+            data: Arc::new(data.clone()),
+            pos: 0,
+            counter: counter.clone(),
+        };
+        let mut total = 0usize;
+        let mut chunks = 0usize;
+        while let Some(chunk) = futures::executor::block_on(futures::StreamExt::next(&mut body)) {
+            let chunk = chunk.expect("an in-memory body never errors");
+            total += chunk.len();
+            chunks += 1;
+        }
+        assert_eq!(total, data.len(), "every byte must be sent");
+        assert_eq!(counter.load(Ordering::Relaxed), data.len() as u64);
+        assert_eq!(chunks, 4, "200000 bytes in 64 KiB chunks = 4 polls");
+    }
+
+    #[test]
+    fn chunked_body_counts_zero_for_an_empty_file() {
+        // A zero-byte file yields no chunk at all; the counter must stay 0
+        // instead of panicking on the slice.
+        let counter = Arc::new(AtomicU64::new(0));
+        let mut body = ChunkedBody {
+            data: Arc::new(Vec::new()),
+            pos: 0,
+            counter: counter.clone(),
+        };
+        assert!(futures::executor::block_on(futures::StreamExt::next(&mut body)).is_none());
+        assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn streamed_upload_request_is_not_chunked_and_carries_content_length() {
+        // Runde D (docs/features/LIVE_ACCEPTANCE.md): the upload host answers
+        // HTTP 400 to a `Transfer-Encoding: chunked` request and only 201 when a
+        // `Content-Length` is present. The streamed body therefore has to set
+        // that header itself. This test drives the real request builder
+        // (`upload_body`) against a loopback listener and inspects the **raw**
+        // request head: `Content-Length` present and naming the file size,
+        // `Transfer-Encoding` absent. No network beyond 127.0.0.1, no tmp files.
+        use std::io::Write as _;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+
+        let server = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut raw: Vec<u8> = Vec::new();
+            let mut buf = [0u8; 4096];
+            // Read until the end of the header block.
+            let end = loop {
+                if let Some(i) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break i + 4;
+                }
+                let n = sock.read(&mut buf).expect("read head");
+                if n == 0 {
+                    break raw.len();
+                }
+                raw.extend_from_slice(&buf[..n]);
+            };
+            // Only the head is inspected — never the body bytes.
+            let head = String::from_utf8_lossy(&raw[..end]).into_owned();
+            let len: usize = head
+                .to_ascii_lowercase()
+                .lines()
+                .find_map(|l| l.strip_prefix("content-length:"))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0);
+            // Drain the body so the client's write can complete, then answer 201.
+            let mut have = raw.len().saturating_sub(end);
+            while have < len {
+                let n = sock.read(&mut buf).expect("read body");
+                if n == 0 {
+                    break;
+                }
+                have += n;
+            }
+            let _ = sock.write_all(
+                b"HTTP/1.1 201 Created\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+            );
+            (head, len)
+        });
+
+        let data: Vec<u8> = (0..150_000u32).map(|i| (i % 251) as u8).collect();
+        let counter = Arc::new(AtomicU64::new(0));
+        let client = reqwest::Client::new();
+        let request = client.post(format!("http://{addr}/v2/upload"));
+        let request = upload_body(request, Arc::new(data.clone()), Some(counter.clone()));
+        let _ = request.send().await;
+
+        let (head, seen_len) = server.join().expect("server thread");
+        let lower = head.to_ascii_lowercase();
+        assert!(
+            lower.contains("content-length:"),
+            "the streamed request must carry Content-Length:\n{head}"
+        );
+        assert_eq!(
+            seen_len,
+            data.len(),
+            "Content-Length must name the real file size:\n{head}"
+        );
+        assert!(
+            !lower.contains("transfer-encoding"),
+            "the streamed request must not be chunked:\n{head}"
+        );
+        assert_eq!(counter.load(Ordering::Relaxed), data.len() as u64);
+    }
 
     #[test]
     fn avatar_cache_file_name_is_node_and_viewbox() {

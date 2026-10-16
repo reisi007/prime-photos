@@ -74,3 +74,25 @@ So the `PUT` works **without** a `contentDate` and leaves the node's capture dat
 standing. The earlier query-parameter requirement stands as recorded
 (`fileSize` missing ⇒ 400 `MissingFileSize`). Full write-up:
 `docs/SPEC_CAPTURE_DATE.md` § 12.3; endpoint: `docs/PROTOCOL.md` § 2.17.
+
+## Streamed upload body needs an explicit `Content-Length` (Runde D, 2026-10-16)
+
+The per-file byte progress (Befund 11c) streams the POST body in chunks
+(`src/prime_photos.rs::ChunkedBody`). Live-tested against the account, a
+streamed request **without** a length header is rejected:
+
+| Request form | Result |
+|---|---|
+| `POST https://content-eu.drive.amazonaws.com/v2/upload?…` with `Transfer-Encoding: chunked` (no `Content-Length`) | **HTTP 400**, **no** node created |
+| The same upload with an explicit `Content-Length` | **HTTP 201** (node created) |
+
+So the host requires `Content-Length`; it does **not** accept a chunked body.
+A `reqwest::Body::wrap_stream(…)` has `BodyLength::Unknown`, and hyper only
+avoids chunked encoding when a length header is present
+(`hyper/src/proto/h1/role.rs`, `Some(BodyLength::Unknown)` ⇒ `Encoder::length`).
+The streamed upload therefore sets the header itself
+(`src/prime_photos.rs::upload_body`). Regression-guarded by
+`streamed_upload_request_is_not_chunked_and_carries_content_length`, which
+inspects the raw request head of the real builder against a loopback listener:
+`Content-Length` present and naming the file size, `Transfer-Encoding` absent.
+
