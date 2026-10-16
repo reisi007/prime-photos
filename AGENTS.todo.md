@@ -87,14 +87,6 @@ umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen
   unbenutzt; dazu **Doppel-Keys** in der Tabelle — `"Ersetzen"` (zweimal) und `"Ignorieren"`
   (zweimal), je eine Kopie ist toter Text (gleicher Wert, daher harmlos). Es gibt keine
   Eindeutigkeitsprüfung — Kandidat für eine Prüfung im Test.
-- [ ] **`docs/SPEC_DUPLICATES.md` zwei stale Empfehlungszellen + eine neue Zeile** (Verifier-Funde,
-  echt): (1)+(2) die **Empfehlungszellen** neben „Global dedup default setting" bzw. `:269` sagen
-  noch „Optional. Only worth it if a preferences screen lands" — auf den Nachbarzeilen-Stil („Done")
-  ziehen. (3) **neu (2026-10-16, vom Umsetzer gemeldet):** die Zeile `:275` „**Global conflict
-  setting** | *Does not exist* | **We also have none**" ist auf unserer Seite überholt — seit
-  `Config.conflict_resolution_default` gibt es die globale Konflikt-Standardwahl (Einstellungen →
-  Upload); die Original-Spalte bleibt „gibt es dort nicht".
-
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 
 Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.**
@@ -127,11 +119,6 @@ Ausdrücklich **ohne** Starttermin:
 - Tray-Status-Popup mit Statistiken (`statuspopup_stats_*`).
 - Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte Drosselung; Logout während
   laufendem Upload; Nav-Accessibility.
-- **Toter Dependency-Eintrag `kamadak-exif`** (Befund des Verifiers der contentDate-Runde,
-  2026-10-16): seit `fcbc14d` liest kein Code mehr EXIF, der Eintrag in `Cargo.toml` steht aber
-  weiter und wird mitgebaut. Entfernen wäre ein eigener kleiner Auftrag (`Cargo.toml` +
-  `Cargo.lock`, `cargo build`/`cargo test` als Gate) — bewusst **nicht** in der contentDate-Runde
-  mitgemacht, damit dort ein Auftrag = ein Commit bleibt.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
   `docs/SPEC_SCOPE_INVENTORY.md`; Sync, Downloads/Restore, Datei-Management, Apple-Photos-Import,
   Videos, Autoplay, Upsell-/Quota-Banner, Auto-Update, Proxy, ausgeblendete Dateien,
