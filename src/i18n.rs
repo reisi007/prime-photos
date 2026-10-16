@@ -354,8 +354,6 @@ const EN: &[(&str, &str)] = &[
     ("Als neue Datei speichern", "Save as new file"),
     ("Dateiname-Konflikt", "File name conflict"),
     ("Dateiname-Konflikt: {}", "File name conflict: {}"),
-    ("Ersetzen", "Replace"),
-    ("Ignorieren", "Ignore"),
     ("Keine Antwort auf den Konflikt — wird übersprungen.", "No answer to the conflict — skipping."),
     ("Nicht noch einmal fragen", "Don't ask again"),
     (
@@ -389,7 +387,6 @@ const EN: &[(&str, &str)] = &[
     ("Slow-Mode aktiv: 1 Datei gleichzeitig.", "Slow mode active: 1 file at a time."),
     ("UEBERSPRUNGEN {}: bereits hochgeladen", "SKIPPED {}: already uploaded"),
     ("Übersprungen", "Skipped"),
-    ("Warten", "Waiting"),
     ("Warteschlange ({})", "Queue ({})"),
     // Queue-table headers and empty state (Welle 3.1/3.5,
     // docs/SPEC_UPLOAD_PROGRESS.md §7.8).
@@ -426,3 +423,23 @@ const EN: &[(&str, &str)] = &[
     ("Komponenten und Lizenztexte", "Components and license texts"),
     ("Icons und Grafiken", "Icons and graphics"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::EN;
+    use std::collections::HashSet;
+
+    /// Every German key must appear exactly once. The table is a linear lookup
+    /// (`tr` returns the first match), so a duplicate silently shadows the later
+    /// entry — this guards against that class of drift.
+    #[test]
+    fn german_keys_are_unique() {
+        let mut seen = HashSet::new();
+        for (de, _) in EN {
+            assert!(
+                seen.insert(*de),
+                "duplicate German key in EN table: {de:?}"
+            );
+        }
+    }
+}
