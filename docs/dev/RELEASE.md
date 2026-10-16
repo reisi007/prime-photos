@@ -22,6 +22,22 @@ automatisch aus den Commits seit dem letzten Tag).
 **macOS wird im CI _nicht_ gebaut** (User-Entscheidung 2026-10-13). Das macOS-Bundle entsteht
 lokal über `packaging/make-app.sh` und wird bei Bedarf manuell an ein Release gehängt (§4).
 
+### Build-Gates (User-Entscheidung 2026-10-13)
+
+- **Push/PR gegen `main`:** nur **Linux** — `cargo build` + `cargo test` als Pflicht-Gate; die
+  anderen OS werden dort **nicht** gebaut.
+- **Release:** **Git-Tag `v*`** → CI-Matrix-Build **Windows + Linux**; alle Beine müssen grün
+  sein (`needs:`), sonst kein Release → GitHub Release mit den Artefakten.
+- **macOS wird NICHT im CI gebaut** (User-Entscheidung 2026-10-13: „nur lokal macOS bauen ist
+  ok") — lokal über `packaging/make-app.sh` (arm64) und bei Bedarf manuell ans Release hängen.
+- **Signierung ist nur auf macOS relevant.** Dort ist eine (selbstsignierte) Codesignatur nötig,
+  damit Benachrichtigungen/Bundle-Identifier sauber funktionieren; Windows/Linux brauchen keine.
+- **Warnungs-Baseline 0:** `[lints.rust] warnings = "deny"` in `Cargo.toml` — jede Warnung ist
+  ein harter Build-Fehler. Kein `.cargo/config.toml` mit `-Dwarnings` (würde auch Dependencies
+  hart nehmen). `cargo fmt --check` ist **kein** Gate — das Repo ist nicht fmt-clean.
+- **Secrets nur in `main`/Tag-Läufen** (fork-PRs erhalten keine Secrets). Windows: Authenticode
+  optional (sonst SmartScreen-Hinweis); Linux: keine Signatur.
+
 ---
 
 ## 2. Was das CI-Release erzeugt

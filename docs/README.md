@@ -47,6 +47,7 @@ Wire-Protokoll unserer Upload-Engine (cookie-basierter Weg).
 Dokumentation unserer Codebase und Entwicklungsprozesse.
 
 - [BUILD.md](dev/BUILD.md) — Build & Run (Plattformen, Abhängigkeiten, Konfigurationspfade).
+- [SETUP.md](dev/SETUP.md) — Werkzeuge auf der Entwicklermaschine (PATH, ilspycmd, macOS-/Bild-Tools).
 - [RELEASE.md](dev/RELEASE.md) — Release-Prozess, Artefakte, Signierung, Verifikation.
 - [I18N.md](dev/I18N.md) — Internationalisierung (Sprachschicht, Locale-Default).
 - [DEV_NOTES.md](dev/DEV_NOTES.md) — Fallstricke und Codebase-Kenntnisse.
@@ -54,10 +55,42 @@ Dokumentation unserer Codebase und Entwicklungsprozesse.
 
 ## Features — [`features/`](features/)
 
-Feature-spezifische Dokumentation und Live-Befunde.
+Feature-spezifische Dokumentation (eine Datei pro Feature) und Live-Befunde.
 
-- [FEATURES.md](features/FEATURES.md) — Feature-Übersicht und Scope-Grenzen.
+- [FEATURES.md](features/FEATURES.md) — Index über alle Feature-Dateien.
 - [LIVE_ACCEPTANCE.md](features/LIVE_ACCEPTANCE.md) — Live-Abnahme-Befunde (echter Account, Cookie-Flow).
+
+### Session
+- [login.md](features/login.md) — Sign-in (Gerätefluss/PKCE, Webview-Wipe, Marktplatz, Start-Gate)
+- [session-refresh.md](features/session-refresh.md) — Token-Auffrischung (80 %, Worker, Cookies neu münzen)
+- [sign-out.md](features/sign-out.md) — Abmelden + Abbruch eines laufenden Uploads
+
+### Backup
+- [backup-targets.md](features/backup-targets.md) — Sicherungsziele (Ordnerdialog, Inhaltsfilter)
+- [destination.md](features/destination.md) — Upload-Ziel / Spiegelung
+- [change-detection.md](features/change-detection.md) — Änderungserkennung (Events, Stat-Check, Wasserzeichen)
+- [duplicates-conflicts.md](features/duplicates-conflicts.md) — Dedup-Index, Inhalts-Identität, vier Konflikt-Optionen
+
+### Upload
+- [upload.md](features/upload.md) — Upload-Engine (Wire-Parameter, Aufnahmedatum, NFC-Dateinamen)
+- [queue-progress.md](features/queue-progress.md) — Warteschlange, Concurrency, Fortschritt/ETA, Ergebnis-Aufschlüsselung
+- [pause.md](features/pause.md) — Globale Pause
+- [one-time-upload.md](features/one-time-upload.md) — Drag & Drop / Einmal-Queue
+
+### Desktop
+- [autostart.md](features/autostart.md) — Login-Item (Default an)
+- [tray.md](features/tray.md) — Tray-Icon / -Menü / Zustände
+- [notifications.md](features/notifications.md) — OS-Benachrichtigungen
+- [settings.md](features/settings.md) — Einstellungs-Seite
+
+### UI & App
+- [window-layout.md](features/window-layout.md) — Panel-Reihenfolge, virtuelle Liste, Höhen, Ordner-Karten
+- [error-handling.md](features/error-handling.md) — Fehlerbehandlung im UI
+- [languages.md](features/languages.md) — Internationalisierung (i18n)
+- [branding.md](features/branding.md) — Name / Branding / Logo-Assets
+- [about-licenses.md](features/about-licenses.md) — About / Drittanbieter-Lizenzen
+- [platform.md](features/platform.md) — Cross-Platform-Portierung
+- [scope.md](features/scope.md) — Scope-Grenzen und Roadmap
 
 ## Startpunkt
 

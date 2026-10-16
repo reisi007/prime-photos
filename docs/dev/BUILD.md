@@ -13,10 +13,41 @@ nicht belegbar war, steht in §7 ausdrücklich als „nicht verifiziert" und wir
 Auf dem Referenzrechner sind nur die Rust-Targets `aarch64-apple-darwin` und `wasm32-unknown-unknown`
 installiert (`rustup target list --installed`); ein Windows- oder Linux-Target ist **nicht** installiert.
 
-Windows und Linux sind erklärte, gleichwertige Ziele (`AGENTS.md`, Abschnitt „Plattform / Portierung"),
-werden aber **hier nicht laufgetestet**. Der dort beschriebene Nachweis ist ein Cross-Compile-Check
+Windows und Linux sind erklärte, gleichwertige Ziele (`docs/features/platform.md`), werden aber
+**hier nicht laufgetestet**. Der dort beschriebene Nachweis ist ein Cross-Compile-Check
 (`cargo check --target …`), kein echter Lauf — ein solcher Cross-Check ist bisher **nicht durchgeführt**
 worden. Die Abschnitte 4 und 5 sind daher Anleitungen auf Basis der Crate-Vorgaben, kein Erfahrungsbericht.
+
+### Warnungs-Baseline: 0 (User-Entscheidung 2026-10-15)
+
+**Erzwungen (User-Entscheidung 2026-10-15, „cargo warnings sollen als error behandelt
+werden"):** `[lints.rust] warnings = "deny"` in `Cargo.toml` — ab sofort ist **jede** Warnung ein
+**harter Build-Fehler**, kein Hinweis mehr. `[lints]` greift nur für **unser** Paket (`src/`,
+`build.rs`, Tests), **nicht** für Dependencies (die laufen ohnehin mit `cap-lints`); Rust ≥ 1.74
+ist erfüllt (edition 2024).
+
+**Einzige Ausnahme — und sie ist begründet:** `folders::supported_extensions()`
+(`src/folders.rs:29-37`) ist bewusst **nicht** verdrahtet und trägt ein punktuelles
+`#[allow(dead_code)]`; das überschreibt das paketweite `deny` (empirisch belegt in Verify Runde 1
+zu `c019528`). Es ist der vorbereitete Haken für einen späteren Datei-Picker und wird von **keiner**
+Codestelle aufgerufen. Neue Karteileichen bleiben verboten: nur dieser eine, dokumentierte Haken
+ist erlaubt.
+
+**Verworfen:** `.cargo/config.toml` mit `rustflags = ["-Dwarnings"]` (würde **auch** Deps hart
+nehmen, deren Warnungen wir nicht beheben können — ein fremder Patch würde unseren Build rot
+machen) und die Erzwingung **nur** in der CI (es gibt bislang **kein** Workflow, und lokal bliebe
+es weich statt hart).
+
+### `cargo fmt --check` ist kein Gate (Befund 2026-10-15)
+
+Das Repo ist **nicht** fmt-clean als Baseline — `cargo fmt --check` meldet Abweichungen in
+**unangetasteten** Dateien (`build.rs`, `src/app.rs`: Import-Reihenfolge und Zeilenumbrüche). Ein
+fmt-Diff ist damit **kein** Regressionssignal und darf einen Task nicht blockieren;
+Regressionssignal ist allein die **Warnungs-Baseline 0** (oben).
+
+**Stand 2026-10-16:** `cargo fmt --check` ist weiterhin **nicht** grün (102 Hunks in 19
+Dateien). Die **einmalige Formatierung** des Altbestands ist **geplant** (erster Punkt im Ledger
+`AGENTS.todo.md`); **danach** gilt `cargo fmt --check` als Gate (User-Entscheidung 2026-10-16).
 
 ---
 
