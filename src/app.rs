@@ -6,7 +6,7 @@ use crate::countries::system_country;
 use crate::dedup::DedupIndex;
 use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
-use crate::icons::{draw_flag_badge, nav_icon, upload_logo, NavIcon};
+use crate::icons::{draw_flag_badge, nav_backup_icon, nav_settings_icon, upload_logo};
 use crate::login;
 use crate::notify;
 use crate::theme;
@@ -597,7 +597,13 @@ impl PrimePhotoApp {
 
     // -- rendering ----------------------------------------------------------
 
-    pub(crate) fn nav_item(ui: &mut egui::Ui, current: &mut Page, value: Page, label: &str, icon: NavIcon) {
+    pub(crate) fn nav_item(
+        ui: &mut egui::Ui,
+        current: &mut Page,
+        value: Page,
+        label: &str,
+        icon: fn(&egui::Ui) -> egui::Image<'static>,
+    ) {
         let selected = *current == value;
         let (rect, resp) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
@@ -618,7 +624,8 @@ impl PrimePhotoApp {
             egui::pos2(rect.left() + 17.0, rect.center().y),
             egui::vec2(18.0, 18.0),
         );
-        nav_icon(painter, icon, icon_rect, color);
+        // The raster is white, so the tint yields the navigation colour.
+        icon(ui).tint(color).paint_at(ui, icon_rect);
         painter.text(
             egui::pos2(rect.left() + 38.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -684,14 +691,14 @@ impl PrimePhotoApp {
             &mut self.page,
             Page::Backup,
             tr("Datensicherung"),
-            NavIcon::Backup,
+            nav_backup_icon,
         );
         Self::nav_item(
             ui,
             &mut self.page,
             Page::Settings,
             tr("Einstellungen"),
-            NavIcon::Settings,
+            nav_settings_icon,
         );
 
         // Account block at the bottom of the sidebar. A fixed reserve plus a

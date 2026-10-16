@@ -2,69 +2,16 @@
 //!
 //! Two kinds live here:
 //!
-//! * Hand-drawn vector glyphs for the app chrome (`nav_icon`, `upload_logo`,
+//! * Hand-drawn vector glyphs for the app chrome (`upload_logo`,
 //!   `draw_flag_badge` and the flag painters). These stay as they are.
-//! * The backup row actions ([`kebab_icon`], [`refresh_icon`]). These are
+//! * The sidebar navigation icons ([`nav_backup_icon`], [`nav_settings_icon`])
+//!   and the backup row actions ([`kebab_icon`], [`refresh_icon`]). These are
 //!   **not** drawn here: they are Material Symbols SVGs (Apache-2.0, see
 //!   `docs/THIRD_PARTY.md`) rastered to white PNGs by `build.rs` and tinted to
-//!   the current theme text colour at run time.
+//!   the current theme colour at run time.
 
 use crate::theme;
 use eframe::egui::{self, Color32};
-
-/// Small line icons for the sidebar navigation.
-#[derive(Clone, Copy)]
-pub(crate) enum NavIcon {
-    Backup,
-    Settings,
-}
-
-/// Draws a small, crisp line icon that aligns to the fixed icon column.
-pub(crate) fn nav_icon(painter: &egui::Painter, kind: NavIcon, rect: egui::Rect, color: Color32) {
-    let s = rect.width().min(rect.height());
-    let c = rect.center();
-    let stroke = egui::Stroke::new(1.6_f32, color);
-    match kind {
-        NavIcon::Backup => {
-            // Upload arrow into a tray.
-            let top = c.y - s * 0.30;
-            let mid = c.y + s * 0.02;
-            painter.line_segment([egui::pos2(c.x, mid), egui::pos2(c.x, top)], stroke);
-            painter.line_segment(
-                [egui::pos2(c.x, top), egui::pos2(c.x - s * 0.17, top + s * 0.17)],
-                stroke,
-            );
-            painter.line_segment(
-                [egui::pos2(c.x, top), egui::pos2(c.x + s * 0.17, top + s * 0.17)],
-                stroke,
-            );
-            let ty = c.y + s * 0.34;
-            painter.line_segment(
-                [egui::pos2(c.x - s * 0.32, ty - s * 0.14), egui::pos2(c.x - s * 0.32, ty)],
-                stroke,
-            );
-            painter.line_segment(
-                [egui::pos2(c.x + s * 0.32, ty - s * 0.14), egui::pos2(c.x + s * 0.32, ty)],
-                stroke,
-            );
-            painter.line_segment(
-                [egui::pos2(c.x - s * 0.32, ty), egui::pos2(c.x + s * 0.32, ty)],
-                stroke,
-            );
-        }
-        NavIcon::Settings => {
-            // Three sliders.
-            for (i, kx) in [-0.18f32, 0.12, -0.06].iter().enumerate() {
-                let y = c.y + (i as f32 - 1.0) * s * 0.30;
-                painter.line_segment(
-                    [egui::pos2(c.x - s * 0.34, y), egui::pos2(c.x + s * 0.34, y)],
-                    stroke,
-                );
-                painter.circle_filled(egui::pos2(c.x + kx * s, y), s * 0.10, color);
-            }
-        }
-    }
-}
 
 /// Our own upload logo: a teal circle with a white upload arrow and tray.
 pub(crate) fn upload_logo(ui: &mut egui::Ui, diameter: f32) {
@@ -107,23 +54,46 @@ pub(crate) fn upload_logo(ui: &mut egui::Ui, diameter: f32) {
 }
 
 // ---------------------------------------------------------------------------
-// Backup row-action icons (Material Symbols, rastered by build.rs)
+// Sidebar navigation + backup row-action icons (Material Symbols, rastered by
+// build.rs)
 // ---------------------------------------------------------------------------
 //
 // Coupling contract with `build.rs` (the other half of the pair):
+//   assets/icon-cloud.svg     ⇒ $OUT_DIR/icon-cloud.png     (64 px, white)
+//   assets/icon-settings.svg  ⇒ $OUT_DIR/icon-settings.png  (64 px, white)
 //   assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
 //   assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
-// The rasters are deliberately white: the buttons tint them to the theme text
-// colour, so one raster per icon covers light and dark themes.
+// The rasters are deliberately white: the buttons and the sidebar tint them to
+// the theme colour, so one raster per icon covers light and dark themes.
 
+/// The filled "cloud" sidebar-navigation icon ("Sicherung"), as a build-time PNG.
+const NAV_CLOUD_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-cloud.png"));
+/// The filled "settings" sidebar-navigation icon ("Einstellungen"), as a
+/// build-time PNG.
+const NAV_SETTINGS_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-settings.png"));
 /// The vertical-kebab ("more") row-action icon, as a build-time PNG.
 const MORE_VERT_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-more-vert.png"));
 /// The refresh ("scan and upload now") row-action icon, as a build-time PNG.
 const REFRESH_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-refresh.png"));
 
+/// Logical display size of a sidebar navigation icon, in points. The sidebar
+/// icon column is 18 px wide; the row-action icons' 17 pt are a different
+/// context and stay as they are. The 64-px sources keep it crisp up to ~3.5× DPI.
+const NAV_ICON_PX: f32 = 18.0;
+
 /// Logical display size of a row-action icon, in points. The 64-px sources keep
 /// it crisp up to ~3.5× DPI.
 const ROW_ICON_PX: f32 = 17.0;
+
+/// The filled "cloud" icon for the sidebar's "Sicherung" entry.
+pub(crate) fn nav_backup_icon(ui: &egui::Ui) -> egui::Image<'static> {
+    sidebar_icon(ui, "cloud", NAV_CLOUD_PNG)
+}
+
+/// The filled "settings" icon for the sidebar's "Einstellungen" entry.
+pub(crate) fn nav_settings_icon(ui: &egui::Ui) -> egui::Image<'static> {
+    sidebar_icon(ui, "settings", NAV_SETTINGS_PNG)
+}
 
 /// The vertical-kebab icon for the backup row's action menu.
 pub(crate) fn kebab_icon(ui: &egui::Ui) -> egui::Image<'static> {
@@ -133,6 +103,13 @@ pub(crate) fn kebab_icon(ui: &egui::Ui) -> egui::Image<'static> {
 /// The refresh icon for the visible "scan and upload now" row button.
 pub(crate) fn refresh_icon(ui: &egui::Ui) -> egui::Image<'static> {
     row_icon(ui, "refresh", REFRESH_PNG)
+}
+
+/// Build an [`egui::Image`] for one sidebar navigation icon at [`NAV_ICON_PX`].
+fn sidebar_icon(ui: &egui::Ui, name: &'static str, png: &'static [u8]) -> egui::Image<'static> {
+    let texture = icon_texture(ui.ctx(), name, png);
+    egui::Image::new(egui::load::SizedTexture::from_handle(&texture))
+        .fit_to_exact_size(egui::vec2(NAV_ICON_PX, NAV_ICON_PX))
 }
 
 /// Build an [`egui::Image`] for one row-action icon at [`ROW_ICON_PX`].
@@ -437,8 +414,8 @@ fn draw_code_badge(painter: &egui::Painter, c: egui::Pos2, r: f32, country: &str
 mod tests {
     use super::*;
 
-    /// The raster pipeline really produces a white, covered glyph for both row
-    /// icons — the proof that `build.rs`'s `path { fill: … }` override reaches
+    /// The raster pipeline really produces a white, covered glyph for every UI
+    /// icon — the proof that `build.rs`'s `path { fill: … }` override reaches
     /// the shape (a `color` override would leave the bare `<path>` black), which
     /// is what makes the run-time tint to the theme colour possible.
     ///
@@ -448,6 +425,8 @@ mod tests {
     #[test]
     fn icon_rasters_are_white_and_covered() {
         for (name, png) in [
+            ("icon-cloud", NAV_CLOUD_PNG),
+            ("icon-settings", NAV_SETTINGS_PNG),
             ("icon-more-vert", MORE_VERT_PNG),
             ("icon-refresh", REFRESH_PNG),
         ] {

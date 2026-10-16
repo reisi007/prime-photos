@@ -33,3 +33,29 @@ Konvention je Eintrag: **Name**, **Urheber**, **Lizenz**, **Quell-URL**,
 - **Verändert:** nein — Datei unverändert als `assets/icon-refresh.svg`
   übernommen. Die Einfärbung (weiß) passiert erst im Build (`build.rs`),
   die Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `cloud` (gefüllt, Sidebar „Sicherung")
+
+- **Name:** Material Symbols (Outlined), Symbol `cloud`, **gefüllte Variante**
+  (`cloud_fill1_24px.svg`), 24 px
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/cloud/materialsymbolsoutlined/cloud_fill1_24px.svg>
+- **Abrufdatum:** 2026-10-16
+- **sha256:** `bf80e3ef84946beef546b95cd351d455411c3231ef240f739e205815e3e20cd2`
+- **Verändert:** nein — Datei unverändert als `assets/icon-cloud.svg`
+  übernommen. Die Einfärbung (weiß) passiert erst im Build (`build.rs`),
+  die Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `settings` (gefüllt, Sidebar „Einstellungen")
+
+- **Name:** Material Symbols (Outlined), Symbol `settings`, **gefüllte Variante**
+  (`settings_fill1_24px.svg`), 24 px
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/settings/materialsymbolsoutlined/settings_fill1_24px.svg>
+- **Abrufdatum:** 2026-10-16
+- **sha256:** `e1e14b7ed71c13c9910dfd1e323f37bb88d68199ecd40b11a5580a3282882d7c`
+- **Verändert:** nein — Datei unverändert als `assets/icon-settings.svg`
+  übernommen. Die Einfärbung (weiß) passiert erst im Build (`build.rs`),
+  die Quelle selbst bleibt unangetastet.

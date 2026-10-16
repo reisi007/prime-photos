@@ -2,8 +2,9 @@
 //!
 //! Rasterises the SVG sources in `assets/` into PNGs inside `OUT_DIR`, where
 //! `src/tray.rs` (the five tray glyphs plus the coloured logo fallback),
-//! `src/main.rs` (the window/dock icon) and `src/icons.rs` (the two row-action
-//! icons) embed them with `include_bytes!`.
+//! `src/main.rs` (the window/dock icon) and `src/icons.rs` (the two sidebar
+//! navigation icons plus the two row-action icons) embed them with
+//! `include_bytes!`.
 //!
 //! Why a build script and why `resvg`:
 //! * `sips`/`qlmanage` exist on macOS only, but the release matrix is
@@ -36,11 +37,14 @@ use std::path::{Path, PathBuf};
 //     assets/logo-small.svg       ⇒ $OUT_DIR/logo-small.png       (256 px)
 //     assets/logo-small-black.svg ⇒ $OUT_DIR/logo-small-black.png (256 px)
 //
-//   Row-action icons (Material Symbols, Apache-2.0 — see docs/THIRD_PARTY.md):
-//   rastered white so `src/icons.rs` can tint them to the theme colour at run
-//   time. These sources carry **no** `fill`/`currentColor` (a bare `<path d="…"/>`
-//   paints black by default), so they get a `path { fill: … }` override instead
-//   of the `* { color: … }` one the tray glyphs use:
+//   UI icons (Material Symbols, Apache-2.0 — see docs/THIRD_PARTY.md): the two
+//   sidebar navigation icons and the two row-action icons, rastered white so
+//   `src/icons.rs` can tint them to the theme colour at run time. These sources
+//   carry **no** `fill`/`currentColor` (a bare `<path d="…"/>` paints black by
+//   default), so they get a `path { fill: … }` override instead of the
+//   `* { color: … }` one the tray glyphs use:
+//     assets/icon-cloud.svg     ⇒ $OUT_DIR/icon-cloud.png     (64 px, white)
+//     assets/icon-settings.svg  ⇒ $OUT_DIR/icon-settings.png  (64 px, white)
 //     assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
 //     assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
 //
@@ -75,9 +79,16 @@ const LOGOS: [(&str, u32); 3] = [
     ("logo-small-black", 256),
 ];
 
-/// Row-action icon stems (Material Symbols) plus the pixel size to raster them
-/// at. Rastered white, one file each — the UI tints them at run time.
-const ICONS: [(&str, u32); 2] = [("icon-more-vert", 64), ("icon-refresh", 64)];
+/// UI icon stems (Material Symbols) plus the pixel size to raster them at: the
+/// two sidebar navigation icons (`icon-cloud`, `icon-settings`) and the two
+/// row-action icons (`icon-more-vert`, `icon-refresh`). Rastered white, one
+/// file each — the UI tints them at run time.
+const ICONS: [(&str, u32); 4] = [
+    ("icon-cloud", 64),
+    ("icon-settings", 64),
+    ("icon-more-vert", 64),
+    ("icon-refresh", 64),
+];
 
 /// Directory (directly under Cargo's `<target>`) that `packaging/make-app.sh`
 /// feeds to `iconutil` to build `AppIcon.icns`.
