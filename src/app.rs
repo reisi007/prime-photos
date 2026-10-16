@@ -6,7 +6,7 @@ use crate::countries::system_country;
 use crate::dedup::DedupIndex;
 use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
-use crate::icons::{draw_flag_badge, nav_icon, NavIcon};
+use crate::icons::{draw_flag_badge, nav_icon, upload_logo, NavIcon};
 use crate::login;
 use crate::notify;
 use crate::theme;
@@ -673,7 +673,11 @@ impl PrimePhotoApp {
 
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
-        ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
+        ui.horizontal(|ui| {
+            upload_logo(ui, 24.0);
+            ui.add_space(6.0);
+            ui.label(RichText::new(tr("Prime Photos")).size(20.0).strong());
+        });
         ui.add_space(16.0);
         Self::nav_item(
             ui,
