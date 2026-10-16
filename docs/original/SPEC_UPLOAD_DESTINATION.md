@@ -15,10 +15,10 @@ Wrapper `~/.local/bin/ilspycmd` (setzt `DOTNET_ROOT` selbst). REA ist für diese
 Assembly unbrauchbar: `inspect_managed_artifact` liefert `metadata-not-admitted`
 (Budget 67 MB), `search_android_classes` ist der falsche Weg (jadx/APK).
 Die Spec stützt sich auf den **Decompiler** (Typ/Methode) und auf die
-vorhandenen Specs (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3,
-`docs/SPEC_FOLDERS.md`, `docs/SPEC_UPLOAD.md`, `docs/SPEC_DEDUP.md`,
-`docs/PROTOCOL.md`, `docs/openapi.yaml`, `docs/UI_FLOWS.md`,
-`docs/UI_STATES.md`) sowie auf **unseren Code** (`src/prime_photos.rs`,
+vorhandenen Specs (`SPEC_CONTENT_FILTER_DESTINATION.md` §3,
+`SPEC_FOLDERS.md`, `SPEC_UPLOAD.md`, `SPEC_DEDUP.md`,
+`../protocol/PROTOCOL.md`, `../protocol/openapi.yaml`, `UI_FLOWS.md`,
+`UI_STATES.md`) sowie auf **unseren Code** (`src/prime_photos.rs`,
 `src/folders.rs`, `src/backup_config.rs`, `src/backup.rs`).
 
 **Markierung:** Jede Aussage ist als „**am Code geprüft**" (Typ/Methode) oder
@@ -200,9 +200,9 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 | Methode | Pfad | Query-Parameter |
 |---|---|---|
 | `POST` | `/v2/upload` | `conflictResolution`, `fileSize`, `name`, `parentNodeId` |
-| `PUT` | `/v2/upload/<nodeId>` | identisch (`conflictResolution`, `fileSize`, `name`, `parentNodeId`) — vgl. `docs/SPEC_UPLOAD.md` §2.4 |
+| `PUT` | `/v2/upload/<nodeId>` | identisch (`conflictResolution`, `fileSize`, `name`, `parentNodeId`) — vgl. `SPEC_UPLOAD.md` §2.4 |
 
-**Ohne `fileSize` ⇒ 400 `MissingFileSize`** (live belegt, `docs/SPEC_UPLOAD.md` §2.4).
+**Ohne `fileSize` ⇒ 400 `MissingFileSize`** (live belegt, `SPEC_UPLOAD.md` §2.4).
 
 ### 4.3 Was das Original sendet
 
@@ -212,7 +212,7 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 | `conflictResolution` | `NONE` (Backup) / `RENAME` (`SaveAsNew`) / `PUT` (`Replace`) | **am Code geprüft** (`CloudDriveConflictResolutionExtensions`: None→NONE, Rename→RENAME) |
 | `fileSize` | Byte-Länge | **weiterhin aus alten Dumps** (`UploadRequest`) |
 | `name` | Dateiname | **weiterhin aus alten Dumps** (`UploadRequest`) |
-| `contentDate` | **nicht gesendet** (server-seitige Ableitung) | **weiterhin aus alten Dumps** (`docs/SPEC_CAPTURE_DATE.md`) |
+| `contentDate` | **nicht gesendet** (server-seitige Ableitung) | **weiterhin aus alten Dumps** (`SPEC_CAPTURE_DATE.md`) |
 
 ### 4.4 Was WIR heute senden
 
@@ -259,12 +259,12 @@ Konflikt-Weg:
 **Korrektur (2026-10-16):** Die frühere Fassung behauptete, der `GetNodeByMd5`-Treffer
 werde mit dem Zielknoten verglichen. Das ist **falsch** — der Treffer wird
 **cross-path** übernommen, ohne Vergleich mit dem Zielknoten. Die maßgebliche
-Beschreibung steht in `docs/SPEC_FILE_IDENTITY.md` §2; hier wird keine zweite
+Beschreibung steht in `SPEC_FILE_IDENTITY.md` §2; hier wird keine zweite
 Fassung geführt.
 
-**Knapp mit Verweis:** `docs/SPEC_FILE_IDENTITY.md` §2 (Dedup-Identität,
-cross-path), `docs/SPEC_DEDUP.md` §1–§2 (Dedup-Identität),
-`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §1 (Konflikt-Wire-Verhalten).
+**Knapp mit Verweis:** `SPEC_FILE_IDENTITY.md` §2 (Dedup-Identität,
+cross-path), `SPEC_DEDUP.md` §1–§2 (Dedup-Identität),
+`SPEC_CONTENT_FILTER_DESTINATION.md` §1 (Konflikt-Wire-Verhalten).
 
 ---
 
@@ -319,9 +319,9 @@ Teil des Cloud-Zielpfads.
 
 | Schritt | Beschreibung | API |
 |---|---|---|
-| 1. Baum-Navigation | `GET /drive/v1/nodes` mit Filtern nach Ordner-Kind, Status und Name, plus Eltern-Id | `docs/PROTOCOL.md` §2.10 |
-| 2. Root | `GET /drive/v1/nodes` mit dem Filter `isRoot:true` | `docs/PROTOCOL.md` §2.10 |
-| 3. Ordner anlegen | `POST /drive/v1/nodes` mit dem Kind `FOLDER`, Name, Elternliste und Ressourcenversion `V2` | `docs/PROTOCOL.md` §2.12 |
+| 1. Baum-Navigation | `GET /drive/v1/nodes` mit Filtern nach Ordner-Kind, Status und Name, plus Eltern-Id | `../protocol/PROTOCOL.md` §2.10 |
+| 2. Root | `GET /drive/v1/nodes` mit dem Filter `isRoot:true` | `../protocol/PROTOCOL.md` §2.10 |
+| 3. Ordner anlegen | `POST /drive/v1/nodes` mit dem Kind `FOLDER`, Name, Elternliste und Ressourcenversion `V2` | `../protocol/PROTOCOL.md` §2.12 |
 | 4. Neuer-Ordner-Dialog | Validierung: Sonderzeichen, 280 Zeichen, Namenskonflikt | `CreateCloudFolderViewController` |
 
 ### 9.3 Was der Pfad-Mapper leisten muss
@@ -372,7 +372,7 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 
 **Was das für unseren Cookie-Host bedeutet:** Der Cookie-Host
 (`content-<zone>.drive.amazonaws.com`) unterstützt `POST /v2/upload` und
-`PUT /v2/upload/<nodeId>` (live belegt, `docs/SPEC_UPLOAD.md` §2.4). Die
+`PUT /v2/upload/<nodeId>` (live belegt, `SPEC_UPLOAD.md` §2.4). Die
 Ordner-Anlage über `POST /drive/v1/nodes` ist **nicht live getestet** — das ist
 eine offene Frage, die im Spiegelungs-Auftrag geklärt werden muss.
 
@@ -437,7 +437,7 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 | Aussage | vorher (Dump) | jetzt (Code) | geändert? | Beleg (Typ/Methode) |
 |---|---|---|---|---|
 | Zielordner ist Cloud-Knoten | `ScheduledBackupItem.DestinationNodeId` | identisch | nein | `ScheduledBackupItem.DestinationNodeId` |
-| Persistenz in SQLite | `schedules.destination_node_id` | identisch | nein | `docs/SPEC_FOLDERS.md` §3.1 |
+| Persistenz in SQLite | `schedules.destination_node_id` | identisch | nein | `SPEC_FOLDERS.md` §3.1 |
 | Vorschlag: `Backup/<Macname>/<Pfad>` | `GetSuggestedCloudPathSegmentsForLocalPath` | identisch | nein | `BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath` |
 | Reihenfolge: Backup → Macname → VolumeLabel → Pfad | `BuildCloudPathSegments` | identisch | nein | `BackupPathMapper.BuildCloudPathSegments` |
 | Anlegen: `GetOrCreateBackupDestination` | `CreateFolder` | identisch | nein | `BackupPathMapper.GetOrCreateBackupDestination` |
@@ -480,12 +480,12 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 
 | Thema | Quelle | Grund |
 |---|---|---|
-| F3 (Zielordner) | `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3 | Bereits geprüft, konsistent mit meiner Analyse |
-| schedules-Spalten | `docs/SPEC_FOLDERS.md` §3.1 | Bereits geprüft |
-| Upload-Endpunkte | `docs/PROTOCOL.md` §2.17, `docs/openapi.yaml` | Bereits geprüft |
-| Dedup/Konflikt | `docs/SPEC_DEDUP.md` | Bereits geprüft |
-| UI-Flows | `docs/UI_FLOWS.md` §3 | Bereits geprüft |
-| UI-States | `docs/UI_STATES.md` §3 | Bereits geprüft |
+| F3 (Zielordner) | `SPEC_CONTENT_FILTER_DESTINATION.md` §3 | Bereits geprüft, konsistent mit meiner Analyse |
+| schedules-Spalten | `SPEC_FOLDERS.md` §3.1 | Bereits geprüft |
+| Upload-Endpunkte | `../protocol/PROTOCOL.md` §2.17, `../protocol/openapi.yaml` | Bereits geprüft |
+| Dedup/Konflikt | `SPEC_DEDUP.md` | Bereits geprüft |
+| UI-Flows | `UI_FLOWS.md` §3 | Bereits geprüft |
+| UI-States | `UI_STATES.md` §3 | Bereits geprüft |
 
 ### 11.5 Was UNKNOWN geblieben ist
 
@@ -502,7 +502,7 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 
 ## 12. Korrekturen an den vorhandenen Docs
 
-1. **`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3.1 — Asymmetrie bestätigt.**
+1. **`SPEC_CONTENT_FILTER_DESTINATION.md` §3.1 — Asymmetrie bestätigt.**
    Die Spec sagt: „`CanChangeDestination` existiert am VM, wird aber am Ziel-Button
    **nicht** verkabelt — der Ziel-Button ist in diesem Dialog immer aktiv." Diese
    Spec bestätigt das und ergänzt: „`CanChangeSource` steuert den Quellordner-Button
@@ -510,13 +510,13 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
    (`WireEvents`)."
    Kein Widerspruch, nur schärfere Belege.
 
-2. **`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3.2 — Vorschlag bestätigt.**
+2. **`SPEC_CONTENT_FILTER_DESTINATION.md` §3.2 — Vorschlag bestätigt.**
    Die Spec sagt: „`BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath` baut:
    Segment `"Backup"`, Segment `<Maschinenname>`, VolumeLabel, Eltern-Pfade." Diese
    Spec bestätigt das und ergänzt: „`BuildCloudPathSegments` (Segment `"Amazon Drive"`
    ⇒ Root)." Kein Widerspruch, nur schärfere Belege.
 
-3. **`docs/SPEC_UPLOAD.md` §2.1 — `parentNodeId` bestätigt.**
+3. **`SPEC_UPLOAD.md` §2.1 — `parentNodeId` bestätigt.**
    Die Spec sagt: „`parentNodeId` = cached Web folder id (oder `NONE` in dry run)."
    Diese Spec bestätigt das und ergänzt: „der Eltern-Knoten stammt aus dem
    gespeicherten Web-Ordnerknoten (`web_dir_node`)" (`src/prime_photos.rs:953`). Kein
@@ -572,10 +572,10 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
   `src/backup_config.rs:44–101` (`render_backup_config`),
   `src/backup.rs:1027–1038` (`start_folder_upload`),
   `src/backup.rs:1402–1477` (`finalize_upload`).
-* **Cross-Referenz:** `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3,
-  `docs/SPEC_FOLDERS.md` §3, `docs/SPEC_UPLOAD.md` §2,
-  `docs/SPEC_DEDUP.md` §1–§2, `docs/PROTOCOL.md` §2,
-  `docs/openapi.yaml`, `docs/UI_FLOWS.md` §3, `docs/UI_STATES.md` §3.
+* **Cross-Referenz:** `SPEC_CONTENT_FILTER_DESTINATION.md` §3,
+  `SPEC_FOLDERS.md` §3, `SPEC_UPLOAD.md` §2,
+  `SPEC_DEDUP.md` §1–§2, `../protocol/PROTOCOL.md` §2,
+  `../protocol/openapi.yaml`, `UI_FLOWS.md` §3, `UI_STATES.md` §3.
 
 ---
 

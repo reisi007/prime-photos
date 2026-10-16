@@ -1,7 +1,7 @@
 # Spec: Photo Upload (cookie-based web flow)
 
 Status: backfill spec for **already implemented** behaviour. Clean-room: own words and
-tables only. Protocol/reference details from `docs/PROTOCOL.md`, `docs/openapi.yaml`,
+tables only. Protocol/reference details from `../protocol/PROTOCOL.md`, `../protocol/openapi.yaml`,
 the official (read-only) `/Applications/Amazon Photos.app`, and the committed
 source state (`git show HEAD:src/prime_photos.rs`, upload-worker parts of
 `git show HEAD:src/main.rs`). The working tree is dirty with an unrelated in-flight
@@ -19,7 +19,7 @@ This spec covers the **web/cookie upload path** actually used by this app:
   creation/membership, and the concurrent worker scheduling in the GUI.
 - It does **not** cover the desktop client's device flow
   (`upload-photos.amazon.de/v2/upload` with `x-amz-access-token`), which is
-  documented in `docs/PROTOCOL.md` §2.17 / §3 but **not used** by us.
+  documented in `../protocol/PROTOCOL.md` §2.17 / §3 but **not used** by us.
 - It does **not** cover download, folder reconciliation, or dedup (see separate
   backlog/spec items).
 
@@ -96,7 +96,7 @@ real account on our cookie host `content-eu.drive.amazonaws.com/v2/upload`):
   server-derived value (`…36.123Z`).
 
 This matches the original client: clean-room recon of the bundle
-(`docs/SPEC_CAPTURE_DATE.md` §1–§7) shows it **never** sets `contentDate` — the
+(`SPEC_CAPTURE_DATE.md` §1–§7) shows it **never** sets `contentDate` — the
 field stays `null` and the query builder discards it; §10 of that document records
 the delta to our earlier client-side derivation.
 
@@ -319,7 +319,7 @@ From `AGENTS.todo.md` (P1 upload items):
 - Exact tag order the server applies when deriving `contentDate` from the file:
   live-proven for one sample to be `DateTimeOriginal` + `SubSecTime`, but the full
   precedence is not mapped. The original client never sets `contentDate` at all
-  (`docs/SPEC_CAPTURE_DATE.md`).
+  (`SPEC_CAPTURE_DATE.md`).
 - Whether the web host requires the omitted desktop headers (`Content-MD5`,
   `Content-Disposition`, trace ids, source id).
 - Error response shapes for non-409 failures (none observed in captures; our
@@ -343,4 +343,4 @@ From `AGENTS.todo.md` (P1 upload items):
 ---
 
 Spec owner: orchestrator backfill (2026-10-13). Write-only deliverable:
-`docs/SPEC_UPLOAD.md`.
+`SPEC_UPLOAD.md`.

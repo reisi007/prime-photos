@@ -119,7 +119,7 @@ exact endpoint with **query parameters** instead of a JSON body:
 vends the customer's **website cookies** (written into `NSHttpCookieStorage` for
 the embedded web views). The body form with `requested_token_type=access_token`
 shown above remains the access-token refresh path. See
-`docs/SPEC_LOGIN.md` § 3.8.
+`../original/SPEC_LOGIN.md` § 3.8.
 
 ### 2.2 `POST https://api.amazon.com/auth/register`
 
@@ -538,12 +538,12 @@ Notes:
   sub-seconds** (e.g. `…T19:47:36.123Z`), derived from `DateTimeOriginal` +
   `SubSecTimeOriginal` — **not** from `ModifyDate`, the file mtime or the upload time.
   It stores the EXIF **wall-clock** time naively as `Z` (no `OffsetTime*` conversion).
-  Details: `docs/SPEC_CAPTURE_DATE.md` §12.
+  Details: `../original/SPEC_CAPTURE_DATE.md` §12.
 * A **client-supplied** `contentDate` query value is echoed back **verbatim** and
   **overrides** that derivation (live 2026-10-16: request `…T19:47:36.000Z` ⇒ response
   `…T19:47:36.000Z`, although the file carries `.123`). This is why a client that always
   sends the parameter can overwrite the server's capture date — see
-  `docs/SPEC_CAPTURE_DATE.md` §12.2.
+  `../original/SPEC_CAPTURE_DATE.md` §12.2.
 * Characters in `name` are URL-encoded with `+` for spaces.
 * All 3 uploads in `upload-capture.mitm` returned `201` with `x-amzn-RequestId`
   echoing the request's `x-amzn-RequestId`.
@@ -557,8 +557,8 @@ Notes:
 | `POST …/v2/upload` with `contentDate=…T19:47:36.000Z` | **201**, response `contentDate` = the **sent** value, verbatim |
 | `PUT …/v2/upload/<nodeId>` (the `Replace` path) **without** `contentDate` | **200**, **same** node id, content swapped (size + MD5), node's `contentDate` **unchanged** |
 
-The `Replace` acceptance is recorded in `docs/features/LIVE_ACCEPTANCE.md`; the full
-write-up is `docs/SPEC_CAPTURE_DATE.md` §12.3. Test nodes were removed with
+The `Replace` acceptance is recorded in `../features/LIVE_ACCEPTANCE.md`; the full
+write-up is `../original/SPEC_CAPTURE_DATE.md` §12.3. Test nodes were removed with
 `DELETE …/drive/v1/nodes/<id>` ⇒ **202**.
 
 ### 2.18 `POST https://cdws.eu-west-1.amazonaws.com/drive/v2/memories/v1/collage/narratives`
@@ -584,7 +584,7 @@ per file.
    *(Once registered, the client sends only the refresh token; the registration in
    §2.2 happens only on first login. Where the two tokens are stored and how the
    refresh is scheduled — 80 % of the remaining lifetime — is documented in
-   `docs/SPEC_LOGIN.md` § 3.8.)*
+   `../original/SPEC_LOGIN.md` § 3.8.)*
 
 2. **Resolve the account + regional endpoints**
    * `GET https://api.amazon.com/user/profile` (`Authorization: bearer Atna|<…>`) → account id.

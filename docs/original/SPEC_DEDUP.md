@@ -3,8 +3,8 @@
 **Status:** clean-room backfill spec (read-only reconstruction of the official macOS
 Amazon Photos client). Own words and tables only; no verbatim decompiled code.
 Quoting German UI labels from `de.lproj/Localizable.strings` is intentional.
-No personal data. Read alongside `docs/UI_STATES.md` (enums/tables), `docs/UI_FLOWS.md`,
-`docs/PROTOCOL.md`, and `docs/openapi.yaml`.
+No personal data. Read alongside `UI_STATES.md` (enums/tables), `UI_FLOWS.md`,
+`../protocol/PROTOCOL.md`, and `../protocol/openapi.yaml`.
 
 **Scope.** This document owns two things:
 
@@ -13,7 +13,7 @@ No personal data. Read alongside `docs/UI_STATES.md` (enums/tables), `docs/UI_FL
 2. The `ContentFilter` / `ContentFilterExtensions` taxonomy: which extensions fall
    into the Photos / Videos / Other groups.
 
-`docs/SPEC_FOLDERS.md` (Scan/Filter-Semantik) should **reference this document**
+`SPEC_FOLDERS.md` (Scan/Filter-Semantik) should **reference this document**
 for the extension taxonomy and must not redefine it. Our own Rust implementation
 does not use these lists yet; they are the reference for the P1 "Dedup" work and
 the backlog "exakter Extension-Filter" item.
@@ -121,7 +121,7 @@ Even when the local cache is stale, the endpoint rejects a duplicate body:
 
 - The server is queried by **our** committed app through
   `POST content-<zone>.drive.amazonaws.com/v2/upload` (cookie auth; see
-  `docs/openapi.yaml` `/v2/upload` and `docs/SPEC_UPLOAD.md` §1 — the cookie host
+  `../protocol/openapi.yaml` `/v2/upload` and `SPEC_UPLOAD.md` §1 — the cookie host
   is *our* web path, **not** the desktop client's; the desktop device flow is
   `upload-photos.amazon.de/v2/upload` with `x-amz-access-token`, `PROTOCOL.md`
   §2.17, and is unused by us). The original client's `/v2/upload` strings are
@@ -351,7 +351,7 @@ the customer has never been prompted (`HasCustomerSeenApplePhotosDuplicatesPromp
   an explicit pre-flight) is part of P1.
 - The desktop-client device flow
   (`upload-photos.amazon.de/v2/upload` with `x-amz-access-token`,
-  `Content-MD5` base64, etc.) is documented in `docs/PROTOCOL.md` but unused by
+  `Content-MD5` base64, etc.) is documented in `../protocol/PROTOCOL.md` but unused by
   us; its dedup behaviour is assumed to be equivalent but **unverified**.
 - Whether `GetNodeIdForLocalId(localId + md5)` is ever used by the backup flow
   to short-circuit duplicates, beyond resumable-upload recovery, is unverified.
@@ -361,11 +361,11 @@ the customer has never been prompted (`HasCustomerSeenApplePhotosDuplicatesPromp
 
 ## 8. Cross-reference
 
-- `docs/UI_STATES.md` §4.1: `ContentFilter` / `DeduplicateOptions` bitmasks,
+- `UI_STATES.md` §4.1: `ContentFilter` / `DeduplicateOptions` bitmasks,
   German labels, and the "Everything forces dedup off" constraint.
-- `docs/PROTOCOL.md`: desktop upload headers (`content-md5` hex + base64), 409
+- `../protocol/PROTOCOL.md`: desktop upload headers (`content-md5` hex + base64), 409
   behaviour, node endpoints.
-- `docs/openapi.yaml`: `/v2/upload` parameters, `node.contentProperties.md5`.
+- `../protocol/openapi.yaml`: `/v2/upload` parameters, `node.contentProperties.md5`.
 - Impl backlog: `AGENTS.todo.md` P1 "Nur neue Dateien hochladen (Dedup)" and
   "exakter Extension-Filter".
 

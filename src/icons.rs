@@ -7,7 +7,7 @@
 //! * The sidebar navigation icons ([`nav_backup_icon`], [`nav_settings_icon`])
 //!   and the backup row actions ([`kebab_icon`], [`refresh_icon`]). These are
 //!   **not** drawn here: they are Material Symbols SVGs (Apache-2.0, see
-//!   `docs/THIRD_PARTY.md`) rastered to white PNGs by `build.rs` and tinted to
+//!   `docs/dev/THIRD_PARTY.md`) rastered to white PNGs by `build.rs` and tinted to
 //!   the current theme colour at run time.
 
 use crate::theme;

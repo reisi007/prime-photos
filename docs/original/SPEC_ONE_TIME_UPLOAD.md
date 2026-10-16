@@ -24,10 +24,10 @@ This doc owns the **drag-and-drop → one-time (ad-hoc) upload** feature: the dr
 the option chain that decides what happens, the one-time queue row ("Einmalige Sicherung"), its
 persistence, and the overlay/scanning/notice surfaces.
 
-Not duplicated here: folder scan/filter + persistence (`docs/SPEC_FOLDERS.md`); duplicate
-identity and dedup eligibility (`docs/SPEC_DEDUP.md`); scheduled cadence/watchers/pause
-(`docs/SPEC_BACKGROUND_SYNC.md`); progress UI (`docs/SPEC_UPLOAD_PROGRESS.md`); notifications /
-menu-bar presence (`docs/SPEC_NOTIFICATIONS.md`).
+Not duplicated here: folder scan/filter + persistence (`SPEC_FOLDERS.md`); duplicate
+identity and dedup eligibility (`SPEC_DEDUP.md`); scheduled cadence/watchers/pause
+(`SPEC_BACKGROUND_SYNC.md`); progress UI (`SPEC_UPLOAD_PROGRESS.md`); notifications /
+menu-bar presence (`SPEC_NOTIFICATIONS.md`).
 
 ---
 
@@ -378,7 +378,7 @@ defaulting under root "Alle" — §4.)
 ### 10.7 Notifications
 
 The `DragDropToastNotification` class has no observed publisher
-(`docs/SPEC_NOTIFICATIONS.md` §3.2), but the original **does** show an **in-window**
+(`SPEC_NOTIFICATIONS.md` §3.2), but the original **does** show an **in-window**
 `ToastType.BackupStartedToast` on a drop (§7). For us: reflect the run via the overlay/row and
 optionally the existing `src/notify.rs` run-finished toast (behind `config.notifications`).
 
@@ -426,14 +426,14 @@ optionally the existing `src/notify.rs` run-finished toast (behind `config.notif
 
 ## 12. Cross-references
 
-- `docs/UI_FLOWS.md` §4.4 ("Einmalig" vs "Plan"), §4.8 (drag-and-drop flow), §11.2 (status
+- `UI_FLOWS.md` §4.4 ("Einmalig" vs "Plan"), §4.8 (drag-and-drop flow), §11.2 (status
   precedence; one-time row ignores the per-backup pause).
-- `docs/UI_STATES.md` §3.1 (row model; one-time name fixed), §3.8 (`uploads` row `ManualUpload`).
-- `docs/SPEC_FOLDERS.md` §2 (scan/filter contract), §3 (original schedule model).
-- `docs/SPEC_DEDUP.md` §1 (MD5 identity), §2.2 (`UploadType` eligibility), §4.1 (conflict).
-- `docs/SPEC_BACKGROUND_SYNC.md` (cadence/pause; a one-time drop is outside the scheduler).
-- `docs/SPEC_UPLOAD_PROGRESS.md` (progress UI — a one-time run reuses it).
-- `docs/SPEC_NOTIFICATIONS.md` §3.2 (`DragDropToastNotification` has no publisher).
+- `UI_STATES.md` §3.1 (row model; one-time name fixed), §3.8 (`uploads` row `ManualUpload`).
+- `SPEC_FOLDERS.md` §2 (scan/filter contract), §3 (original schedule model).
+- `SPEC_DEDUP.md` §1 (MD5 identity), §2.2 (`UploadType` eligibility), §4.1 (conflict).
+- `SPEC_BACKGROUND_SYNC.md` (cadence/pause; a one-time drop is outside the scheduler).
+- `SPEC_UPLOAD_PROGRESS.md` (progress UI — a one-time run reuses it).
+- `SPEC_NOTIFICATIONS.md` §3.2 (`DragDropToastNotification` has no publisher).
 - Our code: `src/app.rs` (`update`), `src/backup.rs` (`backup_ui`, `start_folder_upload`,
   `finalize_upload`), `src/folders.rs` (`scan_images`, `is_supported_image`,
   `ConflictResolution`), `src/upload.rs` (`run_upload`, `upload_worker`), `src/dedup.rs`,

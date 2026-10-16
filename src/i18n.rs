@@ -393,7 +393,7 @@ const EN: &[(&str, &str)] = &[
     ("Übersprungen", "Skipped"),
     ("Warteschlange ({})", "Queue ({})"),
     // Queue-table headers and empty state (Welle 3.1/3.5,
-    // docs/SPEC_UPLOAD_PROGRESS.md §7.8).
+    // docs/original/SPEC_UPLOAD_PROGRESS.md §7.8).
     ("Größe", "Size"),
     ("Keine Uploads in der Warteschlange", "No uploads in the queue"),
     ("Name", "Name"),

@@ -30,7 +30,7 @@ jobs:
     # Optionale Signatur-Secrets als Job-Env verfügbar machen (der `secrets`-Kontext
     # ist in job-level `if` nicht zuverlässig -> in Schritten über `env.X != ''`
     # prüfen). Ohne diese Secrets baut und veröffentlicht das Release unsigniert.
-    # Namen sind in docs/RELEASE.md dokumentiert; siehe auch AGENTS.md "CI/Release".
+    # Namen sind in docs/dev/RELEASE.md dokumentiert; siehe auch AGENTS.md "CI/Release".
     env:
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
       WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
@@ -39,7 +39,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # System-Abhängigkeiten (docs/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
+      # System-Abhängigkeiten (docs/dev/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
       # tray-icon (libayatana-appindicator3), native-tls (System-OpenSSL),
       # pkg-config + C-Compiler (rusqlite "bundled" übersetzt SQLite aus C-Quellen).
       - name: Install Linux system dependencies

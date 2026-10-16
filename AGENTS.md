@@ -12,7 +12,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - Persistent backup folders: `src/folders.rs` -> `~/Library/Application Support/prime_photos/folders.toml`
 - Login: `src/login.rs` (embedded wry WKWebView as a child view of the main window; cookies captured with an asynchronous main-queue probe)
 - Config: `src/config.rs`, stored at `~/Library/Application Support/prime_photos/config.toml`
-- Protocol notes: `docs/PROTOCOL.md`
+- Protocol notes: `docs/protocol/PROTOCOL.md`
 
 ## Projektregeln
 
@@ -47,11 +47,11 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - Name/Rename (user decision 2026-10-13): project, git repo and app are **"Prime Photos"**. Cargo package/binary `prime-photos`; upload module `src/prime_photos.rs` with struct `PrimePhotos`; config dir `~/Library/Application Support/prime_photos/` (was `amzn_photos_uploader`); the project directory is renamed to `prime-photos`. The old config folder is migrated **once, locally, by hand** (no migration code in the app).
 - GUI framework: egui/eframe (native ARM, single binary).
 - Auth (GUI): embedded WKWebView login, **in the same window as the app** (like the original). egui's window hosts a wry `WKWebView` child view; no extra window, no external browser, no CDP. Amazon's sign-in page is loaded directly (`/ap/signin?…` with `assoc_handle=amzn_photos_web_<cc>`). Cookie capture must **not** run inside egui's `update`: wry's `WebView::cookies` is synchronous and spins the macOS run loop, which re-enters winit's event handler and panics — so probes are dispatched to the main queue and the result is picked up on the next frame. A country/marketplace selector picks the TLD (default from system locale on first run).
-- Auth (login chrome): deliberate deviation from the measured original (`docs/UI_FLOWS.md` §2.1). While Amazon's page is open, a slim branded header (our upload logo + "Prime Photos" + "Abbrechen") sits above the webview and the window title reads "Login – Prime Photos". Reason: the app is a third-party tool, not Amazon's own, so its identity and a way to cancel must stay reachable. The measured window sizes stay the benchmark for the main app window.
+- Auth (login chrome): deliberate deviation from the measured original (`docs/original/UI_FLOWS.md` §2.1). While Amazon's page is open, a slim branded header (our upload logo + "Prime Photos" + "Abbrechen") sits above the webview and the window title reads "Login – Prime Photos". Reason: the app is a third-party tool, not Amazon's own, so its identity and a way to cancel must stay reachable. The measured window sizes stay the benchmark for the main app window.
 - **Keine technischen Fehlermeldungen im Endnutzer-UI (User-Regel 2026-10-15):** Im sichtbaren UI (v. a. im Login-Header) erscheinen nur **verständliche** Meldungen; technische Details (`IO error: …`, wry-Fehler, URLs, Fehlercodes) gehen ins Log (`log::warn!`), **nie** in die Oberfläche. Anlass: „Cookies konnten nicht gelesen werden: IO error: timed out waiting for cookies response" stand im Login-Header. Auch der Header-Rest (Logo + „Prime Photos" + Untertitel) wird vertikal sauber zentriert.
 - Auth (upload engine): browser cookies (session-id + x-acb/at-acb/ubid-acb) -> `content-<zone>.drive.amazonaws.com/v2/upload`.
-- Flow note: this is the **web** flow (cookie-based). The desktop client's **device** flow (`amzn_photos_desktop_*` signin -> `/auth/register` -> refresh token -> `/auth/token` -> `upload-photos.amazon.de/v2/upload`) is documented in `docs/openapi.yaml` but not used.
-- **Sitzung wie das Original — Login einmal, dann Refresh-Token (User-Entscheidung 2026-10-15):** „Ziel wäre so gut es geht so wie im Original mit der Anmeldung / Update der Tokens zu verfahren" und „Ziel: nur einmal Anmeldung nötig, refresh token speichern. Nachbau Original hier mit Rea clean room spec für Login / auth. Gerne aber unsere aktuelle Login Ui so gut wie es geht beibehalten." Damit ist der reine Web-/Cookie-Weg **nicht mehr das Ziel** — der Rückfall wurde am 2026-10-15 ganz **entfernt** (siehe „Kein Cookie-Rückfall mehr" unten). Clean-Room-Grundlage des Nachbaus: `docs/SPEC_LOGIN.md` § 3.8 und `docs/PROTOCOL.md` § 2.1 (Recon 2026-10-15 am DLL).
+- Flow note: this is the **web** flow (cookie-based). The desktop client's **device** flow (`amzn_photos_desktop_*` signin -> `/auth/register` -> refresh token -> `/auth/token` -> `upload-photos.amazon.de/v2/upload`) is documented in `docs/protocol/openapi.yaml` but not used.
+- **Sitzung wie das Original — Login einmal, dann Refresh-Token (User-Entscheidung 2026-10-15):** „Ziel wäre so gut es geht so wie im Original mit der Anmeldung / Update der Tokens zu verfahren" und „Ziel: nur einmal Anmeldung nötig, refresh token speichern. Nachbau Original hier mit Rea clean room spec für Login / auth. Gerne aber unsere aktuelle Login Ui so gut wie es geht beibehalten." Damit ist der reine Web-/Cookie-Weg **nicht mehr das Ziel** — der Rückfall wurde am 2026-10-15 ganz **entfernt** (siehe „Kein Cookie-Rückfall mehr" unten). Clean-Room-Grundlage des Nachbaus: `docs/original/SPEC_LOGIN.md` § 3.8 und `docs/protocol/PROTOCOL.md` § 2.1 (Recon 2026-10-15 am DLL).
   1. **Anmelden — unsere UI bleibt:** das eingebettete Webview mit unserem Header, „Abbrechen", der Marktplatz-Auswahl und dem Fenstertitel „Login – Prime Photos" **bleibt**; geändert wird nur die **URL** auf den Parametersatz des Originals: `openid.assoc_handle` und `pageId` = `amzn_photos_desktop_<region>` (gb→uk), `openid.oa2.scope=device_auth_access`, `openid.oa2.response_type=code`, `openid.oa2.code_challenge_method=S256` + `openid.oa2.code_challenge` (S256 eines frischen 32-Byte-Verifiers), `openid.oa2.client_id=device:<hex aus „<deviceSerial>#<deviceTypeId>">` (lowercased), `openid.return_to=https://www.<domain>/ap/maplanding`, `openid.pape.max_auth_age=0`, `marketPlaceId`, `language`, `forceMobileLayout=true`.
   2. **Erfolgserkennung:** nicht mehr „Cookies sind da", sondern `openid.oa2.authorization_code` in einer `/ap/…`-Navigation (die Navigation selbst wird verworfen — wie im Original). Die Marktplatz-Wahl aus dem Cookie-Suffix (`x-acb<cc>`) entfällt damit als Nebenwirkung.
   3. **Einlösen:** `POST https://api.amazon.com/auth/register` mit `registration_data` (app_name/version, device_type/serial/model, os_version) und `auth_data` (`use_global_authentication=false`, `authorization_code`, `code_verifier`, `code_algorithm="SHA-256"`, `client_id` **ohne** `device:`-Präfix, `client_domain="DeviceLegacy"`) ⇒ `tokens.bearer.access_token` + `refresh_token`; ein leerer Access-Token gilt als Fehlschlag.
@@ -63,7 +63,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   **S-C-Umsetzung:** der Auffrischungs-Worker läuft als **ein** langlebiger Task auf der bestehenden Tokio-Runtime (Muster wie `avatar_fetch`), Ergebnis über einen geteilten Slot, den die UI pro Frame pollt. **Folge der Speicher-only-Regel:** der reine Cookie-Rückfall (Geräteweg abgelehnt) gilt nur für die **laufende** Sitzung, nicht über einen Neustart — der Geräteweg ist der persistente Pfad.
   **Login-Start leert den Webview-Speicher (User-Entscheidung 2026-10-15):** bei **jedem** Öffnen des
   Login-Webviews wird der Cookie-/Cache-Speicher des eingebauten WKWebView **vor** dem Laden der
-  Anmeldeseite geleert — wie das Original (`docs/SPEC_LOGIN.md` § 3.3). Umsetzung: `WebViewBuilder`
+  Anmeldeseite geleert — wie das Original (`docs/original/SPEC_LOGIN.md` § 3.3). Umsetzung: `WebViewBuilder`
   **ohne** `with_url` bauen, `WebView::clear_all_browsing_data()` rufen, dann `WebView::load_url(url)`;
   der `Err`-Pfad bleibt. **Verworfen:** `with_incognito(true)` (nonPersistent DataStore) und ein
   benannter DataStore (`with_data_store_identifier` + `remove_data_store`). Hintergrund: „Abmelden"
@@ -84,13 +84,13 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   **Grenze („so gut es geht"):** wir treten als **eigenes** Gerät mit eigener `client_id` auf. Ein abgelehnter Device-Weg wird als **klare Meldung** gezeigt, nicht still verschluckt.
 - **Kein Cookie-Rückfall mehr (User-Entscheidung 2026-10-15):** Der Cookie-**Probe** und der Web-/Cookie-Rückfall sind **entfernt**; der Geräteweg (PKCE) ist der **einzige** Anmeldeweg, ein abgelehnter Weg erscheint als klare Meldung. Anlass: `wry::WebView::cookies()` blockiert auf macOS den Hauptthread bis zu **1 s** (`wait_for_blocking_operation`, wry 0.57) und läuft aus einem `DispatchQueue::main`-Block **immer** in den Timeout — die Login-UI fror ein und zeigte „Cookies konnten nicht gelesen werden: IO error: timed out waiting for cookies response". Da der Geräteweg live akzeptiert wird und der Rückfall ohnehin nur sitzungsweit wäre (Cookies werden nicht persistiert), entfällt er. Mit ihm entfallen der Browser-Link „Amazon Photos im Browser öffnen" (`urls::login_url`, `platform::open_url`) und die zugehörigen Texte. **Verworfen:** den Rückfall asynchron über `objc2` am `WKWebView` neu zu bauen (mehr Aufwand, kein Bedarf).
 - **`expires_in` kommt als JSON-String** (`"3600"`): der Parser akzeptiert String **und** Zahl (Register **und** Refresh).
-- UI reference: `docs/UI_FLOWS.md` + `docs/UI_STATES.md` (clean-room spec from the decompiled app + resources). Use them when changing the UI.
+- UI reference: `docs/original/UI_FLOWS.md` + `docs/original/UI_STATES.md` (clean-room spec from the decompiled app + resources). Use them when changing the UI.
 - **Panel-Reihenfolge in `App::update` (Befund 2026-10-16):** `SidePanel::left("nav")` → `TopBottomPanel::bottom("log")` → `CentralPanel` (egui-Standard: **Panels zuerst**, `CentralPanel` zuletzt). **Nicht zurückdrehen.** Stand das `CentralPanel` davor, schließt der Zentralbereich den Log-Streifen **nicht** aus: `ui.available_height()` ist um die Panelhöhe zu groß, und jede Seite, die ihre Höhe füllt (die Warteschlange tut das seit Welle 3a), endet hinter dem Protokoll-Panel — headless gemessen **+26 px** Überlapp bei 760×520 und 1000×700, nach der Umstellung **−8 px**. Die Einstellungs-Seite hängt nicht an `available_height`/`screen_rect` und ist unberührt.
 - **Virtuelle Liste (Befund 2026-10-16):** `ScrollArea::show_rows(ui, row_h, n, …)` bekommt den **echten** Zeilen-Vorschub **ohne** `item_spacing`. In einem flachen `ui.horizontal` stimmt das nicht: das Frame ist `interact_size.y` hoch (Theme 26), `add_sized`-Kinder werden darin **zentriert** (Vorschub 31), ein **nacktes** `ui.label` expandiert auf das volle Frame (Vorschub 34). Richtig ist `ui.allocate_ui_with_layout(vec2(w, row_h), left_to_right(Center), …)` für **jede** Zeilenart — dann ist der Vorschub exakt `row_h + item_spacing.y` (in der Warteschlange 28 = 20 + 8) und die deklarierte Höhe stimmt mit der Ist-Höhe überein (vorher Δ 252 px ⇒ letzte Zeile abgeschnitten).
 - Folder reconciliation (observed in the client's local DBs under `~/Library/Application Support/Amazon Cloud Drive`): local SQLite state, not an HTTP call. `backup` table (schedule_path, relative_path, node_id, size, modified_date, status, last_scan_time) + `uploads` table (path, status, precomputed_md5, node_id) + `cloud.db` node cache, synced via `/drive/v1/changes` and `/drive/v1/nodes`. `BackupScanIntervalInHours = 336`.
 - Desktop-client upload protocol (observed): `POST https://upload-photos.amazon.de/v2/upload?name=<urlenc>&fileSize=<n>&conflictResolution=NONE&kind=FILE&parentNodeId=<id>` with raw body, `x-amz-access-token`, `x-amzn-file-md5` (hex), `Content-MD5` (base64), `x-amz-clouddrive-appid`, `x-amzn-clouddrive-source`. Not used by the app yet (we use the cookie path); documented for parity.
 - Upload response (cookie path, live observed 2026-10-15): a successful upload returns JSON whose **metadata is not always present** — for an image without EXIF resolution (live: a PNG) the body carries `id`/`name`/`kind`/`version`/… but **no `resolutionUnit`**. `ResponseUpload` requires it today, so a **successful** upload is reported as a parse error (counted as an error, no index row ⇒ re-read every run). Those fields must be treated as optional; the bug and the repro are in the ledger (Welle 2, live findings), fix not yet commissioned.
-- **Aufnahmedatum: wir senden kein `contentDate` (User-Entscheidung 2026-10-16, „das Wichtige ist, dass die Sortierung online nach Aufnahmedatum geht").** Das Aufnahmedatum leitet **der Server** aus den hochgeladenen Bytes ab — wie beim Original-Client, der das Feld nie setzt (REA: `docs/SPEC_CAPTURE_DATE.md` §1–§7). Live belegt am 2026-10-16 an unserem Cookie-Host (`content-<zone>.drive.amazonaws.com/v2/upload`): ein `POST` **ohne** `contentDate` ⇒ **201** und das Konto trägt `DateTimeOriginal` + `SubSecTimeOriginal` aus der Datei (`2026-10-13T19:47:36.123Z`) — nicht `ModifyDate`, nicht mtime, nicht die Upload-Zeit; ein **mitgesendeter** Wert wird **wörtlich übernommen** und überschreibt die Ableitung (`…36.000Z`); der `PUT /v2/upload/<nodeId>` funktioniert **ohne** `contentDate` (**200**, gleiche Node-Id, Inhalt getauscht, Datum bleibt). Der Server legt die EXIF-Wanduhrzeit naiv als `Z` ab (keine Offset-Umrechnung). **Der Query-Satz ist damit `conflictResolution`, `fileSize`, `name`, `parentNodeId`** — POST und PUT identisch (ohne `fileSize` ⇒ 400 `MissingFileSize`). **Verworfen:** den Wert weiterhin selbst ermitteln und mitsenden — die eigene Ermittlung hing an unserem EXIF-Leser und fiel ohne EXIF auf die **Dateizeit** zurück (bei einem Lightroom-Export = Exportzeit ⇒ falscher Tag); mit dem Feld entfallen EXIF-Priorität, Dateizeit-Rückfall und die Regel „jünger als 10 Minuten ⇒ Fehler". Doku: `docs/SPEC_UPLOAD.md` §2.4, `docs/PROTOCOL.md` §2.17, Live-Abnahme in `docs/features/LIVE_ACCEPTANCE.md`.
+- **Aufnahmedatum: wir senden kein `contentDate` (User-Entscheidung 2026-10-16, „das Wichtige ist, dass die Sortierung online nach Aufnahmedatum geht").** Das Aufnahmedatum leitet **der Server** aus den hochgeladenen Bytes ab — wie beim Original-Client, der das Feld nie setzt (REA: `docs/original/SPEC_CAPTURE_DATE.md` §1–§7). Live belegt am 2026-10-16 an unserem Cookie-Host (`content-<zone>.drive.amazonaws.com/v2/upload`): ein `POST` **ohne** `contentDate` ⇒ **201** und das Konto trägt `DateTimeOriginal` + `SubSecTimeOriginal` aus der Datei (`2026-10-13T19:47:36.123Z`) — nicht `ModifyDate`, nicht mtime, nicht die Upload-Zeit; ein **mitgesendeter** Wert wird **wörtlich übernommen** und überschreibt die Ableitung (`…36.000Z`); der `PUT /v2/upload/<nodeId>` funktioniert **ohne** `contentDate` (**200**, gleiche Node-Id, Inhalt getauscht, Datum bleibt). Der Server legt die EXIF-Wanduhrzeit naiv als `Z` ab (keine Offset-Umrechnung). **Der Query-Satz ist damit `conflictResolution`, `fileSize`, `name`, `parentNodeId`** — POST und PUT identisch (ohne `fileSize` ⇒ 400 `MissingFileSize`). **Verworfen:** den Wert weiterhin selbst ermitteln und mitsenden — die eigene Ermittlung hing an unserem EXIF-Leser und fiel ohne EXIF auf die **Dateizeit** zurück (bei einem Lightroom-Export = Exportzeit ⇒ falscher Tag); mit dem Feld entfallen EXIF-Priorität, Dateizeit-Rückfall und die Regel „jünger als 10 Minuten ⇒ Fehler". Doku: `docs/original/SPEC_UPLOAD.md` §2.4, `docs/protocol/PROTOCOL.md` §2.17, Live-Abnahme in `docs/features/LIVE_ACCEPTANCE.md`.
 - Desktop auth chain (observed): `POST api.amazon.com/auth/token` (`source_token_type=refresh_token` -> `access_token`) -> `GET drive.amazonaws.com/drive/v2/account/endpoint` -> `POST cdws.../drive/v1/account/source`.
 - Supported photos: jpg, jpeg, png, heic, heif, tif, tiff, gif, webp, bmp plus common RAW (cr2, cr3, arw, nef, dng, raf, rw2, orf, srw, pef, and others). `.xmp` sidecars are explicitly rejected.
 - Folder scans enforce `is_supported_image` (single source in `folders.rs`). There is **no file picker** in HEAD (only `FileDialog::pick_folder()`) and `supported_extensions()` is currently unwired.
@@ -103,7 +103,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
 - Content identity (user decision 2026-10-14): a file's identity is its **content**. A file whose **MD5 is already in the index under another path** (renamed/moved) is **skipped locally, before the network**, and counted as **"bereits im Konto"** (`conflict_skipped`) — not as "unverändert", because the file itself was never uploaded. Same path + same MD5 stays "unverändert"; same path + a different MD5 is uploaded. The local check demotes the server's `DuplicatesConflictError` to a pure safety net; `dedup = true` is the switch for both. **Persistence (user decision 2026-10-14):** such a path is **recorded in the index with a marker** (`origin = 'content_skip'`, next to the real uploads) so the fast stat path applies on later scans and the display keeps saying "bereits im Konto" in **every** run — otherwise the folder (~3,6 GB for "Sport") would be read and hashed again on each scan. That is a deliberate one-column schema change and matches the original, whose `uploads` table also carries a `status` column.
 - Conflict handling (user decision 2026-10-13): all **four original options** per upload target (Nachfragen / Ignorieren / Als neue Datei speichern / Ersetzen). Wire mapping (corrected 2026-10-15 — the earlier `NONE`/`RENAME`/`OVERWRITE` line was stale, see the 2.2/2.2b decisions): `Nachfragen`/`Ignorieren`/`Ersetzen` ⇒ `conflictResolution=NONE`; `SaveAsNew` ⇒ `RENAME`. **`OVERWRITE` is rejected by the cookie host** (`POST` ⇒ 404, empty body) and is never sent; "Ersetzen" is carried out in place with `PUT /v2/upload/<nodeId>` instead. Replaces the current hard-coded `RENAME`.
 - Conflict-handling **default** (user decision **2026-10-15**, changed from the 2026-10-14 `SaveAsNew` default): a file's identity is its **content**. `dedup = true` keeps meaning *same content ⇒ never uploaded* (MD5: server-side `409` + `errorCode = "DuplicatesConflictError"` and the local cross-path MD5 check). For a **name** conflict (same name, **different** content) new targets now default to **`Replace`**: the POST sends `conflictResolution=NONE`, the 409 `NameAlreadyExists` names the existing node, and the follow-up `PUT /v2/upload/<nodeId>` (POST query set, §2.2b) overwrites it **in place** — same node id, same name, the old content is gone. Chosen deliberately with the risk known: two **different** photos sharing a name (documented case: `27_ÖFB-Reisinger_01.jpg` exists twice with different MD5) ⇒ the one already in the account is replaced. `SaveAsNew` (wire `RENAME`) stays selectable per target. **Two different defaults — do not merge them:** the *Application Default* (`Config.conflict_resolution_default`) is `Replace`, while the *file* fallback — the enum's `#[default]`, used by `#[serde(default)]` for a `folders.toml` entry **without** the key — stays `SaveAsNew`, so pre-existing targets are never silently switched to overwriting. **Beide lokalen Ablagen stehen auf `Replace` (User-Entscheidung 2026-10-16, „alles auf replace"):** `config.toml` trägt `conflict_resolution_default = "replace"`, „Sport" trägt `conflict_resolution = "replace"` — von Hand umgestellt, **kein** Migrationscode. Anlass: ein zweiter JPEG-Export oder ein DNG mit geänderten Metadaten gehört **ersetzt**, nicht dupliziert. **Verworfen:** den Application Default dafür wieder auf `SaveAsNew` drehen. **Watch out:** `ConflictResolution` uses `#[serde(rename_all = "lowercase")]`, so the file value is `saveasnew`/`replace`, **not** `save_as_new` — renaming the serde rule would break existing config files.
-- **Sichere Ersetz-Regel (User-Entscheidung 2026-10-16):** der `PUT /v2/upload/<nodeId>` darf den vom 409 `NameAlreadyExists` benannten Knoten **nur** überschreiben, wenn der **lokale Index genau diesen Pfad an genau diese Node** bindet — dann wurde dieselbe lokale Datei geändert (User-Wortlaut: „nie was oben ist löschen, außer es ist die gleiche Datei physisch relativ zum gesicherten Pfad, dann überschreiben"). Trifft der Name auf eine **fremde** Datei aus einem anderen Pfad, wird **umbenannt** (`SaveAsNew`/Wire `RENAME`), nie gelöscht. Träger der Bindung ist die neue Spalte **`node_id`** im Dedup-Index (Parität zum Original, dessen `uploads`-Tabelle ebenfalls `node_id` führt): `record_upload` schreibt die Node des Erfolgs, `COALESCE(excluded.node_id, node_id)` lässt eine bekannte Bindung bestehen, `node_id_for(path)` ist die Abfrage für die Regel. **Altdaten ohne Node-Id sind ungebunden** und werden beim ersten Inhaltswechsel einmalig umbenannt — vom User ausdrücklich akzeptiert (`docs/DEV_NOTES.md`). Die Regel beschränkt **nur die automatische Ordner-Politik**: eine **ausdrückliche** Antwort „Ersetzen" im Konflikt-Dialog ist die Zustimmung für *diese* Datei und überschreibt sie (User-Entscheidung 2026-10-16). Ein **Inhaltsduplikat** bleibt auch dort „bereits im Konto" — dieselben Bytes sind schon da, es gibt nichts zu überschreiben. **Verworfen:** den Application Default nur deshalb auf `SaveAsNew` zurückdrehen (die Sicherheit kommt aus der Bindung, nicht aus einem anderen Default); bei fehlender Bindung **nichts** tun und den Server entscheiden lassen.
+- **Sichere Ersetz-Regel (User-Entscheidung 2026-10-16):** der `PUT /v2/upload/<nodeId>` darf den vom 409 `NameAlreadyExists` benannten Knoten **nur** überschreiben, wenn der **lokale Index genau diesen Pfad an genau diese Node** bindet — dann wurde dieselbe lokale Datei geändert (User-Wortlaut: „nie was oben ist löschen, außer es ist die gleiche Datei physisch relativ zum gesicherten Pfad, dann überschreiben"). Trifft der Name auf eine **fremde** Datei aus einem anderen Pfad, wird **umbenannt** (`SaveAsNew`/Wire `RENAME`), nie gelöscht. Träger der Bindung ist die neue Spalte **`node_id`** im Dedup-Index (Parität zum Original, dessen `uploads`-Tabelle ebenfalls `node_id` führt): `record_upload` schreibt die Node des Erfolgs, `COALESCE(excluded.node_id, node_id)` lässt eine bekannte Bindung bestehen, `node_id_for(path)` ist die Abfrage für die Regel. **Altdaten ohne Node-Id sind ungebunden** und werden beim ersten Inhaltswechsel einmalig umbenannt — vom User ausdrücklich akzeptiert (`docs/dev/DEV_NOTES.md`). Die Regel beschränkt **nur die automatische Ordner-Politik**: eine **ausdrückliche** Antwort „Ersetzen" im Konflikt-Dialog ist die Zustimmung für *diese* Datei und überschreibt sie (User-Entscheidung 2026-10-16). Ein **Inhaltsduplikat** bleibt auch dort „bereits im Konto" — dieselben Bytes sind schon da, es gibt nichts zu überschreiben. **Verworfen:** den Application Default nur deshalb auf `SaveAsNew` zurückdrehen (die Sicherheit kommt aus der Bindung, nicht aus einem anderen Default); bei fehlender Bindung **nichts** tun und den Server entscheiden lassen.
 - **Drei Ebenen der Konflikt-Standardwahl (User-Entscheidung 2026-10-15, bestätigt 2026-10-16):**
   1. **Application Default** — neues Feld in `Config` (`config.toml`), einstellbar in
      **Einstellungen → Upload** (Radiogruppe mit den vier vorhandenen Optionslabels, das Muster der
@@ -138,7 +138,7 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   Das Häkchen nennt den **Ordner**: „Nicht noch einmal nach ‚<Ordner>'-Ordner fragen"
   (Original-Muster `…donotaskagain_checkbox_text`); bei der **Einmal-Queue** (kein Ordner) bleibt der
   neutrale Text „Nicht noch einmal fragen", weil dort nichts persistiert wird.
-  **Bewusst abweichend (dokumentiert in `docs/SPEC_CONFLICT_OPTIONS.md` §5):** wir fragen **pro
+  **Bewusst abweichend (dokumentiert in `docs/original/SPEC_CONFLICT_OPTIONS.md` §5):** wir fragen **pro
   Datei** (60-s-Timeout ⇒ Ignorieren), das Original zeigt **nach dem Lauf** ein gebündeltes Sheet
   („N Dateinamenkonflikte in …", eine Antwort für alle) plus Toast; ein nachträgliches Sheet wäre ein
   UI-Umbau und gehört zu Welle 3.
@@ -196,7 +196,7 @@ funktionierender Upload (Event-Watcher + Stat-Check + Wasserzeichen) und echte T
 
 ## About + Drittanbieter-Lizenzen (Welle 4, User-Entscheidungen 2026-10-16)
 
-Recon: `docs/SPEC_ABOUT.md`. Kernbefund: das Original hat **keine** eingebettete Lizenzliste — nur
+Recon: `docs/original/SPEC_ABOUT.md`. Kernbefund: das Original hat **keine** eingebettete Lizenzliste — nur
 einen Link auf eine Web-Seite; About ist ein Sheet mit Logo, Version, **Geräte-Seriennummer**,
 Send-Logs-Knopf, drei Rechtslinks und Copyright. Wir bauen das About **ohne** Amazon-Bezüge
 (Projektregel „Name & Branding").
@@ -216,7 +216,7 @@ Send-Logs-Knopf, drei Rechtslinks und Copyright. Wir bauen das About **ohne** Am
   wird das **ausgewiesen** statt erfunden. Kein Netzwerk im Generator.
 - **Darstellung:** eigenes, **scrollbares Lizenz-Fenster**, erreichbar über einen Knopf im
   **About**-Fenster (bei ~760 Komponenten die einzige lesbare Form). Zwei Quellen werden gezeigt:
-  die generierte Liste **und** die kuratierte Icon-Attribution aus `docs/THIRD_PARTY.md`
+  die generierte Liste **und** die kuratierte Icon-Attribution aus `docs/dev/THIRD_PARTY.md`
   (dort steht: „Die About-/Lizenzseite (Welle 4) liest aus dieser Datei" — eine Quelle der Wahrheit).
 - **Auslöser: Tray-Menü + macOS-App-Menü**, Eintrag „**Über Prime Photos**", **ohne** Tastenkürzel —
   genau die zwei Pfade des Originals (`clouddrive_desktop_contextmenu_support_about`), nur mit
@@ -242,7 +242,7 @@ Send-Logs-Knopf, drei Rechtslinks und Copyright. Wir bauen das About **ohne** Am
 Der Login-Item-Schalter „Nach dem Anmelden starten" ist bei erster Nutzung **ein** (PORT-4 baute
 nur den Schalter, Default aus). Begründung: ohne Login-Item läuft nach Neustart/Ausloggen **kein
 Watcher** — die Event-Erkennung würde schlafen (Wasserscan ist nur Sicherheitsnetz). Das Original
-schaltet Autostart beim Onboarding ebenfalls selbst ein (`docs/SPEC_OS_INTEGRATION.md` §3.6).
+schaltet Autostart beim Onboarding ebenfalls selbst ein (`docs/original/SPEC_OS_INTEGRATION.md` §3.6).
 `Config.autostart_enabled:
 Option<bool>` (`None` = nie entschieden ⇒ einmal registrieren + `Some(true)` speichern; `Some(false)`
 = Veto, nie einschalten, ein von Hand angelegter Eintrag wird nicht bekämpft; `Some(true)` ⇒
@@ -261,9 +261,9 @@ fortgeschrieben (Abnahme + Commit je Welle). Kurzform:
 - **Welle 1 — echter Lauf** (kein Code) — Belege im Ledger.
 - **Welle 2 — Konflikt-/Duplikat-Kette abschließen:** 409-Ursache trennen (2.1), „Ersetzen" via
   `PUT /v2/upload/<nodeId>` (2.2), „Nicht noch einmal fragen" pro Ziel persistieren (2.3), Rest nach
-  `docs/SPEC_CONFLICT_OPTIONS.md` (2.4). **Läuft ab 2026-10-15.**
+  `docs/original/SPEC_CONFLICT_OPTIONS.md` (2.4). **Läuft ab 2026-10-15.**
 - **Welle 3 — Progress-/UI-Umbau** (Detail in den Hauptbereich, Klapp-Panel weg, Live-Status)
-  **plus die Layout-Punkte aus `docs/SPEC_UPLOAD_PROGRESS.md` § 7.8** — feste Spaltenköpfe,
+  **plus die Layout-Punkte aus `docs/original/SPEC_UPLOAD_PROGRESS.md` § 7.8** — feste Spaltenköpfe,
   Kürzen + Tooltip, Liste füllt die Höhe, die 300-Zeilen-Kappe entfällt, leerer Zustand zentriert
   (User-Entscheidung 2026-10-15: „3.1–3.4 **plus** §7.8-Layout" als **ein** Paket).
 - **Welle 4 — About / Third-Party-Lizenzen** (Voraussetzung für ein öffentliches Release).
@@ -284,7 +284,7 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
   (`background_sync`: erster Tick 15 min, dann 90 min) ist **nicht** MVP-fertig und entfällt als
   Hauptpfad. Pro überwachtem Backup-Ordner ein OS-Watch über eine plattformneutrale Crate
   (macOS FSEvents / Windows ReadDirectoryChangesW / Linux inotify).
-  Original-Parameter (`docs/SPEC_BACKGROUND_SYNC.md` §6, belegt): FSEvents-Latenz 3 s, Throttle
+  Original-Parameter (`docs/original/SPEC_BACKGROUND_SYNC.md` §6, belegt): FSEvents-Latenz 3 s, Throttle
   100 ms, `Throttle(FiveSeconds)`-Debounce, Poll `BackupWatcherPollIntervalInSeconds` 30 s,
   Re-arm bei Fehler, pausierte Ziele bekommen keinen Watcher.
 - **Reaktion pro Event: „file add / edit per Event abfragen"** (User-Vorgabe) — nur die betroffene
@@ -292,7 +292,7 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
 - **Stat-Check vor dem Hash:** die Skip-Entscheidung fragt zuerst (path, size, mtime) gegen den
   persistierten Index; nur unbekannte/geänderte Dateien werden gelesen und MD5-gehasht. `size` und
   `mtime` stehen in der Tabelle bereits, blieben aber ungenutzt (`src/dedup.rs`). Das MD5 bleibt die
-  Identität (`docs/SPEC_DEDUP.md` §1); der Stat-Treffer ist nur der schnelle Pfad.
+  Identität (`docs/original/SPEC_DEDUP.md` §1); der Stat-Treffer ist nur der schnelle Pfad.
 - **Kaltstart (Event-Ersatz fürs Ausschalten):** beim Start bzw. nach Anmeldung wird **einmal** pro
   Ordner enumeriert und per Stat-Check entschieden, was fehlt. Kein Timer.
 - **Sicherheitsnetz beim Start (User-Entscheidung 2026-10-14):** pro Backup-Ordner wird das
@@ -325,7 +325,7 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
   „file add / edit per event abfragen"); ein `BackupScanIntervalInHours`-Takt.
 - **Offen:** Sicherheitsnetz für verpasste Events (Watcher-Limit, ausgeworfenes Laufwerk,
   Netzwerk-Mount) — als optionaler Schalter, noch nicht entschieden.
-- **Doku:** `docs/SPEC_CHANGE_DETECTION.md` (Clean-Room recon, in Arbeit).
+- **Doku:** `docs/original/SPEC_CHANGE_DETECTION.md` (Clean-Room recon, in Arbeit).
 
 ## Pause, One-Time-Queue & Gesamt-Fortschritt (User-Entscheidung 2026-10-14)
 
@@ -344,7 +344,7 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
   **nach vollständig abgeschlossenem Upload wieder gelöscht**. Damit überlebt die Zeile „Einmalige
   Sicherung" einen Neustart und der Lauf wird fortgesetzt (Guards wie Hintergrund-Sync). Das
   entspricht dem Original, das die Drop-Queue persistiert
-  (`uploads`/`backup`, `schedule_id="ManualUpload"`, `docs/SPEC_ONE_TIME_UPLOAD.md` §6).
+  (`uploads`/`backup`, `schedule_id="ManualUpload"`, `docs/original/SPEC_ONE_TIME_UPLOAD.md` §6).
   **Verworfen:** die alte Regel „Drop-Queue ist absichtlich transient/nie persistiert"
   (`SPEC_ONE_TIME_UPLOAD.md` §10.3) — sie galt nur, bis der User die Parität verlangte.
 - **Gesamt-Fortschritt über alle Uploads** (Wunsch 2026-10-14): genau **eine** aggregierte Anzeige
@@ -392,7 +392,7 @@ Linksklick; außerdem zweifelte er die Zahl „480 fertig" an („passt die Anza
   PNGs in der richtigen Größe") — Raster statt Font, keine neue Abhängigkeit.
   Belege: `assets/icon-more-vert.svg` (Kebab) und `assets/icon-refresh.svg`, Quellen im
   Material-Symbols-Repo (`symbols/web/<name>/materialsymbolsoutlined/<name>_24px.svg`), Hashes und
-  Attribution in `docs/THIRD_PARTY.md`.
+  Attribution in `docs/dev/THIRD_PARTY.md`.
   **Falle, die dabei zu beachten ist:** die Quellen haben **kein** `fill`/`currentColor` (Standard =
   schwarz), der vorhandene Asset-Override `*{color:…}` färbt sie also **nicht** — für die Icon-Gruppe
   greift ein **fill**-Override. Das wird durch einen Test belegt (Raster ist gedeckt und weiß).
@@ -449,7 +449,7 @@ Ledger-Einträge sind nach Umsetzung + Verify gelöscht; **hier** steht das Daue
   Config-Felder (serde-Defaults, alte `config.toml` lädt weiter); Klammerung **1..=8** bleibt.
 - **Zielfeld aus dem Dialog (F9, Welle 5.7).** „Ziel für Datensicherung:" samt „Ändern …" ist
   **entfernt**; das Ziel wird automatisch bestimmt (heute `Pictures/Web`). Die **Original-Spiegelung**
-  (`Backup/<Macname>/<Quellpfad>`) ist ein **eigener Auftrag** nach `docs/SPEC_UPLOAD_DESTINATION.md`.
+  (`Backup/<Macname>/<Quellpfad>`) ist ein **eigener Auftrag** nach `docs/original/SPEC_UPLOAD_DESTINATION.md`.
   **Verworfen:** das Feld behalten und bei `Pictures/Web` bleiben.
 - **„Nichts hochzuladen" ⇒ abgeschlossener Zustand (F3, Welle 5.8, `c6003ff`).** Ein Ordner, der am
   Lauf teilnahm, aber nichts zu tun hatte, wird über `folder_total` **finalisiert** (Done, 0/0); nie
@@ -597,7 +597,7 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
   Duplikat derselben Datei.
 - NFC ist die gemeinsame Form: Windows und die Web-Seite sind NFC, und das Original sendet auf
   Windows ebenfalls NFC (auf macOS roh NFD — es normalisiert gar nicht, belegt in
-  `docs/SPEC_FILENAME_ENCODING.md`).
+  `docs/original/SPEC_FILENAME_ENCODING.md`).
 - **Unverändert bleiben: der lokale Pfad und der MD5-Index.** Die Dedup-Schlüssel sind Pfade, die
   dürfen sich nicht verschieben; die Normalisierung betrifft **nur** den Namen, der an den Server
   geht, und den Anzeigetext.
@@ -609,8 +609,8 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
 
 ## Duplikate & Dateikonflikte: alle Varianten wie das Original (User-Entscheidung 2026-10-14)
 
-Recon: `docs/SPEC_DUPLICATES.md` (Mechanismen, Erkennungsweg, 409, Gap-Tabelle) und
-`docs/SPEC_CONFLICT_OPTIONS.md` (die vollständige Varianten-Liste mit Abnahmekriterium). Kernbefund:
+Recon: `docs/original/SPEC_DUPLICATES.md` (Mechanismen, Erkennungsweg, 409, Gap-Tabelle) und
+`docs/original/SPEC_CONFLICT_OPTIONS.md` (die vollständige Varianten-Liste mit Abnahmekriterium). Kernbefund:
 das Original hat **zwei orthogonale** Mechanismen — **Inhalts-Dedupe** (MD5, **über Pfade hinweg**,
 `GetNodeByMd5`) und **Namenskonflikt** (exakter Name + Parent, **pro Ziel**, global gibt es nichts).
 
@@ -648,8 +648,8 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
     wird er gelöscht** — nicht als „✅ erledigt" stehen gelassen; die Historie lebt in den Commits.
   - **Kein Platz für Doku (User-Regel 2026-10-16):** langes Wissen, Recon, Herleitungen und
     „Erledigt und gelöscht"-Nacherzählungen gehören **nicht** in `AGENTS.todo.md`. Ziel:
-    `docs/` — Clean-Room-Spec zum Thema, `docs/PROTOCOL.md` (Endpunkte),
-    `docs/features/LIVE_ACCEPTANCE.md` (Live-Befunde), `docs/DEV_NOTES.md` (Fallstricke unserer
+    `docs/` — Clean-Room-Spec zum Thema, `docs/protocol/PROTOCOL.md` (Endpunkte),
+    `docs/features/LIVE_ACCEPTANCE.md` (Live-Befunde), `docs/dev/DEV_NOTES.md` (Fallstricke unserer
     Codebase); **Dauer-Entscheidungen** → `AGENTS.md`. **Vor** dem Löschen eines Eintrags wird sein
     nur-dort-Wissen dorthin ausgelagert, erst dann gelöscht.
   - **Niemals gelöscht:** offene Punkte, bewusst Zurückgestelltes und der ganze Abschnitt „Verworfen"
@@ -696,11 +696,11 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
     Application"**-Identität aus dem **Apple Developer Program** (99 $/Jahr) + **Notarisierung**
     (`notarytool`) + Stapling — nur das akzeptieren fremde Macs. **Selbstsigniert/ad-hoc sind nur
     lokal vertraut**; für heruntergeladene Builds gilt der dokumentierte Gatekeeper-Workaround
-    (Rechtsklick→Öffnen bzw. `xattr -dr com.apple.quarantine`, siehe `docs/RELEASE.md`).
+    (Rechtsklick→Öffnen bzw. `xattr -dr com.apple.quarantine`, siehe `docs/dev/RELEASE.md`).
   - Kein `codesign --deep` (von Apple veraltet/abgeraten). `packaging/make-app.sh` nimmt die Identität
     per `CODESIGN_IDENTITY`.
   - Secrets nur in `main`/Tag-Läufen (fork-PRs erhalten keine Secrets). Windows: Authenticode optional
-    (sonst SmartScreen-Hinweis); Linux: keine Signatur. Details: `docs/RELEASE.md`.
+    (sonst SmartScreen-Hinweis); Linux: keine Signatur. Details: `docs/dev/RELEASE.md`.
 - **Spec-first pro Feature (User-Entscheidung 2026-10-13):** Vor jeder Implementierung wird das
   Original-Binary (`/Applications/Amazon Photos.app`: .NET-DLL + Ressourcen, nur lesend) zum
   jeweiligen Feature untersucht — **Status 2026-10-15: es liegt wieder unter `/Applications` und ist
@@ -727,7 +727,7 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
   die zuvor gesicherten Ressourcen-Dumps.
   Das Ergebnis wird als **Clean-room-Spec** in `docs/` festgehalten
   (beobachtetes Verhalten in eigenen Worten/Tabellen, keine verbatimen Code-Auszüge, keine
-  Personendaten) — analog zu `docs/UI_FLOWS.md` / `docs/UI_STATES.md`. Erst danach Umsetzer-Briefing.
+  Personendaten) — analog zu `docs/original/UI_FLOWS.md` / `docs/original/UI_STATES.md`. Erst danach Umsetzer-Briefing.
 - **Build-Verify ist nur grobe Basis:** Bauen → prüfen → committen gilt; Förmlichkeit
   (Runden-Protokoll, Footer-Schreibweise) nach Augenmaß, kein Selbstzweck.
 

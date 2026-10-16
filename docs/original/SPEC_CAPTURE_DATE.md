@@ -103,12 +103,12 @@ verschieben würde (0 Treffer für `OffsetTime`).
 
 **Was serverseitig sichtbar wird** (nicht Client-Verhalten, sondern Beobachtung an der Antwort):
 Die Upload-Antwort eines EXIF-losen Bildes trägt `contentDate` in UTC-`Z`-Form
-(`…T00:00:00.000Z`), siehe `docs/PROTOCOL.md` §2.17; ein Node-`GET` auf ein EXIF-haltiges DNG
-zeigt dagegen eine **volle** Zeit (`…T10:31:53.401Z`, `docs/PROTOCOL.md` §2.10).
+(`…T00:00:00.000Z`), siehe `../protocol/PROTOCOL.md` §2.17; ein Node-`GET` auf ein EXIF-haltiges DNG
+zeigt dagegen eine **volle** Zeit (`…T10:31:53.401Z`, `../protocol/PROTOCOL.md` §2.10).
 
 **Beleg.** Negative Symbolsuche (`OffsetTime`, `TimeZone`, `ToUniversalTime` nahe dem Upload-Pfad);
 `QueryExtensions.ToUrlEncodedQuery` (der einzige Ort, der Datum je serialisieren würde);
-`docs/PROTOCOL.md` §2.10/§2.17 (Live-Mitschnitt, nicht Artefakt).
+`../protocol/PROTOCOL.md` §2.10/§2.17 (Live-Mitschnitt, nicht Artefakt).
 
 **Einordnung.** Client-Seite **belegt** (kein Datum, keine Umrechnung, kein Suffix).
 Ob der Server die EXIF-Lokalzeit naiv oder mit Offset interpretiert → **UNKNOWN** (Serverlogik,
@@ -126,10 +126,10 @@ stellt sie gar nicht. **Präzisiert (2026-10-16):** weil kein Reader-Aufruf `par
 blieb das Feld `nanosecond` ungesetzt ⇒ die von uns **früher** gesendete Sub-Sekunde war **immer**
 `.000`. Der Server dagegen trägt echte dreistellige Sub-Sekunden (Live-Test, §12.1/§12.2). Der
 gesamte EXIF-Pfad und damit auch dieser Wert sind seit `fcbc14d` entfernt — wir senden **kein**
-Datum mehr (§10, §12.5; `docs/SPEC_UPLOAD.md` §2.4).
+Datum mehr (§10, §12.5; `SPEC_UPLOAD.md` §2.4).
 
 **Beleg.** Negative Symbolsuche (`SubSecTime`, `Subsec`, `nanosecond`); `kamadak-exif-0.6.1`
-(`parse_subsec` als einziger Setzer von `nanosecond`, kein Aufrufer); `docs/SPEC_UPLOAD.md` §2.4
+(`parse_subsec` als einziger Setzer von `nanosecond`, kein Aufrufer); `SPEC_UPLOAD.md` §2.4
 (unser Stand).
 
 **Einordnung.** **belegt** für den Client (keine Sub-Sekunden-Übernahme, weil kein Datum).
@@ -154,7 +154,7 @@ EXIF-Sub-Sekunde aus `SubSecTimeOriginal`; ein gesendeter Wert wird wörtlich ge
 Konstruktor-Aufrufstellen des Mehrteil-Pfads und die Mehrteil-URL-Bauer; negative Zuweisungssuche
 über das gesamte Dekomplilat (`FallbackContentDate = ` = 0 Treffer, `.FallbackContentDate` =
 0 Treffer). String-Scan: `fallbackContentDate` + `<FallbackContentDate>k__BackingField` +
-`get_FallbackContentDate` nur in `Amazon Photos.dll`. `docs/openapi.yaml` listet
+`get_FallbackContentDate` nur in `Amazon Photos.dll`. `../protocol/openapi.yaml` listet
 `fallbackContentDate` **nicht** — nur `contentDate` (Beschreibung dort: „Optional; otherwise
 derived from EXIF/file time"). Evidence-ID `ev_ae22f6e9…`.
 
@@ -173,17 +173,17 @@ Mitternachts-Form ist eine **Antwort**-Erscheinung:
 
 | Beobachtung | Quelle | Wert |
 |---|---|---|
-| Upload-Antwort eines **EXIF-losen** PNG | `docs/PROTOCOL.md` §2.17 | `contentDate = 2026-10-13T00:00:00.000Z` (Mitternacht) |
-| Node-`GET` eines **EXIF-haltigen** DNG | `docs/PROTOCOL.md` §2.10 | `contentDate = 2026-05-08T10:31:53.401Z` (volle Zeit) |
+| Upload-Antwort eines **EXIF-losen** PNG | `../protocol/PROTOCOL.md` §2.17 | `contentDate = 2026-10-13T00:00:00.000Z` (Mitternacht) |
+| Node-`GET` eines **EXIF-haltigen** DNG | `../protocol/PROTOCOL.md` §2.10 | `contentDate = 2026-05-08T10:31:53.401Z` (volle Zeit) |
 
 **Schlussfolgerung (aus den zwei Live-Beobachtungen, nicht aus dem Artefakt):** Für ein Bild
 **ohne** auswertbares EXIF liefert der Server den **Datumsanteil mit Tagesgranularität**
-(Mitternacht UTC) — passend zur `contentDate`-Beschreibung in `docs/openapi.yaml` („otherwise
+(Mitternacht UTC) — passend zur `contentDate`-Beschreibung in `../protocol/openapi.yaml` („otherwise
 derived from EXIF/file time"). Für ein Bild **mit** EXIF steht die volle Zeit. Der Client bereitet
 davon **nichts** vor.
 
 **Beleg.** Client-Seite: `ToUrlEncodedQuery`/`UploadRequest`/`UploadFile`-URL-Bau (§7) als
-einzige mögliche Normalisierungsstelle; `docs/PROTOCOL.md` §2.10/§2.17 und `docs/openapi.yaml`
+einzige mögliche Normalisierungsstelle; `../protocol/PROTOCOL.md` §2.10/§2.17 und `../protocol/openapi.yaml`
 (fremde Live-/Spez-Belege, ausdrücklich **nicht** Artefakt).
 
 **Einordnung.** Client normalisiert nichts: **belegt**. Die Deutung „Tag-Normalisierung = Fallback
@@ -243,14 +243,14 @@ ist konstant `"v2"`.
 **Typischer Wert.** Aus dem Client gibt es **keinen** typischen `contentDate`-Wert — das Feld steht
 nicht auf der Leitung. Der Wert, den man von außen sieht, ist der **Server**-Wert der Antwort:
 `2026-10-13T00:00:00.000Z` (EXIF-los, §5) bzw. volle Zeit bei EXIF (§5). Die
-`contentDate`-Beschreibung der Schnittstelle (`docs/openapi.yaml`) nennt das Feld ausdrücklich
+`contentDate`-Beschreibung der Schnittstelle (`../protocol/openapi.yaml`) nennt das Feld ausdrücklich
 optional und server-seitig „otherwise derived from EXIF/file time"; sie kennt **kein**
 `fallbackContentDate`.
 
 **Beleg.** `UploadRequest` (Property-Liste), `SimpleUploader.UploadFile` (Objekt-Initialisierung),
 `CloudDriveService.UploadFile` (URL-Bau `…/upload`), `QueryExtensions.ToUrlEncodedQuery`,
 `InitiateMultipartUploadRequest` + Konstruktor + beide Aufrufstellen + Mehrteil-URL-Bauer,
-`CloudDriveFileMetadata` (Feld-Liste); `docs/openapi.yaml` (Zeilen zu `contentDate`).
+`CloudDriveFileMetadata` (Feld-Liste); `../protocol/openapi.yaml` (Zeilen zu `contentDate`).
 Evidence-ID `ev_ae22f6e9…`.
 
 **Einordnung.** **belegt.**
@@ -273,7 +273,7 @@ Evidence-ID `ev_ae22f6e9…`.
 
 **Ausweichroute (genutzt).** Vollständiger C#-Dekompiliert der Assembly in ein temporäres
 Verzeichnis; alle Aussagen oben stammen aus gezielten Symbol-/String-Greps über dieses Dekompiliert
-plus (für §2/§5) den vorhandenen Live-Notizen `docs/PROTOCOL.md`, `docs/openapi.yaml`. Es wurden
+plus (für §2/§5) den vorhandenen Live-Notizen `../protocol/PROTOCOL.md`, `../protocol/openapi.yaml`. Es wurden
 **keine** Live-Zugriffe gefahren.
 
 **Suchgrenze (bewusst gezogen).** Durchsucht wurden: die Assembly `Amazon Photos.dll`
@@ -353,7 +353,7 @@ Upload abzubrechen, wenn die Datei jünger als 10 Minuten war; der Wert ging als
 **überschreibt** — unsere eigene, potenziell falsche Ermittlung konnte die richtige
 Server-Ableitung also nur verschlechtern. Seit `fcbc14d` („fix(upload): kein contentDate mehr senden
 - der Server leitet das Aufnahmedatum ab") sendet unser Client deshalb **keinen** `contentDate` mehr
-und überlässt die Ableitung dem Server wie das Original; vertieft in `docs/SPEC_UPLOAD.md` §2.4.
+und überlässt die Ableitung dem Server wie das Original; vertieft in `SPEC_UPLOAD.md` §2.4.
 
 ---
 
@@ -383,8 +383,8 @@ und überlässt die Ableitung dem Server wie das Original; vertieft in `docs/SPE
 * **Dateisystem-Zeiten:** `IFileSystemObject` (`CreatedDate`, `ModifiedDate`), `FileSystemObject`,
   `LocalFileSystemObject`.
 * **Thumbnails (Abgrenzung):** `CGImageSource`/`CreateThumbnail` (ImageIO) — nur Thumbnails.
-* **Fremdbelege (nicht Artefakt):** `docs/PROTOCOL.md` §2.10/§2.17, `docs/openapi.yaml`
-  (`contentDate`-Beschreibung), `docs/SPEC_UPLOAD.md` §2.4, `docs/SPEC_DEDUP.md` §1.
+* **Fremdbelege (nicht Artefakt):** `../protocol/PROTOCOL.md` §2.10/§2.17, `../protocol/openapi.yaml`
+  (`contentDate`-Beschreibung), `SPEC_UPLOAD.md` §2.4, `SPEC_DEDUP.md` §1.
 * **Bundle:** `Contents/Info.plist` (`CFBundleShortVersionString` = `11.3.0`,
   `CFBundleVersion` = `36`, `CommitId` = `1d7941b5`), `Contents/MonoBundle/Amazon Photos.dll`
   (SHA-256 `34a616e7…`).
@@ -394,7 +394,7 @@ und überlässt die Ableitung dem Server wie das Original; vertieft in `docs/SPE
 ## 12. Live-Test 2026-10-16: wie `contentDate` tatsächlich entsteht
 
 **Methode.** Eine eigene, in derselben Sitzung aus dem **Refresh-Token** gemintete Cookie-Session
-(der Geräteweg aus `docs/SPEC_LOGIN.md` § 3.8) gegen das echte Konto, ausschließlich gegen
+(der Geräteweg aus `SPEC_LOGIN.md` § 3.8) gegen das echte Konto, ausschließlich gegen
 Testordner/-knoten, die anschließend gelöscht wurden. Schreibtests liefen gegen
 `POST content-<zone>.drive.amazonaws.com/v2/upload` bzw. `PUT /v2/upload/<nodeId>`; der lesende
 Test gegen `…/drive/v1/nodes/<folder>/children`. **Keine Live-Werte** (keine Cookies, keine
@@ -466,11 +466,11 @@ ab: `19:47:36` bleibt `19:47:36Z`, obwohl die Datei `OffsetTimeOriginal = +02:00
 **Schlussfolgerung.** Der `PUT` funktioniert **ohne** `contentDate` und lässt das Datum des Knotens
 **stehen** — die Ersetzung ist ein reiner Inhalts-Tausch, kein neues Aufnahmedatum. (Damit ist die
 seit Welle 2 offene Live-Abnahme des `Replace`-PUT geführt; Beleg in
-`docs/features/LIVE_ACCEPTANCE.md`.)
+`../features/LIVE_ACCEPTANCE.md`.)
 
-### 12.4 Korrektur eines früheren Befunds (§5, `docs/PROTOCOL.md` §2.17)
+### 12.4 Korrektur eines früheren Befunds (§5, `../protocol/PROTOCOL.md` §2.17)
 
-`docs/PROTOCOL.md` §2.17 hielt fest, die Server-Antwort normalisiere `contentDate` „auf Mitternacht
+`../protocol/PROTOCOL.md` §2.17 hielt fest, die Server-Antwort normalisiere `contentDate` „auf Mitternacht
 des Dateidatums". Das ist **nur der EXIF-lose Fall** — die damalige Beobachtung war ein **PNG ohne**
 EXIF. Mit auswertbarem EXIF liefert der Server die **volle** Aufnahmezeit samt Sub-Sekunden
 (Test 1 + 2). Die Mitternachts-Aussage bleibt für **EXIF-lose** Dateien gültig, ist aber **keine**
@@ -480,7 +480,7 @@ allgemeine Normalisierung.
 
 Die Umsetzung ist **geliefert und unabhängig verifiziert** (Commit `fcbc14d`, „fix(upload): kein
 contentDate mehr senden - der Server leitet das Aufnahmedatum ab"); dokumentiert in
-`docs/SPEC_UPLOAD.md` §2.4. Unser Client sendet `contentDate` **gar nicht mehr** und überlässt die
+`SPEC_UPLOAD.md` §2.4. Unser Client sendet `contentDate` **gar nicht mehr** und überlässt die
 Ableitung dem Server. Was der Live-Test dafür stützt:
 
 * **Ein gesendeter Wert gewinnt wörtlich** (Test 2 B): unser eigenes Datum hat die Server-Ableitung

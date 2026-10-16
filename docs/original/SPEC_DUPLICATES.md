@@ -12,7 +12,7 @@ two independent mechanisms — **content dedup** ("Duplikate überspringen") and
 path, the local state and the 409 behaviour, and closes with a gap analysis against
 our own Rust implementation.
 
-**Relationship to `docs/SPEC_DEDUP.md`.** That document is the reference for the
+**Relationship to `SPEC_DEDUP.md`.** That document is the reference for the
 *content-filter taxonomy* and the *MD5-as-identity* mechanics. This document is the
 reference for the *option set* (which choices exist, where, with which default) and
 the *gap analysis*. Where they overlap, `SPEC_DEDUP.md` owns the extension lists.
@@ -71,7 +71,7 @@ write-back from the interactive prompt (§1.3).
   `AppSettings.DefaultPostOnboardingDedupeChecked` = **false**.
 * **Hard interaction:** selecting the content filter `Everything` forces
   `AvoidDuplicates = false` (`ScheduledBackupItem.ContentFilter` setter); dedup only
-  makes sense for photos/videos. This matches `docs/SPEC_DEDUP.md` §3.4.
+  makes sense for photos/videos. This matches `SPEC_DEDUP.md` §3.4.
 * **UI location:** the "Upload-Einstellungen für „<Ordner>" bearbeiten" window —
   `BackupConfigurationViewController.CreateAvoidDuplicatesFieldBelow`, checkbox
   identifier `BackupView_SettingsAvoidDuplicates_Checkbox`. The global default lives
@@ -122,7 +122,7 @@ write-back from the interactive prompt (§1.3).
 ## 2. Detection path
 
 The duplicate identity is the **MD5 of the whole file body** (lower-case hex, 32
-chars), not name/size/date (`docs/SPEC_DEDUP.md` §1). The original asks two different
+chars), not name/size/date (`SPEC_DEDUP.md` §1). The original asks two different
 questions and answers them on two different paths.
 
 ### 2.1 Content dedup — local pre-check, then server
@@ -173,7 +173,7 @@ first two bytes for a JPEG BOM and skips such files via
 `IgnoredDueToPotentialConflictWithiOSUploads`). This is a byte-level heuristic on top
 of the MD5 rule, driven by `FilterOutPotentialDuplicatesFromApplePhotosLibrary` /
 `HasCustomerSeenApplePhotosDuplicatesPrompt`. Details and the prompt strings are in
-`docs/SPEC_DEDUP.md` §2.2/§6.
+`SPEC_DEDUP.md` §2.2/§6.
 
 ---
 
@@ -289,7 +289,7 @@ import path, per-media dedup flags. These are documented boundaries, not oversig
 
 ## 6. UNKNOWN
 
-* **~~Our cookie endpoint's 409 `ErrorType` vocabulary~~ — solved (2026-10-15, live probe).** `DuplicatesConflictError` (content duplicate) and `NameAlreadyExists` (name conflict) both occur on our cookie flow, each with `errorDetails.conflictNodeIds`. `MD5_DUPLICATE` (the original's other spelling) is handled defensively. Split implemented in `src/prime_photos.rs` / `src/upload.rs`, see `docs/SPEC_CONFLICT_OPTIONS.md` §4.2.
+* **~~Our cookie endpoint's 409 `ErrorType` vocabulary~~ — solved (2026-10-15, live probe).** `DuplicatesConflictError` (content duplicate) and `NameAlreadyExists` (name conflict) both occur on our cookie flow, each with `errorDetails.conflictNodeIds`. `MD5_DUPLICATE` (the original's other spelling) is handled defensively. Split implemented in `src/prime_photos.rs` / `src/upload.rs`, see `SPEC_CONFLICT_OPTIONS.md` §4.2.
 * **~~`conflictResolution=OVERWRITE` acceptance.~~ — solved (2026-10-15, live probe).** Our
   endpoint answers **404 with an empty body** to a POST carrying `OVERWRITE`. The value is no
   longer sent: `Replace` posts `NONE` and then overwrites the node the 409 names via
@@ -297,11 +297,11 @@ import path, per-media dedup flags. These are documented boundaries, not oversig
   `fileSize`, `name`, `parentNodeId`, `contentDate`; live-proven: 200, same node id, content
   swapped). A PUT with the bare `?conflictResolution=NONE` — i.e. **without** `fileSize` — is
   rejected with **400 `MissingFileSize`**, so it is *not* the working path —
-  see `docs/SPEC_CONFLICT_OPTIONS.md` §4.
+  see `SPEC_CONFLICT_OPTIONS.md` §4.
 * **Whether `GetNodeByMd5` dedup is gated by any additional server-side flag** beyond
   `UploadType` (e.g. a weblab). Only the client-side gating was observed.
 * **Exact button→outcome mapping of the iOS-dedup prompt** — carried over from
-  `docs/SPEC_DEDUP.md` §9, unchanged here.
+  `SPEC_DEDUP.md` §9, unchanged here.
 * **Search path used (for reproducibility):** `ilspycmd -l c`/`-l e` over
   `Amazon Photos.dll` filtered by `conflict|dedup|duplicate|preupload|uploadtype`;
   full decompile to a scratch tree, then `grep` for `PreUploadCheck`, `GetNodeByMd5`,
@@ -364,6 +364,6 @@ Symbol names, label keys and file locations cited above (no code copies):
   (`FileOutcome`, `resolve_conflict`, `UploadShared.conflict_*`),
   `src/backup_config.rs`, `src/prime_photos.rs` (`conflict_node_id`,
   `CONFLICT_PREFIX`, 409 branch), `src/i18n.rs` (conflict/dedup strings).
-* **Cross-reference:** `docs/SPEC_DEDUP.md` (identity, filter taxonomy, Apple-Photos
-  prompt), `docs/SPEC_ONE_TIME_UPLOAD.md` (manual/one-shot path),
-  `docs/PROTOCOL.md` (upload headers/409), `AGENTS.md` (our deliberate boundaries).
+* **Cross-reference:** `SPEC_DEDUP.md` (identity, filter taxonomy, Apple-Photos
+  prompt), `SPEC_ONE_TIME_UPLOAD.md` (manual/one-shot path),
+  `../protocol/PROTOCOL.md` (upload headers/409), `AGENTS.md` (our deliberate boundaries).

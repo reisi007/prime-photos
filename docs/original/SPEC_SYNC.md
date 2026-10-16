@@ -29,13 +29,13 @@ folders are selected for download (selective sync), how local and cloud changes 
 detected, how the engine turns them into operations, how those operations are
 queued/retried, how failures surface, and which notification/progress surfaces exist.
 
-Not duplicated here: folder scan/filter for *backups* (`docs/SPEC_FOLDERS.md`),
-cadence/watchers/pause of *scheduled backups* (`docs/SPEC_BACKGROUND_SYNC.md`), dedup
-identity (`docs/SPEC_DEDUP.md`), the one-time/drag-drop queue
-(`docs/SPEC_ONE_TIME_UPLOAD.md`), progress/ETA UI (`docs/SPEC_UPLOAD_PROGRESS.md`),
-notifications and menu-bar presence (`docs/SPEC_NOTIFICATIONS.md`). Downloads as a
+Not duplicated here: folder scan/filter for *backups* (`SPEC_FOLDERS.md`),
+cadence/watchers/pause of *scheduled backups* (`SPEC_BACKGROUND_SYNC.md`), dedup
+identity (`SPEC_DEDUP.md`), the one-time/drag-drop queue
+(`SPEC_ONE_TIME_UPLOAD.md`), progress/ETA UI (`SPEC_UPLOAD_PROGRESS.md`),
+notifications and menu-bar presence (`SPEC_NOTIFICATIONS.md`). Downloads as a
 *user-initiated file operation* (Restore tab, trash, file management) belong to
-`docs/SPEC_LIBRARY.md`; this doc covers downloads **as a sync direction** only.
+`SPEC_LIBRARY.md`; this doc covers downloads **as a sync direction** only.
 
 Sync is a **legacy** product core in this build: the original deprecates it and migrates
 users to one-way backup (§3.10). Our port implements the backup direction only, so sync is
@@ -800,24 +800,24 @@ decision discards in favour of the watermark. → **belegt** (our side) / *infer
 
 ## 7. Cross-references
 
-- `docs/UI_FLOWS.md` §6 (Sync tab `Screen.Sync` — legacy), §7 (preferences window, Sync tab),
+- `UI_FLOWS.md` §6 (Sync tab `Screen.Sync` — legacy), §7 (preferences window, Sync tab),
   §11.2 (status precedence), §11.4 (global pause toggle), §12 (dialogs).
-- `docs/UI_STATES.md` (transfer-item row model, status popup rows).
-- `docs/SPEC_BACKGROUND_SYNC.md` — owns scan/cadence/watchers/pause for *scheduled backups*.
+- `UI_STATES.md` (transfer-item row model, status popup rows).
+- `SPEC_BACKGROUND_SYNC.md` — owns scan/cadence/watchers/pause for *scheduled backups*.
   Sync reuses the same watcher patterns (`ObservableFileSystemWatcher`, `RunLoopWorker`) but
   with its own workers and settings; `BackupScanIntervalInHours = 336` is a backup setting,
   not a sync setting.
-- `docs/SPEC_FOLDERS.md` — folder scan/filter contract (`is_supported_image`, `ContentFilter`),
+- `SPEC_FOLDERS.md` — folder scan/filter contract (`is_supported_image`, `ContentFilter`),
   and the mutual exclusion between sync folders and backup folders
   (`…_schedules_syncfolder_warningmessage`).
-- `docs/SPEC_DEDUP.md` — MD5 identity. Sync stores `md5`/`crc` on the record but its *change*
+- `SPEC_DEDUP.md` — MD5 identity. Sync stores `md5`/`crc` on the record but its *change*
   test is size+mtime (§3.7), not a re-hash.
-- `docs/SPEC_ONE_TIME_UPLOAD.md` — the one-time queue is a separate pipeline
+- `SPEC_ONE_TIME_UPLOAD.md` — the one-time queue is a separate pipeline
   (`schedule_id = "ManualUpload"`), not part of sync.
-- `docs/SPEC_LIBRARY.md` — downloads as a user-initiated file operation, trash, album/file
+- `SPEC_LIBRARY.md` — downloads as a user-initiated file operation, trash, album/file
   management; this doc only covers downloads as a sync direction (`DownloadOperation`,
   `…_statuswindow_downloadnotallowedinsyncfolder*`).
-- `docs/SPEC_NOTIFICATIONS.md` — `SyncDeletesNotification` and the status-popup notification
+- `SPEC_NOTIFICATIONS.md` — `SyncDeletesNotification` and the status-popup notification
   message (`…_syncwindow_nonetwork`, `…_syncwindow_serviceunavailable`).
 - Our code: `src/folders.rs` (`FolderStore`, `is_supported_image`, `ConflictResolution`,
   `scan_images`), `src/upload.rs` (`UploadShared`, `upload_worker`, `run_upload`,

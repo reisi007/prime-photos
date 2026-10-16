@@ -31,11 +31,11 @@ This doc owns two things that in the original belong to one navigation target:
    trash, restore-from-trash, delete, patch metadata) versus what it actually *exposes to a user*.
    This distinction is the central finding of §3.12.
 
-Not duplicated here: upload / one-time backup (`docs/SPEC_UPLOAD.md`,
-`docs/SPEC_ONE_TIME_UPLOAD.md`); folder scan, filter and schedule persistence
-(`docs/SPEC_FOLDERS.md`); duplicate identity (`docs/SPEC_DEDUP.md`); bidirectional sync
-(`docs/SPEC_SYNC.md` — **cross-reference only**, that doc owns the sync engine); progress/ETA UI
-(`docs/SPEC_UPLOAD_PROGRESS.md`); notifications (`docs/SPEC_NOTIFICATIONS.md`).
+Not duplicated here: upload / one-time backup (`SPEC_UPLOAD.md`,
+`SPEC_ONE_TIME_UPLOAD.md`); folder scan, filter and schedule persistence
+(`SPEC_FOLDERS.md`); duplicate identity (`SPEC_DEDUP.md`); bidirectional sync
+(`SPEC_SYNC.md` — **cross-reference only**, that doc owns the sync engine); progress/ETA UI
+(`SPEC_UPLOAD_PROGRESS.md`); notifications (`SPEC_NOTIFICATIONS.md`).
 
 ---
 
@@ -510,9 +510,9 @@ rows in the same DB file), so a restart mid-batch keeps the batch identity, and 
 drives the `…_statuswindow_transferingmessage_canceled` summary and the
 `TransferStatusMessageIcon.Canceled` icon. → **belegt**
 
-### 3.15 Our `docs/PROTOCOL.md` records only what the upload flows exercised
+### 3.15 Our `../protocol/PROTOCOL.md` records only what the upload flows exercised
 
-`docs/PROTOCOL.md` documents **only `POST` and `GET`** requests, because the trace behind it was
+`../protocol/PROTOCOL.md` documents **only `POST` and `GET`** requests, because the trace behind it was
 taken exclusively around upload paths (sign-in, `/drive/v1/account/source`, `/auth/token`,
 `/v2/upload`, plus the incidental `/drive/v1/changes` and `/drive/v1/nodes` calls). That is a
 **limit of the recording, not the behaviour of the app**: the assembly demonstrably also issues
@@ -663,7 +663,7 @@ distance; the scope call itself is ours, not a gap to close.
 | Favourites | not present in the desktop client at all | `favorite` exists only as a search-aggregation DTO | `src/prime_photos.rs` (`ResponseAggregations`) |
 | `cloud.db` node cache | full local mirror + `changes` checkpoint worker | **none** — stateless HTTP client | `src/prime_photos.rs` |
 | i18n | `Localizable.strings` | central de/en table | `src/i18n.rs` |
-| `PROTOCOL.md` method coverage | PUT/PATCH/DELETE exist in the app (§3.12) | our `PROTOCOL.md` documents **only POST and GET** — the trace only covered upload flows | `docs/PROTOCOL.md` |
+| `PROTOCOL.md` method coverage | PUT/PATCH/DELETE exist in the app (§3.12) | our `PROTOCOL.md` documents **only POST and GET** — the trace only covered upload flows | `../protocol/PROTOCOL.md` |
 
 ---
 
@@ -705,23 +705,23 @@ distance; the scope call itself is ours, not a gap to close.
 
 ## 7. Cross-references
 
-- `docs/UI_FLOWS.md` §3 (main-window layout and nav menu), §5 (Download tab `Screen.Restore`:
+- `UI_FLOWS.md` §3 (main-window layout and nav menu), §5 (Download tab `Screen.Restore`:
   purpose, entry points, controls), §8.2 (FTUE bulk-download page), §12 (dialogs).
-- `docs/UI_STATES.md` §1 (three-layer state model), §3.2 (status vocabulary), §4.3 (bandwidth &
+- `UI_STATES.md` §1 (three-layer state model), §3.2 (status vocabulary), §4.3 (bandwidth &
   concurrency, incl. the symmetric 8/1 bounds and the `DownloadMaxQueues = 4` device default),
   §5.1 (status popup rows).
-- `docs/SPEC_UPLOAD.md`, `docs/SPEC_ONE_TIME_UPLOAD.md` — upload and one-time queue; the shared
+- `SPEC_UPLOAD.md`, `SPEC_ONE_TIME_UPLOAD.md` — upload and one-time queue; the shared
   `TransferDatabase` / worker / status-row patterns are the mirror image of the ones here.
-- `docs/SPEC_SYNC.md` — owns the sync engine, the only managed caller of `TrashNode`, `PatchNode`
+- `SPEC_SYNC.md` — owns the sync engine, the only managed caller of `TrashNode`, `PatchNode`
   (rename/move) and the purge/delete rules, plus the mass-delete notifications. Cross-reference
   only; nothing here re-specifies sync.
-- `docs/SPEC_FOLDERS.md` — folder scan/filter, schedule persistence, destination resolution.
-- `docs/SPEC_DEDUP.md` — MD5 identity; the original's download "already present" rule (§3.9 step 1)
+- `SPEC_FOLDERS.md` — folder scan/filter, schedule persistence, destination resolution.
+- `SPEC_DEDUP.md` — MD5 identity; the original's download "already present" rule (§3.9 step 1)
   is the same length+MD5 idea applied on the way *down*.
-- `docs/SPEC_BACKGROUND_SYNC.md` — cadence/watchers; the download worker is a separate poll loop
+- `SPEC_BACKGROUND_SYNC.md` — cadence/watchers; the download worker is a separate poll loop
   (`ManualDownloadPollIntervalInSeconds`) and not part of the scheduler.
-- `docs/PROTOCOL.md` — read together with §3.15 (POST/GET only; PUT/PATCH/DELETE exist in the app).
-- `docs/openapi.yaml` — the device/desktop REST surface incl. `/drive/v1/changes`.
+- `../protocol/PROTOCOL.md` — read together with §3.15 (POST/GET only; PUT/PATCH/DELETE exist in the app).
+- `../protocol/openapi.yaml` — the device/desktop REST surface incl. `/drive/v1/changes`.
 - Our code: `src/app.rs` (`enum Page`, `sidebar`, `nav_item`), `src/settings.rs`
   (`bandwidth_settings`, download placeholder), `src/i18n.rs`, `src/prime_photos.rs`
   (`get_album`, `create_album`, `list_albums`, `search`, `ResponseAggregations`), `src/dedup.rs`,

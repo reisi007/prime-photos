@@ -32,11 +32,11 @@ campaignwindow}_*`, `outage_banner_text`, their triggers, gating and dismissal
 semantics; (4) **multiple accounts** — the `folderconflict_*` family ("anderes
 Benutzerkonto") and the per-account state layout.
 
-Not duplicated here: **login / session / cookies** → `docs/SPEC_LOGIN.md`. The general
-notification inventory → `docs/SPEC_NOTIFICATIONS.md`. The window/footer chrome and
-measured sizes hosting these blocks → `docs/UI_FLOWS.md` §3, `docs/UI_STATES.md` §3.
+Not duplicated here: **login / session / cookies** → `SPEC_LOGIN.md`. The general
+notification inventory → `SPEC_NOTIFICATIONS.md`. The window/footer chrome and
+measured sizes hosting these blocks → `UI_FLOWS.md` §3, `UI_STATES.md` §3.
 The upload-side reaction to a spent quota (`TransferError.CloudDriveOverQuota`) →
-`docs/SPEC_UPLOAD_PROGRESS.md`.
+`SPEC_UPLOAD_PROGRESS.md`.
 
 ---
 
@@ -139,7 +139,7 @@ GetAccountUrl(path)` → `GetMetadataUrl("account" + path)`). The quota call is
 different: `CloudDriveAccountService` builds its own CDRS base as
 `scheme://host(metadataUrl) + "/drive/v2"` and appends `/account/quota`, with the
 literal query `?customerId=UNNEEDED`. The three legacy paths match our
-already-captured `docs/PROTOCOL.md` §2.13–§2.15. → **belegt**
+already-captured `../protocol/PROTOCOL.md` §2.13–§2.15. → **belegt**
 
 **Fetch timing (belegt):** on worker start one immediate
 `RefreshAccountInfo(DateTimeOffset.Now)` on a background task; then a repeating tick
@@ -191,7 +191,7 @@ account name is a first-class UI element, not an extra. → **belegt**
 (`Services.CloudDrive.EndpointsProvider`) returns the concatenation
 **`thumbnailServiceUrl + "v1/thumbnail/" + nodeId`**, where `thumbnailServiceUrl` is the
 string the login `GET …/endpoints` call puts into `GetEndpointsResponse` (our capture in
-`docs/PROTOCOL.md` §2.x has `https://thumbnails-photos.amazon.de/`).
+`../protocol/PROTOCOL.md` §2.x has `https://thumbnails-photos.amazon.de/`).
 `CloudDriveService.DownloadThumbnail` collects the parameters into a `NameValueCollection`
 and sets it as the URL query; every key/value is `WebUtility.UrlEncode`d
 (`Helpers.QueryExtensions.ToUrlEncodedQuery`), so a comma is sent as `%2C`. It is a plain
@@ -422,7 +422,7 @@ ShouldDisplayUpsellWindow()`: marketplace `A1VC38T7YXB528` (Japan) with
 feature from §3.2). → **belegt**
 
 Modal geometry, string variants and the cookie-injected manage-storage navigation are
-documented in `docs/UI_FLOWS.md` §10; the only account-conditioned extra branch here
+documented in `UI_FLOWS.md` §10; the only account-conditioned extra branch here
 is the FTUE's `ShouldShowUpsellView => !_accountInfo.HasPlans`. → **belegt**
 
 ### 5.7 The campaign window
@@ -506,7 +506,7 @@ no re-resolution of `CustomerInfo` after sign-out were found. `CustomerInfo` is 
 singleton resolved at startup, and the sign-out helpers remove tokens and restart.
 → *inferred* one signed-in account per process; switching means sign out, restart,
 sign in. Whether the *original* keeps multiple customers' credentials and lets the
-user choose on the login screen is **UNKNOWN** — `docs/SPEC_LOGIN.md` owns that
+user choose on the login screen is **UNKNOWN** — `SPEC_LOGIN.md` owns that
 question.
 
 ---
@@ -643,7 +643,7 @@ switches from *percent used* to *bytes remaining* (default 10 GiB), so a port co
 - **The campaign window's URL and display policy.** `ShowAsync(url)` has no in-assembly
   caller. → **UNKNOWN**
 - **Account switching.** No switch-account UI or second-customer login flow was found;
-  whether the login screen offers a customer choice is owned by `docs/SPEC_LOGIN.md`.
+  whether the login screen offers a customer choice is owned by `SPEC_LOGIN.md`.
   → **UNKNOWN**
 - **The outage regions we would be in.** `OutageSettings` is a downloaded CloudFront
   file; its content for our marketplaces at any given time is runtime data. → **UNKNOWN**
@@ -665,18 +665,18 @@ switches from *percent used* to *bytes remaining* (default 10 GiB), so a port co
 
 ## 10. Cross-references
 
-- `docs/PROTOCOL.md` §2.13 (`GET /drive/v1/account/preferences`), §2.14
+- `../protocol/PROTOCOL.md` §2.13 (`GET /drive/v1/account/preferences`), §2.14
   (`/drive/v1/account/usage`), §2.15 (`/drive/v2/account/quota?customerId=UNNEEDED`) —
   the captured shapes this doc's endpoints match.
-- `docs/SPEC_LOGIN.md` — login/session/cookies, the auth behind every call in §3.2, and
+- `SPEC_LOGIN.md` — login/session/cookies, the auth behind every call in §3.2, and
   the account-switch question (§6.3).
-- `docs/SPEC_NOTIFICATIONS.md` — the full notification inventory; this doc owns only the
+- `SPEC_NOTIFICATIONS.md` — the full notification inventory; this doc owns only the
   quota/over-quota/outage subset and the banner stack in §5.
-- `docs/UI_FLOWS.md` §3.1 (footer + banner stack, measured sizes), §3.3 (the app menu the
+- `UI_FLOWS.md` §3.1 (footer + banner stack, measured sizes), §3.3 (the app menu the
   avatar button pops), §10 (upsell geometry and strings).
-- `docs/UI_STATES.md` §3 (footer storage-block states), §3.8 (`uploads` row states that
+- `UI_STATES.md` §3 (footer storage-block states), §3.8 (`uploads` row states that
   `ResetErroredToWaiting` acts on).
-- `docs/SPEC_UPLOAD_PROGRESS.md` — the transfer side of `TransferError.CloudDriveOverQuota`
+- `SPEC_UPLOAD_PROGRESS.md` — the transfer side of `TransferError.CloudDriveOverQuota`
   and the error-window rows the `QuotaAvailable` event re-queues.
 - Our code: `src/app.rs` (`fn sidebar`, the account block), `src/icons.rs`
   (`draw_flag_badge`), `src/login.rs` (`amazon_domain`, `login_url`, `logout`),

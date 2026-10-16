@@ -140,7 +140,7 @@ pub enum FolderStatus {
 /// default `Replace` (`Config::conflict_resolution_default`).
 ///
 /// Mirrors the original client's four options ("Umgang mit Dateinamenkonflikten",
-/// `docs/SPEC_DEDUP.md` §4.1) and maps onto the wire parameter `conflictResolution`.
+/// `docs/original/SPEC_DEDUP.md` §4.1) and maps onto the wire parameter `conflictResolution`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ConflictResolution {
@@ -192,7 +192,7 @@ impl ConflictResolution {
 }
 
 /// Which content types a backup target uploads, mirroring the original client's
-/// `ContentFilter` flags (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.2:
+/// `ContentFilter` flags (`docs/original/SPEC_CONTENT_FILTER_DESTINATION.md` §2.2:
 /// `None=0`, `Photos=2`, `Videos=4`, `Other=8`, `PhotosAndVideo=6`,
 /// `Everything=14`).
 ///
@@ -270,7 +270,7 @@ pub struct BackupFolder {
     pub conflict_resolution: ConflictResolution,
     /// Which content types this target uploads — the original's two
     /// "Fotos sichern"/"Videos sichern" checkboxes
-    /// (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1/§2.2). Default `Photos`,
+    /// (`docs/original/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1/§2.2). Default `Photos`,
     /// so an existing `folders.toml` without the key keeps uploading photos.
     /// The **effective** filter is still [`is_supported_image`]; this field is
     /// parity + future and must not change behaviour yet.

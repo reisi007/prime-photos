@@ -1,6 +1,6 @@
 //! The **device** login flow (PKCE → authorization code → tokens), rebuilt from
 //! the original's observed behaviour (user decision 2026-10-15,
-//! `docs/SPEC_LOGIN.md` § 3.8 / `docs/PROTOCOL.md` § 2.1).
+//! `docs/original/SPEC_LOGIN.md` § 3.8 / `docs/protocol/PROTOCOL.md` § 2.1).
 //!
 //! This module contains the **pure, testable building blocks only**: PKCE, the
 //! portal URL (in [`crate::urls`]), the request bodies and response parsers, the
@@ -31,7 +31,7 @@ use crate::urls;
 /// Application name the device flow announces to Amazon (recon 2026-10-15).
 ///
 /// The three identity values below are the ones the **original** currently
-/// sends (probed 2026-10-15, `docs/PROTOCOL.md` § 2.1). They only ever appear in
+/// sends (probed 2026-10-15, `docs/protocol/PROTOCOL.md` § 2.1). They only ever appear in
 /// the request **body** of the device path — never in our UI, window title,
 /// bundle name or branding: we speak the original client's protocol on the
 /// wire, we do not present ourselves as an Amazon app (project rule "Name &

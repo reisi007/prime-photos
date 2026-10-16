@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # System-Abhängigkeiten (docs/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
+      # System-Abhängigkeiten (docs/dev/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
       # tray-icon (libayatana-appindicator3), native-tls (System-OpenSSL),
       # pkg-config + C-Compiler (rusqlite "bundled" übersetzt SQLite aus C-Quellen).
       - name: Install Linux system dependencies

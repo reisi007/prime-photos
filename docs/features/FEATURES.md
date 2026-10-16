@@ -5,7 +5,7 @@ piece behaves. This file describes **Prime Photos**, not the original Amazon
 Photos client.
 
 Where behaviour was modelled on the original, the clean-room recon lives in
-`docs/original/`; the wire protocol in `docs/protocol/`; the durable decisions
+`../original/`; the wire protocol in `../protocol/`; the durable decisions
 that govern all of this in `AGENTS.md`.
 
 ---

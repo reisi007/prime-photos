@@ -39,11 +39,11 @@ Amazon servers:
 | Other integration keys (URL scheme, app groups, Dock) | §3.7 |
 
 Explicitly **not** covered here (cross-references only, §7): the status-popup and notification
-surfaces that the status item drives (`docs/SPEC_NOTIFICATIONS.md`), the upload pipeline the
-service and the CLI share (`docs/SPEC_ONE_TIME_UPLOAD.md` §6), background scheduling
-(`docs/SPEC_BACKGROUND_SYNC.md`).
+surfaces that the status item drives (`SPEC_NOTIFICATIONS.md`), the upload pipeline the
+service and the CLI share (`SPEC_ONE_TIME_UPLOAD.md` §6), background scheduling
+(`SPEC_BACKGROUND_SYNC.md`).
 
-A deliberate **overlap boundary** with `docs/SPEC_NOTIFICATIONS.md` §2 exists: that doc owns
+A deliberate **overlap boundary** with `SPEC_NOTIFICATIONS.md` §2 exists: that doc owns
 *what* the menu bar shows (icons, tooltip, badge, click phases) and the LaunchAgent plist
 *template*; this doc owns *how the entry points are registered and what they trigger*, the
 crash-restart policy, and the process/window lifecycle. Where both state a fact, the wording here
@@ -161,7 +161,7 @@ Net effect: **the Services entry creates one scheduled backup per selected folde
 user's default settings — not a one-time upload.** This is the key behavioural fact for the port
 and the intended divergence point (§5). The contrast case is the *argument* path
 (`UploadArgStartupTask`): dragging a folder onto the app icon / `--upload=<path>` starts a
-**one-time** queue instead (`docs/SPEC_ONE_TIME_UPLOAD.md` §6) — belegt, different pipeline.
+**one-time** queue instead (`SPEC_ONE_TIME_UPLOAD.md` §6) — belegt, different pipeline.
 
 **Windows sibling (for our cross-platform mapping).** The managed code also registers a shell
 context-menu entry via a registry key under `Software\Classes\directory\shell\amz_addBackup`
@@ -247,7 +247,7 @@ launchd semantics and was not traced → **UNKNOWN**.
   service (used by the "Fenster schließen" menu item, §3.5). → **belegt**.
 - **Status item** is created once via `NSStatusBar.SystemStatusBar.CreateStatusItem(...)`
   (square length) with a state-dependent template image and the app menu attached; the
-  menu/click/popover behaviour itself is owned by `docs/SPEC_NOTIFICATIONS.md` §2.4–2.5
+  menu/click/popover behaviour itself is owned by `SPEC_NOTIFICATIONS.md` §2.4–2.5
   (two-phase: preloaded minimal menu → full popover). The status item is started through a
   dedicated startup task (`AppIconTask.StartAppIcon`), with a second task switching it to the
   full menu after startup. → **belegt**.
@@ -336,7 +336,7 @@ referencing base string where applicable. "Referenced?" = grep for the managed c
 
 Not re-quoted here (owned by other docs): the status-popup titles
 (`…_contextmenu_manualupload` "Upload und Status", the `…_contextmenu_message_*` state texts,
-`…_contextmenu_uploaderrored`) → `docs/SPEC_NOTIFICATIONS.md` §2.4–3.
+`…_contextmenu_uploaderrored`) → `SPEC_NOTIFICATIONS.md` §2.4–3.
 
 ---
 
@@ -355,7 +355,7 @@ Not re-quoted here (owned by other docs): the status-popup titles
 | Crash relaunch | LaunchAgent (`KeepAlive`, `restart_app.scpt`, `launchctl load/unload`) + worker watchdog (5/15 s) + crash-frequency guard (10/5 min) | **none** — no relaunch mechanism, no crash policy | — |
 | Self-restart | `AppRestart` via `quit_and_restart_app.scpt`, `--source-restart`; wake → `--source-autostart` | **none** | — |
 | Autostart / login item | preference via `osascript` System Events; auto-enabled at onboarding | **partial** — `auto-launch` crate in **LaunchAgent mode** (plist under `~/Library/LaunchAgents`, no AppleScript); settings checkbox "Nach dem Anmelden starten"; *inferred* not auto-enabled at first sign-in (no onboarding default found) | `Cargo.toml` (`auto-launch`), `src/app.rs` (`Autostart`, `build_autostart`), `src/settings.rs` |
-| Notifications | `NSUserNotification` + status item | `notify-rust` run-finished toast → cross-ref | `src/notify.rs`, `docs/SPEC_NOTIFICATIONS.md` |
+| Notifications | `NSUserNotification` + status item | `notify-rust` run-finished toast → cross-ref | `src/notify.rs`, `SPEC_NOTIFICATIONS.md` |
 | Apple Photos import | `NSPhotoLibraryUsageDescription` + entitlement | **out of scope** (MVP excludes the import) | — |
 | Bundle packaging | full `Info.plist` (URL, services, LSUIElement…) | template with identifier/version/category only; `make-app.sh` signs ad-hoc; **app icon copied and `CFBundleIconFile = AppIcon`** (observed) — `Contents/Resources/AppIcon.icns`, built from `assets/logo.svg` (`build.rs` → `target/pp-appicon.iconset` → `iconutil` in `make-app.sh`), **not checked in** | `packaging/Info.plist`, `packaging/make-app.sh` |
 
@@ -394,17 +394,17 @@ Not re-quoted here (owned by other docs): the status-popup titles
 
 ## 7. Cross-references
 
-- `docs/SPEC_NOTIFICATIONS.md` §2.1–2.6 — bundle/process model, LaunchAgent plist template,
+- `SPEC_NOTIFICATIONS.md` §2.1–2.6 — bundle/process model, LaunchAgent plist template,
   login item (osascript), status item icon/tooltip/badge, click phases, close-keeps-running;
   §3 — notification surfaces (not duplicated here).
-- `docs/SPEC_STATUS_DETAIL.md` — the status-popup detail (planned at the time of writing; the
+- `SPEC_STATUS_DETAIL.md` — the status-popup detail (planned at the time of writing; the
   popup content is only cross-referenced here, not specified).
-- `docs/SPEC_ONE_TIME_UPLOAD.md` §6 — the one-time pipeline the `--upload` argument path shares;
+- `SPEC_ONE_TIME_UPLOAD.md` §6 — the one-time pipeline the `--upload` argument path shares;
   §8 — its string table (a drop/service conflict policy is *not* re-specified here).
-- `docs/SPEC_BACKGROUND_SYNC.md` — scheduled cadence/pause that a service-created backup obeys.
-- `docs/UI_FLOWS.md` §2 — the login window chrome (context for the app menu / Edit menu need),
+- `SPEC_BACKGROUND_SYNC.md` — scheduled cadence/pause that a service-created backup obeys.
+- `UI_FLOWS.md` §2 — the login window chrome (context for the app menu / Edit menu need),
   §13 — status-item click question (resolved in `SPEC_NOTIFICATIONS.md` §2.5).
-- `docs/RELEASE.md` — our packaging/signing context (ad-hoc macOS signature).
+- `../dev/RELEASE.md` — our packaging/signing context (ad-hoc macOS signature).
 - Our code: `src/tray.rs` (tray items "Fenster anzeigen" / pause / "Beenden"),
   `src/app_menu.rs` (macOS app + Edit menu), `src/app.rs` (`Autostart`, close-to-tray,
   tray event dispatch), `src/settings.rs` (autostart checkbox), `src/notify.rs`

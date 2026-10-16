@@ -9,7 +9,7 @@
 //! handled by whatever is focused (the WKWebView), exactly like in a native app.
 //!
 //! The app menu additionally carries "Über Prime Photos" as its **first** entry
-//! (original parity, `docs/SPEC_ABOUT.md` §5.2). AppKit's built-in items need no
+//! (original parity, `docs/original/SPEC_ABOUT.md` §5.2). AppKit's built-in items need no
 //! target because the responder chain provides one; a **custom** selector does
 //! not, so that item gets its own target object (see [`AboutTarget`]). The
 //! callback must not touch the UI from inside AppKit — it only sets a flag and

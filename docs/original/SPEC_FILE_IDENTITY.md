@@ -46,7 +46,7 @@ beides gleichzeitig sein. Das Original entscheidet **erst A, dann B** (§6).
 | **Woraus** | Datei-Bytes (der Body), **nicht** Name, Größe oder Datum |
 | **Form** | Lower-case Hexadezimal, 32 Zeichen — **am Code geprüft** (Hex-Konvertierung per `ToHexString` auf dem Hash-Byte-Array) |
 | **Wo verglichen** | (1) lokal am aufgelösten Knoten: das MD5-Feld der Inhaltseigenschaften wird mit dem berechneten Wert verglichen; (2) lokal über Pfade hinweg: `GetNodeByMd5`; (3) serverseitig: 409-Antwort (§4) — **am Code geprüft** (`CloudDriveStorageService.PreUploadCheck`) |
-| **Request-Header** | `x-amzn-file-md5: <hex>` (Wire/Response: `contentProperties.md5`) — weiterhin aus `docs/PROTOCOL.md` |
+| **Request-Header** | `x-amzn-file-md5: <hex>` (Wire/Response: `contentProperties.md5`) — weiterhin aus `../protocol/PROTOCOL.md` |
 | **Vorab-Prüfung** | `CloudDriveStorageService.PreUploadCheck` läuft **vor jedem Netz-Aufruf** gegen den lokalen Knoten-Cache (`cloud.db`). Treffer ⇒ `FileIgnoredPreUploadException` ⇒ **kein Request**, Status `Ignored` — **am Code geprüft** |
 | **PreUploadCheck-Kosten** | Lokale SQLite-Abfragen (`GetNodeByNameAndParentIfExists`, ggf. `GetNodeByMd5`), **kein** Netz. Ein Retry mit dem Grund `RetryReason.Reupdate` kann den MD5-Check unterdrücken (`ShouldSuppressMd5Check`) — **am Code geprüft** (`UploadRecordExtensions.ShouldSuppressMd5Check`) |
 
@@ -149,19 +149,19 @@ Grenze, kein Bug.
 | **Vergleich** | exakt (ordinal) — **am Code geprüft** (`GetNodeByNameAndParentIfExists`: vier Gleichheitsbedingungen — Name, Kind, Elternknoten und Status — mit dem Statuswert `AVAILABLE`) | exakt (Server-Antwort) |
 | **Ebene** | pro Zielordner (`parentNodeId`) | pro Zielordner (Server) |
 | **Lookup** | `GetNodeByNameAndParentIfExists` mit Name, Elternknoten und dem Kind-Typ `FILE` — **lokal** gegen `cloud.db` — **am Code geprüft** | kein lokaler Knoten-Cache; Name-Konflikt erst aus 409 |
-| **Encoding** | **nicht normalisiert** — `fso.Name` raw (NFD auf macOS) — weiterhin aus `docs/SPEC_FILENAME_ENCODING.md` (konsistent mit fehlender Normalisierung in `PreUploadCheck`) | **NFC** normalisiert (`crate::text::nfc`, `src/urls.rs:344`) |
+| **Encoding** | **nicht normalisiert** — `fso.Name` raw (NFD auf macOS) — weiterhin aus `SPEC_FILENAME_ENCODING.md` (konsistent mit fehlender Normalisierung in `PreUploadCheck`) | **NFC** normalisiert (`crate::text::nfc`, `src/urls.rs:344`) |
 
 **Encoding-Folge für das Original:** Zwei Namen, die sich nur in der Unicode-Form
 unterscheiden (NFD vs. NFC), sind für **jeden** Namensvergleich im Client
 **verschiedene** Strings. Nur der Inhalts-MD5 vereinheitlicht sie. Auf macOS sendet
 das Original roh NFD — ein von Windows (NFC) angelegter Knoten wird per Name
-**nicht** gefunden (`docs/SPEC_FILENAME_ENCODING.md` §3).
+**nicht** gefunden (`SPEC_FILENAME_ENCODING.md` §3).
 
 **Encoding-Folge für uns:** Wir normalisieren auf NFC vor dem Upload und beim
 Abfragen. Der Server vergleicht exakt; NFC ist die gemeinsame Form (Windows-Default,
 Web-Seite). **Konsequenz:** Bereits unter NFD hochgeladene Dateien (vom Original)
 werden per Name **nicht** mehr gefunden — der MD5-Dedup fängt identischen Inhalt
-aber weiter ab (`docs/SPEC_FILENAME_ENCODING.md` §5).
+aber weiter ab (`SPEC_FILENAME_ENCODING.md` §5).
 
 ---
 
@@ -196,7 +196,7 @@ greift — **am Code geprüft** (`UploadViaSimpleOrLegacyUploader` +
   sonst `FileUploadNameConflictException` → Dialog nach dem Lauf
 
 `SaveAsNew` schickt `RENAME` **unbedingt** — auch ohne Namenskonflikt und ohne
-Zielknoten (Korrektur in `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §8) —
+Zielknoten (Korrektur in `SPEC_CONTENT_FILTER_DESTINATION.md` §8) —
 **am Code geprüft** (`NameConflictStrategy.GetConflictResolution`).
 
 **Wire-Werte** — **am Code geprüft** (`CloudDriveConflictResolutionExtensions`):
@@ -268,21 +268,21 @@ getrennte Zähler.
 
 ## 10. Korrekturen an vorhandenen Docs (Widersprüche)
 
-1. **`docs/SPEC_DEDUP.md` §2.3 — „the original effectively uses
-   `conflictResolution=NONE`" vs. `docs/SPEC_DUPLICATES.md` §1.2/§4.**
+1. **`SPEC_DEDUP.md` §2.3 — „the original effectively uses
+   `conflictResolution=NONE`" vs. `SPEC_DUPLICATES.md` §1.2/§4.**
    **`SPEC_DUPLICATES.md` hat recht.** Der Original-Client nutzt `NONE` **oder**
    `RENAME` je nach `ConflictResolution`-Politik; bei `SaveAsNew` geht **immer**
    `RENAME` raus (Korrektur in `SPEC_CONTENT_FILTER_DESTINATION.md` §8) — **am
    Code geprüft** (`UploadViaSimpleOrLegacyUploader`). **`SPEC_DEDUP.md` zu
    präzisieren.**
 
-2. **`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §1.3 vs.
-   `docs/SPEC_CONFLICT_OPTIONS.md` §1.3** — beide beschreiben die Reihenfolge.
+2. **`SPEC_CONTENT_FILTER_DESTINATION.md` §1.3 vs.
+   `SPEC_CONFLICT_OPTIONS.md` §1.3** — beide beschreiben die Reihenfolge.
    Ersteres ist präziser (4 Schritten, inkl. „Schritt 2 nicht Toggle-abhängiger
    MD5-Vergleich"). Letzteres fasst zusammen. **Kein echter Widerspruch**, aber
    `SPEC_CONTENT_FILTER_DESTINATION.md` sollte als Referenz gelten.
 
-3. **`docs/SPEC_DEDUP.md` §1 — „The original never compares names or sizes for
+3. **`SPEC_DEDUP.md` §1 — „The original never compares names or sizes for
    dedup, only MD5"** — **beide Docs ungenau.** Korrekt für die
    **Dedup-Entscheidung** (Schritt 2 prüft am aufgelösten Knoten den MD5). Aber:
    der **Name-Lookup** (Schritt 1) ist die *Voraussetzung*, um den Knoten zu
@@ -290,11 +290,11 @@ getrennte Zähler.
    formuliert — sollte heißen: „Der Original vergleicht nie **Grönde** für
    Dedup; der Name dient nur der Knoten-Auflösung."
 
-4. **`docs/SPEC_FILENAME_ENCODING.md`** — vollständig korrekt. Die Behauptung
+4. **`SPEC_FILENAME_ENCODING.md`** — vollständig korrekt. Die Behauptung
    „Original normalisiert nicht" ist konsistent mit `SPEC_DEDUP.md` (kein
    Normalisierung in `PreUploadCheck`).
 
-5. **`docs/SPEC_FOLDERS.md` §3.4** — sagt nichts über Stat-Schnellpfad; korrekt,
+5. **`SPEC_FOLDERS.md` §3.4** — sagt nichts über Stat-Schnellpfad; korrekt,
    denn den gibt es nicht. Unsere Erweiterung ist in `SPEC_FILE_IDENTITY.md` §3.4
    dokumentiert.
 
@@ -368,13 +368,13 @@ getrennte Zähler.
 - `src/urls.rs:374` — `replace_upload_url`
 
 **Specs (verdichtet):**
-- `docs/SPEC_DEDUP.md` §1, §2.2, §4
-- `docs/SPEC_DUPLICATES.md` §2, §3, §4, §5
-- `docs/SPEC_FILENAME_ENCODING.md` §1, §3, §5
-- `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §1.3, §1.4, §8
-- `docs/SPEC_CONFLICT_OPTIONS.md` §0, §1.1, §1.2, §1.3
-- `docs/SPEC_FOLDERS.md` §3.1, §3.4
-- `docs/PROTOCOL.md` §409-Verhalten
+- `SPEC_DEDUP.md` §1, §2.2, §4
+- `SPEC_DUPLICATES.md` §2, §3, §4, §5
+- `SPEC_FILENAME_ENCODING.md` §1, §3, §5
+- `SPEC_CONTENT_FILTER_DESTINATION.md` §1.3, §1.4, §8
+- `SPEC_CONFLICT_OPTIONS.md` §0, §1.1, §1.2, §1.3
+- `SPEC_FOLDERS.md` §3.1, §3.4
+- `../protocol/PROTOCOL.md` §409-Verhalten
 
 ---
 

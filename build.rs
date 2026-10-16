@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 //     assets/logo-small.svg       ⇒ $OUT_DIR/logo-small.png       (256 px)
 //     assets/logo-small-black.svg ⇒ $OUT_DIR/logo-small-black.png (256 px)
 //
-//   UI icons (Material Symbols, Apache-2.0 — see docs/THIRD_PARTY.md): the two
+//   UI icons (Material Symbols, Apache-2.0 — see docs/dev/THIRD_PARTY.md): the two
 //   sidebar navigation icons and the two row-action icons, rastered white so
 //   `src/icons.rs` can tint them to the theme colour at run time. These sources
 //   carry **no** `fill`/`currentColor` (a bare `<path d="…"/>` paints black by

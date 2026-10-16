@@ -37,7 +37,7 @@ umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen
 1. [ ] **Upload-Ziel-Spiegelung wie das Original (offen nach der Spec).** Das Zielfeld ist aus dem
    Dialog **entfernt** (Welle 5.7); die App wählt das Ziel heute automatisch (`Pictures/Web`,
    `src/prime_photos.rs:820-843`). Offen ist der **eigene Auftrag** nach
-   `docs/SPEC_UPLOAD_DESTINATION.md`: die Original-Spiegelung `Backup/<Macname>/<Quellpfad>`
+   `docs/original/SPEC_UPLOAD_DESTINATION.md`: die Original-Spiegelung `Backup/<Macname>/<Quellpfad>`
    (Segmente bei Bedarf anlegen). **Offene Frage:** kann unser Cookie-Host Ordner anlegen
    (`POST /drive/v1/nodes`, `kind: "FOLDER"`)? Bestehende Uploads in `Pictures/Web` bleiben.
 
@@ -55,7 +55,7 @@ umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen
 Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.**
 
 - [ ] **Icons nicht sauber ausgerichtet.** Nav-/Sidebar-Icons an die Doku-Werte ausrichten
-  (Header 64 pt bzw. 104 pt mit Banner, 4 pt Akzentleiste, Nav-Spalte — `docs/UI_FLOWS.md` §3.1);
+  (Header 64 pt bzw. 104 pt mit Banner, 4 pt Akzentleiste, Nav-Spalte — `docs/original/UI_FLOWS.md` §3.1);
   braucht die Maßwerte/Design-Abmachung, kein Rate-Wert. **Stand 2026-10-16: verschoben in den
   manuellen Test** (Schritt 2 der Auftragsliste) — der Recon liefert für die Nav-Zeile keine
   Icon-Maße, und nach Welle 3c sitzen die Icons in einem festen 18×18-Rect. Ein blindes „Ausrichten"
@@ -78,7 +78,7 @@ Ausdrücklich **ohne** Starttermin:
 - Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte Drosselung; Logout während
   laufendem Upload; Nav-Accessibility.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
-  `docs/SPEC_SCOPE_INVENTORY.md`; Sync, Downloads/Restore, Datei-Management, Apple-Photos-Import,
+  `docs/original/SPEC_SCOPE_INVENTORY.md`; Sync, Downloads/Restore, Datei-Management, Apple-Photos-Import,
   Videos, Autoplay, Upsell-/Quota-Banner, Auto-Update, Proxy, ausgeblendete Dateien,
   iOS-Dedupe-Prompt, Crash-Relaunch bleiben draußen.
 
@@ -109,9 +109,9 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 
 ## Offen (Backlog)
 
-- [ ] „Details anzeigen"-Panel (verschachtelt/flach wie das Original, `docs/UI_FLOWS.md` §4.7).
+- [ ] „Details anzeigen"-Panel (verschachtelt/flach wie das Original, `docs/original/UI_FLOWS.md` §4.7).
 - [ ] Menüleisten-Status-Item (Status-Popup: Status, Benachrichtigungen, Speicher, §9).
-- [ ] Videos hochladen (bisher nur Fotos). Offene Fragen dazu: `docs/SPEC_SCOPE_INVENTORY.md`.
+- [ ] Videos hochladen (bisher nur Fotos). Offene Fragen dazu: `docs/original/SPEC_SCOPE_INVENTORY.md`.
 - [ ] „Startseite"/Übersichtsseite? (Strings vorhanden, im Build ungenutzt.)
 - [ ] `.app`-Icon für das Bundle — gehört zu `packaging/make-app.sh`.
 - [ ] Rest aus `Amazon Photos.dll`: Quota-Form, exakter Extension-Filter, Watcher-Intervall,

@@ -690,20 +690,20 @@ deliberate divergence — the `uploads` table grows monotonically with renamed f
 
 ## 9. Cross-references
 
-- `docs/SPEC_BACKGROUND_SYNC.md` — §2 (worker architecture), §3 (scan triggers,
+- `SPEC_BACKGROUND_SYNC.md` — §2 (worker architecture), §3 (scan triggers,
   `ForceScan`), §4 (intervals, `BackupScanIntervalInHours` = 336 h), §6 (filesystem
   watching — this doc supplies the change-detection half), §7 (pause interaction),
   §9 (belegt vs. UNKNOWN).
-- `docs/SPEC_DEDUP.md` — §1 (MD5 identity), §2.2 (`UploadType` eligibility), §4.1
+- `SPEC_DEDUP.md` — §1 (MD5 identity), §2.2 (`UploadType` eligibility), §4.1
   (conflict resolution).
-- `docs/SPEC_FOLDERS.md` — §2 (our scan/filter contract), §3.2 (`ScheduleRecord`,
+- `SPEC_FOLDERS.md` — §2 (our scan/filter contract), §3.2 (`ScheduleRecord`,
   `last_scan_time` / `last_enumeration_time` / `last_deep_scan_time`), §4.1 (gap table).
-- `docs/SPEC_ONE_TIME_UPLOAD.md` — §5.4 (`UploadType.Normal`; a one-time drop has neither
+- `SPEC_ONE_TIME_UPLOAD.md` — §5.4 (`UploadType.Normal`; a one-time drop has neither
   watcher nor scan).
-- `docs/SPEC_UPLOAD.md`, `docs/SPEC_UPLOAD_PROGRESS.md` (what happens after a change is
-  classified), `docs/SPEC_NOTIFICATIONS.md` (status icon; no "backup finished" toast).
-- `docs/UI_FLOWS.md` §4.5–4.7 (backup configuration, auto-upload toggle),
-  `docs/UI_STATES.md` §3/§4 (row states).
+- `SPEC_UPLOAD.md`, `SPEC_UPLOAD_PROGRESS.md` (what happens after a change is
+  classified), `SPEC_NOTIFICATIONS.md` (status icon; no "backup finished" toast).
+- `UI_FLOWS.md` §4.5–4.7 (backup configuration, auto-upload toggle),
+  `UI_STATES.md` §3/§4 (row states).
 - Our code: `src/folders.rs` (`scan_images`, `scan_new_since`, `max_mtime`,
   `is_supported_image`), `src/dedup.rs` (`should_skip`, `stat_matches`,
   `record_upload`, `folder_max_mtime`, `record_folder_scan`), `src/upload.rs`
@@ -725,4 +725,4 @@ No account identifiers, user names, device or serial values, absolute user paths
 verbatim decompiled code are reproduced. German user-facing labels are quoted from the
 shipped `Localizable.strings`. The target application was only read (plist/strings and
 read-only decompilation of the managed assembly) and was never launched, signed or
-modified. `docs/SPEC_CHANGE_DETECTION.md` is the only file created by this task.
+modified. `SPEC_CHANGE_DETECTION.md` is the only file created by this task.

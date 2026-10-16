@@ -73,7 +73,7 @@ fn capped_done(done: usize, total: usize) -> usize {
     done.min(total)
 }
 
-/// Forced pause (user decision 2026-10-16, `docs/SPEC_MISSING_SOURCE.md`): a
+/// Forced pause (user decision 2026-10-16, `docs/original/SPEC_MISSING_SOURCE.md`): a
 /// backup target whose source folder is gone must be **paused**, not errored —
 /// and it must recover by itself once the source is back.
 ///
@@ -135,7 +135,7 @@ fn ambiguous_folder_names(folders: &[folders::BackupFolder]) -> HashSet<String> 
         .collect()
 }
 
-/// Fixed geometry of the live queue table (docs/SPEC_UPLOAD_PROGRESS.md §7.8):
+/// Fixed geometry of the live queue table (docs/original/SPEC_UPLOAD_PROGRESS.md §7.8):
 /// the name column takes the remaining width, folder/size/status are fixed, the
 /// row height is fixed. The header uses the same widths, so both line up.
 const QUEUE_ROW_H: f32 = 20.0;
@@ -219,7 +219,7 @@ fn page_heights(free: f32) -> (f32, f32) {
 
 /// One line of the live queue table: a backup-folder group header or a file row.
 /// Both are drawn at the same fixed height, so `ScrollArea::show_rows` can still
-/// virtualise the list (docs/SPEC_UPLOAD_PROGRESS.md §7.8) — it needs a uniform
+/// virtualise the list (docs/original/SPEC_UPLOAD_PROGRESS.md §7.8) — it needs a uniform
 /// row *height*, not flat data.
 enum QueueRow {
     /// A backup-folder group header: the folder label plus the number of its
@@ -518,7 +518,7 @@ fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
 
 /// Debounce for filesystem events: a burst (a camera import, a folder copy) is
 /// collected and handled once instead of once per file. Mirrors the original's
-/// 5 s folder debounce (`docs/SPEC_CHANGE_DETECTION.md` §4.3).
+/// 5 s folder debounce (`docs/original/SPEC_CHANGE_DETECTION.md` §4.3).
 const WATCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
 /// How often the watcher supervisor re-syncs its watcher set with the persisted
@@ -818,7 +818,7 @@ async fn background_sync_pass(
 /// Fold one watcher event into `paths`: only supported image **files** survive.
 /// A directory is not a photo, and a path that no longer exists is a deletion —
 /// both are ignored, exactly like the original's event type gate
-/// (`docs/SPEC_CHANGE_DETECTION.md` §4.3). Returns `false` on a watcher error so
+/// (`docs/original/SPEC_CHANGE_DETECTION.md` §4.3). Returns `false` on a watcher error so
 /// the caller can re-arm the set. `seen` is the batch's path set, so a path the OS
 /// reports more than once is folded in only once — O(1) per path, no scan of the
 /// list, and no cap: the batch grows as large as the burst.
@@ -1547,7 +1547,7 @@ impl PrimePhotoApp {
     }
 
     /// Modal prompt for a name conflict (`ConflictResolution::Ask`,
-    /// docs/SPEC_DEDUP.md §4.1). Rendered from `update` independently of the
+    /// docs/original/SPEC_DEDUP.md §4.1). Rendered from `update` independently of the
     /// current page; the answer is written into the shared state, where the
     /// waiting worker picks it up. Drawn only while a conflict is pending.
     pub(crate) fn conflict_dialog(&mut self, ctx: &egui::Context) {
@@ -1910,7 +1910,7 @@ impl PrimePhotoApp {
         let mut actions: Vec<FolderAction> = Vec::new();
 
         // Live per-file queue, grouped by backup folder
-        // (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). The grouped structure is
+        // (docs/original/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). The grouped structure is
         // cached and only rebuilt when the run's *file states* changed
         // (`UploadShared::rev`): a 5 000-file run otherwise cloned every file
         // name on every frame, for nothing — only the counters move.
@@ -1953,7 +1953,7 @@ impl PrimePhotoApp {
             self.queue_cache_rev = rev;
         }
         // Live per-file queue as a virtualised table (Welle 3.1,
-        // docs/SPEC_UPLOAD_PROGRESS.md §7.3/§7.8): the queue is permanent
+        // docs/original/SPEC_UPLOAD_PROGRESS.md §7.3/§7.8): the queue is permanent
         // main-area content with fixed columns, no longer collapsed away. The
         // rows stay grouped by backup folder — a background run puts **every**
         // enabled folder into one queue (src/backup.rs, run planning), so without

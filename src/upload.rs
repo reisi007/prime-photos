@@ -23,7 +23,7 @@ use tokio::task::JoinSet;
 
 /// Coarse per-file state of a queue entry. The upload path streams the body and
 /// counts the bytes it hands to the transport, so an `Uploading` row also shows
-/// a real per-file percentage (Befund 11c); `docs/SPEC_UPLOAD_PROGRESS.md` §4.2
+/// a real per-file percentage (Befund 11c); `docs/original/SPEC_UPLOAD_PROGRESS.md` §4.2
 /// described the older whole-file behaviour.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileState {
@@ -45,7 +45,7 @@ pub(crate) struct QueueEntry {
     /// could not be stat'ed — the queue's size column then shows `0 B`.
     pub(crate) size: u64,
     /// Full path, shown as the name column's hover tooltip
-    /// (docs/SPEC_UPLOAD_PROGRESS.md §7.3).
+    /// (docs/original/SPEC_UPLOAD_PROGRESS.md §7.3).
     pub(crate) path: PathBuf,
     /// Bytes handed to the transport for this file so far (Befund 11c), copied
     /// from the upload's progress counter by a 100 ms polling task. `0` before a
@@ -120,7 +120,7 @@ pub(crate) struct UploadShared {
     pub(crate) net_started: Option<Instant>,
     /// Seconds since `net_started` (wall clock). 0 while nothing has finished.
     pub(crate) upload_secs: f64,
-    /// Interactive name-conflict prompt (docs/SPEC_DEDUP.md §4.1): the file name
+    /// Interactive name-conflict prompt (docs/original/SPEC_DEDUP.md §4.1): the file name
     /// the user must decide on. `Some` while the run is waiting for the answer.
     pub(crate) pending_conflict: Option<String>,
     /// The user's answer to `pending_conflict` (`Ignore` / `SaveAsNew` /
@@ -166,7 +166,7 @@ impl UploadShared {
 
 /// The folder card's status word (Variant A, user decision 2026-10-16): our six
 /// `FolderStatus` values mapped onto the original client's row vocabulary
-/// (`docs/SPEC_UPLOAD_PROGRESS.md` §2.2, `docs/UI_FLOWS.md` §11.2), coloured by
+/// (`docs/original/SPEC_UPLOAD_PROGRESS.md` §2.2, `docs/original/UI_FLOWS.md` §11.2), coloured by
 /// the same alert-level logic with our palette
 /// (Success→GREEN, Error→RED, Info→TEAL, Warning→AMBER, Normal→MUTED):
 ///
@@ -201,9 +201,9 @@ pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, Color3
 }
 
 /// Progress fragment of the folder card's second line (Variant A): the
-/// original's Fortschrittszeile (`docs/SPEC_UPLOAD_PROGRESS.md` §2.2) —
+/// original's Fortschrittszeile (`docs/original/SPEC_UPLOAD_PROGRESS.md` §2.2) —
 /// `{0}% hochgeladen` while running, the original's own completion word
-/// `Vollständig` at 100 % (`docs/UI_FLOWS.md` §11.5), `Angehalten bei {0} %`
+/// `Vollständig` at 100 % (`docs/original/UI_FLOWS.md` §11.5), `Angehalten bei {0} %`
 /// while paused. Empty when the target has no total: a never-scanned folder
 /// must not claim any progress (same trap as [`status_text`]'s empty arm).
 pub(crate) fn folder_progress_text(status: FolderStatus, done: usize, total: usize) -> String {
@@ -513,7 +513,7 @@ pub(crate) async fn upload_worker(
         // Stat before reading (user decision 2026-10-14): the recorded
         // `size`/`mtime` decide the cheap skip path, so an already-uploaded,
         // unchanged file is never read or hashed at all. The MD5 stays the
-        // duplicate identity (docs/SPEC_DEDUP.md §1) — a stat hit only
+        // duplicate identity (docs/original/SPEC_DEDUP.md §1) — a stat hit only
         // short-circuits files whose metadata matches exactly what was
         // recorded for this path. An unknown mtime (0) never hits.
         let meta = std::fs::metadata(&path);
@@ -576,7 +576,7 @@ pub(crate) async fn upload_worker(
         }
 
         // Read the file once and compute the MD5 up front: the MD5 is the
-        // duplicate identity (docs/SPEC_DEDUP.md §1) and the bytes are handed to
+        // duplicate identity (docs/original/SPEC_DEDUP.md §1) and the bytes are handed to
         // upload_picture so the file is never read twice.
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
@@ -689,7 +689,7 @@ pub(crate) async fn upload_worker(
         // — both contradict "never waste bandwidth". The pause check therefore
         // happens at the top of the loop only, not by racing this future.
         //
-        // Conflict policy (docs/SPEC_DEDUP.md §4.1): a 409 is reported by the
+        // Conflict policy (docs/original/SPEC_DEDUP.md §4.1): a 409 is reported by the
         // engine. `Ignore` maps it to "already there" (finished, no bytes); `Ask`
         // waits for one user decision per file (with an optional "don't ask
         // again" for the rest of the run). `SaveAsNew` (`RENAME`) still yields a

@@ -5,7 +5,7 @@
 //! The loaded page is the **device** portal URL ([`crate::urls::auth_portal_url`],
 //! PKCE); a navigation handler captures the `openid.oa2.authorization_code` when
 //! Amazon redirects to an `/ap/…` URL and **ignores** that navigation (the
-//! original does the same, `docs/SPEC_LOGIN.md` § 3.4). The code is redeemed
+//! original does the same, `docs/original/SPEC_LOGIN.md` § 3.4). The code is redeemed
 //! (`register_device`), the refresh token stored in the OS keychain
 //! (`KeyringTokenStore`) and web cookies fetched for the unchanged,
 //! cookie-based upload engine.
@@ -38,7 +38,7 @@ thread_local! {
 
 /// The **sign-in completion signal** of the device flow: the authorization code
 /// carried as `openid.oa2.authorization_code` on a `/ap/` navigation (original
-/// `LoginWebPolicyDelegate`, `docs/SPEC_LOGIN.md` § 3.4).
+/// `LoginWebPolicyDelegate`, `docs/original/SPEC_LOGIN.md` § 3.4).
 ///
 /// Only `/ap/` URLs are considered (the portal's `return_to` is
 /// `/ap/maplanding`); the raw value is taken up to the next `&` — the original
@@ -116,7 +116,7 @@ impl WebviewLogin {
     /// A navigation handler watches for the device flow's completion signal: on
     /// an `/ap/` URL carrying `openid.oa2.authorization_code` the code is stored
     /// and the navigation is **ignored** (`false`), exactly like the original
-    /// (`docs/SPEC_LOGIN.md` § 3.4). Every other navigation is used.
+    /// (`docs/original/SPEC_LOGIN.md` § 3.4). Every other navigation is used.
     pub fn start<W: HasWindowHandle>(&mut self, window: &W, url: &str, bounds: Rect) {
         if self.running {
             return;
@@ -141,7 +141,7 @@ impl WebviewLogin {
             Ok(wv) => {
                 // Clear the browser storage first, then load: every sign-in
                 // starts without the previous session's state (original
-                // behaviour, docs/SPEC_LOGIN.md § 3.3).
+                // behaviour, docs/original/SPEC_LOGIN.md § 3.3).
                 if let Err(e) = wv.clear_all_browsing_data() {
                     log::warn!("Login-Speicher konnte nicht geleert werden: {e}");
                 }
@@ -563,7 +563,7 @@ impl PrimePhotoApp {
     /// The URL is the **device** portal (PKCE), not the old web sign-in: our UI
     /// (header, marketplace picker, "Abbrechen") is unchanged, only the
     /// parameters the page receives follow the original's desktop flow
-    /// (`docs/SPEC_LOGIN.md` § 3.3).
+    /// (`docs/original/SPEC_LOGIN.md` § 3.3).
     pub(crate) fn begin_login(&mut self, frame: &eframe::Frame, ctx: &egui::Context) {
         if self.login.running {
             return;

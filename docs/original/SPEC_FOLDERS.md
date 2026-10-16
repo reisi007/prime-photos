@@ -5,9 +5,9 @@ behaviour, mapped against the official Amazon Photos desktop client's *backup-sc
 model. Applies to committed state only (`git show HEAD:src/folders.rs`,
 `HEAD:src/main.rs` scan/start/finalize sections); working-tree edits are ignored.
 Extension *taxonomy* (which extensions fall into Photos / Videos / Other) is owned by
-`docs/SPEC_DEDUP.md`; values are only summarised here (canonical owner is that doc).
+`SPEC_DEDUP.md`; values are only summarised here (canonical owner is that doc).
 
-Companion docs: `docs/UI_FLOWS.md` (§4.5–§4.7), `docs/UI_STATES.md` (§3.2–§3.5).
+Companion docs: `UI_FLOWS.md` (§4.5–§4.7), `UI_STATES.md` (§3.2–§3.5).
 
 ## 1. Scope and sources
 
@@ -60,7 +60,7 @@ Notes:
   lower-cased filename **extension** loaded from an embedded JSON resource
   (`supported-content-types.json`), and `.xmp` is categorised there as
   `IMAGE_SIDECAR` / `VIDEO_SIDECAR` (sidecar group; JSON keys
-  `image_sidecar`/`video_sidecar`). See §3.4 and `docs/SPEC_DEDUP.md` for the
+  `image_sidecar`/`video_sidecar`). See §3.4 and `SPEC_DEDUP.md` for the
   full taxonomy.
 
 ### 2.2 Recursive scan (`scan_images`)
@@ -229,7 +229,7 @@ Drive/<account>-schedules.db`, table `schedules` (unique index
 
 A parallel `backup`/`uploads` table set plus `cloud.db` (node cache) is used for
 reconciliation and transfer state; `sync.db` etc. exist for other domains. These are
-not reproduced here — see `docs/UI_STATES.md` §3.8.
+not reproduced here — see `UI_STATES.md` §3.8.
 
 ### 3.2 ScheduleRecord (service object)
 
@@ -274,7 +274,7 @@ German is not observed in `Localizable.strings` (the enum's hard-coded fallback
 
 ### 3.4 Content filter, dedupe and conflict resolution
 
-`ContentFilter` bitmask (observed values; canonical owner is `docs/SPEC_DEDUP.md`
+`ContentFilter` bitmask (observed values; canonical owner is `SPEC_DEDUP.md`
 §3.1 — values summarised here for context):
 
 | Flag | Value | Meaning |
@@ -446,7 +446,7 @@ Relevant to `AGENTS.todo.md`:
 - **`enabled` flag** is persisted yet the flow starts uploads on creation
   regardless of it.
 - Extension taxonomy is **not** ours to define here — see
-  `docs/SPEC_DEDUP.md` (ContentFilter groups, sidecar lists, dedupe IDs).
+  `SPEC_DEDUP.md` (ContentFilter groups, sidecar lists, dedupe IDs).
 
 ## 7. Open questions
 

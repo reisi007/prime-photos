@@ -29,21 +29,21 @@ mechanic and its trigger; and the **About window** with its legal links (Terms o
 Notice, Third-Party Licenses) and log-sending.
 
 Split of responsibilities (not duplicated here):
-- **Login / sign-out / cookie capture / de-registration** → `docs/SPEC_LOGIN.md` (this doc only
+- **Login / sign-out / cookie capture / de-registration** → `SPEC_LOGIN.md` (this doc only
   records that the general tab hosts the sign-out button and the autostart switch).
-- **Backup cadence, watchers, pause, per-schedule records** → `docs/SPEC_BACKGROUND_SYNC.md`
+- **Backup cadence, watchers, pause, per-schedule records** → `SPEC_BACKGROUND_SYNC.md`
   (here only the *defaults stored in preferences*: `BackupItemInterval`, `ContentFilter`,
   dedupe default, and the `BackupScanIntervalInHours` constant).
-- **Progress / transfer UI / states** → `docs/SPEC_UPLOAD_PROGRESS.md`.
-- **Dedup identity + eligibility** → `docs/SPEC_DEDUP.md` (this doc covers the preferences
+- **Progress / transfer UI / states** → `SPEC_UPLOAD_PROGRESS.md`.
+- **Dedup identity + eligibility** → `SPEC_DEDUP.md` (this doc covers the preferences
   switches `EnableDeduplicationForPhotosAndVideos` /
   `FilterOutPotentialDuplicatesFromApplePhotosLibrary` and their persistency).
-- **Folder scan filter** → `docs/SPEC_FOLDERS.md` (this doc covers the
+- **Folder scan filter** → `SPEC_FOLDERS.md` (this doc covers the
   `ExcludeHiddenFilesAndFolders` switch that feeds it).
-- **Notifications** → `docs/SPEC_NOTIFICATIONS.md` (this doc covers the preferences switches
+- **Notifications** → `SPEC_NOTIFICATIONS.md` (this doc covers the preferences switches
   `ShowNotifications` / `EnableNotificationBadging` and the update notifications' text).
-- **One-time drop queue** → `docs/SPEC_ONE_TIME_UPLOAD.md`.
-- **Upload protocol/API** → `docs/SPEC_UPLOAD.md`, `docs/PROTOCOL.md`.
+- **One-time drop queue** → `SPEC_ONE_TIME_UPLOAD.md`.
+- **Upload protocol/API** → `SPEC_UPLOAD.md`, `../protocol/PROTOCOL.md`.
 
 Deliberately **out of scope** here: the sync tab's folder selection UI internals (the original's
 selective-sync tree), the upsell/quota windows, onboarding, and the diagnostics window — none of
@@ -99,8 +99,8 @@ through `AutoGet`/`AutoSet` extension helpers whose key is the **property name**
 key equals the C# property name verbatim. → **belegt**
 
 Two further stores exist but are outside this doc: the backup/upload SQLite DBs
-(`Database.*`, documented in `docs/SPEC_BACKGROUND_SYNC.md` §6 / `docs/SPEC_UPLOAD_PROGRESS.md`)
-and the cookies (→ `docs/SPEC_LOGIN.md`). → **belegt**
+(`Database.*`, documented in `SPEC_BACKGROUND_SYNC.md` §6 / `SPEC_UPLOAD_PROGRESS.md`)
+and the cookies (→ `SPEC_LOGIN.md`). → **belegt**
 
 ### 3.1 General tab ("Allgemeines") — account block
 
@@ -132,7 +132,7 @@ The general tab has **no language selector** and **no notifications checkbox** i
 `ShowNotifications` exists as a customer setting (default `true`) but is shown only in an
 unreferenced legacy key (`…_preferences_enable_notifications`, §4) — *inferred*: the
 notifications master switch was dropped from the UI when the popup status/notification centre took
-over (see `docs/SPEC_NOTIFICATIONS.md`); the key is still written by the save path
+over (see `SPEC_NOTIFICATIONS.md`); the key is still written by the save path
 (`_customerSettings.ShowNotifications = viewModel.NotificationsEnabled`) but no view binds it, so
 it always saves its loaded value. → **belegt** (no `ShowNotifications` view binding exists) /
 *inferred* (why)
@@ -235,7 +235,7 @@ confirmation "Datensicherung zurücksetzen?") and its reset-confirmation strings
 `Initialize()` **never adds it** to the tab control (grep: the constructor creates it,
 `View.TabControl.Add` is called only for general/sync/bandwidth/proxy). → *inferred* dead (the
 absence of the `Add` call is **belegt**). The per-backup interval/content-filter defaults that
-this tab would own live in the backup *configuration* window instead (`docs/SPEC_BACKGROUND_SYNC.md`),
+this tab would own live in the backup *configuration* window instead (`SPEC_BACKGROUND_SYNC.md`),
 and the preferences save path writes their defaults (§3.7). → **belegt** / *inferred*
 
 ### 3.7 Apply / save semantics (the OK path)
@@ -291,7 +291,7 @@ are the property names. None appears in the preferences UI except where §3.3 sa
 | `DefaultAutoUpdateAfterTimeInSeconds` | **1800** (30 min) | auto-update grace period (§3.10) |
 | `NotifyForUpdateInSeconds` | 12,960,000 (15 days) | minimum gap between "update available" notifications |
 | `MaxNumberOfConcurrentNetworkConnections` | `max(2, cores*12)` | ServicePoint tuning at startup |
-| `CloudDriveServiceUploadMinTransferBytesPerSecond` + `MaxConsecutiveSlowUploadEvents` | 500 / 5 | slow-transfer warning threshold (surfaced in the UI as "slow upload" notices, `docs/SPEC_UPLOAD_PROGRESS.md`) |
+| `CloudDriveServiceUploadMinTransferBytesPerSecond` + `MaxConsecutiveSlowUploadEvents` | 500 / 5 | slow-transfer warning threshold (surfaced in the UI as "slow upload" notices, `SPEC_UPLOAD_PROGRESS.md`) |
 
 **On "UploadMaxPartSize / chunk size":** there is **no** client-side part-size setting. The
 multipart upload path is fully **server-dictated**: the initiate call returns `partSize`
@@ -330,7 +330,7 @@ Mechanic, in order:
    no update, a health metric only. → **belegt**
 4. **Compatibility gate.** `ICompatibilityChecker.CheckCompatibility()` returns a reason; `None`
    → "compatible update" path; anything else (e.g. unsupported OS) → an
-   `IncompatibleUpdateAvailableEvent` (separate dialog flow, `docs/SPEC_NOTIFICATIONS.md`
+   `IncompatibleUpdateAvailableEvent` (separate dialog flow, `SPEC_NOTIFICATIONS.md`
    territory). The supported-OS floor is also in app settings
    (`MinimumSupportedMacVersion` = 10.10.0; the Info.plist declares `LSMinimumSystemVersion`
    10.15 for this build). → **belegt**
@@ -490,7 +490,7 @@ site (searched in the full decompilation dump). → **belegt**
 | `…stubupdater_notfound_title` | "Neue Version verfügbar" | yes (`AppUpdateService` failure dialog) |
 | `…stubupdater_notfound_message` | "Eine neue Version von Amazon Photos wurde veröffentlicht. Klicken Sie auf \"OK\", um die Downloadseite zu öffnen." | yes |
 | `…dotnet_update_information` | "Das ausstehende Anwendungs-Update erfordert eine neuere Version von Microsoft .NET…" | **no** (unreferenced; Mono/.NET-update path not wired in this build) |
-| `…preferences_signout_dialog_title` | "Wollen Sie sich von diesem Gerät abmelden?" | **no** (sign-out confirmation lives in the deregistration flow, `docs/SPEC_LOGIN.md`) |
+| `…preferences_signout_dialog_title` | "Wollen Sie sich von diesem Gerät abmelden?" | **no** (sign-out confirmation lives in the deregistration flow, `SPEC_LOGIN.md`) |
 
 Rows marked **no** are defined but not referenced by the managed assembly — *inferred* dead, or
 rendered by a nib/legacy layout outside this assembly. Note the corrections this table forces:
@@ -525,11 +525,11 @@ lives in About under `…send_logs_button_text`, **not** `…preferences_send_lo
 | Slow-Mode (temporary concurrency=1) | not present as such — the original has no "one file at a time" toggle; concurrency is a slider | `slow_mode` checkbox, **run-scoped, reset on restart** | `src/app.rs` (`slow_mode`), `src/backup.rs` (`if self.slow_mode { 1 }`) |
 | Persistence format | `settings.json` (flat JSON, hot reload via `FileSystemWatcher`) + `app-settings.json` (server, 1 h refresh) + OS login items + SQLite | `config.toml` (TOML, explicit save) + `folders.toml` + SQLite (dedup index) | `src/config.rs`, `src/folders.rs`, `src/dedup.rs` |
 | Live reload of settings | yes — `Changed` observable, subscribers re-read (queues, throttle) without restart | no — settings are read at run start; `Save` writes the file, a run takes the current values | `src/settings.rs` (`save_config`), `src/backup.rs` |
-| Auto-update | CloudFront manifests, rollout gate, 30-min grace, stub installer `--quiet/--unattended`, failure dialog | **none** (GitHub Release + manual build per AGENTS.md; `docs/RELEASE.md`) | — (deliberate: different distribution channel) |
+| Auto-update | CloudFront manifests, rollout gate, 30-min grace, stub installer `--quiet/--unattended`, failure dialog | **none** (GitHub Release + manual build per AGENTS.md; `../dev/RELEASE.md`) | — (deliberate: different distribution channel) |
 | About window | sheet with version, device serial, send-logs, 3 legal links, copyright | **none** — no About dialog, no third-party-license notice; marked "release-relevant" in AGENTS.md | — (gap) |
 | Legal links | ToS / Privacy / Third-Party-Licenses → web URLs | none | — (gap) |
 | Send-logs | command + spinner + success/failure dialogs | log facade exists in-app (`UploadShared::log`) but no export/send | `src/upload.rs` |
-| Update notification texts | toast "Aktualisierung in {0} Minuten" + popup | n/a | `docs/SPEC_NOTIFICATIONS.md` |
+| Update notification texts | toast "Aktualisierung in {0} Minuten" + popup | n/a | `SPEC_NOTIFICATIONS.md` |
 
 Two deliberate divergences worth restating (per AGENTS.md, so they are not "fixed" by accident):
 (1) the **language override** — the original has none; (2) the **persistent pause** and the
@@ -575,23 +575,23 @@ is saved-but-unbound. → **belegt**
 
 ## 7) Cross-references
 
-- `docs/SPEC_LOGIN.md` — sign-out button/deregistration, the Login flow the preferences account
+- `SPEC_LOGIN.md` — sign-out button/deregistration, the Login flow the preferences account
   block departs from.
-- `docs/SPEC_BACKGROUND_SYNC.md` — backup cadence (`BackupScanIntervalInHours` = 336 h,
+- `SPEC_BACKGROUND_SYNC.md` — backup cadence (`BackupScanIntervalInHours` = 336 h,
   `BackupScannerCheckIntervalInHours`, `BackupDeepScanIntervalInHours`, `BackupWatcherPollIntervalInSeconds`),
   pause, per-schedule records, and the per-backup window that owns interval/content-filter.
-- `docs/SPEC_UPLOAD_PROGRESS.md` — transfer UI, queue states, slow-transfer thresholds
+- `SPEC_UPLOAD_PROGRESS.md` — transfer UI, queue states, slow-transfer thresholds
   (`CloudDriveServiceUploadMinTransferBytesPerSecond`).
-- `docs/SPEC_NOTIFICATIONS.md` — the update notification texts and the popup centre (the
+- `SPEC_NOTIFICATIONS.md` — the update notification texts and the popup centre (the
   `ShowNotifications` question, §6).
-- `docs/SPEC_DEDUP.md` — MD5 identity and the `EnableDeduplicationForPhotosAndVideos` /
+- `SPEC_DEDUP.md` — MD5 identity and the `EnableDeduplicationForPhotosAndVideos` /
   `FilterOutPotentialDuplicatesFromApplePhotosLibrary` switches.
-- `docs/SPEC_FOLDERS.md` — the scan that consumes `ExcludeHiddenFilesAndFolders`.
-- `docs/SPEC_ONE_TIME_UPLOAD.md` — the manual-upload queue whose worker count comes from
+- `SPEC_FOLDERS.md` — the scan that consumes `ExcludeHiddenFilesAndFolders`.
+- `SPEC_ONE_TIME_UPLOAD.md` — the manual-upload queue whose worker count comes from
   `UploadQueues`.
-- `docs/UI_FLOWS.md` / `docs/UI_STATES.md` — the clean-room UI spec the port's settings page is
+- `UI_FLOWS.md` / `UI_STATES.md` — the clean-room UI spec the port's settings page is
   modelled on.
-- `docs/RELEASE.md` — why our port has no auto-update (different distribution channel).
+- `../dev/RELEASE.md` — why our port has no auto-update (different distribution channel).
 - Our code: `src/config.rs` (`Config`, `notifications`, `language`, `background_sync`),
   `src/settings.rs` (`settings_ui`, `general_settings`, `bandwidth_settings`),
   `src/app.rs` (`PrimePhotoApp` fields, `set_autostart`, `save_config`), `src/upload.rs`

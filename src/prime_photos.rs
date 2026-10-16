@@ -339,7 +339,7 @@ const UPLOAD_CHUNK_BYTES: usize = 64 * 1024;
 /// Streams a file's bytes in [`UPLOAD_CHUNK_BYTES`] chunks and adds each chunk's
 /// length to `counter` as it is polled — i.e. as the transport takes it. This is
 /// what turns the cookie upload path from "whole file, no byte-level progress"
-/// (`docs/SPEC_UPLOAD_PROGRESS.md` §4.2) into a per-file percentage: the caller
+/// (`docs/original/SPEC_UPLOAD_PROGRESS.md` §4.2) into a per-file percentage: the caller
 /// hands in a shared counter, the worker's polling task copies it into the queue
 /// entry every 100 ms.
 ///
@@ -405,7 +405,7 @@ fn upload_body(
 }
 
 /// Marker prefix for an upload conflict reported by the upload endpoint (HTTP 409,
-/// `docs/SPEC_DEDUP.md` §4.1). The upload worker resolves it per the folder's
+/// `docs/original/SPEC_DEDUP.md` §4.1). The upload worker resolves it per the folder's
 /// policy — skip for `Ignore`, ask the user per file for `Ask`.
 pub(crate) const CONFLICT_PREFIX: &str = "\u{1}conflict\u{1}";
 /// Separator between the server's `errorCode` and the node id inside the
@@ -601,7 +601,7 @@ struct ResponsePreferences {
 }
 
 /// Avatar view box in pixels (the original's `AvatarViewBoxSize = 60`, see
-/// `docs/SPEC_ACCOUNT_BILLING.md` §3.4). Also used by
+/// `docs/original/SPEC_ACCOUNT_BILLING.md` §3.4). Also used by
 /// [`crate::urls::thumbnail_url`].
 pub(crate) const AVATAR_VIEW_BOX: u32 = 60;
 
@@ -1172,7 +1172,7 @@ impl PrimePhotos {
                 // An upload conflict (HTTP 409). Who resolves it is the
                 // caller's business: `upload_worker` treats it as "already
                 // there" for `Ignore`, or asks the user per file for `Ask`
-                // (docs/SPEC_DEDUP.md §4.1). The marker carries the server's
+                // (docs/original/SPEC_DEDUP.md §4.1). The marker carries the server's
                 // `errorCode` — so the worker can tell a content duplicate
                 // (`DuplicatesConflictError`) from a name conflict
                 // (`NameAlreadyExists`) — plus the existing node id.
@@ -1409,7 +1409,7 @@ impl PrimePhotos {
     }
 
     /// Fetch the signed-in customer's display name and avatar node id from the
-    /// account preferences endpoint (`docs/SPEC_ACCOUNT_BILLING.md` §3.4).
+    /// account preferences endpoint (`docs/original/SPEC_ACCOUNT_BILLING.md` §3.4).
     ///
     /// `Ok(None)` when the response carries no usable name **or** no avatar
     /// node id (missing, empty, whitespace-only) — never panics, and a missing
@@ -1444,7 +1444,7 @@ impl PrimePhotos {
     }
 
     /// Download the 60×60 avatar thumbnail as **direct JPEG bytes** from the
-    /// thumbnail service (`docs/SPEC_ACCOUNT_BILLING.md` §3.4). The
+    /// thumbnail service (`docs/original/SPEC_ACCOUNT_BILLING.md` §3.4). The
     /// device-specific `x-amz-access-token` the original sends is deliberately
     /// **not** used — our cookie headers are sufficient here and the token
     /// would make the request fail with 401.
@@ -1875,7 +1875,7 @@ mod tests {
     }
 
     /// No regression against the documented full response
-    /// (`docs/PROTOCOL.md` §2.17): every field our shape knows is still read and
+    /// (`docs/protocol/PROTOCOL.md` §2.17): every field our shape knows is still read and
     /// still lands in the right place. The example carries a `contentDate`
     /// inside `contentProperties`, which our shape does not model — serde
     /// ignores unknown fields, which is wanted here.

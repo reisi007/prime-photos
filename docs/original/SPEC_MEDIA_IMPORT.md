@@ -2,7 +2,7 @@
 
 Behavioural specification of the **original** Amazon Photos desktop client's photo-library import
 path and its media (photos vs. videos vs. non-media) handling, plus the mapping onto this port. As
-with `docs/SPEC_ONE_TIME_UPLOAD.md`, the behaviour below is **reverse-engineered from the shipped
+with `SPEC_ONE_TIME_UPLOAD.md`, the behaviour below is **reverse-engineered from the shipped
 managed assembly**, not inferred from string tables alone.
 
 This document is **clean-room**: it records *observed behaviour* in our own words and tables. It
@@ -27,11 +27,11 @@ the iOS duplicate prompt (`iosdedupeprompt_*`), the video-vs-photo upload differ
 handling of non-photo files, and the Autoplay/`mediaimport_autoplayaction` trace.
 
 **Not owned here** (cross-referenced): drag & drop and the one-time queue row →
-`docs/SPEC_ONE_TIME_UPLOAD.md`; folder scan, `is_supported_image`, folder persistence →
-`docs/SPEC_FOLDERS.md`; MD5 duplicate identity, conflict handling, the full extension taxonomy →
-`docs/SPEC_DEDUP.md`; node/upload protocol → `docs/PROTOCOL.md`, `docs/SPEC_UPLOAD.md`; cadence,
-watchers, pause → `docs/SPEC_BACKGROUND_SYNC.md`; progress UI and notifications →
-`docs/SPEC_UPLOAD_PROGRESS.md`, `docs/SPEC_NOTIFICATIONS.md`.
+`SPEC_ONE_TIME_UPLOAD.md`; folder scan, `is_supported_image`, folder persistence →
+`SPEC_FOLDERS.md`; MD5 duplicate identity, conflict handling, the full extension taxonomy →
+`SPEC_DEDUP.md`; node/upload protocol → `../protocol/PROTOCOL.md`, `SPEC_UPLOAD.md`; cadence,
+watchers, pause → `SPEC_BACKGROUND_SYNC.md`; progress UI and notifications →
+`SPEC_UPLOAD_PROGRESS.md`, `SPEC_NOTIFICATIONS.md`.
 
 ---
 
@@ -147,7 +147,7 @@ Reupload=99`. → **belegt**
 
 A library import is therefore the **one** manual path that participates in the cross-account MD5
 check and the **one** that renames on conflict. This refines
-`docs/SPEC_ONE_TIME_UPLOAD.md` §5.4 ("a one-time drop has no `record`, so it stays `Normal`"): a
+`SPEC_ONE_TIME_UPLOAD.md` §5.4 ("a one-time drop has no `record`, so it stays `Normal`"): a
 one-time drop *of a photo library* is **not** `Normal`. → **belegt**
 
 ### 3.6 The one-time media import and its cloud destination (belegt)
@@ -202,7 +202,7 @@ Either way `HasCustomerSeenApplePhotosDuplicatesPrompt` becomes `true`;
 `DialogResult.NegativeActionClicked` → filtering **off** plus
 `RetryIgnoredDueToPotentialConflictsWithiOSUploads()` and metric `IosHeicDedupePromptDesktopAndIos`,
 otherwise filtering **on** and metric `IosHeicDedupePromptIosOnly`. → **belegt** (the button→outcome
-mapping is inherited from `docs/SPEC_DEDUP.md` §6 and unverified there too)
+mapping is inherited from `SPEC_DEDUP.md` §6 and unverified there too)
 
 Enforcement at upload (`PreUploadCheck`, plus a second site for the resumable path): when
 `FilterOutPotentialDuplicatesFromApplePhotosLibrary` **or** the prompt has never been seen, **and**
@@ -299,7 +299,7 @@ Size ceilings are shared: `Size > CloudDriveServiceUploadMaxFileSizeInBytes` thr
 `ResumableUploads.ZeroByteFileTotalRequests`. `WeighedUploadStrategy` runs the weighted round-robin;
 `SmallFileSizeUploadStrategy` / `LargeFileSizeUploadStrategy` split the queue below/above
 `MultipartUploadMinSizeInBytes` and serve small files first. There is **no** video-specific upload
-endpoint or host — uploads go through the same `/v2/upload` family (`docs/PROTOCOL.md`); the only
+endpoint or host — uploads go through the same `/v2/upload` family (`../protocol/PROTOCOL.md`); the only
 "zone" concept is the HTTP content host. → **belegt**
 
 ### 3.13 Autoplay label and the missing media player (belegt / UNKNOWN)
@@ -387,14 +387,14 @@ Our state was read from `src/` (`folders.rs`, `backup.rs`, `backup_config.rs`, `
 
 **Net assessment.** Every capability in §3.1–§3.13 is **unimplemented** in our port; only the
 general image-extension filter and the one-time drag-drop queue (owned by
-`docs/SPEC_ONE_TIME_UPLOAD.md`) exist. Nothing here is a deliberate divergence — it is out of the
+`SPEC_ONE_TIME_UPLOAD.md`) exist. Nothing here is a deliberate divergence — it is out of the
 current scope, which `AGENTS.md` already records ("Apple-Photos-/iPhoto-/Aperture-Import" under
 **Out (bewusst, nicht MVP)**). → *inferred* (scope intent) / **belegt** (code state)
 
 One *in* scope point of contact: our `one_time` field. Our port now persists the dropped queue in
 the MD5 SQLite and deletes it after completion (`AGENTS.md`, decision 2026-10-14), which is closer
 to the original's DB-backed `schedule_id="ManualUpload"` rows than the older "never persisted"
-rule in `docs/SPEC_ONE_TIME_UPLOAD.md` §10.3 — a `OneTimeMediaImport` drop of a **library** would
+rule in `SPEC_ONE_TIME_UPLOAD.md` §10.3 — a `OneTimeMediaImport` drop of a **library** would
 land in exactly that queue, but as `UploadType.PhotosImport`, not `Normal` (§3.5). → **belegt**
 
 ---
@@ -418,7 +418,7 @@ land in exactly that queue, but as `UploadType.PhotosImport`, not `Normal` (§3.
   real layout. → **UNKNOWN**
 - **Absolute mapping of "Übergehen"/"Beibehalten" to filtering on/off.** The dialog result branch
   is **belegt**; which of the two buttons produces `DialogResult.NegativeActionClicked` is not
-  verified (`docs/SPEC_DEDUP.md` §6 flags the same gap). → **UNKNOWN**
+  verified (`SPEC_DEDUP.md` §6 flags the same gap). → **UNKNOWN**
 - **`TransferError.PhotoLibraryEditedContentNotFound` (41) and `FileTypeNotSupported` (49)** —
   values are **belegt**, no raise site was found. Whether they are reachable is **UNKNOWN**.
 - **Why an edited file that has vanished skips the record silently** rather than deleting the row
@@ -435,29 +435,29 @@ land in exactly that queue, but as `UploadType.PhotosImport`, not `Normal` (§3.
   reachable.
 - **Video acceptance of the cookie flow.** Our upload endpoint and the original's differ; whether
   `content-<zone>.drive.amazonaws.com/v2/upload` accepts a video is unverified (same gap as
-  `docs/SPEC_DEDUP.md` §7 for non-media files). → **UNKNOWN**
+  `SPEC_DEDUP.md` §7 for non-media files). → **UNKNOWN**
 
 ---
 
 ## 7. Cross-references
 
-- `docs/SPEC_ONE_TIME_UPLOAD.md` §4 (one-time destinations), §5 (queue row), §6 (persistence),
+- `SPEC_ONE_TIME_UPLOAD.md` §4 (one-time destinations), §5 (queue row), §6 (persistence),
   §10.3 (our transient one-time row — superseded for the persistence part by the 2026-10-14
   decision in `AGENTS.md`), §10.5 (deliberate dedup divergence).
-- `docs/SPEC_FOLDERS.md` §2.1 (`is_supported_image`), §2.2 (`scan_images`), §2.7 (global pause),
+- `SPEC_FOLDERS.md` §2.1 (`is_supported_image`), §2.2 (`scan_images`), §2.7 (global pause),
   §3.4 (content filter / dedupe / conflict on schedule records).
-- `docs/SPEC_DEDUP.md` §1 (MD5 identity), §2 (pre-upload check and `UploadType` eligibility),
+- `SPEC_DEDUP.md` §1 (MD5 identity), §2 (pre-upload check and `UploadType` eligibility),
   §3 (extension taxonomy — the authoritative list; this doc only adds the manifest counts),
   §4.2 (content-dedup errors), §6 (the Apple-Photos prompt flow, incl. the unverified button
   mapping), §7 (open points for our project).
-- `docs/SPEC_UPLOAD.md` / `docs/PROTOCOL.md` — endpoints, headers, `conflictResolution`, multipart
+- `SPEC_UPLOAD.md` / `../protocol/PROTOCOL.md` — endpoints, headers, `conflictResolution`, multipart
   parameters.
-- `docs/SPEC_BACKGROUND_SYNC.md` — cadence, pause; a one-time import is outside the scheduler.
-- `docs/SPEC_UPLOAD_PROGRESS.md` — the transfer-item list the library rows appear in.
-- `docs/SPEC_NOTIFICATIONS.md` — notification surfaces; `MediaImportStartNotification` is a
+- `SPEC_BACKGROUND_SYNC.md` — cadence, pause; a one-time import is outside the scheduler.
+- `SPEC_UPLOAD_PROGRESS.md` — the transfer-item list the library rows appear in.
+- `SPEC_NOTIFICATIONS.md` — notification surfaces; `MediaImportStartNotification` is a
   persistent *in-app* toast, distinct from desktop notifications.
-- `docs/UI_FLOWS.md` §4.4 ("Einmalig" vs "Plan"), §4.8 (drag-and-drop flow), §11.2 (status
-  precedence). `docs/UI_STATES.md` §3.8 (`uploads` row for `ManualUpload`), §4.1 (`ContentFilter` /
+- `UI_FLOWS.md` §4.4 ("Einmalig" vs "Plan"), §4.8 (drag-and-drop flow), §11.2 (status
+  precedence). `UI_STATES.md` §3.8 (`uploads` row for `ManualUpload`), §4.1 (`ContentFilter` /
   `DeduplicateOptions` bitmasks).
 - `AGENTS.md` — "Scope-Grenzen (In/Out)": the Apple-Photos/iPhoto/Aperture import is explicitly
   **Out (bewusst, nicht MVP)**.

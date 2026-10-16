@@ -11,9 +11,9 @@ as a *global worker stop* — explicitly **not** the per-backup pause; and the *
 popup** with its statistics suffix (`statuspopup_stats_*`, `contextmenu_*`).
 
 Scope boundary: **progress texts** ("Upload-Vorgang läuft …", ETA, byte counters) are owned by
-`docs/SPEC_UPLOAD_PROGRESS.md`; the **backup-pause mechanism** (schedule flags, watcher removal,
-`SPEC_BACKGROUND_SYNC.md` §7) is owned by `docs/SPEC_BACKGROUND_SYNC.md`; the **status icon /
-notification surfaces** are owned by `docs/SPEC_NOTIFICATIONS.md`. This document owns the *table,
+`SPEC_UPLOAD_PROGRESS.md`; the **backup-pause mechanism** (schedule flags, watcher removal,
+`SPEC_BACKGROUND_SYNC.md` §7) is owned by `SPEC_BACKGROUND_SYNC.md`; the **status icon /
+notification surfaces** are owned by `SPEC_NOTIFICATIONS.md`. This document owns the *table,
 its model and its error surfaces*.
 
 Confidence convention: **belegt** = read directly out of the reverse-engineered
@@ -696,23 +696,23 @@ row menu, pause toggle), `src/upload.rs` (`UploadShared`, `FileState`, `status_t
 
 ## 7. Cross-references
 
-- `docs/UI_FLOWS.md` §4.7 (details view, nested vs flat, item-table columns), §9.1 (status popup),
+- `UI_FLOWS.md` §4.7 (details view, nested vs flat, item-table columns), §9.1 (status popup),
   §11.2 (status precedence table), §11.4 (the two pause mechanisms), §11.5 (completion / retry).
-- `docs/UI_STATES.md` §3.1 (row model), §3.2 (status vocabulary), §3.3 (aggregated row state),
+- `UI_STATES.md` §3.1 (row model), §3.2 (status vocabulary), §3.3 (aggregated row state),
   §3.6 (details view: nested vs flat), §3.8 (DB fields behind the backup screen), §5.1 (status
   popup), §5.2 (activity window).
-- `docs/SPEC_UPLOAD_PROGRESS.md` — **progress texts, ETA, byte counters, "Upload-Vorgang läuft"**.
+- `SPEC_UPLOAD_PROGRESS.md` — **progress texts, ETA, byte counters, "Upload-Vorgang läuft"**.
   Everything about *how fast* and *how far* belongs there, not here.
-- `docs/SPEC_BACKGROUND_SYNC.md` §7 — the **backup-pause** mechanism (schedule flags, forced scans
+- `SPEC_BACKGROUND_SYNC.md` §7 — the **backup-pause** mechanism (schedule flags, forced scans
   on resume, watcher removal, `ProcessScanRequest`); this document only contrasts it with the
   global worker stop in §3.8.
-- `docs/SPEC_NOTIFICATIONS.md` §2.4 (status icon), §3.2 (event → notification map), §3.3 (the three
+- `SPEC_NOTIFICATIONS.md` §2.4 (status icon), §3.2 (event → notification map), §3.3 (the three
   notification surfaces) — the popup's notification list is specified there, not here.
-- `docs/SPEC_ONE_TIME_UPLOAD.md` §5.2/§5.3 — the one-time queue's row model and its
+- `SPEC_ONE_TIME_UPLOAD.md` §5.2/§5.3 — the one-time queue's row model and its
   `OneTimeBackupItemsViewModel` (the `"ManualUpload"` schedule id used by the error window).
-- `docs/SPEC_DEDUP.md` §1 (MD5 identity) and §4.1 (conflict policy) — why a record can end up
+- `SPEC_DEDUP.md` §1 (MD5 identity) and §4.1 (conflict policy) — why a record can end up
   skipped rather than failed.
-- `docs/SPEC_CHANGE_DETECTION.md` — the `max mtime` watermark decision; unrelated to the status
+- `SPEC_CHANGE_DETECTION.md` — the `max mtime` watermark decision; unrelated to the status
   table but shares the "suspended vs completed" vocabulary.
 - Our code: `src/backup.rs` (`backup_ui`, `start_folder_upload`, `start_one_time_upload`,
   `finalize_upload`, queue panel, row menu), `src/upload.rs` (`UploadShared`, `FileState`,

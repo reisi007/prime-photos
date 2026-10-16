@@ -56,7 +56,7 @@ Der Entscheidungsort ist `UploadViaSimpleOrLegacyUploader`
 | „Neue Datei automatisch umbenennen" | `SaveAsNew` | **unabhängig** davon, ob ein Zielknoten existiert: `overwrite = false` | `RENAME` |
 | „Alte Datei ersetzen" | `Replace` | Zielknoten vorhanden ⇒ `overwrite = true`, `nodeId = destinationNode` | `PUT` (kein Enum-Wert) |
 
-**Präzisierung gegenüber `docs/SPEC_CONFLICT_OPTIONS.md`:** `SaveAsNew` ist in
+**Präzisierung gegenüber `SPEC_CONFLICT_OPTIONS.md`:** `SaveAsNew` ist in
 `NameConflictStrategy.GetConflictResolution` die **einzige** Option **ohne** Wächter
 auf `destinationNodeId != null` (Replace und Ignore haben ihn). Folge: bei
 „Neue Datei automatisch umbenennen" geht **jeder** Upload mit `conflictResolution=RENAME`
@@ -81,7 +81,7 @@ vor jeder Konflikt-Entscheidung:
 
 **Also: bei identischem Namen und identischem MD5 gewinnt die Inhalts-Identität,
 es entsteht kein Konflikt und keine Umbenennung.** Das deckt sich mit
-`docs/SPEC_CONFLICT_OPTIONS.md` §1.3.
+`SPEC_CONFLICT_OPTIONS.md` §1.3.
 
 **Der entscheidende Nebenbefund für F1:** Schritt 2 ist **nicht** vom Dedupe-Toggle
 abhängig — der Namens-Lookup samt MD5-Vergleich läuft **immer**. Der Toggle steuert
@@ -179,7 +179,7 @@ de facto wirkungslos.
 
 `xmp` ist die **einzige** Mehrfach-Endung (`image_sidecar` **und** `video_sidecar`).
 Da die Bild-Prüfung zuerst läuft, zählt eine `.xmp`-Datei in `Matches` als **Foto**.
-(Vollständige Listen: `docs/SPEC_DEDUP.md` §3.3.)
+(Vollständige Listen: `SPEC_DEDUP.md` §3.3.)
 
 ### 2.4 Wo gefiltet wird — **beides**, Scan **und** Upload
 
@@ -374,8 +374,8 @@ zulässig."), `schedules_overlappingfolder_warningmessage`, `schedules_syncfolde
 
 ## 6. Konsequenz für Prime Photos
 
-Lücken gegen unseren heutigen Stand (Quelle: `AGENTS.md`, `docs/SPEC_CONFLICT_OPTIONS.md`
-§3/§4, `docs/SPEC_FOLDERS.md` §2):
+Lücken gegen unseren heutigen Stand (Quelle: `AGENTS.md`, `SPEC_CONFLICT_OPTIONS.md`
+§3/§4, `SPEC_FOLDERS.md` §2):
 
 | Thema | Original | Unser Stand | Lücke |
 |---|---|---|---|
@@ -461,9 +461,9 @@ lediglich das Verhalten von `SaveAsNew` ohne Konflikt ist gegeneinander zu halte
   `clouddrive_desktop_schedules_{rootfolder,overlappingfolder,syncfolder,restrictedfolder}_warningmessage`,
   `clouddrive_desktop_scheduleerror_destinationmissing_{header,text}`,
   `clouddrive_desktop_upload_statuswindow_statusignored` („Zuvor hochgeladen").
-* **Cross-Referenz:** `docs/SPEC_CONFLICT_OPTIONS.md`, `docs/SPEC_DUPLICATES.md`,
-  `docs/SPEC_DEDUP.md` (§3 Taxonomie), `docs/SPEC_FOLDERS.md` (§3 Modell),
-  `docs/PROTOCOL.md`.
+* **Cross-Referenz:** `SPEC_CONFLICT_OPTIONS.md`, `SPEC_DUPLICATES.md`,
+  `SPEC_DEDUP.md` (§3 Taxonomie), `SPEC_FOLDERS.md` (§3 Modell),
+  `../protocol/PROTOCOL.md`.
 
 ---
 

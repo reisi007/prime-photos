@@ -31,7 +31,7 @@ pub(crate) struct BackupConfigForm {
     pub(crate) dedup: bool,
     pub(crate) conflict_resolution: ConflictResolution,
     /// Content filter — the original's two "Fotos sichern"/"Videos sichern"
-    /// checkboxes (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1). `Photos` by
+    /// checkboxes (`docs/original/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1). `Photos` by
     /// default; the effective filter stays `is_supported_image`.
     pub(crate) content_filter: ContentFilter,
     pub(crate) mode: ConfigFormMode,
@@ -75,9 +75,9 @@ impl PrimePhotoApp {
         // resolved below Pictures/Web (`src/prime_photos.rs` looks up the two
         // folders). The original instead mirrors the source path into a cloud
         // node (`Backup/<Macname>/<path>`) behind a cloud picker — that is a
-        // separate task (`docs/SPEC_UPLOAD_DESTINATION.md`), not built here.
+        // separate task (`docs/original/SPEC_UPLOAD_DESTINATION.md`), not built here.
         // Content filter: the original's two checkboxes ("Fotos sichern"/
-        // "Videos sichern", `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1).
+        // "Videos sichern", `docs/original/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1).
         // "Videos sichern" is visible but disabled — the app uploads photos
         // only, so the effective filter stays `is_supported_image`. This field
         // is parity + future, it changes no behaviour today.

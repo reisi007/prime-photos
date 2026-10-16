@@ -43,7 +43,7 @@ pub(crate) fn auth_token_url(country: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Device login flow (user decision 2026-10-15, `docs/SPEC_LOGIN.md` § 3.8).
+// Device login flow (user decision 2026-10-15, `docs/original/SPEC_LOGIN.md` § 3.8).
 //
 // These helpers are the **pure** URL builders of the device/PKCE sign-in path.
 // Since S-B the login itself uses them ([`auth_portal_url`] from
@@ -183,7 +183,7 @@ pub(crate) fn panda_auth_cookies_url(
 /// Culture string the **device** portal URL sends (`language=<culture>`).
 ///
 /// The original sends a "sanitised culture string" here; how exactly it is
-/// sanitised is unproven (`docs/SPEC_LOGIN.md` § 3.3). The mapping below is our
+/// sanitised is unproven (`docs/original/SPEC_LOGIN.md` § 3.3). The mapping below is our
 /// documented own default: the marketplace languages the original client
 /// actually ships, resolved from the marketplace **code** (`at`/`ch` sign in
 /// on the German marketplace; `gb`/`uk` on the British one — matching
@@ -285,7 +285,7 @@ pub(crate) fn preferences_url(country: &str) -> String {
 }
 
 /// `GET v1/thumbnail/<id>` on the **marketplace's** thumbnail host
-/// (`thumbnails-photos.amazon.<domain>`, `docs/PROTOCOL.md` §2.4). `viewBox` is
+/// (`thumbnails-photos.amazon.<domain>`, `docs/protocol/PROTOCOL.md` §2.4). `viewBox` is
 /// percent-encoded (`60%2C60`), exactly as the original sends it.
 pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
     let domain = marketplace_domain(country);
@@ -307,7 +307,7 @@ pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
 /// capture date from the uploaded file itself (`DateTimeOriginal` + `SubSecTime`,
 /// like the original, which never sets the field). A value computed client side
 /// would be taken over verbatim and thereby override that derivation — see
-/// `docs/SPEC_CAPTURE_DATE.md` and `docs/SPEC_UPLOAD.md` §2.4.
+/// `docs/original/SPEC_CAPTURE_DATE.md` and `docs/original/SPEC_UPLOAD.md` §2.4.
 ///
 /// The query itself is built by [`upload_query`] and shared with the replace
 /// `PUT` ([`replace_upload_url`]), so the two stages cannot drift apart.

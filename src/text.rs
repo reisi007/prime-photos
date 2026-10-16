@@ -24,7 +24,7 @@ pub(crate) fn nfc(s: &str) -> String {
 }
 
 /// Human-readable byte size, matching the original's `HumanizedSize`
-/// (docs/SPEC_UPLOAD_PROGRESS.md §7.6): **binary** (÷1024), units
+/// (docs/original/SPEC_UPLOAD_PROGRESS.md §7.6): **binary** (÷1024), units
 /// `B/KB/MB/GB/TB` (short, untranslated), whole bytes without a decimal and
 /// every larger value with **one decimal, truncated** (abgerundet — not
 /// rounded), so `1535` is `1.4 KB`, never `1.5`.

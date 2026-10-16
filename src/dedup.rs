@@ -1,7 +1,7 @@
 //! Persistent local MD5 dedup index.
 //!
 //! Mirrors the original client's `uploads.precomputed_md5` + `PreUploadCheck`
-//! mechanism (`docs/SPEC_DEDUP.md` §1/§2.2): the duplicate identity is the MD5 of
+//! mechanism (`docs/original/SPEC_DEDUP.md` §1/§2.2): the duplicate identity is the MD5 of
 //! the whole file body. Our **skip rule is path-centric** (user decision
 //! 2026-10-13):
 //!
@@ -276,7 +276,7 @@ impl DedupIndex {
     /// Path-centric pre-upload check: `Some(origin)` when this exact path was
     /// already recorded with the same MD5, `None` otherwise. `size`/`mtime` are
     /// recorded alongside but do not take part in the decision (MD5 is the
-    /// identity, see docs/SPEC_DEDUP §1).
+    /// identity, see docs/original/SPEC_DEDUP §1).
     ///
     /// The returned [`Origin`] tells the caller whether the path itself was
     /// uploaded ("unverändert") or only marked as a content skip ("bereits im
@@ -341,7 +341,7 @@ impl DedupIndex {
     ///
     /// A stat hit is only the fast path — the caller then skips reading and
     /// hashing the file. The MD5 remains the duplicate identity
-    /// (`docs/SPEC_DEDUP.md` §1): this check never replaces `should_skip`, it
+    /// (`docs/original/SPEC_DEDUP.md` §1): this check never replaces `should_skip`, it
     /// only avoids reading a file that provably did not change since it was
     /// recorded. The returned [`Origin`] carries the same distinction as
     /// [`DedupIndex::should_skip`] ("unverändert" vs. "bereits im Konto").

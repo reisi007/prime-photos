@@ -778,7 +778,7 @@ impl PrimePhotoApp {
     }
 
     /// Full-window overlay while a file drag hovers over the window
-    /// ("Einmalige Sicherung", docs/SPEC_ONE_TIME_UPLOAD.md §7): a
+    /// ("Einmalige Sicherung", docs/original/SPEC_ONE_TIME_UPLOAD.md §7): a
     /// semi-transparent frame with a visible border plus the drop instruction.
     ///
     /// Drawn last in `update` so it covers every panel, and `interactable
@@ -1128,7 +1128,7 @@ impl eframe::App for PrimePhotoApp {
                 egui::CollapsingHeader::new(summary)
                     // Fixed id: `summary` changes with every counter / file / ETA
                     // update, so an id derived from the label would lose the
-                    // open state on each update (docs/DEV_NOTES.md §3).
+                    // open state on each update (docs/dev/DEV_NOTES.md §3).
                     .id_salt("log_panel")
                     .show(ui, |ui| {
                         // Definite body height given to the scroll area as a

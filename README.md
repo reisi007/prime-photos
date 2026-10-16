@@ -13,7 +13,7 @@ Prime Photos is **not** an official Amazon product and is **not** affiliated wit
 - **Windows and Linux are declared, equal targets**, but are **not run-tested**. The intended proof is a cross-compile check (`cargo check --target …`), which has **not been performed yet**.
 - No release has actually been triggered; the CI workflows are only syntactically checked.
 
-See [`docs/BUILD.md`](docs/BUILD.md) §1 for the full test boundary.
+See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
 
 ## Features
 
@@ -38,7 +38,7 @@ cargo run                # build (if needed) and start
 cargo build --release    # release binary: target/release/prime-photos
 ```
 
-Per-platform prerequisites (macOS / Windows / Linux system packages) are in **[`docs/BUILD.md`](docs/BUILD.md)**.
+Per-platform prerequisites (macOS / Windows / Linux system packages) are in **[`docs/dev/BUILD.md`](docs/dev/BUILD.md)**.
 
 macOS `.app` bundle (ad-hoc signed by default):
 
@@ -56,16 +56,16 @@ All files live under the `prime_photos` config folder (`dirs::config_dir()/prime
 - `folders.toml` — backup targets
 - `dedup.sqlite3` — persistent dedup index
 
-Exact paths per platform: [`docs/BUILD.md`](docs/BUILD.md) §6.
+Exact paths per platform: [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §6.
 
 ## Documentation
 
-- [`docs/BUILD.md`](docs/BUILD.md) — build & run per platform, prerequisites, config paths.
-- [`docs/RELEASE.md`](docs/RELEASE.md) — release process, artifacts, signing, verification.
-- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — the wire protocol notes.
-- [`docs/I18N.md`](docs/I18N.md) — the internationalization layer.
-- [`docs/DEV_NOTES.md`](docs/DEV_NOTES.md) — codebase pitfalls (developer knowledge).
-- [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) — third-party component attribution.
+- [`docs/dev/BUILD.md`](docs/dev/BUILD.md) — build & run per platform, prerequisites, config paths.
+- [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) — release process, artifacts, signing, verification.
+- [`docs/protocol/PROTOCOL.md`](docs/protocol/PROTOCOL.md) — the wire protocol notes.
+- [`docs/dev/I18N.md`](docs/dev/I18N.md) — the internationalization layer.
+- [`docs/dev/DEV_NOTES.md`](docs/dev/DEV_NOTES.md) — codebase pitfalls (developer knowledge).
+- [`docs/dev/THIRD_PARTY.md`](docs/dev/THIRD_PARTY.md) — third-party component attribution.
 - [`AGENTS.md`](AGENTS.md) — durable project decisions (agent/developer-oriented, not an end-user guide).
 
 ## License

@@ -1,7 +1,7 @@
 # Live acceptance — device session path (2026-10-15)
 
-Evidence that the rebuilt session flow (`docs/SPEC_LOGIN.md` § 3.8,
-`docs/PROTOCOL.md` § 2.1) works against the real Amazon Photos service.
+Evidence that the rebuilt session flow (`../original/SPEC_LOGIN.md` § 3.8,
+`../protocol/PROTOCOL.md` § 2.1) works against the real Amazon Photos service.
 
 This file exists because `AGENTS.md` holds **rules only** — every "this was
 proven live" statement moved out of it and lives here instead.
@@ -53,9 +53,9 @@ already usable.
 | `expires_in` arrives from `/auth/register` **and** `/auth/token` as the JSON **string** `"3600"` | the parser accepts string **and** number in both places |
 | An `openid.oa2.authorization_code` is **single-use** | the redemption path repeats **only** when the request never reached the server (network error), **never** after a server answer |
 | `wry::WebView::cookies()` blocks the main thread up to 1 s and always times out when called from a `DispatchQueue::main` block | the cookie probe and the whole web/cookie fallback were removed; the device flow is the only sign-in path |
-| Amazon's browser cookies survived a sign-out (`~/Library/HTTPStorages/prime-photos.binarycookies`) and let the next sign-in skip 2FA | opening the login webview now clears its browsing data first (`docs/SPEC_LOGIN.md` § 3.3) |
-| The 10-minute EXIF guard rejects an EXIF-less file that is younger than 10 minutes **before** an upload URL is even built — live-reproduced on 2026-10-15 and **original parity** (`docs/SPEC_UPLOAD.md`), not an invention of ours | for live test runs, age the file first: `SetFile -d "01/01/2020 12:00:00" -m "01/01/2020 12:00:00"`. Without that, the run shows an error line in the UI log only and the row keeps `status = uploading`; a later event/watermark run picks the file up once it is old enough |
-| A stray node is removed with `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>` ⇒ **202 `{}`**; `PUT …/drive/v1/trash/<id>` does **not** exist on the cookie host (⇒ 404) | test targets and leftover nodes are cleaned up with the DELETE (verbs collected in `docs/PROTOCOL.md` § 5) |
+| Amazon's browser cookies survived a sign-out (`~/Library/HTTPStorages/prime-photos.binarycookies`) and let the next sign-in skip 2FA | opening the login webview now clears its browsing data first (`../original/SPEC_LOGIN.md` § 3.3) |
+| The 10-minute EXIF guard rejects an EXIF-less file that is younger than 10 minutes **before** an upload URL is even built — live-reproduced on 2026-10-15 and **original parity** (`../original/SPEC_UPLOAD.md`), not an invention of ours | for live test runs, age the file first: `SetFile -d "01/01/2020 12:00:00" -m "01/01/2020 12:00:00"`. Without that, the run shows an error line in the UI log only and the row keeps `status = uploading`; a later event/watermark run picks the file up once it is old enough |
+| A stray node is removed with `DELETE https://www.amazon.<cc>/drive/v1/nodes/<id>` ⇒ **202 `{}`**; `PUT …/drive/v1/trash/<id>` does **not** exist on the cookie host (⇒ 404) | test targets and leftover nodes are cleaned up with the DELETE (verbs collected in `../protocol/PROTOCOL.md` § 5) |
 
 ## Replace `PUT` accepted live (2026-10-16)
 
@@ -73,7 +73,7 @@ only, with a genuine name conflict, and cleaned up afterwards.
 So the `PUT` works **without** a `contentDate` and leaves the node's capture date
 standing. The earlier query-parameter requirement stands as recorded
 (`fileSize` missing ⇒ 400 `MissingFileSize`). Full write-up:
-`docs/SPEC_CAPTURE_DATE.md` § 12.3; endpoint: `docs/PROTOCOL.md` § 2.17.
+`../original/SPEC_CAPTURE_DATE.md` § 12.3; endpoint: `../protocol/PROTOCOL.md` § 2.17.
 
 ## Streamed upload body needs an explicit `Content-Length` (Runde D, 2026-10-16)
 

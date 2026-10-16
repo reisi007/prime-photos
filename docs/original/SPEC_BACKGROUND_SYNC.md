@@ -12,10 +12,10 @@ German user-facing labels are quoted from the shipped
 device and path values are omitted.
 
 Scope boundary: this doc owns the *scan/upload trigger and cadence* model.
-Duplicates are owned by `docs/SPEC_DEDUP.md`, folder scan/filter/persistence by
-`docs/SPEC_FOLDERS.md`, menu-bar presence + notifications by
-`docs/SPEC_NOTIFICATIONS.md`, the interval/filter UI by `docs/UI_FLOWS.md` §4.5/§4.7
-and `docs/UI_STATES.md` §3/§4.
+Duplicates are owned by `SPEC_DEDUP.md`, folder scan/filter/persistence by
+`SPEC_FOLDERS.md`, menu-bar presence + notifications by
+`SPEC_NOTIFICATIONS.md`, the interval/filter UI by `UI_FLOWS.md` §4.5/§4.7
+and `UI_STATES.md` §3/§4.
 
 ---
 
@@ -28,7 +28,7 @@ and `docs/UI_STATES.md` §3/§4.
 | App-wide tunables | `Contents/…/app-settings.json` (shipped defaults) and `~/Library/Application Support/Amazon Cloud Drive/app-settings.json` |
 | Per-schedule state | `~/Library/Application Support/Amazon Cloud Drive/<account>-schedules.db` (table `schedules`) |
 | German labels | `Contents/Resources/de.lproj/Localizable.strings` |
-| Existing notes reused | `docs/UI_FLOWS.md` §4.5–4.7, §9, §11; `docs/UI_STATES.md` §3, §4.2, §4.4; `docs/SPEC_FOLDERS.md` §3; `docs/SPEC_NOTIFICATIONS.md` §2 |
+| Existing notes reused | `UI_FLOWS.md` §4.5–4.7, §9, §11; `UI_STATES.md` §3, §4.2, §4.4; `SPEC_FOLDERS.md` §3; `SPEC_NOTIFICATIONS.md` §2 |
 
 **Confidence convention.** *observed* = read directly off one of the sources above.
 *inferred* = reasoned from adjacent evidence. **UNKNOWN** = could not be determined
@@ -319,7 +319,7 @@ Two independent pause mechanisms (also in `UI_FLOWS.md` §11.4):
 
 The client is a menu-bar app (`LSUIElement=true`, `ActivationPolicy=Accessory`,
 `ApplicationShouldTerminateAfterLastWindowClosed=false`) — details in
-`docs/SPEC_NOTIFICATIONS.md` §2.1/§2.6. Consequence for background sync:
+`SPEC_NOTIFICATIONS.md` §2.1/§2.6. Consequence for background sync:
 
 - Closing the main window does **not** stop the app; the workers and their watchers
   keep running in the background, and the only user-visible surface is the status
@@ -410,7 +410,7 @@ a `tokio::sync::watch::Sender<bool>` (`src/app.rs`), the tray (`src/tray.rs`) of
 "Fenster anzeigen / Anhalten|Fortsetzen / Beenden", close-to-tray already hides the
 window while the app keeps running (`src/app.rs`), `src/notify.rs` sends a
 run-finished notification behind `config.notifications`, and `src/dedup.rs` holds the
-persistent path+MD5 index. `docs/SPEC_FOLDERS.md` §2.6/§4.1 already records "no
+persistent path+MD5 index. `SPEC_FOLDERS.md` §2.6/§4.1 already records "no
 background scheduler" as the gap. PORT-5 closes exactly that gap.
 
 ### 10.1 What PORT-5 concretely needs
@@ -451,5 +451,5 @@ No account identifiers, user names, device/serial values, absolute user paths or
 verbatim decompiled code are reproduced. German user-facing labels are quoted from
 the shipped `Localizable.strings`. The target app was only read (plist/strings/
 read-only decompilation of the managed assembly and its shipped settings) and was
-never launched, signed or modified. `docs/SPEC_BACKGROUND_SYNC.md` is the only file
+never launched, signed or modified. `SPEC_BACKGROUND_SYNC.md` is the only file
 created or changed by this task.

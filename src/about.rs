@@ -2,7 +2,7 @@
 //!
 //! Data comes from Welle 4a (already committed): the generated dependency list
 //! (`assets/third-party-licenses.txt`, ~1.2 MB) and the curated icon attribution
-//! (`docs/THIRD_PARTY.md`). Both are embedded as text — nothing is read at run
+//! (`docs/dev/THIRD_PARTY.md`). Both are embedded as text — nothing is read at run
 //! time.
 //!
 //! ## Why the license list is virtualized
@@ -28,10 +28,10 @@ const THIRD_PARTY_LICENSES: &str = include_str!(concat!(
 ));
 
 /// Curated icon/graphic attribution — the single source of truth is
-/// `docs/THIRD_PARTY.md` (read-only here).
+/// `docs/dev/THIRD_PARTY.md` (read-only here).
 const THIRD_PARTY_ICONS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/docs/THIRD_PARTY.md"
+    "/docs/dev/THIRD_PARTY.md"
 ));
 
 /// Hard wrap width for the license text, in characters. The generated list is

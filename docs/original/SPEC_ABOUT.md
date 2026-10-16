@@ -46,8 +46,8 @@ Menü-/Kürzel-Lage (About und Versionshinweise **ohne** Tastenkürzel). → **b
 | 3 | **Datenschutzerklärung (Privacy)** | **Nein** — Browser | Link „Datenschutzerklärung" **im About-Fenster** |
 | 4 | **Drittanbieter-Lizenzen (Third-Party)** | **Nein** — Browser (Web-Seite) | Link „Drittanbieterlizenzen" **im About-Fenster** |
 | 5 | **Versionshinweise / Release Notes** (`ReleaseNotesWindow`) | **Ja** — eigenes, nicht-modales Fenster (Web-View) | Tray-Menü und App-Menü „Versionshinweise"; zusätzlich automatisch beim Start (`ShowReleaseNotesWindowTask`) |
-| 6 | **Version-/Update-Info** | **Nein** — kein eigenes Fenster | Benachrichtigung/Dialoge des Auto-Updaters → **siehe `docs/SPEC_PREFERENCES.md` §3.10** |
-| 7 | Diagnose/Support (`DiagnosticsWindow`) | Ja, aber anderes Feature | nicht Teil dieses Auftrags → `docs/UI_FLOWS.md` #22 |
+| 6 | **Version-/Update-Info** | **Nein** — kein eigenes Fenster | Benachrichtigung/Dialoge des Auto-Updaters → **siehe `SPEC_PREFERENCES.md` §3.10** |
+| 7 | Diagnose/Support (`DiagnosticsWindow`) | Ja, aber anderes Feature | nicht Teil dieses Auftrags → `UI_FLOWS.md` #22 |
 
 **Kernbefund:** Es gibt **genau ein** „About"-Fenster. Datenschutz, Nutzungsbedingungen und
 Drittanbieter-Lizenzen sind darin **nur Links**, die den **System-Browser** öffnen — es existiert
@@ -83,7 +83,7 @@ Drittanbieter-Lizenzen sind darin **nur Links**, die den **System-Browser** öff
 | eigene Auto-Layout-Constraints der **vollen** Ansicht (`AboutView`) | Breite **≤ 900**, Höhe **572** |
 | eigene Auto-Layout-Constraints der **vereinfachten** Ansicht (`AboutViewSimplification`) | **624 × 572** |
 
-`docs/UI_FLOWS.md` §2.1 nennt 504 × 410. Der Code setzt diesen Frame auch, **die Inhaltsansicht
+`UI_FLOWS.md` §2.1 nennt 504 × 410. Der Code setzt diesen Frame auch, **die Inhaltsansicht
 fordert jedoch 572 pt Höhe** (und bis 900 pt Breite). Welche Größe macOS beim Sheet tatsächlich
 annimmt, hängt davon ab, ob die Content-View-Constraints die Fenstergröße treiben — das ist hier
 **nicht belegt**, weil kein Lauf beobachtet wurde. → Größe **UNKNOWN** (beide Zahlen sind belegt,
@@ -188,7 +188,7 @@ Die im About-Fenster gezeigte Version ist **zusammengesetzt**, nicht die Bundle-
   vorbehalten." (installiert 2026 ⇒ „© 2012-2026 …"). → **belegt**
 
 Sofern ein Versions-Fenster fehlt, aber ein Update ansteht: das regelt der Auto-Updater über
-Benachrichtigungen/Dialoge, **siehe `docs/SPEC_PREFERENCES.md` §3.10**.
+Benachrichtigungen/Dialoge, **siehe `SPEC_PREFERENCES.md` §3.10**.
 
 ---
 
@@ -212,7 +212,7 @@ Suchweg (alle Prüfungen am installierten Bundle/Assembly, nur lesend):
 Lizenztypen stehen, ist im Bundle **nicht** belegbar (die Seite ist nicht mitgeliefert und wurde in
 diesem Auftrag nicht abgerufen). → **UNKNOWN**
 
-`docs/SPEC_PREFERENCES.md` §3.11 hält bereits fest, dass ein Drittanbieter-Lizenzhinweis die
+`SPEC_PREFERENCES.md` §3.11 hält bereits fest, dass ein Drittanbieter-Lizenzhinweis die
 einzige harte Pflicht für uns ist; **dieser Abschnitt ist der Suchbeleg dafür**, dass die Vorlage
 dafür im Original **nicht** lokal existiert.
 
@@ -288,7 +288,7 @@ Alles → **belegt**, außer: **ob** die Seite beim Start tatsächlich erscheint
 zur Laufzeit) → **UNKNOWN**.
 
 Abgrenzung: Der Auto-**Update**-Pfad („Wurde aktualisiert", Download-Dialog) ist **nicht** Teil der
-Release Notes — **siehe `docs/SPEC_PREFERENCES.md` §3.10**.
+Release Notes — **siehe `SPEC_PREFERENCES.md` §3.10**.
 
 ---
 
@@ -314,22 +314,22 @@ Release Notes — **siehe `docs/SPEC_PREFERENCES.md` §3.10**.
   Wert**, z. B. `"deDrittanbieterlizenzen"` und `"itInformazioni su"` — offenbar ein fehlerhaftes
   Bundle. Ursache und Auswirkung → **UNKNOWN**. → **belegt** (Werte)
 
-Vollständige String-Tabelle bereits in `docs/SPEC_PREFERENCES.md` §4 und `docs/UI_STATES.md` §5.3.
+Vollständige String-Tabelle bereits in `SPEC_PREFERENCES.md` §4 und `UI_STATES.md` §5.3.
 
 ---
 
 ## 8. Was andere Docs schon abdecken (nur Verweise)
 
-- **`docs/SPEC_PREFERENCES.md` §3.11** — About-Fenster: Elementtabelle, Sheet-Präsentation,
+- **`SPEC_PREFERENCES.md` §3.11** — About-Fenster: Elementtabelle, Sheet-Präsentation,
   Web-URLs, Send-Logs-Ablauf, Hinweis auf die Lizenz-Pflicht. Dort steht bereits, dass der
   Titel-String ungenutzt ist.
-- **`docs/SPEC_PREFERENCES.md` §4** — String-Schlüssel→Deutsch-Tabelle (inkl. `aboutwindow_*`,
+- **`SPEC_PREFERENCES.md` §4** — String-Schlüssel→Deutsch-Tabelle (inkl. `aboutwindow_*`,
   `about_close`, `send_logs_*`).
-- **`docs/SPEC_PREFERENCES.md` §5 / `AGENTS.todo.md`** (Scope-Zeile 14) — Gap „About fehlt".
-- **`docs/SPEC_PREFERENCES.md` §3.10** — Auto-Update (Version-/Update-Info ohne eigenes Fenster).
-- **`docs/UI_STATES.md` §5.3** — About-Fenster-Inhalt kurz; §3 (Feld `serial-number` „shown in About").
-- **`docs/UI_FLOWS.md` §1 (#15 About, #16 Release Notes)** und **§2.1** (Größen 504 × 410 / 370 × 382).
-- **`docs/SPEC_OS_INTEGRATION.md`** (~Zeilen 273, 354) — App-Menü mit About/Preferences/Help/
+- **`SPEC_PREFERENCES.md` §5 / `AGENTS.todo.md`** (Scope-Zeile 14) — Gap „About fehlt".
+- **`SPEC_PREFERENCES.md` §3.10** — Auto-Update (Version-/Update-Info ohne eigenes Fenster).
+- **`UI_STATES.md` §5.3** — About-Fenster-Inhalt kurz; §3 (Feld `serial-number` „shown in About").
+- **`UI_FLOWS.md` §1 (#15 About, #16 Release Notes)** und **§2.1** (Größen 504 × 410 / 370 × 382).
+- **`SPEC_OS_INTEGRATION.md`** (~Zeilen 273, 354) — App-Menü mit About/Preferences/Help/
   Release notes; dortiger Hinweis auf den fehlenden Window-Menü-Nachbau bei uns.
 
 **Neu in diesem Dokument** (nicht in den obigen): der zusammengesetzte Versions-String samt
@@ -368,4 +368,4 @@ Layout-Umschalters samt Code-Default; das Release-Notes-Fenster im Detail; Logo-
 | **Welches Layout die Installation zeigt** | weblab-/server-getrieben; Code-Default ⇒ **voll**, Remote-Zuteilung nicht einsehbar | `RemoteExperiment`-Defaults (100/0/0) + `MinervaCustomConfig.json` (kein Eintrag) |
 | **Erscheinen die Release Notes automatisch beim Start?** | Feature-Gate-Zustand (`EnableNewReleaseNotes` / `ShouldShowReleaseNotesWindow`) zur Laufzeit unbekannt | `ShowReleaseNotesWindowTask`, `ReleaseNotesVersion = 19` |
 | **Ursache der fehlerhaften `ne.lproj`-Werte** | Bundle-Auffälligkeit ohne Codebezug | Werte in `ne.lproj/Localizable.strings` |
-| **Ob die App überhaupt je unterschrieben/notarisiert ausgeliefert wird** | außerhalb dieses Auftrags | nicht geprüft (siehe `docs/RELEASE.md`) |
+| **Ob die App überhaupt je unterschrieben/notarisiert ausgeliefert wird** | außerhalb dieses Auftrags | nicht geprüft (siehe `../dev/RELEASE.md`) |

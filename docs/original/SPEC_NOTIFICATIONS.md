@@ -22,7 +22,7 @@ path values were redacted or omitted.
 | Managed code | `Contents/MonoBundle/Amazon Photos.dll` (.NET / CoreCLR, `Microsoft.macOS.dll` bindings) |
 | Native launcher | `Contents/MacOS/Amazon Photos` |
 | German labels | `Contents/Resources/de.lproj/Localizable.strings` (986 entries) |
-| Existing notes reused | `docs/UI_FLOWS.md` §9 (menu-bar status popup), §11.4; `docs/UI_STATES.md` |
+| Existing notes reused | `UI_FLOWS.md` §9 (menu-bar status popup), §11.4; `UI_STATES.md` |
 
 ### 1.1 Exact commands used (all read-only)
 
@@ -355,4 +355,4 @@ This document contains **no personal data** and **no verbatim decompiled code**.
 identifiers, user names, device/serial values and absolute user paths are omitted or shown as
 placeholders. German user-facing labels are quoted (they are shipped UI strings, not code).
 The target app was only read (plist/strings/read-only decompilation) and was never launched,
-signed, or modified. `docs/SPEC_NOTIFICATIONS.md` is the only file created or changed.
+signed, or modified. `SPEC_NOTIFICATIONS.md` is the only file created or changed.

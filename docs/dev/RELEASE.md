@@ -1,7 +1,7 @@
 # Prime Photos — Release & Verteilung
 
 Wie ein Release dieses Projekts entsteht und wie ein heruntergeladener Build geprüft wird.
-System-Voraussetzungen zum Bauen: `docs/BUILD.md`. macOS-Bundle lokal: `packaging/README.md`.
+System-Voraussetzungen zum Bauen: `BUILD.md`. macOS-Bundle lokal: `packaging/README.md`.
 Quelle der Entscheidungen: `AGENTS.md` „CI/Release".
 
 ---
@@ -35,7 +35,7 @@ läuft damit **nur, wenn beide Beine grün sind** — sonst entsteht kein Releas
 | Linux x64 | `ubuntu-latest` | `Prime-Photos-linux-x64.tar.gz` (enthält `prime-photos`) |
 
 - Beide bauen mit `cargo build --release --locked`.
-- Der Linux-Job installiert die System-Abhängigkeiten aus `docs/BUILD.md` §5:
+- Der Linux-Job installiert die System-Abhängigkeiten aus `BUILD.md` §5:
   `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libssl-dev pkg-config build-essential`.
 - **Es werden keine SHA256-Prüfsummen erzeugt** (nicht implementiert).
 
@@ -211,7 +211,7 @@ die Datei mit `packaging/gen-third-party-licenses.sh`.
 
 ## 12. Referenzen
 
-- `docs/BUILD.md` — System-Voraussetzungen macOS/Windows/Linux.
+- `BUILD.md` — System-Voraussetzungen macOS/Windows/Linux.
 - `packaging/README.md` — `make-app.sh`, `Info.plist`, ad-hoc vs. eigene Identität.
 - `AGENTS.md` „CI/Release" — die getroffenen Entscheidungen.
 - `.github/workflows/ci.yml`, `.github/workflows/release.yml` — die Workflows selbst.

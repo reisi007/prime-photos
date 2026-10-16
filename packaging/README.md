@@ -2,7 +2,7 @@
 
 Werkzeuge für das **macOS-Bundle** von *Prime Photos*. Windows/Linux sind hier nur als
 Stichpunkte dokumentiert (keine echten Installer). Die System-Voraussetzungen stehen in
-`docs/BUILD.md` (§3 macOS, §4 Windows, §5 Linux).
+`docs/dev/BUILD.md` (§3 macOS, §4 Windows, §5 Linux).
 
 Dateien:
 
@@ -19,7 +19,7 @@ Das Skript legt sein Ergebnis unter `target/dist/` ab — also unter dem bereits
 ## macOS: bauen, signieren, starten
 
 Voraussetzungen: Rust-Toolchain und die Xcode Command Line Tools (C-Compiler für `rusqlite`
-`bundled`) — siehe `docs/BUILD.md` §3. Danach:
+`bundled`) — siehe `docs/dev/BUILD.md` §3. Danach:
 
 ```sh
 ./packaging/make-app.sh
@@ -95,7 +95,7 @@ früheren Build vorliegen, sonst bricht das Skript beim Icon-Schritt ab.
 
 ## Windows (nur Hinweis)
 
-Bauen mit dem MSVC-Target (`cargo build --release`, `docs/BUILD.md` §4). Für die **Verteilung**
+Bauen mit dem MSVC-Target (`cargo build --release`, `docs/dev/BUILD.md` §4). Für die **Verteilung**
 wäre zusätzlich eine Authenticode-Signatur (SignTool) nötig — **hier nicht umgesetzt**, es gibt
 keinen Installer im Repo.
 
@@ -112,7 +112,7 @@ Archiv mitzugeben. **AppImage/Flatpak/.deb sind nicht Teil dieses Skripts** (out
   Unterschied macht. Für eine echte Verteilung wäre Hardened Runtime + Notarisierung ohnehin
   nur mit einer Developer-ID-Signatur sinnvoll.
 - Ob macOS-Benachrichtigungen im signierten Bundle zuverlässig erscheinen, ist nicht geprüft
-  (siehe `docs/BUILD.md` §7).
+  (siehe `docs/dev/BUILD.md` §7).
 - Der komplette Ablauf wurde auf diesem Rechner ausgeführt (ad-hoc, `EXIT=0`): Bundle unter
   `target/dist/Prime Photos.app`, `Info.plist` ersetzt, `codesign -dv` meldet `Signature=adhoc`,
   `codesign --verify --verbose=2` meldet „valid on disk / satisfies its Designated Requirement".

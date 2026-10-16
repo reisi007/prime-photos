@@ -11,8 +11,8 @@ Datei ist die **vollständige, prüfbare Liste** aller Varianten aus **beiden** 
 Auslösebedingung, Leitungsverhalten, 409-Verhalten, unserem Stand (mit `Datei:Zeile`), Aufwand
 und Abnahmekriterium — plus der Konflikt-Dialog und die Lücken.
 
-**Vorhandene Grundlage.** `docs/SPEC_DUPLICATES.md` (Mechanismen, Erkennungsweg, lokaler
-Zustand, 409, Gap-Tabelle) und `docs/SPEC_FILENAME_ENCODING.md` (Namens-Kodierung). Jede
+**Vorhandene Grundlage.** `SPEC_DUPLICATES.md` (Mechanismen, Erkennungsweg, lokaler
+Zustand, 409, Gap-Tabelle) und `SPEC_FILENAME_ENCODING.md` (Namens-Kodierung). Jede
 übernommene Aussage wurde gegen das Assembly bzw. unseren Code geprüft; die Abweichungen
 stehen in §8 „Korrekturen an den vorhandenen Docs".
 
@@ -300,7 +300,7 @@ lokale Skip sind schon getrennt.
 * **Ob der Server einen dedup-berechtigten Upload am `suppress`-Weg anders behandelt** —
   der Client setzt `suppress=DEDUPLICATION` nur für **nicht** dedup-berechtigte Uploads; die
   Serverwirkung ist nicht belegt.
-* **Genaue Knopf→Ergebnis-Zuordnung des iOS-Dedupe-Prompts** — aus `docs/SPEC_DEDUP.md` §9
+* **Genaue Knopf→Ergebnis-Zuordnung des iOS-Dedupe-Prompts** — aus `SPEC_DEDUP.md` §9
   übernommen, hier unverändert UNKNOWN.
 * **Suchweg (reproduzierbar):** vollständiger `ilspycmd`-Decompile von `Amazon Photos.dll`;
   Greps nach `ConflictResolution`, `DeduplicateOptions`, `CloudDriveConflictResolution`,
@@ -384,8 +384,8 @@ lokale Skip sind schon getrennt.
   `replace_upload_url`), `src/config.rs` (`dedup_default`, `conflict_resolution_default`),
   `src/backup_config.rs`, `src/backup.rs` (`conflict_dialog`, `remember_conflict_in_folder`),
   `src/i18n.rs` (Konflikt-/Dedupe-Strings).
-* **Cross-Referenz:** `docs/SPEC_DUPLICATES.md`, `docs/SPEC_DEDUP.md`,
-  `docs/SPEC_ONE_TIME_UPLOAD.md`, `docs/PROTOCOL.md`, `docs/SPEC_FILENAME_ENCODING.md`.
+* **Cross-Referenz:** `SPEC_DUPLICATES.md`, `SPEC_DEDUP.md`,
+  `SPEC_ONE_TIME_UPLOAD.md`, `../protocol/PROTOCOL.md`, `SPEC_FILENAME_ENCODING.md`.
 
 ---
 

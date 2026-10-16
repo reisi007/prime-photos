@@ -29,8 +29,8 @@ vs. browser-cookie), which is the core of § 5.
 
 Out of scope for this spec: the post-login device registration / token chain
 (`POST /auth/register`, `POST /auth/token`, endpoint discovery) which is
-already documented in `docs/PROTOCOL.md` §§ 2.1–2.6, and upload protocol
-details (`docs/SPEC_UPLOAD.md`).
+already documented in `../protocol/PROTOCOL.md` §§ 2.1–2.6, and upload protocol
+details (`SPEC_UPLOAD.md`).
 
 ---
 
@@ -41,7 +41,7 @@ details (`docs/SPEC_UPLOAD.md`).
 | `Contents/MonoBundle/Amazon Photos.dll` (decompiled via `ilspycmd`) | `LoginConstants`, `LoginWindowController`, `LoginWebPolicyDelegate`, `MacLoginTask`, `DomainProvider`, `Localization`, `WebCookieManager`, `EncryptedFileTokenProvider`, `AccessTokenWorker`, `AppRestartInvalidRefreshTokenHandler` |
 | `Contents/MonoBundle/Amazon.Auth.Map.dll` (decompiled) | `AuthPortalUrl` base class, `AmazonCloudDriveAuthPortalUrl` subclass, `ClientIdProvider`, `AuthService`, `PandaService` / `RetriablePandaService` (incl. request/response DTOs), `AmazonAccessToken` / `AmazonRefreshToken`, `Constants` |
 | `Contents/Resources/de.lproj/Localizable.strings` | German labels (keys cited inline) |
-| `docs/UI_FLOWS.md`, `docs/UI_STATES.md`, `docs/PROTOCOL.md` | window geometry, navigation vocabulary, device-flow endpoints |
+| `UI_FLOWS.md`, `UI_STATES.md`, `../protocol/PROTOCOL.md` | window geometry, navigation vocabulary, device-flow endpoints |
 | `git show HEAD:src/login.rs`, `HEAD:src/config.rs`, login parts of `HEAD:src/main.rs`, `HEAD:src/prime_photos.rs` | our committed implementation |
 
 ---
@@ -183,7 +183,7 @@ original **cannot** be dismissed without quitting the app. *observed*.
 
 The captured authorization code is then consumed by the device-registration flow
 (`POST /auth/register` with PKCE verifier → refresh token → `POST /auth/token`
-→ `GET /drive/v2/account/endpoint`). See `docs/PROTOCOL.md` §§ 2.1–2.4.
+→ `GET /drive/v2/account/endpoint`). See `../protocol/PROTOCOL.md` §§ 2.1–2.4.
 
 ### 3.6 Marketplace → domain mapping
 
@@ -224,7 +224,7 @@ cloud-drive region used in `assoc_handle` and the Amazon region used in
 
 The original does **not** use browser cookies for uploads; its sign-in produces
 an OAuth authorization code that is exchanged for a refresh token and then an
-access token (`Atna|…`), see `docs/PROTOCOL.md`. Website cookies do exist in the
+access token (`Atna|…`), see `../protocol/PROTOCOL.md`. Website cookies do exist in the
 original — but they are **minted from the stored refresh token**
 (`POST <Panda-Base>/auth/token … requested_token_type=auth_cookies`) for the
 embedded web views and are never harvested from a webview (§ 3.8). Login still
@@ -247,14 +247,14 @@ Everything below is *observed* in the decompiled auth types (`AuthService`,
 `AppSettings`, `TickTockTimer` and `Constants` (`Amazon.CloudDrive.Constants`,
 the holder of `LocalStoragePath`). `<Panda-Base>` is the Panda service base URL
 as configured — `https://api.amazon.com` in the captures
-(`docs/PROTOCOL.md` § 2); before a request leaves the client that `amazon.com`
+(`../protocol/PROTOCOL.md` § 2); before a request leaves the client that `amazon.com`
 host is rewritten onto the marketplace domain, so a `DE` login talks to
 `api.amazon.de` (§ 3.6). *observed.*
 
 **1. Authorization code → refresh token.** The
 `openid.oa2.authorization_code` captured in the portal window (§§ 3.3/3.4) is
 redeemed with `POST <Panda-Base>/auth/register`. Endpoint and body match
-`docs/PROTOCOL.md` § 2.2 — including the captured `client_id`, which is the § 3.3
+`../protocol/PROTOCOL.md` § 2.2 — including the captured `client_id`, which is the § 3.3
 client id **without** its `device:` prefix (the prefix is stripped before the
 request).
 `registration_data` carries `app_name`, `app_version`, `device_type`,
@@ -317,7 +317,7 @@ the defaults above apply, and only a local override can change them.
 availability wait: `POST <Panda-Base>/auth/token` with the body
 `{source_token: <refresh token>, source_token_type: refresh_token,
 requested_token_type: access_token, app_name, app_version}` →
-`access_token` + `expires_in` (TTL 3600 s, `docs/PROTOCOL.md` § 2.1). The call
+`access_token` + `expires_in` (TTL 3600 s, `../protocol/PROTOCOL.md` § 2.1). The call
 sits inside a generic retry/back-off wrapper around the Panda service (settings
 `PandaServiceRetries`, `PandaServiceBackOffFactor`,
 `PandaServiceMaxBackOffInSeconds` — `AppSettings` defaults **5**, **2.0**,

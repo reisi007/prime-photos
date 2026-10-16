@@ -7,7 +7,7 @@ Scope-Entscheidung — **nicht alles umsetzen**. „Scope" ist ein Vorschlag;
 „später automatisch". Nichts davon ist implementiert.
 
 Belege: `Localizable.strings` (Strings/Keys) + `Amazon Photos.dll` (Symbole),
-jeweils gegen `docs/SPEC_*.md` gehalten.
+jeweils gegen `SPEC_*.md` gehalten.
 
 | # | Feature | Beleg | Status bei uns | Scope |
 |---|---|---|---|---|
@@ -56,7 +56,7 @@ vom Geräte-Default ab. Die geltende Entscheidung steht in `AGENTS.md` →
 Gleicher Upload-Endpoint (`kind=FILE`, nur `FILE` beobachtet); der Modus läuft
 allein über die `content_filter`-Bitmaske (`None=0, Photos=2, Videos=4,
 Other=8, PhotosAndVideo=6, Everything=14`, dazu `DeduplicateOptions`;
-Tabellen in `docs/UI_STATES.md`). **UNKNOWN:** welche Video-Extensions das
+Tabellen in `UI_STATES.md`). **UNKNOWN:** welche Video-Extensions das
 Original akzeptiert, ob sich Upload-Parameter für Video unterscheiden, und die
 Quota-Frage (Prime: Fotos unbegrenzt, Videos begrenzt? —
 `…_notification_overquota_unlimitedphotos_*`, Videospeicher-Upsell-String).

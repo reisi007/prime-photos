@@ -2,8 +2,8 @@
 
 Quellen: die realen deutschen UI-Strings der Original-App (`Localizable.strings`, hier als
 Schlüssel → Wert zitiert), die OCR-Beobachtungen des Orchestrators von einem laufenden Upload,
-sowie `docs/UI_FLOWS.md` (§3.1, §4.6–§4.8, §9.1, §11), `docs/UI_STATES.md` (§2.2, §3.1–§3.8,
-§5.2, §5.7) und `docs/SPEC_ONE_TIME_UPLOAD.md`.
+sowie `UI_FLOWS.md` (§3.1, §4.6–§4.8, §9.1, §11), `UI_STATES.md` (§2.2, §3.1–§3.8,
+§5.2, §5.7) und `SPEC_ONE_TIME_UPLOAD.md`.
 
 Beschrieben wird **beobachtetes Verhalten in eigenen Worten** (Tabellen) — **keine verbatimten
 Dekompilat-Auszüge**, **keine Personendaten**. Nicht Belegtes steht ausdrücklich als **UNKNOWN**.
@@ -273,12 +273,12 @@ Retry-/Aktivfenster-Keys erst mit deren Feature aufnehmen.
 
 ## 6. Querverweise
 
-- `docs/UI_FLOWS.md` §3.1 (Fußzeile), §4.6–§4.8 (Detailtabelle, Spalten, Drag & Drop), §9.1
+- `UI_FLOWS.md` §3.1 (Fußzeile), §4.6–§4.8 (Detailtabelle, Spalten, Drag & Drop), §9.1
   (Menüleisten-Hover), §11 (Status-Precedence, Schedule-Fehler, Completion/Retry).
-- `docs/UI_STATES.md` §2.2 (Fußzeile), §3.1–§3.5 (Zeilenmodell, Statuswortschatz, Aggregat- und
+- `UI_STATES.md` §2.2 (Fußzeile), §3.1–§3.5 (Zeilenmodell, Statuswortschatz, Aggregat- und
   Fortschrittstexte), §3.8 (DB-Felder `uploads`/`backup`/`upload_parts`), §5.2 (Aktivitätsfenster),
   §5.7 (Fehlerkatalog).
-- `docs/SPEC_ONE_TIME_UPLOAD.md` (Ad-hoc-Upload in dieselbe Fortschrittsanzeige) sowie
+- `SPEC_ONE_TIME_UPLOAD.md` (Ad-hoc-Upload in dieselbe Fortschrittsanzeige) sowie
   `src/upload.rs`, `src/backup.rs`, `src/folders.rs`, `src/i18n.rs`; Regeln in `AGENTS.md`.
 
 ---

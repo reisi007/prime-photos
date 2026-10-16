@@ -157,8 +157,8 @@ Symbols (assembly `Contents/MonoBundle/Amazon Photos.dll`, ILSpy 11.1):
   `IsNormalized`, `StringNormalizationExtensions`, `NormalizeToFormC`, `NormalizeName`,
   `SanitizeFileName`, `EscapeFileName`, `RemoveDiacritic`, `Transliterat`, `ToAscii`.
 
-**Bereits dokumentiert (Frage 5).** `docs/PROTOCOL.md` shows the request shape
+**Bereits dokumentiert (Frage 5).** `../protocol/PROTOCOL.md` shows the request shape
 `/v2/upload?name=<url-encoded filename>…` (§ around lines 463 and 586) but says nothing
-about the character form (NFC/NFD). `docs/SPEC_DUPLICATES.md` and `docs/SPEC_DEDUP.md`
+about the character form (NFC/NFD). `SPEC_DUPLICATES.md` and `SPEC_DEDUP.md`
 describe the *dedupe* mechanics but not name encoding. No existing doc in this repo
 addresses the NFC/NFD question; this file is the first.

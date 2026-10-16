@@ -21,7 +21,7 @@ Clean-room: eigene Worte und Tabellen, **keine** verbatim Code-Auszüge, **keine
 |---|---|---|
 | Unser Code | `src/backup.rs`, `src/folders.rs`, `src/upload.rs`, `src/backup_config.rs`, `src/dedup.rs`, `src/app.rs` | gelesen |
 | Original-DLL | `/Applications/Amazon Photos.app/Contents/MonoBundle/Amazon Photos.dll` (4,6 MB) | **am Code geprüft** (ilspycmd 11.1.0.9782, 2026-10-16) |
-| Original-Docs | `docs/SPEC_CHANGE_DETECTION.md`, `docs/SPEC_BACKGROUND_SYNC.md`, `docs/SPEC_FOLDERS.md`, `docs/UI_STATES.md`, `docs/SPEC_DEDUP.md`, `docs/PROTOCOL.md` | aus Dump |
+| Original-Docs | `SPEC_CHANGE_DETECTION.md`, `SPEC_BACKGROUND_SYNC.md`, `SPEC_FOLDERS.md`, `UI_STATES.md`, `SPEC_DEDUP.md`, `../protocol/PROTOCOL.md` | aus Dump |
 
 **Decompiler:** `ilspycmd` über den Wrapper `~/.local/bin/ilspycmd` (setzt `DOTNET_ROOT` selbst).
 Aufrufe: `ilspycmd -l c "<dll>"` (Klassenliste), `ilspycmd -t <Typ> "<dll>"` (einzelner Typ).
@@ -154,8 +154,8 @@ Erkennung des Wiederanschlusses.
 
 | Key | Deutsch | Beleg |
 |---|---|---|
-| `…_statuswindow_errorlong_local_drivenotfound` | „Das externe Laufwerk, aus dem Sie Dateien hochgeladen haben, ist möglicherweise offline. Bitte stellen Sie die Verbindung wieder her und versuchen Sie erneut." | `docs/SPEC_CHANGE_DETECTION.md` §6 |
-| `…_folder_not_present_warning` | „Dieser Ordner wurde nicht gefunden. Er wurde möglicherweise umbenannt, verschoben oder gelöscht." | `docs/SPEC_CHANGE_DETECTION.md` §6 |
+| `…_statuswindow_errorlong_local_drivenotfound` | „Das externe Laufwerk, aus dem Sie Dateien hochgeladen haben, ist möglicherweise offline. Bitte stellen Sie die Verbindung wieder her und versuchen Sie erneut." | `SPEC_CHANGE_DETECTION.md` §6 |
+| `…_folder_not_present_warning` | „Dieser Ordner wurde nicht gefunden. Er wurde möglicherweise umbenannt, verschoben oder gelöscht." | `SPEC_CHANGE_DETECTION.md` §6 |
 
 ### 3.3 Verhalten bei fehlendem Laufwerk (**am Code geprüft**)
 
@@ -404,7 +404,7 @@ aufgerufen, unabhängig davon, ob der Ordner während des Laufs vorhanden war.
 Keine Account-Identifikatoren, Nutzernamen, Geräte-/Seriennummern, absoluten Pfade oder
 verbatim dekompilierten Code reproduziert. Deutsche UI-Texte sind aus den vorhandenen
 Clean-Room-Docs übernommen. Das Original-Bundle wurde nur lesend betrachtet und nie
-gestartet, signiert oder modifiziert. `docs/SPEC_MISSING_SOURCE.md` ist die einzige Datei,
+gestartet, signiert oder modifiziert. `SPEC_MISSING_SOURCE.md` ist die einzige Datei,
 die von dieser Aufgabe erstellt wurde.
 
 ---
