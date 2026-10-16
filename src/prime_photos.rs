@@ -372,9 +372,23 @@ pub(crate) fn is_content_duplicate_code(code: &str) -> bool {
         || code.eq_ignore_ascii_case("MD5_DUPLICATE")
 }
 
+/// How a `Replace` decision came about (user decision 2026-10-16).
+///
+/// The safe-replace rule only restricts the **automatic** folder policy: a `PUT`
+/// may overwrite the node named in the 409 only when the local index binds this
+/// path to exactly that node. An explicit "Ersetzen" answer in the conflict
+/// dialog is the user's consent for *this* file and bypasses the check.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ReplaceBasis<'a> {
+    /// Folder policy `Replace`: only with a matching node binding.
+    Automatic(Option<&'a str>),
+    /// The user chose "Ersetzen" in the dialog.
+    Confirmed,
+}
+
 /// Whether a 409 from the upload endpoint must be answered with the replace
-/// `PUT` (second stage of `ConflictResolution::Replace`, user decision
-/// 2026-10-15). All three conditions must hold:
+/// `PUT` (second stage of `ConflictResolution::Replace`, user decisions
+/// 2026-10-15 and 2026-10-16). All conditions must hold:
 ///
 /// - the folder's policy is `Replace`;
 /// - the response named the node that is already there
@@ -387,7 +401,13 @@ pub(crate) fn is_content_duplicate_code(code: &str) -> bool {
 ///   bandwidth the dedup path exists to save — and reporting it as "neu
 ///   hochgeladen" would contradict "a file's identity is its content". Such a
 ///   409 stays the conflict marker the worker turns into "bereits im Konto"
-///   (`Origin::ContentSkip`, AGENTS.md).
+///   (`Origin::ContentSkip`, AGENTS.md). This holds for `Confirmed` too.
+/// - the replacement is allowed for this node: [`ReplaceBasis::Confirmed`] (the
+///   user answered "Ersetzen") always allows it, while
+///   [`ReplaceBasis::Automatic`] requires the local index to bind this path to
+///   exactly the existing node — otherwise the clash is with a *foreign* file of
+///   the same name, which must be renamed, not destroyed (user decision
+///   2026-10-16).
 ///
 /// Pure, hence testable without the network: the `PUT` itself needs an
 /// authenticated session.
@@ -395,10 +415,15 @@ fn should_replace_after_conflict(
     resolution: ConflictResolution,
     cause: &str,
     existing_node_id: &str,
+    basis: ReplaceBasis<'_>,
 ) -> bool {
     resolution == ConflictResolution::Replace
         && !existing_node_id.is_empty()
         && !is_content_duplicate_code(cause)
+        && match basis {
+            ReplaceBasis::Automatic(indexed) => indexed == Some(existing_node_id),
+            ReplaceBasis::Confirmed => true,
+        }
 }
 
 /// Upload id reported for a successful replace `PUT`: the id the response
@@ -890,12 +915,17 @@ impl PrimePhotos {
 
     /// Upload a picture and return its ID
     /// If contents and md5sum are provided, they will be used instead of reading the file again
+    ///
+    /// `conflict` is the folder's (or the run's) conflict policy; `basis` says how
+    /// a `Replace` came about, so the replace `PUT` is only sent when replacing is
+    /// allowed (see [`should_replace_after_conflict`], user decision 2026-10-16).
     pub async fn upload_picture(
         &mut self,
         pic_path: &Path,
         contents: Option<&[u8]>,
         md5sum: Option<&str>,
         conflict: ConflictResolution,
+        basis: ReplaceBasis<'_>,
     ) -> Result<String, String> {
         if self.web_dir_node.is_none() && !self.dry_run {
             self.update_web_pictures_dir_node().await?;
@@ -1168,21 +1198,25 @@ impl PrimePhotos {
                         .first()
                         .cloned()
                         .unwrap_or_default();
-                    // `Replace` (user decision 2026-10-15): the POST asked for
-                    // `conflictResolution=NONE` — the value the host accepts —
-                    // so a taken name surfaces as 409 naming the node that is
-                    // already there. That node is exactly what the original
-                    // overwrites with `PUT /v2/upload/<nodeId>` **carrying the
-                    // POST's query set** (live-proven: 200, same node id,
-                    // content swapped; live-proven as well that a PUT *without*
-                    // that query set is rejected with 400 `MissingFileSize`), so
-                    // the worker needs no conflict handling of its own for it.
-                    // Without a node id, with any other policy, and for a
-                    // **content** duplicate (the same bytes are already there —
-                    // re-sending them is the wasted bandwidth this project
-                    // avoids) the unchanged conflict marker below goes back, as
-                    // for the other policies.
-                    if should_replace_after_conflict(conflict, &code, &existing) {
+                    // `Replace` (user decisions 2026-10-15 and 2026-10-16): the
+                    // POST asked for `conflictResolution=NONE` — the value the
+                    // host accepts — so a taken name surfaces as 409 naming the
+                    // node that is already there. That node is exactly what the
+                    // original overwrites with `PUT /v2/upload/<nodeId>`
+                    // **carrying the POST's query set** (live-proven: 200, same
+                    // node id, content swapped; live-proven as well that a PUT
+                    // *without* that query set is rejected with 400
+                    // `MissingFileSize`). The PUT is only allowed when the local
+                    // index binds this path to exactly that node
+                    // (`ReplaceBasis::Automatic`), or when the user answered
+                    // "Ersetzen" in the dialog (`ReplaceBasis::Confirmed`); a
+                    // foreign file of the same name must not be destroyed.
+                    // Without a node id, with any other policy, without the
+                    // binding, and for a **content** duplicate (the same bytes
+                    // are already there — re-sending them is the wasted
+                    // bandwidth this project avoids) the unchanged conflict
+                    // marker below goes back, so the worker can rename instead.
+                    if should_replace_after_conflict(conflict, &code, &existing, basis) {
                         // The PUT answers the node the 409 named. It carries
                         // **the same query set as the POST** (`conflictResolution`
                         // [wire value of the policy], `fileSize`, `name`,
@@ -1519,28 +1553,48 @@ mod tests {
 
     #[test]
     fn replace_follows_a_name_conflict_but_never_a_content_duplicate() {
-        // A name conflict names the node to replace → PUT.
+        // A name conflict names the node to replace; the index binds this path
+        // to exactly that node → PUT (automatic folder policy).
         assert!(should_replace_after_conflict(
             ConflictResolution::Replace,
             "NameAlreadyExists",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
         // Unknown and empty causes count as a name conflict → PUT.
         assert!(should_replace_after_conflict(
             ConflictResolution::Replace,
             "SomethingElse",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
         assert!(should_replace_after_conflict(
             ConflictResolution::Replace,
             "",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
         // Both spellings are compared case-insensitively.
         assert!(should_replace_after_conflict(
             ConflictResolution::Replace,
             "NAME_ALREADY_EXISTS",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
+        ));
+        // Safe-replace rule (user decision 2026-10-16): without a binding, or
+        // with a binding to a *different* node, the name clash is with a foreign
+        // file of the same name — no PUT, the worker renames instead.
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NameAlreadyExists",
+            "NODE1",
+            ReplaceBasis::Automatic(None)
+        ));
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NameAlreadyExists",
+            "NODE1",
+            ReplaceBasis::Automatic(Some("ANDERE_NODE"))
         ));
         // A content duplicate: the same bytes are already in the account, so
         // re-sending them is exactly the wasted bandwidth the dedup path avoids
@@ -1548,23 +1602,49 @@ mod tests {
         assert!(!should_replace_after_conflict(
             ConflictResolution::Replace,
             "DuplicatesConflictError",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
         assert!(!should_replace_after_conflict(
             ConflictResolution::Replace,
             "MD5_DUPLICATE",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
         assert!(!should_replace_after_conflict(
             ConflictResolution::Replace,
             "duplicatesconflicterror",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
-        // No node id in the 409 → no PUT target.
+        // The explicit dialog answer "Ersetzen" is the user's consent for this
+        // file and bypasses the binding check — even without any binding.
+        assert!(should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NameAlreadyExists",
+            "NODE1",
+            ReplaceBasis::Confirmed
+        ));
+        // ... but it does not turn a content duplicate into a replace: those very
+        // bytes are already there, there is nothing to overwrite.
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "DuplicatesConflictError",
+            "NODE1",
+            ReplaceBasis::Confirmed
+        ));
+        // No node id in the 409 → no PUT target, whatever the basis.
         assert!(!should_replace_after_conflict(
             ConflictResolution::Replace,
             "NameAlreadyExists",
-            ""
+            "",
+            ReplaceBasis::Automatic(Some(""))
+        ));
+        assert!(!should_replace_after_conflict(
+            ConflictResolution::Replace,
+            "NameAlreadyExists",
+            "",
+            ReplaceBasis::Confirmed
         ));
         // Only `Replace` opens the second stage; the other three policies keep
         // their unchanged conflict-marker behaviour.
@@ -1576,7 +1656,8 @@ mod tests {
             assert!(!should_replace_after_conflict(
                 resolution,
                 "NameAlreadyExists",
-                "NODE1"
+                "NODE1",
+                ReplaceBasis::Automatic(Some("NODE1"))
             ));
         }
     }
@@ -1599,15 +1680,19 @@ mod tests {
         assert!(!should_replace_after_conflict(
             ConflictResolution::Replace,
             &body.error_code,
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
         // `trim` covers every whitespace form, not only the space character.
         for padded in ["\tDuplicatesConflictError\n", " MD5_DUPLICATE\r\n"] {
             assert!(is_content_duplicate_code(padded));
+            // Also with an explicit "Ersetzen" answer a content duplicate is
+            // never replaced (the same bytes are already there).
             assert!(!should_replace_after_conflict(
                 ConflictResolution::Replace,
                 padded,
-                "NODE1"
+                "NODE1",
+                ReplaceBasis::Confirmed
             ));
         }
         // The trim must not swallow the boundary: a padded **name** conflict is
@@ -1615,7 +1700,8 @@ mod tests {
         assert!(should_replace_after_conflict(
             ConflictResolution::Replace,
             "  NameAlreadyExists  ",
-            "NODE1"
+            "NODE1",
+            ReplaceBasis::Automatic(Some("NODE1"))
         ));
     }
 

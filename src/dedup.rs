@@ -15,6 +15,12 @@
 //! restarts. If the config directory cannot be created or opened, the index falls
 //! back to an in-memory database (dedup still works for the session) and finally
 //! to a no-op — it never panics.
+//!
+//! Since 2026-10-16 each row also carries the account `node_id` its path was
+//! uploaded to. That binding is what the safe-replace rule reads
+//! ([`DedupIndex::node_id_for`]): `ConflictResolution::Replace` only overwrites a
+//! name-clashing node when the index binds this very path to it, so a foreign
+//! photo that merely shares the name is never destroyed.
 
 use rusqlite::{Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
@@ -94,7 +100,8 @@ impl DedupIndex {
                      size        INTEGER NOT NULL,
                      mtime       INTEGER NOT NULL,
                      uploaded_at TEXT NOT NULL,
-                     origin      TEXT NOT NULL DEFAULT 'uploaded'
+                     origin      TEXT NOT NULL DEFAULT 'uploaded',
+                     node_id     TEXT
                  );
                  CREATE INDEX IF NOT EXISTS ix_uploads_md5 ON uploads(md5);
                  CREATE TABLE IF NOT EXISTS folder_scan (
@@ -124,7 +131,13 @@ impl DedupIndex {
         // `CREATE TABLE IF NOT EXISTS` above leaves an existing table untouched,
         // so the column is added explicitly. Best effort — a failed migration
         // only costs the origin distinction, never correctness.
+        //
+        // Databases created before 2026-10-16 lack the `node_id` column for the
+        // same reason; the migration adds it in place. A legacy row without a
+        // node id is simply *unbound* — it is renamed instead of replaced on the
+        // first content change (accepted, user decision 2026-10-16).
         let _ = Self::ensure_origin_column(&conn);
+        let _ = Self::ensure_node_id_column(&conn);
         Self { conn: Some(conn) }
     }
 
@@ -143,6 +156,24 @@ impl DedupIndex {
                 "ALTER TABLE uploads ADD COLUMN origin TEXT NOT NULL DEFAULT 'uploaded'",
                 [],
             )?;
+        }
+        Ok(())
+    }
+
+    /// Add the `node_id` column to an `uploads` table that predates it (user
+    /// decision 2026-10-16). A fresh table already carries it, so this is a
+    /// no-op there; an existing table is migrated in place. The column is
+    /// nullable without a default, so every legacy row stays **unbound** —
+    /// exactly what the safe-replace rule needs (it then renames instead of
+    /// replacing, see [`DedupIndex::node_id_for`]).
+    fn ensure_node_id_column(conn: &Connection) -> rusqlite::Result<()> {
+        let has_node_id = {
+            let mut stmt = conn.prepare("PRAGMA table_info(uploads)")?;
+            let mut rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            rows.any(|name| name.map(|n| n == "node_id").unwrap_or(false))
+        };
+        if !has_node_id {
+            conn.execute("ALTER TABLE uploads ADD COLUMN node_id TEXT", [])?;
         }
         Ok(())
     }
@@ -269,8 +300,19 @@ impl DedupIndex {
     /// next scan can skip it. Always marks the row as [`Origin::Uploaded`], even
     /// when the same path previously carried a content-skip marker — a real
     /// upload of the path wins over the skip note.
-    pub fn record_upload(&self, path: &Path, md5: &str, size: u64, mtime: i64) {
-        self.record(path, md5, size, mtime, Origin::Uploaded);
+    ///
+    /// `node_id` is the account node this path was uploaded to (`None` when the
+    /// caller does not know it, e.g. a 409 that named a *foreign* node). It feeds
+    /// the safe-replace rule via [`DedupIndex::node_id_for`].
+    pub fn record_upload(
+        &self,
+        path: &Path,
+        md5: &str,
+        size: u64,
+        mtime: i64,
+        node_id: Option<&str>,
+    ) {
+        self.record(path, md5, size, mtime, Origin::Uploaded, node_id);
     }
 
     /// Remember a local **content skip** (user decision 2026-10-14): the file
@@ -279,36 +321,70 @@ impl DedupIndex {
     /// (no re-read, no re-hash) and keeps the outcome reading "bereits im Konto"
     /// instead of degrading to "unverändert".
     pub fn record_content_skip(&self, path: &Path, md5: &str, size: u64, mtime: i64) {
-        self.record(path, md5, size, mtime, Origin::ContentSkip);
+        self.record(path, md5, size, mtime, Origin::ContentSkip, None);
     }
 
     /// Shared upsert behind [`DedupIndex::record_upload`] and
     /// [`DedupIndex::record_content_skip`]; `origin` is what the next scan reads
     /// back. Same fallback contract: without a usable connection a silent no-op.
-    fn record(&self, path: &Path, md5: &str, size: u64, mtime: i64, origin: Origin) {
+    fn record(
+        &self,
+        path: &Path,
+        md5: &str,
+        size: u64,
+        mtime: i64,
+        origin: Origin,
+        node_id: Option<&str>,
+    ) {
         let Some(conn) = self.conn.as_ref() else {
             return;
         };
         let path_str = path.to_string_lossy();
         let uploaded_at = chrono::Utc::now().to_rfc3339();
         let _ = conn.execute(
-            "INSERT INTO uploads (path, md5, size, mtime, uploaded_at, origin)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            // `COALESCE(excluded.node_id, node_id)` keeps a known binding: a
+            // `None` (e.g. a 409 path that does not know the node) must not
+            // erase it, while a `Some` always overwrites.
+            "INSERT INTO uploads (path, md5, size, mtime, uploaded_at, origin, node_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(path) DO UPDATE SET
                  md5 = excluded.md5,
                  size = excluded.size,
                  mtime = excluded.mtime,
                  uploaded_at = excluded.uploaded_at,
-                 origin = excluded.origin",
+                 origin = excluded.origin,
+                 node_id = COALESCE(excluded.node_id, node_id)",
             rusqlite::params![
                 path_str.as_ref(),
                 md5,
                 size as i64,
                 mtime,
                 uploaded_at,
-                origin.as_db()
+                origin.as_db(),
+                node_id
             ],
         );
+    }
+
+    /// The account node this path was last uploaded to, or `None` when the path
+    /// is unknown or its stored value is NULL/empty.
+    ///
+    /// This is the safe-replace rule's lookup (user decision 2026-10-16): the
+    /// `ConflictResolution::Replace` policy may only overwrite a name-clashing
+    /// node when this returns exactly that node id — otherwise the clash is with
+    /// a *foreign* file of the same name and must be renamed instead.
+    pub fn node_id_for(&self, path: &Path) -> Option<String> {
+        let conn = self.conn.as_ref()?;
+        let path_str = path.to_string_lossy();
+        let stored: Option<Option<String>> = conn
+            .query_row(
+                "SELECT node_id FROM uploads WHERE path = ?1",
+                [path_str.as_ref()],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap_or(None);
+        stored.flatten().filter(|id| !id.is_empty())
     }
 
     /// Largest modification time (Unix seconds) recorded for a **backup folder**
@@ -464,7 +540,7 @@ mod tests {
         assert_eq!(idx.should_skip(p, "aaaa", 10, 1), None);
 
         // Recorded, same md5 → skip, and it was a real upload.
-        idx.record_upload(p, "aaaa", 10, 1);
+        idx.record_upload(p, "aaaa", 10, 1, None);
         assert_eq!(idx.should_skip(p, "aaaa", 10, 1), Some(Origin::Uploaded));
 
         // Same path, different md5 → re-upload.
@@ -485,7 +561,7 @@ mod tests {
 
         // Recorded under `a`; the lookup never names a path, so the same
         // content under a *different* path (`b`, renamed/moved) is found too.
-        idx.record_upload(a, "aaaa", 10, 1);
+        idx.record_upload(a, "aaaa", 10, 1, None);
         assert!(idx.content_seen("aaaa"));
 
         // Unknown content → never seen.
@@ -502,8 +578,8 @@ mod tests {
     fn re_record_updates_md5() {
         let idx = index();
         let p = Path::new("/photos/a.jpg");
-        idx.record_upload(p, "aaaa", 10, 1);
-        idx.record_upload(p, "cccc", 30, 3);
+        idx.record_upload(p, "aaaa", 10, 1, None);
+        idx.record_upload(p, "cccc", 30, 3, None);
         assert_eq!(idx.should_skip(p, "cccc", 30, 3), Some(Origin::Uploaded));
         assert_eq!(idx.should_skip(p, "aaaa", 10, 1), None);
     }
@@ -516,7 +592,7 @@ mod tests {
         // Unknown path → no stat hit.
         assert_eq!(idx.stat_matches(p, 10, 1), None);
 
-        idx.record_upload(p, "aaaa", 10, 1);
+        idx.record_upload(p, "aaaa", 10, 1, None);
 
         // Recorded with the very same size + mtime → hit, origin is the upload.
         assert_eq!(idx.stat_matches(p, 10, 1), Some(Origin::Uploaded));
@@ -547,7 +623,7 @@ mod tests {
         assert_eq!(idx.stat_matches(p, 10, 1), Some(Origin::ContentSkip));
 
         // A later real upload of the same path wins and flips the origin back.
-        idx.record_upload(p, "aaaa", 10, 1);
+        idx.record_upload(p, "aaaa", 10, 1, None);
         assert_eq!(idx.should_skip(p, "aaaa", 10, 1), Some(Origin::Uploaded));
         assert_eq!(idx.stat_matches(p, 10, 1), Some(Origin::Uploaded));
     }
@@ -694,5 +770,81 @@ mod tests {
         assert_eq!(idx.one_time_queue(), None);
         idx.clear_one_time_queue();
         assert_eq!(idx.one_time_queue(), None);
+    }
+
+    #[test]
+    fn node_id_binds_a_path_and_unknown_paths_answer_none() {
+        let idx = index();
+        let p = Path::new("/photos/a.jpg");
+
+        // Unknown path → no binding.
+        assert_eq!(idx.node_id_for(p), None);
+
+        // A recorded node id round-trips.
+        idx.record_upload(p, "aaaa", 10, 1, Some("N1"));
+        assert_eq!(idx.node_id_for(p), Some("N1".to_string()));
+
+        // A record without a node id leaves an unknown path unbound.
+        let q = Path::new("/photos/foreign.jpg");
+        idx.record_upload(q, "bbbb", 20, 2, None);
+        assert_eq!(idx.node_id_for(q), None);
+
+        // A second upload of the same path overwrites the binding.
+        idx.record_upload(p, "aaaa", 10, 1, Some("N2"));
+        assert_eq!(idx.node_id_for(p), Some("N2".to_string()));
+    }
+
+    #[test]
+    fn node_id_none_keeps_a_known_binding_and_content_skip_keeps_it_too() {
+        let idx = index();
+        let p = Path::new("/photos/a.jpg");
+        idx.record_upload(p, "aaaa", 10, 1, Some("N1"));
+
+        // `None` (a 409 that does not know the node) must not erase the binding.
+        idx.record_upload(p, "bbbb", 20, 2, None);
+        assert_eq!(idx.node_id_for(p), Some("N1".to_string()));
+
+        // A content skip carries no node id either and leaves the binding intact.
+        idx.record_content_skip(p, "cccc", 30, 3);
+        assert_eq!(idx.node_id_for(p), Some("N1".to_string()));
+    }
+
+    #[test]
+    fn node_id_degrades_without_db() {
+        let idx = DedupIndex { conn: None };
+        // No connection: no binding, and a record is a silent no-op.
+        assert_eq!(idx.node_id_for(Path::new("/photos/a.jpg")), None);
+        idx.record_upload(Path::new("/photos/a.jpg"), "aaaa", 10, 1, Some("N1"));
+        assert_eq!(idx.node_id_for(Path::new("/photos/a.jpg")), None);
+    }
+
+    #[test]
+    fn migration_adds_node_id_and_legacy_rows_stay_unbound() {
+        // A database written before the `node_id` column existed.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE uploads (
+                 path        TEXT PRIMARY KEY,
+                 md5         TEXT NOT NULL,
+                 size        INTEGER NOT NULL,
+                 mtime       INTEGER NOT NULL,
+                 uploaded_at TEXT NOT NULL,
+                 origin      TEXT NOT NULL DEFAULT 'uploaded'
+             );
+             INSERT INTO uploads (path, md5, size, mtime, uploaded_at, origin)
+             VALUES ('/photos/legacy.jpg', 'aaaa', 10, 1, '2026-01-01T00:00:00Z', 'uploaded');",
+        )
+        .unwrap();
+
+        // Opening it runs the migration in place: the column is present, but the
+        // legacy row is unbound (no value) — a first content change renames it
+        // instead of replacing it.
+        let idx = DedupIndex::from_conn(conn);
+        assert_eq!(idx.node_id_for(Path::new("/photos/legacy.jpg")), None);
+
+        // The migrated table accepts new bindings.
+        let p = Path::new("/photos/new.jpg");
+        idx.record_upload(p, "bbbb", 20, 2, Some("N1"));
+        assert_eq!(idx.node_id_for(p), Some("N1".to_string()));
     }
 }

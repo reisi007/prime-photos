@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::dedup::{DedupIndex, Origin};
 use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
-use crate::prime_photos::PrimePhotos;
+use crate::prime_photos::{PrimePhotos, ReplaceBasis};
 use crate::theme;
 use eframe::egui::Color32;
 use std::{
@@ -610,9 +610,22 @@ pub(crate) async fn upload_worker(
         // can tell a content duplicate ("bereits im Konto", nothing sent from
         // this path) from a name conflict ("vorhanden", different content).
         let mut conflict_cause: Option<String> = None;
+        // The account node this path is bound to in the local index, if any — the
+        // safe-replace rule's input (user decision 2026-10-16). Read once before
+        // the loop: the guard is dropped immediately and never held across an
+        // `await`.
+        let indexed_node_id = dedup.lock().unwrap().node_id_for(&path);
+        // Set when the user explicitly answers "Ersetzen" in the conflict dialog:
+        // that consent for *this* file bypasses the binding check.
+        let mut replace_confirmed = false;
         let outcome = loop {
+            let basis = if replace_confirmed {
+                ReplaceBasis::Confirmed
+            } else {
+                ReplaceBasis::Automatic(indexed_node_id.as_deref())
+            };
             match uploader
-                .upload_picture(&path, Some(&bytes), Some(&md5sum), resolution)
+                .upload_picture(&path, Some(&bytes), Some(&md5sum), resolution, basis)
                 .await
             {
                 Ok(id) => break FileOutcome::Uploaded(id),
@@ -621,6 +634,17 @@ pub(crate) async fn upload_worker(
                         break FileOutcome::Failed(e);
                     };
                     conflict_cause = crate::prime_photos::conflict_cause(&e).map(str::to_owned);
+                    // Namenskonflikt unter `Replace`, den der Index nicht an diesen Pfad bindet:
+                    // eine fremde Datei gleichen Namens darf nicht überschrieben werden
+                    // (User-Entscheidung 2026-10-16) — einmalig umbenennen statt ersetzen.
+                    // Ein Inhaltsduplikat bleibt "bereits im Konto" (der Block unten).
+                    let content_duplicate = conflict_cause
+                        .as_deref()
+                        .is_some_and(crate::prime_photos::is_content_duplicate_code);
+                    if resolution == ConflictResolution::Replace && !content_duplicate && !replace_confirmed {
+                        resolution = ConflictResolution::SaveAsNew;
+                        continue;
+                    }
                     if resolution != ConflictResolution::Ask {
                         // "Ignorieren": the file is already on the server.
                         existing_conflict_id = Some(existing.to_string());
@@ -646,6 +670,11 @@ pub(crate) async fn upload_worker(
                         existing_conflict_id = Some(existing.to_string());
                         break FileOutcome::ConflictSkipped;
                     }
+                    if answer == ConflictResolution::Replace {
+                        // The explicit "Ersetzen" is the user's consent for this
+                        // file: it bypasses the safe-replace binding check.
+                        replace_confirmed = true;
+                    }
                     // Re-upload the same file with the chosen policy.
                     resolution = answer;
                 }
@@ -654,8 +683,14 @@ pub(crate) async fn upload_worker(
         let mut requeued = false;
         match outcome {
             FileOutcome::Uploaded(id) => {
-                // Remember the upload so the next scan skips it.
-                dedup.lock().unwrap().record_upload(&path, &md5sum, size, mtime);
+                // Remember the upload so the next scan skips it, and bind the
+                // path to the node it landed on — that binding is what later
+                // allows an automatic `Replace` of *this* file (user decision
+                // 2026-10-16).
+                dedup
+                    .lock()
+                    .unwrap()
+                    .record_upload(&path, &md5sum, size, mtime, Some(&id));
                 let mut s = shared.lock().unwrap();
                 s.done += 1;
                 s.uploaded_new += 1;
@@ -740,7 +775,10 @@ pub(crate) async fn upload_worker(
                     if content_duplicate {
                         dedup.record_content_skip(&path, &md5sum, size, mtime);
                     } else {
-                        dedup.record_upload(&path, &md5sum, size, mtime);
+                        // The 409 names the node of an existing file — possibly a
+                        // *foreign* one that merely shares the name, so it must
+                        // not be bound to this path (user decision 2026-10-16).
+                        dedup.record_upload(&path, &md5sum, size, mtime, None);
                     }
                 }
                 let mut s = shared.lock().unwrap();
