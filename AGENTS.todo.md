@@ -18,13 +18,20 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
 2. [ ] **Manueller Test VOR dem DMG** (User-Vorgabe 2026-10-16: „vor DMG neu bauen bitte manuellen
-   test einplanen"). Nach Welle 4b/5 die App lokal bauen und nach `/Applications` installieren,
-   dann **vom User am echten Fenster** prüfen lassen — headless ist nur die Geometrie belegt, nicht
-   die Optik:
+   test einplanen"). App lokal bauen und nach `/Applications` installieren, dann **vom User am
+   echten Fenster** prüfen lassen — headless ist nur die Geometrie belegt, nicht die Optik:
    - **About** aus dem **Tray-Menü** *und* dem **macOS-App-Menü** öffnen (der AppKit-Pfad ist
      headless grundsätzlich nicht beweisbar): Version-/Commit-Anzeige, „Schließen", Fenster-✕.
    - **Lizenz-Fenster:** beide Reiter, Scrollen durch Komponentenliste und Lizenztexte, Lesbarkeit,
-     **Ruckeln?** (1,2 MB dürfen nur sichtbar gesetzt werden), Fenster vergrößern/verkleinern.
+     **Ruckeln?** (1,2 MB dürfen nur sichtbar gesetzt werden), Fenster **verkleinern** (die neue
+     Mindestbreite muss das Klippen der 100-Zeichen-Zeilen verhindern).
+   - **Ordner-Dialog (neu asynchron, Welle 5.1):** öffnen → **abbrechen** → **erneut öffnen** (nach
+     einem Abbruch muss ein zweiter Dialog möglich sein — der Guard), dann einen Ordner wählen;
+     prüfen, dass das UI bei offenem Panel **weiterläuft** (früher fror es ein) und das Ergebnis im
+     **richtigen** Feld landet („Datensicherung hinzufügen …" vs. „Ändern …" im Einstellungsdialog).
+   - **Abmelden bei laufendem Upload (Welle 5.2):** einen Lauf starten, mitten drin abmelden → der
+     Lauf endet sofort, **kein** „fertig"/„läuft" in der Zeile, **kein** „Fertig"-Toast; nach
+     erneutem Anmelden darf die Zeile **nicht** „…% hochgeladen" behaupten.
    - **Nav-Icons** (gefüllte Wolke + Zahnrad) bei 18 px — sitzen sie sauber in der Icon-Spalte?
    - **Warteschlange** (Welle 3a): Gruppenköpfe, feste Spaltenköpfe, lange Namen mit Tooltip,
      leerer Zustand, Liste füllt die Höhe, Scrollen bis zur letzten Zeile.
@@ -103,14 +110,13 @@ Verifier APPROVE). Geblieben ist **offene** Arbeit:
   raus** (Runde 2026-10-16, Commit `83376ba`): die Zeilen `:268` und `:273`/`:278` (App-Default
   `Replace`, voller POST-Query-Satz) sowie der §5-Text.
 
-## Offene Kandidaten derselben Absturzklasse (2026-10-14) — **ungeprüft**
+## Offene Kandidaten derselben Absturzklasse (2026-10-14)
 
 Regel aus dem Absturz am Laufende (2026-10-14, behoben; Details in `docs/DEV_NOTES.md` § 1):
 **keine synchrone AppKit-/RunLoop-API direkt aus `update`.**
-- [ ] **`rfd::FileDialog::pick_folder()`** (`src/backup.rs`, `src/backup_config.rs`) — öffnet auf
-  macOS ein **modales** `NSOpenPanel` mit eigener RunLoop. Dieselbe Klasse wie der Absturz
-  (`notify-rust`). **Ungeprüft:** ob es real abstürzt, ist **nicht** belegt. Prüfen und ggf. auf
-  `AsyncFileDialog` + `self.rt` umstellen (die Tokio-Runtime existiert bereits).
+**Erledigt (2026-10-16, `e36488d`):** der letzte Kandidat `rfd::FileDialog::pick_folder()` ist auf
+`AsyncFileDialog` + `self.rt` umgestellt — der synchrone Pfad blockierte das UI und gehörte in genau
+diese Klasse. Offen ist hier **nichts**; die Regel bleibt als Prüfmaßstab für neue AppKit-Aufrufe.
 
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 
@@ -122,23 +128,26 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   manuellen Test** (Schritt 2 der Auftragsliste) — der Recon liefert für die Nav-Zeile keine
   Icon-Maße, und nach Welle 3c sitzen die Icons in einem festen 18×18-Rect. Ein blindes „Ausrichten"
   würde ändern, was der User noch gar nicht beurteilt hat.
-- [ ] **Logout-Residuen — aufgeteilt (Stand 2026-10-16).** Hinfällig: die laufende Login-WebView
-  (der Login-Screen *ersetzt* die Haupt-UI, der Abmelden-Knopf ist dort nicht erreichbar) und die
-  Annahme „`logout()` löscht nur die 5 Auth-Felder" (es stoppt den Session-Worker und löscht
-  Token/Keychain längst). **Offen und beauftragt:** der **laufende Upload** (Abbruch-Flag, User-
-  Entscheidung 2026-10-16, siehe `AGENTS.md`) und `config_error` nach fehlgeschlagenem `save()`
-  (verständlich formulieren **und** auf dem Login-Screen zeigen).
-- [ ] **Nav-Accessibility.** Selbstgezeichnete `nav_item`-Zeilen (`allocate_exact_size`) haben keine
-  Keyboard-Fokus-/Accessibility-Semantik; optional `Sense`-Widget/`widget_info` ergänzen.
 - [ ] **Deutsche Doku-Kommentare in `src/notify.rs`** (Altbestand in HEAD, Verifier-Befund
   2026-10-16, kosmetisch): dort stehen deutsche `///`-Doku-Texte, während der Projektstil in `src/`
   englische Kommentare vorsieht — die inline-`//`-Kommentare sind außerhalb von `i18n.rs`/`tr(...)`
   inzwischen **frei** von Deutsch (Runde `83376ba`). Kein eigener Auftrag; beim nächsten Anfassen
   von `notify.rs` mitziehen.
 
+**Erledigt und damit raus (2026-10-16):** die **Logout-Residuen** (laufender Upload: Abbruch-Flag
+`2a3b636`; `config_error` verständlich und auf dem Login-Screen: dito; die Login-WebView-Residue war
+hinfällig, der Login-Screen ersetzt die Haupt-UI) und die **Nav-Accessibility** (`widget_info`,
+`e36488d`).
+
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
 Ausdrücklich **ohne** Starttermin:
+- **Kleiner Rest aus Welle 5.2 (nicht blockierend, Verifier-Befund 2026-10-16):** die
+  `cancelled`-Zuweisung im Ablauf-Zweig (`src/login.rs:491`) liegt **innerhalb** des
+  `session`-Guards — der Guard im `if`-Kopf wird über den ganzen Block gehalten, Ordnung also
+  `session → upload`. Der Verifier hat das als **deadlock-frei** belegt (es gibt keine
+  Gegenrichtung `upload → session`); beim nächsten Anfassen von `poll_session` nach außen ziehen,
+  damit die Reihenfolge nicht von einer Abwesenheit abhängt.
 - Queue-Paginierung (heute bricht das Panel bei 300 Zeilen ab, Original lädt seitenweise 1000).
 - Fehlerfenster mit `readdtoqueue`/`retryall`; Semantik laut `SPEC_STATUS_DETAIL.md` §3.
 - Pause **pro Ordner** (Zeilen-Symbol) — im Original vorhanden, bei uns Post-MVP.
@@ -169,33 +178,9 @@ Fallstricke, Ops-Tricks, Gates — steht in `docs/DEV_NOTES.md`; Live-Nachweise 
 Geschnitten nach **gemeinsamem Umfeld/Dateien**, damit jede Welle in einem Durchgang ohne
 Merge-Konflikt läuft; die Reihenfolge ist eine Empfehlung.
 
-### Welle 4 — Release-Pflicht: About + Third-Party-Lizenzen
-Entscheidungen vom 2026-10-16 stehen in `AGENTS.md` → „About + Drittanbieter-Lizenzen"; Recon in
-`docs/SPEC_ABOUT.md`. Zwei Pakete:
-- **4a** Daten + eigene Lizenz: `LICENSE-MIT`/`LICENSE-APACHE`, `license = "MIT OR Apache-2.0"` in
-  `Cargo.toml`, Generator `packaging/gen-third-party-licenses.sh` → `assets/third-party-licenses.txt`
-  (alle Abhängigkeiten aus `Cargo.lock`, vollständige Lizenztexte, deterministisch, offline).
-- **4b** UI + Menü: About-Fenster (Logo, Version, Kurztext, Copyright „© <Jahr> Prime Photos"),
-  eigenes scrollbares Lizenz-Fenster (generierte Liste **und** `docs/THIRD_PARTY.md`), Eintrag
-  „Über Prime Photos" im Tray- **und** App-Menü (AppKit-Eintrag über ein ObjC-Zielobjekt).
-
-### Welle 5 — Robustheit & Politur (klein, unabhängig)
-- **erledigt und verifiziert** (`7cc3699`): **5.4** — Selbstheilung statt `conn: None`, siehe
-  `AGENTS.md` → „Abmelden bei laufendem Upload" (dort steht auch die Entscheidung).
-- **hinfällig: 5.3** — der Account-Block zeigt seit `0d66e05` „Marktplatz / amazon.<domain>", die
-  Zeile „Amazon Photos" existiert dort nicht mehr. Der Login-Untertitel „Fotos & Videos zu Amazon
-  Photos hochladen" **bleibt** (faktische Nennung des Ziels, nach der Branding-Regel zulässig, wie
-  „Bei Amazon anmelden").
-- **5.1** `rfd::FileDialog::pick_folder()` auf `AsyncFileDialog` (siehe „Offene Kandidaten" oben).
-- **5.2** Rest: **Abmelden bei laufendem Upload** (Abbruch-Flag, User-Entscheidung 2026-10-16) +
-  `config_error` verständlich und auch auf dem Login-Screen. **Hinfällig** ist die dritte alte
-  Residue (laufende Login-WebView: der Login-Screen *ersetzt* die Haupt-UI, `src/app.rs:950`).
-- **5.2c** Nav-Accessibility: `widget_info`/`Sense` für die selbstgezeichneten `nav_item`-Zeilen.
-- **5.5 (neu, aus dem 4b-Verify)** den überzeichnenden Kommentar in `src/about.rs` korrigieren (die
-  „757 px / ~34 unerreichbare Zeilen"-Angabe reproduziert sich nicht; real sind es 777 px und ein
-  <1-px-Beschnitt) und dem Lizenz-Fenster eine **Mindestbreite** geben (unter ~707 px würden
-  100-Zeichen-Zeilen geklippt).
-- **Verschoben in den manuellen Test:** die Icon-Ausrichtung (keine belegten Maßwerte im Recon).
+**Wellen 1–5 sind abgeschlossen** (jeweils umgesetzt, unabhängig verifiziert und committet; die
+Historie steht in den Commits, die Entscheidungen in `AGENTS.md`). Offen ist nur **Welle 6** unten
+— und die nicht-blockierenden Reste in den Listen weiter oben.
 
 ### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
 Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,

@@ -25,6 +25,10 @@ früheren reinen macOS-Ziel, siehe „Plattform / Portierung").
   (dort wird tatsächlich angemeldet). In Docs, die die Original-App beschreiben, bleibt die
   faktische Nennung des Referenz-Produkts erlaubt (das ist Recon eines echten Produkts); nur
   **unser** Projekt/Code/UI darf sich nirgends als offizielle Amazon-App darstellen.
+  **Folge für den Account-Block (2026-10-16):** die Zeile „Amazon Photos" ist dort seit `0d66e05`
+  durch „Marktplatz / amazon.<domain>" ersetzt. Der **Login-Untertitel** „Fotos & Videos zu Amazon
+  Photos hochladen" **bleibt** — er nennt das Ziel faktisch (wie „Bei Amazon anmelden") und
+  beschreibt, wohin unsere App hochlädt, nicht wer sie ist.
 - **Marktplatz-URLs zentral (Projektregel, User-Entscheidung 2026-10-14):** Jede vom **Marktplatz**
   (oder der Zone) abhängige URL wird **ausschließlich in `src/urls.rs`** gebaut. Außerhalb dieser Datei
   darf **kein** `format!("https://www.amazon.{}…")`, **kein** `thumbnails-photos.amazon.`-Literal und
