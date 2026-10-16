@@ -954,15 +954,24 @@ impl eframe::App for PrimePhotoApp {
                 } else {
                     tr("Bereit").to_string()
                 };
-                egui::CollapsingHeader::new(summary).show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_height(140.0)
-                        .show(ui, |ui| {
-                            for line in &s.log {
-                                ui.label(line);
-                            }
-                        });
-                });
+                egui::CollapsingHeader::new(summary)
+                    // Fixed id: `summary` changes with every counter / file / ETA
+                    // update, so an id derived from the label would lose the
+                    // open state on each update (docs/DEV_NOTES.md §3).
+                    .id_salt("log_panel")
+                    .show(ui, |ui| {
+                        // Size the scroll area to the height the panel actually
+                        // has left: a fixed height overflows the resizable panel
+                        // and gets clipped at the bottom window edge.
+                        let available = ui.available_height();
+                        egui::ScrollArea::vertical()
+                            .max_height(available)
+                            .show(ui, |ui| {
+                                for line in &s.log {
+                                    ui.label(line);
+                                }
+                            });
+                    });
             });
 
             let active = self.upload.lock().unwrap().active;
