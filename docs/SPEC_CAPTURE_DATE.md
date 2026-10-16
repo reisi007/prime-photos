@@ -123,8 +123,10 @@ er kein Datum baut. Der frühere Befund, dass unsere Crate `kamadak-exif-0.6.1` 
 nur über `parse_subsec` setzt und **kein** Reader-Aufruf das aufruft, betrifft **unseren** Code und
 ist hier nur die Kontrastfolie — der Original-Client hat dieselbe Frage anders beantwortet: er
 stellt sie gar nicht. **Präzisiert (2026-10-16):** weil kein Reader-Aufruf `parse_subsec` erreicht,
-bleibt das Feld `nanosecond` ungesetzt ⇒ die von **uns** gesendete Sub-Sekunde ist **immer**
-`.000`. Der Server dagegen trägt echte dreistellige Sub-Sekunden (Live-Test, §12.1/§12.2).
+blieb das Feld `nanosecond` ungesetzt ⇒ die von uns **früher** gesendete Sub-Sekunde war **immer**
+`.000`. Der Server dagegen trägt echte dreistellige Sub-Sekunden (Live-Test, §12.1/§12.2). Der
+gesamte EXIF-Pfad und damit auch dieser Wert sind seit `fcbc14d` entfernt — wir senden **kein**
+Datum mehr (§10, §12.5; `docs/SPEC_UPLOAD.md` §2.4).
 
 **Beleg.** Negative Symbolsuche (`SubSecTime`, `Subsec`, `nanosecond`); `kamadak-exif-0.6.1`
 (`parse_subsec` als einziger Setzer von `nanosecond`, kein Aufrufer); `docs/SPEC_UPLOAD.md` §2.4
@@ -329,22 +331,29 @@ dieses Artefakts.
 
 | Aspekt | Original-Client (11.3.0/36) | Unser Client |
 |---|---|---|
-| Wer ermittelt das Datum | Server | **wir**, vor dem Netz |
-| EXIF-Leser | **keiner** | `exif`-Crate (Tag-Priorität `DateTimeDigitized` → `DateTimeOriginal` → `DateTime`, primärer IFD, `Value::Ascii`) |
-| `contentDate` auf der Leitung | **nie** (Feld bleibt `null`) | **immer**, als Query-Parameter des POST (und des `Replace`-PUT) |
-| Zwischenfall ohne EXIF | Server-Fallback (Tag-Granularität) | Dateizeit, aber nur wenn die Datei **> 10 Minuten** alt ist; sonst **Abbruch** des Uploads |
-| Format des gesendeten Werts | — | `YYYY-MM-DDTHH:MM:SS.<n>Z` mit aktuell **naiv lokaler** EXIF-Zeit + `Z` und der Sub-Sekunde aus dem EXIF-`nanosecond`-Feld (mindestens 3 Stellen gepolstert ⇒ bei gesetzter Sub-Sekunde können **mehr als drei** Nachkommastellen entstehen) |
-| Zeitzone | — | keine Umrechnung (lokale Zeit wird als `Z` ausgegeben) |
+| Wer ermittelt das Datum | Server | **Server** — wir ermitteln nichts mehr (seit `fcbc14d`) |
+| EXIF-Leser | **keiner** | **keiner** im Upload-Pfad — der `exif`-Lesevorgang ist entfernt |
+| `contentDate` auf der Leitung | **nie** (Feld bleibt `null`) | **nie** — weder Query-Parameter des POST noch des `Replace`-PUT |
+| Zwischenfall ohne EXIF | Server-Fallback (Tag-Granularität) | **kein** eigener Fallback mehr — der Server entscheidet |
+| Format des gesendeten Werts | — | **kein** Wert — es wird nichts mehr formatiert |
+| Zeitzone | — | — (kein Datum auf der Leitung) |
 
-**Wichtig:** Diese Abweichungen sind **kein** Widerspruch zum Original-Befund, sondern dessen
-Spiegelbild — das Original überlässt das Feld dem Server, wir besetzen es selbst. Aus dem Artefakt
-allein ist **nicht** entscheidbar, ob der Server unsere volle Zeit übernimmt oder kürzt (§5,
-§9.2) — der Live-Test §12.2 hat es entschieden: ein **mitgesendeter** `contentDate`-Wert wird
-**wörtlich** übernommen und **überschreibt** die Server-Ableitung, und der Server nimmt **ohne**
-gesendeten Wert die **volle** EXIF-Aufnahmezeit (inkl. Sub-Sekunde). Unsere (naiv-lokalen,
-`.000`-)Werte stehen also deshalb so im Konto, weil **wir** sie senden. Zwei Punkte sind zusätzlich
-als **eigener** Code-Fund markiert und gehören nicht in diese Spec-Korrektur: die naiv-lokale Zeit
-und die Sub-Sekunden-Überlänge (vgl. `docs/SPEC_UPLOAD.md` §2.4).
+**Wichtig — auf diesem Feld kein Widerspruch mehr zum Original:** Unser Client verhält sich
+inzwischen wie der Original-Client und überlässt `contentDate` dem Server; die frühere Abweichung
+ist mit `fcbc14d` entfallen.
+
+**Historie — wie es vor `fcbc14d` war:** Unser Client ermittelte das Datum selbst — EXIF über die
+`exif`-Crate (Tag-Priorität `DateTimeDigitized` → `DateTimeOriginal` → `DateTime`, primärer IFD,
+`Value::Ascii`) mit einem **Dateizeit-Rückfall**, wenn kein EXIF lesbar war, und der Regel, den
+Upload abzubrechen, wenn die Datei jünger als 10 Minuten war; der Wert ging als `contentDate` mit
+(POST und `Replace`-PUT), formatiert als `YYYY-MM-DDTHH:MM:SS.<n>Z` mit **naiv lokaler** EXIF-Zeit +
+`Z` und der immer `.000`-Sub-Sekunde. Bei einem Lightroom-Export setzte der Rückfall die
+**Export**zeit statt der Aufnahmezeit. **Warum geändert:** der Live-Test §12.2 zeigt, dass ein
+**mitgesendeter** `contentDate`-Wert **wörtlich** übernommen wird und die Server-Ableitung
+**überschreibt** — unsere eigene, potenziell falsche Ermittlung konnte die richtige
+Server-Ableitung also nur verschlechtern. Seit `fcbc14d` („fix(upload): kein contentDate mehr senden
+- der Server leitet das Aufnahmedatum ab") sendet unser Client deshalb **keinen** `contentDate` mehr
+und überlässt die Ableitung dem Server wie das Original; vertieft in `docs/SPEC_UPLOAD.md` §2.4.
 
 ---
 
@@ -467,11 +476,12 @@ EXIF. Mit auswertbarem EXIF liefert der Server die **volle** Aufnahmezeit samt S
 (Test 1 + 2). Die Mitternachts-Aussage bleibt für **EXIF-lose** Dateien gültig, ist aber **keine**
 allgemeine Normalisierung.
 
-### 12.5 Was das für unseren Client bedeutet (nur beschrieben, nicht geändert)
+### 12.5 Was das für unseren Client bedeutet (geliefert in `fcbc14d`)
 
-Die Umsetzung ist beauftragt und wird in `docs/SPEC_UPLOAD.md` §2.4 dokumentiert; hier steht sie
-**nur als Entscheidung**, nicht als gelieferter Code: unser Client soll `contentDate` **gar nicht
-mehr senden** und die Ableitung dem Server überlassen. Was der Live-Test dafür stützt:
+Die Umsetzung ist **geliefert und unabhängig verifiziert** (Commit `fcbc14d`, „fix(upload): kein
+contentDate mehr senden - der Server leitet das Aufnahmedatum ab"); dokumentiert in
+`docs/SPEC_UPLOAD.md` §2.4. Unser Client sendet `contentDate` **gar nicht mehr** und überlässt die
+Ableitung dem Server. Was der Live-Test dafür stützt:
 
 * **Ein gesendeter Wert gewinnt wörtlich** (Test 2 B): unser eigenes Datum hat die Server-Ableitung
   also nur deshalb überschrieben, weil wir es überhaupt gesendet haben.
