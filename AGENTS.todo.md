@@ -97,12 +97,6 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
   manuellen Test** (Schritt 2 der Auftragsliste) — der Recon liefert für die Nav-Zeile keine
   Icon-Maße, und nach Welle 3c sitzen die Icons in einem festen 18×18-Rect. Ein blindes „Ausrichten"
   würde ändern, was der User noch gar nicht beurteilt hat.
-- [ ] **Deutsche Doku-Kommentare in `src/notify.rs`** (Altbestand in HEAD, Verifier-Befund
-  2026-10-16, kosmetisch): dort stehen deutsche `///`-Doku-Texte, während der Projektstil in `src/`
-  englische Kommentare vorsieht — die inline-`//`-Kommentare sind außerhalb von `i18n.rs`/`tr(...)`
-  inzwischen **frei** von Deutsch (Runde `83376ba`). Kein eigener Auftrag; beim nächsten Anfassen
-  von `notify.rs` mitziehen.
-
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
 Ausdrücklich **ohne** Starttermin:
