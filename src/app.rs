@@ -429,19 +429,19 @@ impl PrimePhotoApp {
         // `total_files` = the stored file count, status "läuft" and 0 done.
         // Already-uploaded files are skipped by the MD5 index anyway, and
         // `resume_one_time` starts the run once the usual guards allow it.
+        // App defaults, exactly like a fresh drop (`begin_one_time_run`): a
+        // restart-restored queue uses the same dedup/conflict settings the
+        // user configured, not the enum default — otherwise a fresh drop and
+        // a restored one could diverge (e.g. Replace vs. SaveAsNew).
+        let (one_dedup, one_conflict) = crate::folders::default_options(&config);
         let (one_time, one_time_resume) = match DedupIndex::open().one_time_queue() {
             Some((display_path, files)) if !files.is_empty() => (
                 Some(BackupFolder {
                     path: display_path,
                     name: "Einmalige Sicherung".to_string(),
                     enabled: true,
-                    // App defaults, exactly like a fresh drop
-                    // (`begin_one_time_run`): a restart-restored queue uses the
-                    // same dedup/conflict settings the user configured, not the
-                    // enum default — otherwise a fresh drop and a restored one
-                    // could diverge (e.g. Replace vs. SaveAsNew).
-                    dedup: config.dedup_default,
-                    conflict_resolution: config.conflict_resolution_default,
+                    dedup: one_dedup,
+                    conflict_resolution: one_conflict,
                     content_filter: crate::folders::ContentFilter::Photos,
                     total_files: files.len(),
                     uploaded_files: 0,
@@ -701,16 +701,17 @@ impl PrimePhotoApp {
             FolderPickerTarget::NewBackup => {
                 // Open the shared "Datensicherungseinstellungen" window in Create
                 // mode instead of adding + uploading right away.
+                // Application defaults as the preselection (user decision
+                // 2026-10-15), read through `default_options` so the create
+                // form and the one-time queue cannot drift apart; a value
+                // changed in the dialog belongs to the created target only,
+                // it is not written back.
+                let (dedup, conflict_resolution) =
+                    crate::folders::default_options(&self.config);
                 self.config_form = Some(BackupConfigForm {
                     path,
-                    // Global dedupe default as the preselection (user decision
-                    // 2026-10-15), the same role the conflict default below
-                    // plays.
-                    dedup: self.config.dedup_default,
-                    // Application default as the preselection (user decision
-                    // 2026-10-15); a value changed in the dialog belongs to the
-                    // created target only, it is not written back.
-                    conflict_resolution: self.config.conflict_resolution_default,
+                    dedup,
+                    conflict_resolution,
                     // Content filter: photos only today ("Videos sichern" is
                     // disabled); the effective filter stays `is_supported_image`.
                     content_filter: crate::folders::ContentFilter::Photos,

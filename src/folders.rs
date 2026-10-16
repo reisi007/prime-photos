@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::config::Config;
+
 const STANDARD_EXT: &[&str] = &[
     "jpg", "jpeg", "png", "heic", "heif", "tif", "tiff", "gif", "webp", "bmp",
 ];
@@ -238,6 +240,18 @@ impl ContentFilter {
             (false, false) => persisted,
         }
     }
+}
+
+/// The dedup/conflict options a **new** backup target and the one-time
+/// (drag & drop) queue are pre-filled with: the application defaults from
+/// `Config` (user decision 2026-10-15). All three pre-fill sites — the
+/// create form, the restored one-time row and `begin_one_time_run`'s plan —
+/// read this one pure function instead of touching `Config` directly, so
+/// they cannot drift apart. A target keeps whatever was persisted for it;
+/// this is only the preselection. (An existing `config.toml` without the
+/// keys loads the same values through the serde defaults.)
+pub(crate) fn default_options(cfg: &Config) -> (bool /*dedup*/, ConflictResolution) {
+    (cfg.dedup_default, cfg.conflict_resolution_default)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -590,5 +604,37 @@ name = "Fotos"
             ContentFilter::from_selection(true, true, ContentFilter::Photos),
             ContentFilter::PhotosAndVideo
         );
+    }
+
+    #[test]
+    fn default_options_mirror_the_application_defaults() {
+        // Every pre-fill site for a new target / the one-time queue reads this
+        // one function — a verifier flipping any single site alone used to
+        // leave the whole suite green. The expectation pins both fields as a
+        // pure mirror: no stock value is forced anywhere.
+        let mut config = Config::default();
+        assert_eq!(
+            default_options(&config),
+            (true, ConflictResolution::Replace),
+            "stock app defaults: dedupe on, conflicts replaced"
+        );
+
+        config.dedup_default = false;
+        config.conflict_resolution_default = ConflictResolution::SaveAsNew;
+        assert_eq!(
+            default_options(&config),
+            (false, ConflictResolution::SaveAsNew)
+        );
+
+        // Every conflict value the settings can express passes through
+        // verbatim — the helper is a mirror, not a fallback.
+        for conflict in [
+            ConflictResolution::Ask,
+            ConflictResolution::Ignore,
+            ConflictResolution::Replace,
+        ] {
+            config.conflict_resolution_default = conflict;
+            assert_eq!(default_options(&config).1, conflict);
+        }
     }
 }

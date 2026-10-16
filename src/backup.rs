@@ -1128,6 +1128,32 @@ async fn watch_loop(
     }
 }
 
+/// The persisted folder a remembered answer would be written into — `None`
+/// exactly when [`remember_conflict_in_folder`] refuses to write:
+/// - the transient drag & drop target (`ONE_TIME_IDX`), which has no
+///   `folders.toml` entry at all and stays run-only,
+/// - an index outside the store (`FolderStore::remove` shifts indices), and
+/// - a file that does not live below that folder's own path — the decisive
+///   guard, because the shifted index is exactly what could point at a
+///   neighbouring folder otherwise.
+///
+/// Both the checkbox label ([`conflict_remember_label`]) and the write
+/// ([`remember_conflict_in_folder`]) go through this one query, so the label
+/// can never name a folder that would not actually receive the answer.
+fn remember_folder<'a>(
+    store: &'a FolderStore,
+    idx: usize,
+    file_path: &Path,
+) -> Option<&'a folders::BackupFolder> {
+    if idx == ONE_TIME_IDX {
+        return None;
+    }
+    store
+        .folders
+        .get(idx)
+        .filter(|f| file_path.starts_with(&f.path))
+}
+
 /// Persist a remembered conflict answer into the folder the asked file belongs
 /// to — the single place that writes it (user decision 2026-10-15).
 ///
@@ -1136,14 +1162,8 @@ async fn watch_loop(
 /// (`folders.toml`). No schema change: the field already exists, and a folder
 /// that keeps its value simply keeps whatever policy it had.
 ///
-/// Refuses — and writes nothing — whenever the target is not provably a
-/// persisted folder this file belongs to:
-/// - the transient drag & drop target (`ONE_TIME_IDX`), which has no
-///   `folders.toml` entry at all and stays run-only,
-/// - an index outside the store (`FolderStore::remove` shifts indices), and
-/// - a file that does not live below that folder's own path — the decisive
-///   guard, because the shifted index is exactly what could point at a
-///   neighbouring folder otherwise.
+/// Refuses — and writes nothing — whenever [`remember_folder`] answers `None`
+/// (transient target, index outside the store, file outside the folder path).
 ///
 /// Returns whether it wrote.
 fn remember_conflict_in_folder(
@@ -1152,17 +1172,15 @@ fn remember_conflict_in_folder(
     file_path: &Path,
     answer: ConflictResolution,
 ) -> bool {
-    if idx == ONE_TIME_IDX {
+    if remember_folder(store, idx, file_path).is_none() {
         return false;
     }
-    let Some(folder) = store.folders.get_mut(idx) else {
-        return false;
-    };
-    if !file_path.starts_with(&folder.path) {
-        return false;
-    }
-    folder.conflict_resolution = answer;
-    true
+    // The guard above proved the index is in range; `map_or` keeps the write
+    // total without a panic path.
+    store.folders.get_mut(idx).map_or(false, |folder| {
+        folder.conflict_resolution = answer;
+        true
+    })
 }
 
 /// Checkbox text of the conflict dialog. `None` stands for the transient
@@ -1181,6 +1199,19 @@ fn remember_checkbox_label(folder_name: Option<&str>) -> String {
         ),
         None => tr("Nicht noch einmal fragen").to_string(),
     }
+}
+
+/// The label for a **pending** conflict: names the folder the answer would be
+/// persisted into — exactly the folder [`remember_conflict_in_folder`] writes
+/// to, decided by the shared guard [`remember_folder`] — and stays neutral
+/// whenever there is none (transient drag & drop target, index outside the
+/// store, or a file that does not live below the folder's path). Both
+/// decisions are the same query, so the checkbox never names a folder that
+/// would not receive the answer — the shifted-index case included.
+fn conflict_remember_label(store: &FolderStore, idx: usize, file_path: &Path) -> String {
+    remember_folder(store, idx, file_path)
+        .map(|f| remember_checkbox_label(Some(&f.name)))
+        .unwrap_or_else(|| remember_checkbox_label(None))
 }
 
 impl PrimePhotoApp {
@@ -1447,17 +1478,20 @@ impl PrimePhotoApp {
     /// set the transient target, publish the plan and spawn the run. The queue
     /// is **not** written here — the caller owns persistence.
     fn begin_one_time_run(&mut self, display_path: PathBuf, files: Vec<PathBuf>) {
+        // Dedup and conflict handling both follow their application default
+        // (user decision 2026-10-15; before that `dedup: true` /
+        // `ConflictResolution::default()` — same values unless the user changed
+        // the app defaults in the settings). `default_options` is the same
+        // source the create form uses, so a fresh drop and a new target agree.
+        let (dedup, conflict_resolution) = folders::default_options(&self.config);
         // The transient target itself: the stored name stays the plain German
-        // key, `tr` is applied at render time. Dedup and conflict handling both
-        // follow their application default (user decision 2026-10-15; before
-        // that `dedup: true` / `ConflictResolution::default()` — same values
-        // unless the user changed the app defaults in the settings).
+        // key, `tr` is applied at render time.
         self.one_time = Some(folders::BackupFolder {
             path: display_path,
             name: "Einmalige Sicherung".to_string(),
             enabled: true,
-            dedup: self.config.dedup_default,
-            conflict_resolution: self.config.conflict_resolution_default,
+            dedup,
+            conflict_resolution,
             content_filter: folders::ContentFilter::Photos,
             total_files: files.len(),
             uploaded_files: 0,
@@ -1467,12 +1501,7 @@ impl PrimePhotoApp {
 
         // One plan, one synthetic folder index: the counters, the live queue
         // and `folder_opts` look exactly like a single-folder run.
-        let mut plan = UploadPlan::from_files(
-            ONE_TIME_IDX,
-            self.config.dedup_default,
-            self.config.conflict_resolution_default,
-            files,
-        );
+        let mut plan = UploadPlan::from_files(ONE_TIME_IDX, dedup, conflict_resolution, files);
         let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
         let limit = if self.config.limit_enabled {
             self.config.limit_kbps
@@ -1543,19 +1572,16 @@ impl PrimePhotoApp {
 
         let mut remember = self.upload.lock().unwrap().conflict_remember;
         let mut answer: Option<ConflictResolution> = None;
-        // Name the folder the answer is persisted into — but only when the
-        // pending target really is one. The transient drag & drop queue
-        // (`ONE_TIME_IDX`) has no `folders.toml` entry, and an index the store
-        // no longer holds must not borrow a neighbouring folder's name; both
-        // fall back to the neutral text and stay run-only, exactly like
-        // `remember_conflict_in_folder` refuses to write for them.
-        let remember_label = match pending_idx {
-            Some(idx) if idx != ONE_TIME_IDX => self
-                .store
-                .folders
-                .get(idx)
-                .map(|f| remember_checkbox_label(Some(&f.name)))
-                .unwrap_or_else(|| remember_checkbox_label(None)),
+        // Name the folder the answer is persisted into — through
+        // `conflict_remember_label`, i.e. the exact guard
+        // `remember_conflict_in_folder` writes with: the transient drag & drop
+        // queue (`ONE_TIME_IDX`) has no `folders.toml` entry, an index the
+        // store no longer holds must not borrow a neighbouring folder's name,
+        // and a file outside the folder path means nothing would be written
+        // there either. All three fall back to the neutral text and stay
+        // run-only, exactly like the write refuses them.
+        let remember_label = match (pending_idx, pending_path.as_deref()) {
+            (Some(idx), Some(path)) => conflict_remember_label(&self.store, idx, path),
             _ => remember_checkbox_label(None),
         };
         // NOTE: egui 0.31 has no `Window::modal`; the dialog is centred and
@@ -2603,15 +2629,18 @@ mod tests {
     fn remember_label_names_the_folder() {
         // A persisted folder owns the answer (see `remember_conflict_in_folder`),
         // so the checkbox names which folder will stop asking.
+        // Language-neutral: the expectation is the translated key itself, not
+        // a hard-coded German literal, so the test holds under `Lang::En` too.
         let label = remember_checkbox_label(Some("Sport"));
 
+        assert_eq!(
+            label,
+            tr1("Nicht noch einmal nach ‚{}'-Ordner fragen", "Sport"),
+            "expected the folder-naming conflict-remember text"
+        );
         assert!(
             label.contains("Sport"),
             "expected the folder name in: {label}"
-        );
-        assert!(
-            label.contains("-Ordner fragen"),
-            "expected the folder wording in: {label}"
         );
     }
 
@@ -2730,6 +2759,72 @@ mod tests {
         assert!(
             toml.contains("conflict_resolution = \"replace\""),
             "expected the lowercase spelling, got: {toml}"
+        );
+    }
+
+    #[test]
+    fn remember_folder_names_only_the_owning_folder() {
+        // The query behind both the checkbox label and the write: the same
+        // three refusals, so the two can never disagree about the target.
+        let root = scratch_folder("folder-guard");
+        let other = scratch_folder("folder-other");
+        let mut store = asking_store(&other);
+        // A second folder at `root`, so index 0 is a neighbour that does not
+        // contain the asked file — the shifted-index scenario.
+        let mut neighbour = folders::BackupFolder::new(root.clone());
+        neighbour.conflict_resolution = ConflictResolution::Ask;
+        store.folders.push(neighbour);
+        let own_file = root.join("sub").join("photo.jpg");
+
+        // Index in range, file below the folder path ⇒ that folder.
+        let found = remember_folder(&store, 1, &own_file).expect("the owning folder is found");
+        assert_eq!(found.path, root);
+        // The transient drag & drop target ⇒ nothing to write into.
+        assert!(remember_folder(&store, ONE_TIME_IDX, &own_file).is_none());
+        // An index the store no longer holds ⇒ nothing.
+        assert!(remember_folder(&store, 2, &own_file).is_none());
+        // A shifted index pointing at a folder that does not contain the file
+        // ⇒ nothing: the answer must not land in a foreign folder.
+        assert!(remember_folder(&store, 0, &own_file).is_none());
+    }
+
+    #[test]
+    fn remember_label_follows_the_write_guard() {
+        // End to end for the checkbox text: it names exactly the folder that
+        // would receive the write (guarded by the same `remember_folder`), so
+        // the label can never promise a write that would not happen.
+        let root = scratch_folder("label-guard");
+        let other = scratch_folder("label-other");
+        let mut store = asking_store(&other);
+        let mut neighbour = folders::BackupFolder::new(root.clone());
+        neighbour.conflict_resolution = ConflictResolution::Ask;
+        store.folders.push(neighbour);
+        let own_file = root.join("photo.jpg");
+
+        // Normal case: the owning folder is named.
+        assert_eq!(
+            conflict_remember_label(&store, 1, &own_file),
+            remember_checkbox_label(Some(&store.folders[1].name))
+        );
+        // Shifted index with a foreign file ⇒ neutral, exactly like the write
+        // refuses it.
+        assert_eq!(
+            conflict_remember_label(&store, 0, &own_file),
+            remember_checkbox_label(None)
+        );
+        // A file below a *different* folder than the indexed one ⇒ neutral.
+        assert_eq!(
+            conflict_remember_label(&store, 1, &other.join("photo.jpg")),
+            remember_checkbox_label(None)
+        );
+        // Transient drag & drop target / dead index ⇒ neutral.
+        assert_eq!(
+            conflict_remember_label(&store, ONE_TIME_IDX, &own_file),
+            remember_checkbox_label(None)
+        );
+        assert_eq!(
+            conflict_remember_label(&store, 7, &own_file),
+            remember_checkbox_label(None)
         );
     }
 }
