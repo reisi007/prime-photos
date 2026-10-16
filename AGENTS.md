@@ -473,6 +473,43 @@ Ledger-Einträge sind nach Umsetzung + Verify gelöscht; **hier** steht das Daue
   **Verworfen:** Variant B (kompakt, eine Zeile, Pfad nur bei Mehrdeutigkeit); Variant C (nur die
   Dopplung entfernen, Pfad in die graue Zeile).
 
+## UX-Feedback am echten Fenster (2026-10-16, zweite Runde, App `bc7c2de` + DMG)
+
+Rückmeldungen des Users am installierten Fenster. Dauerhafte Entscheidungen:
+
+- **Fortschrittsbalken nie > 100 % (Welle 5.15).** Der blaue Aggregat-Balken („Alles aktuell") lief
+  während eines Laufs sichtbar über den rechten Rand („es hat ausgesehen als hätte er kurz 105 %
+  Breite"). Ursache: der `ProgressBar` ohne `desired_width` nimmt die volle Breite der Zeile, obwohl
+  der **Spinner** davor schon Platz verbraucht. Fix: Zeilenbreite **vor** dem `ui.horizontal` merken,
+  dem Balken eine explizite `desired_width` geben (ohne Spinner = Zeilenbreite, mit Spinner = Breite
+  − Spinnerbreite − `item_spacing.x`); die Spinnerbreite ist `interact_size.y` = 26 im Theme.
+- **Ordner-Zelle kurz (Welle 5.15).** Die Disambiguierung in der Warteschlange zeigt nur den
+  **Namen des Elternordners** („Sport (Pictures)") statt des vollen Pfads; der volle Pfad bleibt im
+  Tooltip. Anlass: „Sport (/Users/florianreisinger/Pictures)" wurde in der 120-px-Spalte
+  abgeschnitten. **Verworfen:** nur den Namen zeigen (gleichnamige Ordner wären in der Zeile
+  ununterscheidbar); die Spalte breiter machen.
+- **Kein „Wöchentlich aktiviert um …" (Welle 5.15).** Der Block im Dialog
+  „Datensicherungseinstellungen" ist **entfernt** (samt der i18n-Keys „Wöchentlich aktiviert" und
+  „um") — wir unterstützen kein wöchentliches Hochladen (User-Wortlaut: „wöchentlich um XX
+  hochladen unterstützen wir nicht, entfernen").
+- **Ordnerliste bekommt die ganze Resthöhe (User-Entscheidung 2026-10-16).** Die unterste Karte war
+  angeschnitten, weil `page_heights` die Liste auf `FOLDER_LIST_MAX_FRAC = 0.45` der freien Höhe
+  kappte. Neu: die Liste bekommt allen Platz außer der **Queue-Untergrenze** (`QUEUE_MIN_FRAC`) und
+  dem Chrome — die Queue behält ihr Minimum, die Karten sind vollständig sichtbar.
+  **Verworfen:** die Listen-Höhe auf ganze Karten zu runden; es so zu lassen („scrollt halt").
+- **App-Logo überall detailliert (Welle 5.16).** Die App-UI (Seitenleiste, About, Login) zeigt
+  `assets/logo.svg` (detailliertes Logo mit den Fotokarten) über `icons::app_logo`; das **kleine**
+  `logo-small.svg` bleibt **nur** der farbige Tray-Fallback für ein unbekanntes OS-Theme (User:
+  „Damit nutzen wir das kleine Logo nur in der Taskbar"). Seitenleisten-Logo **30 px** (vorher 24),
+  Logo + Titel **vertikal auf einer Mittelachse**. `assets/logo-small-black.svg` war **tote** Beute
+  und ist gelöscht (samt `build.rs`-Eintrag).
+- **Tray: Statuszeile + Pause-Labels (User-Entscheidung 2026-10-16).** Das Tray-Menü bekommt ganz
+  oben eine **nicht klickbare Statuszeile** („Bereit" / „Upload läuft: x/y" / „Angehalten" /
+  „Letzter Upload: x/y erfolgreich"); der Pause-Eintrag heißt im Tray „**Alle Sicherungen anhalten**"
+  ↔ „**Sicherung starten**". Das **App-Label** bleibt unverändert („Alle Sicherungsvorgänge
+  anhalten" ↔ „… fortsetzen") — der User wollte nur den Tray angleichen. Anlass: „Es ist alles
+  abgeschlossen, da macht ‚Anhalten' keinen Sinn."
+
 ## Scope-Grenzen (In/Out) — User-Wunsch 2026-10-13
 
 Bewusste, absichtliche Abgrenzung. Die vollständige Feature-für-Feature-Liste mit Beleg-Keys/-Symbolen

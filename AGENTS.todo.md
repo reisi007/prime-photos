@@ -4,22 +4,21 @@
 „Ledger-Hygiene". Doku/Recon → `docs/`; Dauer-Entscheidungen → `AGENTS.md`. „Verworfen" wird **nie**
 gelöscht.
 
-## Aktueller Auftrag (2026-10-15, Restbestand)
+## Aktueller Auftrag (2026-10-16)
 
-1. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
-   Reihenfolge: **D → E → DMG** — C, D und E sind **fertig und verifiziert** (`c6003ff`,
-   `69b30c5`, `615d009`).
-   - **Offen vor dem DMG:** der App-gesteuerte **Ende-zu-Ende-Live-Test** (Runde D) — blockiert,
-     solange der Mac gesperrt ist (Keychain-Dialog unbedienbar). Nach dem Entsperren: Testdatei in
-     einen überwachten Ordner legen, **signiertes** Bundle starten, Upload im Log/Konto beobachten,
-     Knoten danach löschen. Live-Beleg der Korrektur bisher: der Host lehnt `chunked` mit **400**
-     ab und verlangt `Content-Length` (⇒ 201); lokaler Listener-Test + Negativprobe.
-   - **DMG** (Release-Build + Install): `cargo build --release` + `packaging/make-app.sh` (signiert
-     mit **„Prime Photos Local Signer"**), `hdiutil create -volname "Prime Photos" -srcfolder
-     <staging> -ov -format UDZO`, Installation nach `/Applications` + `xattr -dr
-     com.apple.quarantine`. **Voraussetzung:** der Keychain-Dialog „… möchte den Schlüssel
-     »refresh-token« verwenden" muss einmalig mit **„Immer erlauben"** bestätigen (stabiles
-     Zertifikat, daher nur einmal).
+1. [ ] **UX-Punkte aus dem manuellen Test am echten Fenster** (App `bc7c2de`, DMG installiert).
+   - [x] **Runde K** (Ordner-Zelle kurz, Balken nie > 100 %, „Wöchentlich aktiviert um" raus) und
+     **Runde L** (detailliertes Logo überall + Sidebar 30 px/zentriert, Tray-Fallback klein, tote
+     `logo-small-black.svg` gelöscht) sind **umgesetzt**; Verify + Commit laufen.
+   - [ ] **Runde M — Ordnerliste bekommt die ganze Resthöhe** (die unterste Karte war angeschnitten).
+     Startet, sobald K committet ist (`src/backup.rs` ist bis dahin im Verifier).
+   - [ ] **Runde N — Tray-Statuszeile + Pause-Labels** (Tray: „Alle Sicherungen anhalten" ↔
+     „Sicherung starten" + nicht klickbare Statuszeile oben; das App-Label bleibt). Startet nach L
+     (`src/tray.rs`/`src/app.rs`/`src/i18n.rs`).
+   - [ ] **UX-Review** aller Seiten (Checkliste des `ui-review`-Skills, angepasst auf
+     `screencapture`) — der User schickt noch Screenshots. Verdacht A: der Warteschlangen-
+     **Gruppenkopf ist zentriert** statt linksbündig (`add_sized` zentriert sein Kind).
+     Verdacht B: „N neu hochgeladen" erscheint **doppelt** (Karte **und** Aggregat-Fußzeile).
 
 ## Manueller Test 2026-10-16 — abgeschlossen, offene Reste
 
