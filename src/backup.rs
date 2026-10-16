@@ -170,45 +170,43 @@ const QUEUE_BELOW_H: f32 = 88.0;
 const QUEUE_FOOTER_H: f32 = 30.0;
 /// Height of one folder card (Variant A), **measured headless** with egui
 /// 0.31.1 at the default font: name line + small path/progress/updated line +
-/// outcome line + frame margins. The list's floor is derived from it — three
-/// cards plus their gaps stay visible before the list scrolls.
+/// outcome line + frame margins. The list's content height is derived from it
+/// (Welle 5.17): `page_heights` needs exactly this plus the gaps to size
+/// the area to what the cards actually occupy.
 const FOLDER_CARD_H: f32 = 60.0;
 /// Vertical gap between two folder cards (the frame's outer margin, 4 + 4).
 const FOLDER_CARD_GAP: f32 = 8.0;
-/// Floor the folder list claims before the queue is laid out: three measured
-/// cards with their gaps — derived from the card height, not a round number.
-const FOLDER_LIST_MIN_H: f32 = 3.0 * FOLDER_CARD_H + 2.0 * FOLDER_CARD_GAP;
-/// Ceiling of the folder list as a fraction of the free height (user decision
-/// 2026-10-16: relative, not the old fixed 320 px).
-const FOLDER_LIST_MAX_FRAC: f32 = 0.45;
 
 /// Vertical budget of the Backup page's two scroll areas for a given free
 /// height — the single source both draw sites use, so the queue (drawn first)
 /// leaves exactly what the folder list was promised.
 ///
-/// Priority (user decision 2026-10-16): the **folder list claims its height
-/// first**; the queue takes the rest, but never more than half of the free
-/// height. All caps and floors are fractions of `free` except the measured
-/// chrome ([`QUEUE_BELOW_H`], [`QUEUE_FOOTER_H`], [`QUEUE_HEADER_H`]) and the
-/// list's card-derived floor, which stay absolute.
+/// Priority (user decision 2026-10-16, Welle 5.17): the **folder list takes
+/// what its content needs** — `cards` measured cards plus the gaps between
+/// them (0 cards ⇒ 0) — but never so much that the queue falls below its
+/// floor or the chrome is eaten; the queue then takes the rest, capped at
+/// half of the free height. All caps and floors are fractions of `free`
+/// except the measured chrome ([`QUEUE_BELOW_H`], [`QUEUE_FOOTER_H`],
+/// [`QUEUE_HEADER_H`]) and the card metrics ([`FOLDER_CARD_H`],
+/// [`FOLDER_CARD_GAP`]), which stay absolute.
 ///
 /// Guarantees for every `free >= 0`:
 /// - `queue_h + list_h + QUEUE_HEADER_H + QUEUE_BELOW_H <= free` — nothing
 ///   runs off the bottom edge (the 2 px margin inside `QUEUE_BELOW_H` covers
 ///   the header being 2 px more conservative than the measured 106 px);
 /// - `queue_h <= QUEUE_MAX_FRAC * free` — the queue stays at or below 50 %;
-/// - `list_h >= min(FOLDER_LIST_MIN_H, …)` — three cards fit whenever the
-///   window is tall enough to give the queue its floor too.
-fn page_heights(free: f32) -> (f32, f32) {
+/// - `list_h` never spends the queue's floor reservation — the queue keeps
+///   at least `QUEUE_MIN_FRAC * free` whenever the chrome fits at all.
+fn page_heights(free: f32, cards: usize) -> (f32, f32) {
     // The queue's fixed chrome: its own column header plus everything below
     // the table (aggregate bar zone + footer room).
     let chrome = QUEUE_HEADER_H + QUEUE_BELOW_H;
-    // 1) The folder list first: its card-derived floor, capped by its fraction
-    //    of the free height — and never so much that the queue loses its floor
-    //    or the chrome is eaten.
-    let list_h = FOLDER_LIST_MIN_H
-        .min(FOLDER_LIST_MAX_FRAC * free)
-        .min((free - chrome - QUEUE_MIN_FRAC * free).max(0.0));
+    // 1) The folder list first: exactly its content's need — `cards` measured
+    //    cards plus the gaps between them (0 cards ⇒ 0) — capped so the queue
+    //    keeps its floor and the chrome is never eaten.
+    let content_h =
+        cards as f32 * FOLDER_CARD_H + cards.saturating_sub(1) as f32 * FOLDER_CARD_GAP;
+    let list_h = content_h.min((free - chrome - QUEUE_MIN_FRAC * free).max(0.0));
     // 2) The queue takes what is left, capped at half the free height; its
     //    floor only applies when it actually fits.
     let rest = (free - chrome - list_h).max(0.0);
@@ -2033,12 +2031,13 @@ impl PrimePhotoApp {
         .max(QUEUE_MIN_NAME_W);
 
         // The page's vertical budget, decided **before** the queue is drawn: the
-        // folder list claims its height first, the queue takes the rest — but
-        // never more than half of the free height (user decision 2026-10-16).
-        // `list_h` is used again at the folder list's own draw time; the
-        // function is pure, so both sites agree.
+        // folder list takes what its `rows.len()` cards need, capped so the queue
+        // keeps its floor; the queue takes the rest, never more than half of the
+        // free height (user decision 2026-10-16, Welle 5.17). `list_h` is used
+        // again at the folder list's own draw time; the function is pure, so
+        // both sites agree.
         let free = ui.available_height();
-        let (table_h, list_h) = page_heights(free);
+        let (table_h, list_h) = page_heights(free, rows.len());
 
         if layout.is_empty() {
             // Centred empty state (Welle 3.1) instead of an empty table. The
@@ -2559,6 +2558,59 @@ mod tests {
         // No known total: no progress, and never a division by zero downstream.
         assert_eq!(capped_done(0, 0), 0);
         assert_eq!(capped_done(3, 0), 0);
+    }
+
+    /// The list's content height: `cards` measured cards plus the gaps between
+    /// them — the same formula `page_heights` uses, stated once here so the
+    /// tests can assert against the content, not against a bare number.
+    fn list_content_h(cards: usize) -> f32 {
+        cards as f32 * FOLDER_CARD_H + cards.saturating_sub(1) as f32 * FOLDER_CARD_GAP
+    }
+
+    #[test]
+    fn page_heights_three_cards_fit_when_tight() {
+        // A tight window (400 px free): the list claims exactly its content —
+        // three cards (3×60) plus two gaps (2×8) = 196 px — and the cap
+        // (400 − 108 chrome − 80 queue floor = 212) leaves room for all of it.
+        // Before Welle 5.17 the list was capped at 45 % of `free` (180 px) and
+        // the third card was visibly cut off.
+        let (queue_h, list_h) = page_heights(400.0, 3);
+        assert_eq!(list_h, list_content_h(3));
+        // The queue still gets more than its floor.
+        assert!(queue_h >= QUEUE_MIN_FRAC * 400.0);
+    }
+
+    #[test]
+    fn page_heights_ten_cards_keep_the_queue_floor() {
+        // Ten cards (672 px of content) in a 500 px window: the list is capped
+        // at exactly the point where the queue keeps its floor
+        // (500 − 108 − 100 = 292) — never below `QUEUE_MIN_FRAC * free`.
+        let (queue_h, list_h) = page_heights(500.0, 10);
+        assert_eq!(
+            list_h,
+            500.0 - (QUEUE_HEADER_H + QUEUE_BELOW_H) - QUEUE_MIN_FRAC * 500.0
+        );
+        assert!(queue_h >= QUEUE_MIN_FRAC * 500.0);
+        // The queue also never exceeds its ceiling.
+        assert!(queue_h <= QUEUE_MAX_FRAC * 500.0);
+    }
+
+    #[test]
+    fn page_heights_zero_cards_give_the_room_to_the_queue() {
+        // No cards: the list collapses to zero and the queue takes the rest —
+        // here capped at half the free height, well above its floor.
+        let (queue_h, list_h) = page_heights(500.0, 0);
+        assert_eq!(list_h, 0.0);
+        assert_eq!(queue_h, QUEUE_MAX_FRAC * 500.0);
+    }
+
+    #[test]
+    fn page_heights_tiny_window_never_overflows() {
+        // Below the chrome (108 px) both areas collapse to zero — nothing may
+        // run off the bottom edge.
+        let (queue_h, list_h) = page_heights(50.0, 5);
+        assert_eq!(queue_h, 0.0);
+        assert_eq!(list_h, 0.0);
     }
 
     #[test]
