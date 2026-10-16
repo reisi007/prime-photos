@@ -1,39 +1,37 @@
 # TODO / decisions ledger
 
-**Nur offene Arbeit** — kurze Checkliste, **keine Doku**. Regel: `AGENTS.md` → „Arbeitsablauf" →
-„Ledger-Hygiene". Doku/Recon → `docs/`; Dauer-Entscheidungen → `AGENTS.md`. „Verworfen" wird **nie**
+**Nur offene Arbeit** — kurze Checkliste, **keine Doku**. Regel: `AGENTS.md` → „Arbeitsweise" →
+„Ledger-Hygiene". Doku → `docs/` (Feature-Dateien: `docs/features/`). „Verworfen" wird **nie**
 gelöscht.
 
-## Aktueller Auftrag (2026-10-16)
+## Erledigt am 2026-10-16 — Einträge gelöscht (Historie in Git)
 
-1. [ ] **UX-Punkte aus dem manuellen Test am echten Fenster** (App `bc7c2de`, DMG installiert).
-   - [x] **Runde K** (Ordner-Zelle kurz, Balken nie > 100 %, „Wöchentlich aktiviert um" raus) und
-     **Runde L** (detailliertes Logo überall + Sidebar 30 px/zentriert, Tray-Fallback klein, tote
-     `logo-small-black.svg` gelöscht) sind **umgesetzt**; Verify + Commit laufen.
-   - [ ] **Runde M — Ordnerliste bekommt die ganze Resthöhe** (die unterste Karte war angeschnitten).
-     Startet, sobald K committet ist (`src/backup.rs` ist bis dahin im Verifier).
-   - [ ] **Runde N — Tray-Statuszeile + Pause-Labels** (Tray: „Alle Sicherungen anhalten" ↔
-     „Sicherung starten" + nicht klickbare Statuszeile oben; das App-Label bleibt). Startet nach L
-     (`src/tray.rs`/`src/app.rs`/`src/i18n.rs`).
-   - [ ] **UX-Review** aller Seiten (Checkliste des `ui-review`-Skills, angepasst auf
-     `screencapture`) — der User schickt noch Screenshots. Verdacht A: der Warteschlangen-
-     **Gruppenkopf ist zentriert** statt linksbündig (`add_sized` zentriert sein Kind).
-     Verdacht B: „N neu hochgeladen" erscheint **doppelt** (Karte **und** Aggregat-Fußzeile).
+Runden **K–O** umgesetzt, unabhängig verifiziert, committet und gepusht: die UX-Punkte (Ordner-Zelle
+kurz, Balken ≤ 100 %, Wöchentlich-Zeile, Logo/Tray, Ordnerliste-Höhe, Tray-Tooltip + Labels) sowie
+der Doku-Neuaufbau (22 Feature-Dateien, `FEATURES.md`, `docs/dev/`). Dauerhafte Entscheidungen →
+`docs/features/`.
+
+## Erster Punkt beim nächsten Mal
+
+- [ ] **Einmal `cargo fmt` über das ganze Repo** (mechanischer Commit; verifiziert 2026-10-16:
+  `cargo fmt --check` liefert **99 Abweichungen** in ~20 Dateien, auch in unangetasteten). Danach
+  gilt `cargo fmt --check` als Gate (User-Entscheidung 2026-10-16).
 
 ## Manueller Test 2026-10-16 — abgeschlossen, offene Reste
 
 App aus `02e0fca` installiert und gestartet; Start sauber (**keine** Warnung/kein Fehler im Log,
 Default-Filter `warn`, `src/logging.rs:74`), Dedup-Index unverworfen mit **591 Zeilen** — Echtbeleg
 für die Selbstheilung aus 5.4. Der Test ist **geschlossen**: die Rückmeldungen 1–3, 5, 6, 8–14 sind
-umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen stehen in `AGENTS.md`
-→ „UI-Politur nach dem manuellen Test 2026-10-16". **Offen ist nur noch:**
+umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen stehen in
+`docs/features/` (`window-layout.md`, `queue-progress.md`, `settings.md`). **Offen ist nur noch:**
 
-1. [ ] **Upload-Ziel-Spiegelung wie das Original (offen nach der Spec).** Das Zielfeld ist aus dem
-   Dialog **entfernt** (Welle 5.7); die App wählt das Ziel heute automatisch (`Pictures/Web`,
-   `src/prime_photos.rs:820-843`). Offen ist der **eigene Auftrag** nach
-   `docs/original/SPEC_UPLOAD_DESTINATION.md`: die Original-Spiegelung `Backup/<Macname>/<Quellpfad>`
-   (Segmente bei Bedarf anlegen). **Offene Frage:** kann unser Cookie-Host Ordner anlegen
-   (`POST /drive/v1/nodes`, `kind: "FOLDER"`)? Bestehende Uploads in `Pictures/Web` bleiben.
+1. [ ] **Upload-Ziel-Spiegelung wie das Original.** Das Zielfeld ist aus dem Dialog **entfernt**
+   (Welle 5.7); die App wählt das Ziel heute automatisch (`Pictures/Web`,
+   `src/prime_photos.rs:820-843`). Auftrag nach `docs/original/SPEC_UPLOAD_DESTINATION.md`: die
+   Original-Spiegelung `Backup/<Macname>/<Quellpfad>` (Segmente bei Bedarf anlegen). Bestehende
+   Uploads in `Pictures/Web` bleiben. **Live-Beleg 2026-10-16:** der Cookie-Host **kann** Ordner
+   anlegen — `POST /drive/v1/nodes` mit `kind: "FOLDER"` und **Cookies nur** ⇒ **201** (Probe-Ordner
+   angelegt, danach gelöscht ⇒ 202); Access-Token nicht nötig. Damit ist die Umsetzung **frei**.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
@@ -79,8 +77,8 @@ Ausdrücklich **ohne** Starttermin:
 ## Geplante Wellen — **NUR PLAN**, keine Welle startet ohne ausdrücklichen Auftrag
 
 Geschnitten nach **gemeinsamem Umfeld/Dateien**. **Wellen 1–5 sind abgeschlossen** (Historie in den
-Commits, Entscheidungen in `AGENTS.md`); offen ist nur **Welle 6** — plus die Reste in den Listen
-weiter oben.
+Commits, Entscheidungen in `docs/features/`); offen ist nur **Welle 6** — plus die Reste in den
+Listen weiter oben.
 
 ### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
 Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,
@@ -114,7 +112,7 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 - [ ] **Win/Linux: In-App-„Beenden".** Ohne sichtbares Tray-Icon gibt es dort keinen Weg zurück
   (macOS ist safe, ⌘Q) — Residuum aus PORT-3.
 - [ ] **Gezeichnete UI-Glyphen ersetzen:** `nav_icon`, Flagge und Logo auf die Material-Symbols-
-  Pipeline umstellen (Icons werden nicht handgezeichnet, siehe `AGENTS.md`); nicht beauftragt.
+  Pipeline umstellen (Icons werden nicht handgezeichnet, siehe `docs/features/branding.md`); nicht beauftragt.
 
 ## Verworfen
 
@@ -145,9 +143,9 @@ Kein Eintrag hier darf nachträglich „doch noch" umgesetzt werden — verworfe
   daher **serverseitig** passieren (wie im Original), nicht bei uns.
 - **`deepseek-v4.1-flash` als Umsetzer-/Verifier-Modell (2026-10-14 gesetzt, 2026-10-15
   zurückgenommen):** lief genau einen Tag, ohne dass ein Fehler oder Gate daran schuld war — der
-  User hat schlicht wieder zurückgestellt. Ein erneuter Wechsel auf ein Gratis-/Billig-Modell für
-  Subagenten braucht eine **neue** User-Entscheidung, nicht den alten Eintrag. Gegenwärtig gilt
-  `opencode-go/deepseek-v4.1-flash` für beide Rollen (siehe `AGENTS.md` → „Umsetzer").
+  User hat schlicht wieder zurückgestellt. **Stand 2026-10-16:** das Modell ist **nicht mehr** in
+  `AGENTS.md` fixiert (Kürzung) — ein Wechsel braucht eine **neue** User-Entscheidung, nicht den
+  alten Eintrag.
 - **`SaveAsNew` als Application Default** (galt 2026-10-14 bis 2026-10-15). Wer ihn zurückdreht,
   ändert eine getroffene Entscheidung. Der Enum-`#[default]` bleibt trotzdem `SaveAsNew`
   (Datei-Fallback für `folders.toml`-Einträge ohne Schlüssel) — **zwei verschiedene Defaults, nicht
