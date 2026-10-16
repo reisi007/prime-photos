@@ -654,29 +654,29 @@ Inhaltsduplikat **nie** per PUT „ersetzt", sondern bleibt „bereits im Konto"
     nur-dort-Wissen dorthin ausgelagert, erst dann gelöscht.
   - **Niemals gelöscht:** offene Punkte, bewusst Zurückgestelltes und der ganze Abschnitt „Verworfen"
     (damit keine verworfenen Ansätze erneut gebaut werden).
-- **Umsetzer:** `general`-Subagent mit Modell **`opencode-go/deepseek-v4.1-flash`**
-  (User-Entscheidung 2026-10-16: „bitte ab jetzt für subagenten deepseek v4.1 flash nehmen").
-  Modell-Geschichte dieses Projekts:
+- **Umsetzer:** `general`-Subagent mit Modell **`opencode-go/longcat-2.5-preview-free`**
+  (User-Entscheidung 2026-10-16: „versuche wieder mal subagenten mit modell opencode go preview
+  2.5 free"). Modell-Geschichte dieses Projekts:
   `step-5-preview-free` → `deepseek-v4.1-flash` (2026-10-14) → `step-5-preview-free` (2026-10-15)
   → `mimo-v2.6-flash-free` (2026-10-15) → `deepseek-v4.1-flash-free` (2026-10-16, $0-Zwilling)
   → `opencode-go/deepseek-v4.1-flash` (2026-10-16, paid) → `opencode-go/longcat-2.5-preview-free`
-  (2026-10-16) → **`opencode-go/deepseek-v4.1-flash`** (2026-10-16, paid; aktuelle Entscheidung).
+  (2026-10-16) → `opencode-go/deepseek-v4.1-flash` (2026-10-16, paid) →
+  **`opencode-go/longcat-2.5-preview-free`** (2026-10-16, $0; aktuelle Entscheidung).
   Bekommt Ziel-Dateien und die vollständige Spezifikation, frische Session pro Task.
-  **Kein `#variant`-Suffix.** Der Free-Twin `opencode/deepseek-v4.1-flash-free` bleibt ungenutzt
-  (Namespace-Regel: alles auf `opencode-go/`).
+  **Kein `#variant`-Suffix.** Der Twin `opencode/longcat-2.5-preview-free` bleibt ungenutzt
+  (Namespace-Regel: alles auf `opencode-go/`); `opencode-go/longcat-2.0` ist **nicht** gemeint.
   **Kein** Wechsel ohne neue User-Entscheidung.
 - **Verifier:** ein **anderer** `general`-Subagent mit **derselben** Vorgabe
-  (`opencode-go/deepseek-v4.1-flash`), frische Session pro Runde; prüft die Substanz (Diff gegen
+  (`opencode-go/longcat-2.5-preview-free`), frische Session pro Runde; prüft die Substanz (Diff gegen
   Auftrag, Invarianten, Blast Radius), nicht die Gates.
   **Live-Werte bleiben beim Hauptagent:** Briefings an Subagenten enthalten **keine** Live-Werte
   (Cookies, Account-Parameter, Probe-Payloads) — Live-Probes gegen das Amazon-Konto laufen
   ausschließlich über den Hauptagent. Das war ursprünglich die Folge des Gratis-Modells
   (Trainings-Vorbehalt) und bleibt als **praktische Regel** bestehen — bei einem $0-Modell
   (LongCat ist free) gilt sie doppelt.
-  **Stand 2026-10-16:** Subagenten laufen wieder auf dem **bezahlten** `deepseek-v4.1-flash`
-  (User-Entscheidung 2026-10-16) — die zwischenzeitliche $0-Phase auf LongCat 2.5 Preview Free
-  ist damit **abgelöst**. `step-5-preview-free` ist **tot** (vom Anbieter 2026-10-15 entfernt)
-  und darf nicht zurückkommen.
+  **Stand 2026-10-16:** Subagenten laufen wieder auf dem **$0-Modell**
+  `opencode-go/longcat-2.5-preview-free` (User-Entscheidung 2026-10-16). `step-5-preview-free`
+  ist **tot** (vom Anbieter 2026-10-15 entfernt) und darf nicht zurückkommen.
 - Reihenfolge je Task: `cargo build` (grün, Ausgabe zitieren) → Verify → **immer committen**; bei „CHANGES REQUIRED": fixen → erneut verifizieren → `git commit --amend`.
 - **Provider-Fehler („Endpoint is unavailable", User-Regel 2026-10-16):** die Subagent-Sessions
   brechen gelegentlich ab (nach Erfahrung **etwa die Hälfte** der Läufe), **die Arbeit überlebt** auf
