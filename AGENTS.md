@@ -170,9 +170,22 @@ gesichtet (alle fünf Tray-Zustände + beide Logos, schwarz/weiß, Farbverlauf k
 Tray-Varianten, hell ⇒ schwarze; `None` (unbekannt) ⇒ das farbige Logo, das auf jedem Hintergrund
 sichtbar ist. macOS bleibt beim schwarzen Template-Satz.
 **Kein Fallback (User 2026-10-14):** fehlt ein SVG, bricht `build.rs` den Build (Compile-Fehler) —
-kein `Option`, keine `exists()`-Prüfung, kein Rückfall auf die gezeichnete Variante (`src/icons.rs`
-bleibt nur für die Vektor-Glyphen im UI selbst: Navigation, Status-Punkt, Flagge). Dekodier-Fehler zur
-Laufzeit = fail fast.
+kein `Option`, keine `exists()`-Prüfung, kein Rückfall auf eine gezeichnete Variante. Dekodier-Fehler
+zur Laufzeit = fail fast.
+
+**UI-Icons: Bibliothek statt selbst gezeichnet (Welle 3c, 2026-10-16).** `src/icons.rs` enthält nach
+Welle 3c **keine** selbst gezeichneten Navigations-Glyphen mehr. Die beiden Sidebar-Icons sind
+**Material Symbols**-SVGs (Apache-2.0, Google LLC) über **dieselbe** Pipeline:
+`assets/icon-cloud.svg` („Sicherung") und `assets/icon-settings.svg` („Einstellungen") — **gefüllte**
+Variante (`…_fill1_24px.svg`), 64-px-Raster, zur Laufzeit auf `TEAL` (ausgewählt/gehover) bzw.
+`MUTED` getönt, im festen 18 × 18-Rect der Icon-Spalte. Motiv **und** Stil folgen dem Original-Bundle
+(gesichtet: `navmenu-backup@3x.png` = massiv gefüllte Wolke, `navmenu-settings@3x.png` = gefülltes
+Zahnrad mit Loch) — Projektregel Original-Parität. **Gefüllt gilt nur für die Navigation:** die
+Zeilen-Icons (Kebab, Refresh) bleiben als **Linie** (Outlined), weil sie im Original ebenfalls Linien
+sind. **Selbst gezeichnet bleiben:** die Marktplatz-Flaggen und unser Logo (`upload_logo`); der
+Status-Punkt ist ein Kreis, kein Glyph. **Verworfen:** `backup` (Wolke mit Hochpfeil) + `tune` (drei
+Schieberegler) — nicht die Motive des Originals; die **Outlined**-Variante für die Navigation — weicht
+sichtbar vom Original ab.
 
 MVP-Zielbild des Users: **polished** — Autostart (Default **an**, siehe §Autostart), effizienter
 funktionierender Upload (Event-Watcher + Stat-Check + Wasserzeichen) und echte Tray-/Logo-Assets.
