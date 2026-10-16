@@ -17,17 +17,22 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    Referenzen in `AGENTS.md`, `AGENTS.todo.md`, `docs/` und Code mitziehen. Anlass: User-Wunsch
    „gerne einen docs Ordner mit einer größeren Struktur". **Bekannter Rest:** `docs/features/FEATURES.md:8`
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
-2. [ ] **Release-Build + Install (DMG).** **Voraussetzung: die 14 Befunde aus dem manuellen Test
-   (Abschnitt „Manueller Test 2026-10-16" oben) sind abgearbeitet** — der Test selbst ist gelaufen
-   (App aus `02e0fca`, signiert, installiert, vom User am echten Fenster geprüft, Start
-   warnungsfrei). Am 2026-10-16 einmal gelaufen: `cargo build --release` +
-   `packaging/make-app.sh` (signiert mit **„Prime Photos Local Signer"**),
-   `hdiutil create -volname "Prime Photos" -srcfolder <staging> -ov -format UDZO`, Installation nach
-   `/Applications` + `xattr -dr com.apple.quarantine`. **Dieser Stand ist inzwischen veraltet** —
-   Welle 3a–3c haben die UI geändert (Warteschlange, Log-Panel, Nav-Icons). **Offen: nach Welle 4/5
-   neu bauen**, DMG nach `target/dist/` legen und installieren. **Voraussetzung:** der
-   Keychain-Dialog „… möchte den Schlüssel »refresh-token« verwenden" muss einmalig mit **„Immer
-   erlauben"** bestätigt sein (stabiles Zertifikat, daher nur einmal).
+2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
+   Reihenfolge: **C → D → E → DMG**.
+   - **C** (Layout/Ordner-Karte/Scroll/Ordner-Spalte/Nichts-hochzuladen): fertig, Verify läuft.
+   - **D** (Byte-Fortschritt pro Datei + Live-Test am Konto): `src/prime_photos.rs` (streaming body +
+     counter), `src/upload.rs` (Fortschritts-Meldung), `src/backup.rs` (pro-Datei-% in der
+     Warteschlange). **Hauptagent** macht den Live-Test.
+   - **E** (forced pause, TODOs T1–T5 aus `docs/SPEC_MISSING_SOURCE.md`): `FolderStatus::Paused`
+     bei fehlendem Ordner (Kaltstart/Watcher/Rescan), Wasserzeichen-Guard (T2, teil-entwarnt),
+     UI-Hinweis „Angehalten (X%)" AMBER (T3), Wiederanschließen-Erkennung (T4), verständliche
+     Meldung statt „Keine Fotos gefunden" (T5).
+   - **DMG** (Release-Build + Install): `cargo build --release` + `packaging/make-app.sh` (signiert
+     mit **„Prime Photos Local Signer"**), `hdiutil create -volname "Prime Photos" -srcfolder
+     <staging> -ov -format UDZO`, Installation nach `/Applications` + `xattr -dr
+     com.apple.quarantine`. **Voraussetzung:** der Keychain-Dialog „… möchte den Schlüssel
+     »refresh-token« verwenden" muss einmalig mit **„Immer erlauben"** bestätigen (stabiles
+     Zertifikat, daher nur einmal).
 
 ## Manueller Test 2026-10-16 — Rückmeldungen des Users am echten Fenster
 
