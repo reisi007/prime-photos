@@ -118,11 +118,16 @@ Oberziel des Users: **nur neue Dateien hochladen, keine Bandbreite verschwenden.
 
 - [ ] **Icons nicht sauber ausgerichtet.** Nav-/Sidebar-Icons an die Doku-Werte ausrichten
   (Header 64 pt bzw. 104 pt mit Banner, 4 pt Akzentleiste, Nav-Spalte — `docs/UI_FLOWS.md` §3.1);
-  braucht die Maßwerte/Design-Abmachung, kein Rate-Wert.
-- [ ] **Logout-Residuen.** `logout()` löscht die 5 Auth-Felder, stoppt aber weder eine laufende
-  Login-WebView noch einen laufenden Upload (der Worker hält eigenen `cfg`-Klon und arbeitet mit
-  dem alten Cookie weiter); `config_error` nach fehlgeschlagenem `save()` wird auf dem Login-Screen
-  nicht angezeigt. Soll: Login-/Upload-Status zurücksetzen, Fehler sichtbar machen.
+  braucht die Maßwerte/Design-Abmachung, kein Rate-Wert. **Stand 2026-10-16: verschoben in den
+  manuellen Test** (Schritt 2 der Auftragsliste) — der Recon liefert für die Nav-Zeile keine
+  Icon-Maße, und nach Welle 3c sitzen die Icons in einem festen 18×18-Rect. Ein blindes „Ausrichten"
+  würde ändern, was der User noch gar nicht beurteilt hat.
+- [ ] **Logout-Residuen — aufgeteilt (Stand 2026-10-16).** Hinfällig: die laufende Login-WebView
+  (der Login-Screen *ersetzt* die Haupt-UI, der Abmelden-Knopf ist dort nicht erreichbar) und die
+  Annahme „`logout()` löscht nur die 5 Auth-Felder" (es stoppt den Session-Worker und löscht
+  Token/Keychain längst). **Offen und beauftragt:** der **laufende Upload** (Abbruch-Flag, User-
+  Entscheidung 2026-10-16, siehe `AGENTS.md`) und `config_error` nach fehlgeschlagenem `save()`
+  (verständlich formulieren **und** auf dem Login-Screen zeigen).
 - [ ] **Nav-Accessibility.** Selbstgezeichnete `nav_item`-Zeilen (`allocate_exact_size`) haben keine
   Keyboard-Fokus-/Accessibility-Semantik; optional `Sense`-Widget/`widget_info` ergänzen.
 - [ ] **Deutsche Doku-Kommentare in `src/notify.rs`** (Altbestand in HEAD, Verifier-Befund
@@ -175,15 +180,22 @@ Entscheidungen vom 2026-10-16 stehen in `AGENTS.md` → „About + Drittanbieter
   „Über Prime Photos" im Tray- **und** App-Menü (AppKit-Eintrag über ein ObjC-Zielobjekt).
 
 ### Welle 5 — Robustheit & Politur (klein, unabhängig)
+- **erledigt und verifiziert** (`7cc3699`): **5.4** — Selbstheilung statt `conn: None`, siehe
+  `AGENTS.md` → „Abmelden bei laufendem Upload" (dort steht auch die Entscheidung).
+- **hinfällig: 5.3** — der Account-Block zeigt seit `0d66e05` „Marktplatz / amazon.<domain>", die
+  Zeile „Amazon Photos" existiert dort nicht mehr. Der Login-Untertitel „Fotos & Videos zu Amazon
+  Photos hochladen" **bleibt** (faktische Nennung des Ziels, nach der Branding-Regel zulässig, wie
+  „Bei Amazon anmelden").
 - **5.1** `rfd::FileDialog::pick_folder()` auf `AsyncFileDialog` (siehe „Offene Kandidaten" oben).
-- **5.2** P2-Reste: Icon-Ausrichtung (`docs/UI_FLOWS.md` §3.1), Logout-Residuen, Nav-Accessibility.
-- **5.3** Optional/Branding: die Zeile „Amazon Photos" im Account-Block durch die Domain ersetzen
-  (Projektregel: kein Amazon-Branding im eigenen Fenster).
-- **5.4** Bei fehlgeschlagener `ensure_origin_column`-Migration `conn: None` zurückgeben: heute
-  bleibt eine **halb funktionierende** Verbindung — `record`/`should_skip`/`stat_matches` scheitern
-  dann still, der **ganze** Dedup-Index fällt aus (jede Datei würde wieder gelesen und neu
-  gesendet), nicht nur die Herkunfts-Unterscheidung. Dazu den überzeichnenden Kommentar in
-  `src/dedup.rs` korrigieren.
+- **5.2** Rest: **Abmelden bei laufendem Upload** (Abbruch-Flag, User-Entscheidung 2026-10-16) +
+  `config_error` verständlich und auch auf dem Login-Screen. **Hinfällig** ist die dritte alte
+  Residue (laufende Login-WebView: der Login-Screen *ersetzt* die Haupt-UI, `src/app.rs:950`).
+- **5.2c** Nav-Accessibility: `widget_info`/`Sense` für die selbstgezeichneten `nav_item`-Zeilen.
+- **5.5 (neu, aus dem 4b-Verify)** den überzeichnenden Kommentar in `src/about.rs` korrigieren (die
+  „757 px / ~34 unerreichbare Zeilen"-Angabe reproduziert sich nicht; real sind es 777 px und ein
+  <1-px-Beschnitt) und dem Lizenz-Fenster eine **Mindestbreite** geben (unter ~707 px würden
+  100-Zeichen-Zeilen geklippt).
+- **Verschoben in den manuellen Test:** die Icon-Ausrichtung (keine belegten Maßwerte im Recon).
 
 ### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
 Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,

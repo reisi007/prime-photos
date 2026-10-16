@@ -348,6 +348,32 @@ ein Listeneintrag allein löst keinen Umsetzungs- oder Verify-Lauf aus.
   laufenden Lauf. Manuelle Läufe starten weiterhin pro Ordner; die Anzeige summiert trotzdem über
   alle.
 
+## Abmelden bei laufendem Upload (User-Entscheidung 2026-10-16)
+
+- **Ein Abbruch-Mechanismus wird gebaut** (User-Wahl aus drei Optionen). Anlass: `logout()` beendet
+  den Session-Worker bereits (Generation-Bump) und löscht Token/Keychain — aber **nicht** einen
+  laufenden Upload: der Worker hält einen eigenen `Config`-Klon mit den **alten** Cookies und lief
+  mit widerrufenen Zugangsdaten in Fehler. **Die dritte Residue der alten Notiz ist hinfällig:** der
+  Login-Screen *ersetzt* die Haupt-UI (`src/app.rs:950`), der Abmelden-Knopf ist bei offener
+  Login-WebView also gar nicht erreichbar.
+- Umsetzung: **Abbruch-Flag in `UploadShared`** (kein neuer Kanal — die App hält `self.upload`
+  bereits, `logout()` erreicht es ohne neues Plumbing). `logout()` setzt es; der Worker prüft es an
+  seiner **Wartestelle** (Pause-Park, `src/upload.rs:393`) **und** beim Konflikt-Dialog und kehrt
+  zurück. Ein laufender HTTP-Request läuft zu Ende. `run_upload` setzt das Flag beim Start zurück.
+- **Ein abgebrochener Lauf gilt nicht als erledigt:** Wassermarke **nicht** vorschieben (sonst gilt
+  der Ordner beim nächsten Start als „unverändert" und die Reste werden nie nachgeholt),
+  `FolderStatus`/Zähler **nicht** verbuchen (heute würde die Zeile „fertig" mit halber Zahl
+  behaupten), Einmal-Queue behalten — das war schon korrekt (`backup.rs:1460` löscht nur bei
+  `done + failed >= total`). Bereits hochgeladene Dateien bleiben im Dedup-Index und werden beim
+  nächsten Lauf über den Stat-Pfad übersprungen.
+- **Verworfen:** nur dokumentieren; den Lauf über die vorhandene Pause **parken** (er nimmt nach
+  erneutem Anmelden mit den **alten** Cookies wieder auf — nicht sauber); `conn: None`-Analogie als
+  Vorbild (der Abbruch braucht keinen neuen Kanal).
+- **Kein Abbruch-Knopf in der UI** (nicht beauftragt) — der Abbruch hängt allein am Abmelden.
+- **`config_error` verständlich machen** (User-Regel „keine technischen Fehlermeldungen im
+  Endnutzer-UI"): das technische Detail geht ins Log, im UI steht ein verständlicher Satz — und er
+  wird **auch auf dem Login-Screen** angezeigt (nach dem Abmelden ist er sonst unsichtbar).
+
 ## Zeilen-Aktionen & Ergebnis-Anzeige (User-Entscheidung 2026-10-14)
 
 Anlass: Der User suchte einen Rescan-Button und erwartete ein **vertikales „…"-Icon** mit Popup bei
