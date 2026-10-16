@@ -36,6 +36,12 @@ pub(crate) struct QueueEntry {
     pub(crate) folder: usize,
     pub(crate) name: String,
     pub(crate) state: FileState,
+    /// File size in bytes, read once while the plan is built. `0` when the file
+    /// could not be stat'ed — the queue's size column then shows `0 B`.
+    pub(crate) size: u64,
+    /// Full path, shown as the name column's hover tooltip
+    /// (docs/SPEC_UPLOAD_PROGRESS.md §7.3).
+    pub(crate) path: PathBuf,
 }
 
 #[derive(Default)]

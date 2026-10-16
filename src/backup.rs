@@ -64,6 +64,53 @@ fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
         })
 }
 
+/// Fixed geometry of the live queue table (docs/SPEC_UPLOAD_PROGRESS.md §7.8):
+/// the name column takes the remaining width, size and status are fixed, the row
+/// height is fixed. The header uses the same widths, so both line up.
+const QUEUE_ROW_H: f32 = 20.0;
+const QUEUE_HEADER_H: f32 = 20.0;
+const QUEUE_SIZE_W: f32 = 72.0;
+const QUEUE_STATUS_W: f32 = 104.0;
+const QUEUE_MIN_NAME_W: f32 = 80.0;
+/// Height of the centred empty-state block while the queue is empty.
+const QUEUE_EMPTY_H: f32 = 72.0;
+/// Lower bound of the queue table's height.
+const QUEUE_MIN_H: f32 = 120.0;
+/// Fixed chrome the queue table must leave **below itself** so the rest of the
+/// page stays reachable (measured headless with egui 0.31.1): the aggregate
+/// progress bar with its 6 px gap (56 px to the folder heading, i.e. the bar,
+/// a 12 px gap and the "Automatisch gesicherte Ordner:" heading) plus the folder
+/// list's own footer room ([`QUEUE_FOOTER_H`]). 80 px measured, 88 px with a
+/// small margin. The Backup page has no scroll area of its own, so the table may
+/// never eat this space; the list below then gets what is left. Because
+/// `table_h` is always `<= free - QUEUE_BELOW_H`, the footer keeps at least
+/// `QUEUE_BELOW_H - 56 - QUEUE_FOOTER_H = 2 px` of its own — the page cannot
+/// overflow at any window size.
+const QUEUE_BELOW_H: f32 = 88.0;
+/// Height the folder list must leave for the footer below it (8 px gap + line).
+const QUEUE_FOOTER_H: f32 = 30.0;
+/// Preferred height of the folder list. It shrinks below this in a small window,
+/// which is why the table only reserves a *floor* ([`FOLDER_LIST_MIN_H`]), not
+/// this full height.
+const FOLDER_LIST_MAX_H: f32 = 320.0;
+/// Floor the queue table must leave for the folder list at its draw time: the
+/// list holds ~3 folder cards before it scrolls.
+const FOLDER_LIST_MIN_H: f32 = 200.0;
+
+/// One line of the live queue table: a backup-folder group header or a file row.
+/// Both are drawn at the same fixed height, so `ScrollArea::show_rows` can still
+/// virtualise the list (docs/SPEC_UPLOAD_PROGRESS.md §7.8) — it needs a uniform
+/// row *height*, not flat data.
+enum QueueRow {
+    /// A backup-folder group header: the folder label plus the number of its
+    /// files that are still open (`Waiting`/`Uploading`).
+    Header { label: String, open: usize },
+    /// A file row. `queue_idx` points into `UploadShared::queue`, so the live
+    /// name/size/state/path are read from there instead of being cloned per
+    /// frame.
+    File { queue_idx: usize },
+}
+
 // ---------------------------------------------------------------------------
 // Upload-run preparation (shared by the manual path and the background sync)
 // ---------------------------------------------------------------------------
@@ -96,13 +143,18 @@ impl UploadPlan {
         }
     }
 
-    /// File size of one entry, counted once into the run's byte total. Never
-    /// panics: unreadable files just do not contribute (the ETA then falls back
-    /// to the file-count rate).
-    fn note_size(&mut self, path: &Path) {
+    /// File size of one entry, counted once into the run's byte total and
+    /// returned so the queue row can reuse it without a second `stat`. Never
+    /// panics: an unreadable file contributes nothing (`0`) and the ETA then
+    /// falls back to the file-count rate.
+    fn note_size(&mut self, path: &Path) -> u64 {
         if let Ok(meta) = std::fs::metadata(path) {
-            self.bytes_total += meta.len();
+            let len = meta.len();
+            self.bytes_total += len;
             self.sized_total += 1;
+            len
+        } else {
+            0
         }
     }
 
@@ -136,12 +188,14 @@ impl UploadPlan {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
+                let size = plan.note_size(&p);
                 plan.queue.push(QueueEntry {
                     folder: i,
                     name,
                     state: FileState::Waiting,
+                    size,
+                    path: p.clone(),
                 });
-                plan.note_size(&p);
                 plan.items.push((row, i, p));
             }
         }
@@ -171,12 +225,14 @@ impl UploadPlan {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            let size = plan.note_size(&p);
             plan.queue.push(QueueEntry {
                 folder: idx,
                 name,
                 state: FileState::Waiting,
+                size,
+                path: p.clone(),
             });
-            plan.note_size(&p);
             plan.items.push((row, idx, p));
         }
         plan
@@ -200,12 +256,14 @@ impl UploadPlan {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            let size = plan.note_size(p);
             plan.queue.push(QueueEntry {
                 folder: *i,
                 name,
                 state: FileState::Waiting,
+                size,
+                path: p.clone(),
             });
-            plan.note_size(p);
             plan.items.push((row, *i, p.clone()));
         }
         if plan.items.is_empty() {
@@ -1446,6 +1504,89 @@ impl PrimePhotoApp {
             }
         });
 
+        // Snapshot rows for read-only rendering. Built **before** the queue table
+        // (Welle 3.1/3.3): the aggregate progress next to the queue and the live
+        // per-folder status both read them, and neither may hold the shared lock
+        // twice.
+        let rows: Vec<Row> = {
+            let s = self.upload.lock().unwrap();
+            let mut rows: Vec<Row> = self
+                .store
+                .folders
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let total = s.folder_total.get(&i).copied().unwrap_or(f.total_files);
+                    let done = s.folder_done.get(&i).copied().unwrap_or(f.uploaded_files);
+                    // Live status (Welle 3.3): while the run counts this target in
+                    // `folder_total` it is *uploading*, regardless of the (stale)
+                    // persisted status — the persisted outcome only applies once
+                    // the run settled and `active` is false again. A background
+                    // run writes its result into a fresh `FolderStore::load()`
+                    // (`finalize_background_store`), never into `self.store`, so
+                    // without this the row kept showing the previous outcome.
+                    let status = if s.active && s.folder_total.contains_key(&i) {
+                        FolderStatus::Uploading
+                    } else {
+                        f.status
+                    };
+                    Row {
+                        idx: i,
+                        name: f.name.clone(),
+                        path: f.path.clone(),
+                        enabled: f.enabled,
+                        status,
+                        total,
+                        done,
+                        new: s.folder_new.get(&i).copied().unwrap_or(0),
+                        existing: s.folder_conflict.get(&i).copied().unwrap_or(0),
+                        unchanged: s.folder_unchanged.get(&i).copied().unwrap_or(0),
+                        failed: s.folder_failed.get(&i).copied().unwrap_or(0),
+                        last_updated: f.last_updated.clone(),
+                    }
+                })
+                .collect();
+            // The transient one-time target is a single extra row after the
+            // persisted folders — same chrome, but it has no row-action icons
+            // (kebab/refresh) and no pause toggle (nothing to configure,
+            // nothing to stop).
+            if let Some(one) = self.one_time.as_ref() {
+                let total = s
+                    .folder_total
+                    .get(&ONE_TIME_IDX)
+                    .copied()
+                    .unwrap_or(one.total_files);
+                let done = s
+                    .folder_done
+                    .get(&ONE_TIME_IDX)
+                    .copied()
+                    .unwrap_or(one.uploaded_files);
+                // Same live-status rule as the persisted folders (Welle 3.3).
+                let status = if s.active && s.folder_total.contains_key(&ONE_TIME_IDX) {
+                    FolderStatus::Uploading
+                } else {
+                    one.status
+                };
+                rows.push(Row {
+                    idx: ONE_TIME_IDX,
+                    name: tr("Einmalige Sicherung").to_string(),
+                    path: one.path.clone(),
+                    enabled: true,
+                    status,
+                    total,
+                    done,
+                    new: s.folder_new.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    existing: s.folder_conflict.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    unchanged: s.folder_unchanged.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    failed: s.folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0),
+                    last_updated: one.last_updated.clone(),
+                });
+            }
+            rows
+        };
+
+        let mut actions: Vec<FolderAction> = Vec::new();
+
         // Live per-file queue, grouped by backup folder
         // (docs/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). The grouped structure is
         // cached and only rebuilt when the run's *file states* changed
@@ -1485,60 +1626,263 @@ impl PrimePhotoApp {
             self.queue_cache = (rev, groups);
             self.queue_cache_rev = rev;
         }
-        if !self.queue_cache.1.is_empty() {
-            let remaining: usize = self
-                .queue_cache
-                .1
-                .iter()
-                .map(|(_, files)| {
-                    files
-                        .iter()
-                        .filter(|(_, st)| matches!(st, FileState::Waiting | FileState::Uploading))
-                        .count()
-                })
-                .sum();
-            egui::CollapsingHeader::new(tr1("Warteschlange ({})", remaining)).show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(220.0)
-                    .show(ui, |ui| {
-                        // Cap the rendered rows so a very large run stays cheap.
-                        let mut shown = 0usize;
-                        for (folder, files) in &self.queue_cache.1 {
-                            if shown >= 300 {
-                                break;
+        // Live per-file queue as a virtualised table (Welle 3.1,
+        // docs/SPEC_UPLOAD_PROGRESS.md §7.3/§7.8): the queue is permanent
+        // main-area content with fixed columns, no longer collapsed away. The
+        // rows stay grouped by backup folder — a background run puts **every**
+        // enabled folder into one queue (src/backup.rs, run planning), so without
+        // the group headers the files of several targets would be
+        // indistinguishable. `ScrollArea::show_rows` only needs a uniform row
+        // height, so the list is a flat `Vec<QueueRow>` of group headers and file
+        // rows that share that height.
+        let remaining: usize = self
+            .queue_cache
+            .1
+            .iter()
+            .map(|(_, files)| {
+                files
+                    .iter()
+                    .filter(|(_, st)| matches!(st, FileState::Waiting | FileState::Uploading))
+                    .count()
+            })
+            .sum();
+        // Flatten the grouped cache and the live queue into one row list. The
+        // cache and this grouping both walk `UploadShared::queue` in first-seen
+        // folder order, so group `g` takes its label and per-file states from the
+        // cache while the file rows carry only a queue index — no file name is
+        // cloned per frame. `QueueEntry.folder` is the grouping key again.
+        let layout: Vec<QueueRow> = {
+            let s = self.upload.lock().unwrap();
+            // Folder index -> its queue positions, in first-seen order.
+            let mut order: Vec<usize> = Vec::new();
+            let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+            for (i, e) in s.queue.iter().enumerate() {
+                if !groups.contains_key(&e.folder) {
+                    order.push(e.folder);
+                }
+                groups.entry(e.folder).or_default().push(i);
+            }
+            let mut layout: Vec<QueueRow> = Vec::with_capacity(s.queue.len() + order.len());
+            for (g, folder) in order.iter().enumerate() {
+                let (label, open) = self
+                    .queue_cache
+                    .1
+                    .get(g)
+                    .map(|(label, files)| {
+                        let open = files
+                            .iter()
+                            .filter(|(_, st)| {
+                                matches!(st, FileState::Waiting | FileState::Uploading)
+                            })
+                            .count();
+                        (label.clone(), open)
+                    })
+                    .unwrap_or_default();
+                // A group whose label could not be resolved (a stale folder
+                // index) is drawn without its header, exactly as before.
+                if !label.is_empty() {
+                    layout.push(QueueRow::Header { label, open });
+                }
+                layout.extend(groups[folder].iter().map(|&i| QueueRow::File { queue_idx: i }));
+            }
+            layout
+        };
+
+        ui.add_space(12.0);
+        ui.label(RichText::new(tr1("Warteschlange ({})", remaining)).strong().size(14.0));
+
+        // Shared geometry: header and rows derive the name width the same way so
+        // the three columns line up. The scroll bar's width is reserved only when
+        // it is not floating (egui's default `ScrollStyle` floats ⇒ 0).
+        let avail = ui.available_width();
+        let spacing_x = ui.spacing().item_spacing.x;
+        let bar_w = ui.spacing().scroll.allocated_width();
+        let name_w = (avail - bar_w - QUEUE_SIZE_W - QUEUE_STATUS_W - 2.0 * spacing_x)
+            .max(QUEUE_MIN_NAME_W);
+
+        if layout.is_empty() {
+            // Centred empty state (Welle 3.1) instead of an empty table.
+            ui.allocate_ui(egui::vec2(avail, QUEUE_EMPTY_H), |ui| {
+                ui.centered_and_justified(|ui| {
+                    ui.label(theme::muted(tr("Keine Uploads in der Warteschlange")));
+                });
+            });
+        } else {
+            // Fixed column header (Name · Größe · Status), above the scroll area
+            // so it never scrolls away.
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [name_w, QUEUE_HEADER_H],
+                    egui::Label::new(RichText::new(tr("Name")).strong().size(11.0)),
+                );
+                ui.add_sized(
+                    [QUEUE_SIZE_W, QUEUE_HEADER_H],
+                    egui::Label::new(RichText::new(tr("Größe")).strong().size(11.0)),
+                );
+                ui.add_sized(
+                    [QUEUE_STATUS_W, QUEUE_HEADER_H],
+                    egui::Label::new(RichText::new(tr("Status")).strong().size(11.0)),
+                );
+            });
+            // Height split for a page that has no scroll area of its own. The
+            // table takes the surplus over the fixed chrome below it
+            // (`QUEUE_BELOW_H`) and a floor for the folder list
+            // (`FOLDER_LIST_MIN_H`) — but never more than what is actually free,
+            // so at the minimum window size nothing runs off the bottom. The list
+            // is then capped to the real leftover at its own draw time (see its
+            // `max_height`), so a small window shrinks the list instead of
+            // pushing it off the edge, while a large window gives the table the
+            // free height (§7.8).
+            let free = ui.available_height();
+            let table_h = (free - QUEUE_BELOW_H - FOLDER_LIST_MIN_H)
+                .max(QUEUE_MIN_H)
+                .min((free - QUEUE_BELOW_H).max(0.0));
+            egui::ScrollArea::vertical()
+                .max_height(table_h)
+                // Honor the cap even when it is tiny: the default
+                // `min_scrolled_height` (64 px) would otherwise overrule a
+                // smaller `max_height` and push the list below off the edge.
+                .min_scrolled_height(0.0)
+                // `QUEUE_ROW_H` is the *measured* row height without spacing:
+                // every row below is allocated at exactly that height, so it
+                // advances by `QUEUE_ROW_H + item_spacing.y` (20 + 8 = 28 px),
+                // which is precisely what `show_rows` derives internally.
+                .show_rows(ui, QUEUE_ROW_H, layout.len(), |ui, range| {
+                    // Lock the shared state once per frame for the visible slice.
+                    let s = self.upload.lock().unwrap();
+                    for i in range {
+                        match &layout[i] {
+                            QueueRow::Header { label, open } => {
+                                // Group line, muted and without a status column
+                                // (§7.8). Both row kinds are allocated at exactly
+                                // `QUEUE_ROW_H`, so each advances by
+                                // `QUEUE_ROW_H + item_spacing.y` — the same height
+                                // `show_rows` derives. A plain `ui.horizontal`
+                                // here would instead expand to the theme's
+                                // `interact_size.y` (26 px), making this row
+                                // taller than the file rows and desynchronising
+                                // the virtualised scroll positions.
+                                let row_w = ui.available_width();
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(row_w, QUEUE_ROW_H),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.add_sized(
+                                            [name_w, QUEUE_ROW_H],
+                                            egui::Label::new(
+                                                RichText::new(label.as_str()).strong().size(12.0),
+                                            )
+                                            .truncate(),
+                                        );
+                                        ui.label(theme::muted(tr1("{} offen", open)).size(11.0));
+                                    },
+                                );
                             }
-                            if !folder.is_empty() {
-                                let open = files
-                                    .iter()
-                                    .filter(|(_, st)| {
-                                        matches!(st, FileState::Waiting | FileState::Uploading)
-                                    })
-                                    .count();
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(folder.as_str()).strong().size(12.0));
-                                    ui.label(theme::muted(tr1("{} offen", open)).size(11.0));
-                                });
-                            }
-                            for (name, state) in files.iter().take(300 - shown) {
-                                shown += 1;
-                                // The state label is one of five fixed strings
-                                // (translated once per row, not allocated).
-                                let (txt, col) = match state {
+                            QueueRow::File { queue_idx } => {
+                                let Some(e) = s.queue.get(*queue_idx) else {
+                                    continue;
+                                };
+                                let (txt, col) = match e.state {
                                     FileState::Waiting => (tr("Warten"), theme::MUTED),
                                     FileState::Uploading => (tr("In Bearbeitung"), theme::TEAL),
                                     FileState::Done => (tr("Abgeschlossen"), theme::GREEN),
                                     FileState::Failed => (tr("Fehlgeschlagen"), theme::RED),
                                     FileState::Skipped => (tr("Übersprungen"), theme::MUTED),
                                 };
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(txt).color(col).size(12.0));
-                                    ui.label(RichText::new(name).size(12.0));
-                                });
+                                // A long name is truncated in the cell; the full
+                                // path shows on hover (§7.3).
+                                let full = e.path.display().to_string();
+                                // Allocated at exactly `QUEUE_ROW_H` so the row
+                                // advances by `QUEUE_ROW_H + item_spacing.y`,
+                                // matching the group rows and `show_rows` (see
+                                // the header arm above).
+                                let row_w = ui.available_width();
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(row_w, QUEUE_ROW_H),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.add_sized(
+                                            [name_w, QUEUE_ROW_H],
+                                            egui::Label::new(
+                                                RichText::new(crate::text::nfc(&e.name)).size(12.0),
+                                            )
+                                            .truncate(),
+                                        )
+                                        .on_hover_text(full);
+                                        ui.add_sized(
+                                            [QUEUE_SIZE_W, QUEUE_ROW_H],
+                                            egui::Label::new(
+                                                RichText::new(crate::text::format_size(e.size))
+                                                    .size(12.0),
+                                            ),
+                                        );
+                                        ui.add_sized(
+                                            [QUEUE_STATUS_W, QUEUE_ROW_H],
+                                            egui::Label::new(
+                                                RichText::new(txt).color(col).size(12.0),
+                                            ),
+                                        );
+                                    },
+                                );
                             }
                         }
-                    });
+                    }
+                });
+        }
+
+        // Aggregate progress: **one** display over all targets, now directly
+        // under the queue (Welle 3.1) instead of in the footer. It stays visible
+        // while idle and is still drawn while a run is live even if its last
+        // target was just removed (the run continues). The byte/ETA detail only
+        // exists for a live run; the outcome counters are already the aggregate
+        // over every target (kept for the footer line below).
+        let (running, progress_text, outcome) = {
+            let s = self.upload.lock().unwrap();
+            let outcome = outcome_text(
+                s.uploaded_new,
+                s.conflict_skipped,
+                s.unchanged_skipped,
+                s.failed,
+            );
+            if s.active {
+                (true, upload_progress_text(&s), outcome)
+            } else {
+                (false, String::new(), outcome)
+            }
+        };
+        let (sum_done, sum_total) = aggregate_progress(&rows);
+        if running || sum_total > 0 {
+            ui.add_space(6.0);
+            let frac = if sum_total > 0 {
+                (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            ui.horizontal(|ui| {
+                // A spinner belongs to this one display and only while a run is
+                // active — never a second, separate indicator.
+                if running {
+                    ui.spinner();
+                }
+                let text = if running {
+                    // File counts over every target, plus the run's byte/ETA
+                    // detail from `upload_progress_text` (kept verbatim).
+                    tr3(
+                        "Gesamt: {} von {} Dateien · {}",
+                        sum_done,
+                        sum_total,
+                        progress_text,
+                    )
+                } else if sum_total > 0 && sum_done >= sum_total {
+                    tr("Alles aktuell").to_string()
+                } else {
+                    tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
+                };
+                // No `desired_width`: egui then takes everything the row has
+                // left after the spinner, so the bar spans the full width and
+                // the counter text is not clipped at 240 px.
+                ui.add(egui::ProgressBar::new(frac).text(text));
             });
-            ui.add_space(8.0);
         }
 
         ui.add_space(12.0);
@@ -1553,69 +1897,17 @@ impl PrimePhotoApp {
             )));
         }
 
-        // Snapshot rows for read-only rendering.
-        let rows: Vec<Row> = {
-            let s = self.upload.lock().unwrap();
-            let mut rows: Vec<Row> = self
-                .store
-                .folders
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let total = s.folder_total.get(&i).copied().unwrap_or(f.total_files);
-                    let done = s.folder_done.get(&i).copied().unwrap_or(f.uploaded_files);
-                    Row {
-                        idx: i,
-                        name: f.name.clone(),
-                        path: f.path.clone(),
-                        enabled: f.enabled,
-                        status: f.status,
-                        total,
-                        done,
-                        new: s.folder_new.get(&i).copied().unwrap_or(0),
-                        existing: s.folder_conflict.get(&i).copied().unwrap_or(0),
-                        unchanged: s.folder_unchanged.get(&i).copied().unwrap_or(0),
-                        failed: s.folder_failed.get(&i).copied().unwrap_or(0),
-                        last_updated: f.last_updated.clone(),
-                    }
-                })
-                .collect();
-            // The transient one-time target is a single extra row after the
-            // persisted folders — same chrome, but it has no row-action icons
-            // (kebab/refresh) and no pause toggle (nothing to configure,
-            // nothing to stop).
-            if let Some(one) = self.one_time.as_ref() {
-                let total = s
-                    .folder_total
-                    .get(&ONE_TIME_IDX)
-                    .copied()
-                    .unwrap_or(one.total_files);
-                let done = s
-                    .folder_done
-                    .get(&ONE_TIME_IDX)
-                    .copied()
-                    .unwrap_or(one.uploaded_files);
-                rows.push(Row {
-                    idx: ONE_TIME_IDX,
-                    name: tr("Einmalige Sicherung").to_string(),
-                    path: one.path.clone(),
-                    enabled: true,
-                    status: one.status,
-                    total,
-                    done,
-                    new: s.folder_new.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    existing: s.folder_conflict.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    unchanged: s.folder_unchanged.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    failed: s.folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    last_updated: one.last_updated.clone(),
-                });
-            }
-            rows
-        };
-
-        let mut actions: Vec<FolderAction> = Vec::new();
+        // The folder list is capped to the real leftover (and its preferred
+        // height), so it can never push the footer off the bottom edge — the
+        // queue above only reserved a floor for it. This also covers the
+        // empty-queue case, where the fixed empty-state block sits above.
+        let list_h = (ui.available_height() - QUEUE_FOOTER_H).clamp(0.0, FOLDER_LIST_MAX_H);
         egui::ScrollArea::vertical()
-            .max_height(320.0)
+            .max_height(list_h)
+            // Honor a shrinking cap: `ScrollArea`'s default `min_scrolled_height`
+            // (64 px) would otherwise override a smaller `max_height` and push the
+            // footer below off the bottom edge in a very small window.
+            .min_scrolled_height(0.0)
             .show(ui, |ui| {
                 // While a file drag hovers the window, the backup page keeps
                 // its hands off: no clicks out from under the overlay.
@@ -1782,77 +2074,15 @@ impl PrimePhotoApp {
             self.apply_action(a);
         }
 
-        // Footer: exactly **one** aggregated progress display over *all* backup
-        // targets — the persisted folders plus the transient one-time row
-        // (`rows` above). It replaces the old header bar, which only showed the
-        // currently running run, and it stays visible while idle (user decision
-        // 2026-10-14).
-        //
-        // The byte/ETA detail only exists for a live run; `rows` is a plain
-        // snapshot, so the shared state is locked once more here (no guard is
-        // held at this point). The outcome counters are read here too — they
-        // are already the aggregate over every target (maintained directly by
-        // the workers, no second summation of the rows).
-        let (running, progress_text, outcome) = {
-            let s = self.upload.lock().unwrap();
-            let outcome = outcome_text(
-                s.uploaded_new,
-                s.conflict_skipped,
-                s.unchanged_skipped,
-                s.failed,
-            );
-            if s.active {
-                (true, upload_progress_text(&s), outcome)
-            } else {
-                (false, String::new(), outcome)
-            }
-        };
-        let (sum_done, sum_total) = aggregate_progress(&rows);
-        // Draw the footer while a run is live even if its last target was just
-        // removed (the run continues, so bars and byte/ETA must stay). Without a
-        // live run a real total is required: a freshly added target that never
-        // ran (`sum_total == 0`) draws nothing instead of "Gesamt: 0 von 0
-        // Dateien". With neither, the empty-folder hint above stays untouched.
-        if running || sum_total > 0 {
+        // Footer: only the run's outcome breakdown over **all** targets is left
+        // here — the aggregate progress display moved up next to the queue
+        // (Welle 3.1). This is a result line, not a second progress bar, and it
+        // stays hidden while every counter is 0 (before any run, or freshly
+        // reset) and while there is no live run and no real total — no empty or
+        // misleading line.
+        if (running || sum_total > 0) && !outcome.is_empty() {
             ui.add_space(8.0);
-            let frac = if sum_total > 0 {
-                (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            ui.horizontal(|ui| {
-                // A spinner belongs to this one display and only while a run is
-                // active — never a second, separate indicator.
-                if running {
-                    ui.spinner();
-                }
-                let text = if running {
-                    // File counts over every target, plus the run's byte/ETA
-                    // detail from `upload_progress_text` (kept verbatim).
-                    tr3(
-                        "Gesamt: {} von {} Dateien · {}",
-                        sum_done,
-                        sum_total,
-                        progress_text,
-                    )
-                } else if sum_total > 0 && sum_done >= sum_total {
-                    tr("Alles aktuell").to_string()
-                } else {
-                    tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
-                };
-                // No `desired_width`: egui then takes everything the row has
-                // left after the spinner, so the bar spans the full footer
-                // width and the counter text is no longer clipped at 240 px.
-                ui.add(egui::ProgressBar::new(frac).text(text));
-            });
-            // Extra result line (user decision 2026-10-14): the run's outcome
-            // breakdown over **all** targets. It is a result line, not a second
-            // progress bar, and it stays hidden while every counter is 0 (before
-            // any run, or freshly reset) — no empty or misleading line.
-            if !outcome.is_empty() {
-                ui.add_space(2.0);
-                ui.label(theme::muted(outcome).size(11.0));
-            }
+            ui.label(theme::muted(outcome).size(11.0));
         }
     }
 }
