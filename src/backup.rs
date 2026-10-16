@@ -99,23 +99,24 @@ fn source_status(path_exists: bool, current: FolderStatus) -> FolderStatus {
 }
 
 /// Label of a backup folder in the queue (rows and group headers): the folder
-/// name, plus the parent path in parentheses when **more than one** backup
-/// folder carries that name (`ambiguous`) — two folders both named "Sport"
-/// would otherwise be indistinguishable in the queue (user decision
-/// 2026-10-16). The ambiguity is computed once per frame over the whole
-/// store, so the rule is stable while the queue is open. The name is shown
-/// NFC-normalised, like every other displayed path in the app.
+/// name, plus the **parent folder's name** in parentheses when **more than
+/// one** backup folder carries that name (`ambiguous`) — two folders both
+/// named "Sport" would otherwise be indistinguishable in the queue (user
+/// decision 2026-10-16). Only the parent's *name* ("Sport (Pictures)"), not
+/// its full path: the label must fit the 120 px column, the full path stays in
+/// the row's tooltip (`folder_tip` at the call site). The ambiguity is
+/// computed once per frame over the whole store, so the rule is stable while
+/// the queue is open. The name is shown NFC-normalised, like every other
+/// displayed path in the app.
 fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> String {
     let name = crate::text::nfc(name);
     if !ambiguous.contains(&name) {
         return name;
     }
-    match path.parent() {
-        Some(p) if !p.as_os_str().is_empty() => {
-            format!("{} ({})", name, crate::text::nfc(&p.display().to_string()))
-        }
-        // No parent to disambiguate with: the plain name stays.
-        _ => name,
+    match path.parent().and_then(|p| p.file_name()) {
+        Some(parent) => format!("{} ({})", name, crate::text::nfc(&parent.to_string_lossy())),
+        // No parent name to disambiguate with (root/empty): the plain name stays.
+        None => name,
     }
 }
 
@@ -2258,6 +2259,14 @@ impl PrimePhotoApp {
             } else {
                 0.0
             };
+            // The row width must be remembered **before** the `horizontal`:
+            // while a run is live the spinner in front of the bar already
+            // consumes part of it, and a `ProgressBar` without `desired_width`
+            // takes the whole row regardless — so it visibly overflowed the
+            // right edge (~105 %). The bar now gets an explicit width: the full
+            // row without a spinner, the row minus the spinner and the item
+            // spacing with one (clamped at 0).
+            let row_w = ui.available_width();
             ui.horizontal(|ui| {
                 // A spinner belongs to this one display and only while a run is
                 // active — never a second, separate indicator.
@@ -2278,10 +2287,15 @@ impl PrimePhotoApp {
                 } else {
                     tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
                 };
-                // No `desired_width`: egui then takes everything the row has
-                // left after the spinner, so the bar spans the full width and
-                // the counter text is not clipped at 240 px.
-                ui.add(egui::ProgressBar::new(frac).text(text));
+                // The spinner is a square of `interact_size.y` (26 px, theme);
+                // the layout adds `item_spacing.x` between the two widgets.
+                let bar_w = if running {
+                    (row_w - ui.spacing().item_spacing.x - ui.style().spacing.interact_size.y)
+                        .max(0.0)
+                } else {
+                    row_w
+                };
+                ui.add(egui::ProgressBar::new(frac).desired_width(bar_w).text(text));
             });
         }
 
@@ -2545,6 +2559,32 @@ mod tests {
         // No known total: no progress, and never a division by zero downstream.
         assert_eq!(capped_done(0, 0), 0);
         assert_eq!(capped_done(3, 0), 0);
+    }
+
+    #[test]
+    fn queue_label_disambiguates_with_the_parent_name_not_the_path() {
+        // Two folders named "Sport" under different parents: the queue label
+        // carries the parent's **name** so it fits the 120 px column — the
+        // full path stays in the row's tooltip (user decision 2026-10-16).
+        let ambiguous: HashSet<String> = ["Sport".to_string()].into_iter().collect();
+        let label = queue_folder_label(
+            "Sport",
+            Path::new("/Users/florianreisinger/Pictures/Sport"),
+            &ambiguous,
+        );
+        assert_eq!(label, "Sport (Pictures)");
+
+        // Unambiguous names stay bare.
+        let label = queue_folder_label(
+            "Sport",
+            Path::new("/Users/florianreisinger/Pictures/Sport"),
+            &HashSet::new(),
+        );
+        assert_eq!(label, "Sport");
+
+        // A root-level folder has no parent name: the plain name stays.
+        let label = queue_folder_label("Sport", Path::new("/Sport"), &ambiguous);
+        assert_eq!(label, "Sport");
     }
 
     #[test]

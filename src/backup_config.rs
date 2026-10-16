@@ -104,24 +104,6 @@ impl PrimePhotoApp {
         });
         ui.add_space(10.0);
 
-        // Weekly schedule (inert; no backend yet) — §4.5 "… aktiviert" + "um".
-        ui.horizontal(|ui| {
-            let mut weekly = true;
-            let mut time = "14:00".to_string();
-            ui.add_enabled(
-                false,
-                egui::Checkbox::new(&mut weekly, tr("Wöchentlich aktiviert")),
-            )
-            .on_disabled_hover_text(unavailable);
-            ui.label(tr("um"));
-            ui.add_enabled(
-                false,
-                egui::TextEdit::singleline(&mut time).desired_width(64.0),
-            )
-            .on_disabled_hover_text(unavailable);
-        });
-        ui.add_space(10.0);
-
         // Functional: dedup.
         ui.checkbox(
             &mut form.dedup,

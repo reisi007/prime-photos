@@ -253,9 +253,7 @@ const EN: &[(&str, &str)] = &[
         "Videos werden noch nicht hochgeladen",
         "Videos are not uploaded yet",
     ),
-    ("Wöchentlich aktiviert", "Weekly enabled"),
     ("Änderungen hochladen:", "Upload changes:"),
-    ("um", "at"),
     // -- settings -------------------------------------------------------
     ("Album (optional):", "Album (optional):"),
     ("Allgemeines", "General"),
