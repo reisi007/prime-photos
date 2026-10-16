@@ -19,10 +19,13 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    nennt `docs/original/` und `docs/protocol/`, die es **noch nicht gibt** — beim Umzug mitziehen.
 2. [ ] **Restplan nach dem manuellen Test (User-Entscheidung 2026-10-16: „E vor dem DMG").**
    Reihenfolge: **C → D → E → DMG**.
-   - **C** (Layout/Ordner-Karte/Scroll/Ordner-Spalte/Nichts-hochzuladen): fertig, Verify läuft.
-   - **D** (Byte-Fortschritt pro Datei + Live-Test am Konto): `src/prime_photos.rs` (streaming body +
-     counter), `src/upload.rs` (Fortschritts-Meldung), `src/backup.rs` (pro-Datei-% in der
-     Warteschlange). **Hauptagent** macht den Live-Test.
+   - **C** (Layout/Ordner-Karte/Scroll/Ordner-Spalte/Nichts-hochzuladen): **fertig, verifiziert
+     APPROVE** (164 Tests, 0 Warnungen), Commit `c6003ff`.
+   - **D** (Byte-Fortschritt pro Datei + Live-Test am Konto): **läuft** — Umsetzer-Subagent
+     (`opencode-go/deepseek-v4.1-flash`, Session `ses_eba5d0c34ffeqoWOsdjHyUFbip`) mit Brief in
+     `$TMPDIR/round_d_brief.md`: `src/prime_photos.rs` (Streaming-Body + `Arc<AtomicU64>`-Counter,
+     `bytes = "1"` als direct dep), `src/upload.rs` (`QueueEntry.bytes_sent` + Polling-Task),
+     `src/backup.rs` (pro-Datei-% in der Warteschlange). **Hauptagent** macht den Live-Test.
    - **E** (forced pause, TODOs T1–T5 aus `docs/SPEC_MISSING_SOURCE.md`): `FolderStatus::Paused`
      bei fehlendem Ordner (Kaltstart/Watcher/Rescan), Wasserzeichen-Guard (T2, teil-entwarnt),
      UI-Hinweis „Angehalten (X%)" AMBER (T3), Wiederanschließen-Erkennung (T4), verständliche
