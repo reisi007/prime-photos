@@ -91,6 +91,12 @@ Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung
    - **T1 (vor Release)** `FolderStatus::Paused` bei fehlendem Ordner zuweisen — Kaltstart, Watcher
      **und** manueller Rescan.
    - **T2 (vor Release)** Wasserzeichen-Guard: `record_folder_scan` **nur** bei vorhandenem Ordner.
+     **Teil-Entwarnung (Hauptagent, 2026-10-16):** der Kaltstart-Pass **überspringt** einen Ordner,
+     den er nicht stat-en kann (`src/backup.rs:593-595`: `let Some(current) = folders::max_mtime(&f.path)
+     else { continue };` — der Ordner landet damit **nicht** in `scans`, und `start_background_run`
+     schreibt für ihn **keine** Wassermarke). Die Falle ist dort **nicht** vorhanden; meine frühere
+     Zuschreibung „T2 ist Datensicherheit" war zu scharf. **Offen zu prüfen:** der **Event-Pfad**
+     (`watch_loop`) und der **manuelle Rescan** — dort den Guard ggf. ergänzen.
    - **T3 (vor Release)** UI-Hinweis „Angehalten (X%)" in AMBER (existiert, nur zuweisen).
    - **T4 (vor Release)** Wiederanschließen aktiv erkennen statt 30-s-Polling.
    - **T5 (vor Release)** verständliche Meldung statt „Keine Fotos gefunden", wenn der Ordner fehlt.
