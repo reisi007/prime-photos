@@ -14,9 +14,9 @@ Pause and menu fixes; **nothing in this spec is based on the working tree**.
 This spec covers the **web/cookie upload path** actually used by this app:
 
 - `POST https://content-<zone>.drive.amazonaws.com/v2/upload` (raw file bytes,
-  cookie auth) and everything that wraps it: EXIF capture date derivation,
-  duplicate (409) handling, album (VISUAL_COLLECTION) creation/membership, and the
-  concurrent worker scheduling in the GUI.
+  cookie auth) and everything that wraps it: capture-date handling (server-side
+  derivation, §2.4), duplicate (409) handling, album (VISUAL_COLLECTION)
+  creation/membership, and the concurrent worker scheduling in the GUI.
 - It does **not** cover the desktop client's device flow
   (`upload-photos.amazon.de/v2/upload` with `x-amz-access-token`), which is
   documented in `docs/PROTOCOL.md` §2.17 / §3 but **not used** by us.
@@ -46,12 +46,12 @@ Query parameters (our URL construction order in `PrimePhotos::upload_picture`):
 | `fileSize` | byte length of body | Must equal body length. |
 | `name` | `Path::file_name` (file name only) | **Not percent-encoded by us** in the `Url::parse` path; the `url` crate may re-encode some characters (unverified behaviour). Original PROTOCOL notes `+` for spaces. |
 | `parentNodeId` | cached Web folder id (or `NONE` in dry run) | See §4.4. |
-| `contentDate` | derived timestamp (§2.4) | Sent as full RFC3339-ish timestamp with milliseconds + `Z`. |
+| `contentDate` | **not sent** | The server derives the capture date from the file (§2.4); a client value would be taken over verbatim. |
 
 openapi.yaml `/v2/upload` additionally enumerates `kind` (enum `[FILE]`) and notes
-`contentDate` optional (otherwise derived from EXIF/file time). Our URL omits
-`kind=FILE`; observation: the server still returns a `FILE` node. **Unverified**
-whether omitting `kind` is always accepted.
+`contentDate` optional (otherwise derived from EXIF/file time) — we omit both and
+let the server derive the capture date (§2.4); observation: the server still
+returns a `FILE` node. **Unverified** whether omitting `kind` is always accepted.
 
 ### 2.2 Required request headers (our committed client)
 
@@ -80,50 +80,31 @@ OAuth/token set. This is the intended web-flow difference.
 - HTTP 401 is detected via `PrimePhotos::check_auth_error` and logged with a manual
   cookie-renewal hint. No automatic refresh (backlog).
 
-### 2.4 Capture date precedence (EXIF vs file time)
+### 2.4 Capture date: derived by the server
 
-Implemented in `PrimePhotos::upload_picture`, before any network call.
+We send **no** `contentDate` (user decision 2026-10-16, live-tested against the
+real account on our cookie host `content-eu.drive.amazonaws.com/v2/upload`):
 
-EXIF order tried (each only if the previous was absent), read from the primary IFD
-via the `exif` crate, expecting `Value::Ascii` with one entry:
+- A `POST` **without** `contentDate` answers `201`, and the response carries a
+  `contentDate` the server derived from the file itself — live: `DateTimeOriginal`
+  **plus** `SubSecTime` (`2026-10-13T19:47:36.123Z`), **not** the differing EXIF
+  `ModifyDate` (`2026-10-20`) and **not** the file mtime.
+- A `POST` **with** a client-side value is taken over **verbatim**
+  (`…36.000Z`): a value we computed would override the server's correct derivation.
+- The replace `PUT` (a 409 name conflict resolved in place with
+  `PUT /v2/upload/<nodeId>`) likewise carries no `contentDate`; the node keeps the
+  server-derived value (`…36.123Z`).
 
-1. `Tag::DateTimeDigitized` ("when the photo was taken"/digitized)
-2. `Tag::DateTimeOriginal`
-3. `Tag::DateTime`
+This matches the original client: clean-room recon of the bundle
+(`docs/SPEC_CAPTURE_DATE.md` §1–§7) shows it **never** sets `contentDate` — the
+field stays `null` and the query builder discards it; §10 of that document records
+the delta to our earlier client-side derivation.
 
-If any is present and parses as `exif::DateTime`, format:
-
-```
-{year:0>4}-{month:0>2}-{day:0>2}T{hour:0>2}:{minute:0>2}:{second:0>2}.{nanosecond:0>3}Z
-```
-
-with `nanosecond` defaulting to `0` when `None`. Note: the `nanosecond` field is the
-EXIF sub-second emitted verbatim (`{:0>3}` pads only to a minimum width of 3), so
-non-zero sub-seconds can serialize to more than three fractional digits — a code
-quirk (broken contentDate whenever a sub-second is set) worth recording as an
-additional open issue, not just `.000Z`.
-
-If no EXIF date is available, fall back to file system time:
-
-- `fs::metadata(pic_path)`; use `created()` then `modified()` on failure.
-- If `now - file_time > 10 minutes`: use that timestamp, formatted
-  `%Y-%m-%dT%H:%M:%S%.3fZ` (UTC, 3 fractional digits).
-- If the file is 10 minutes old or newer: **abort the upload** with
-  `Err("No EXIF data found and file is too recent (created/modified less than 10 minutes ago). …")`.
-- If `file_time` is in the future (duration subtraction fails): use it anyway.
-
-Server-side, `PROTOCOL.md` §2.17 observes `contentDate` normalised to **midnight
-of the file's date** (e.g. `2026-10-13T00:00:00.000Z`), not the capture time.
-Whether our millisecond timestamp is honoured or truncated to midnight is **not
-verified** by us.
-
-EXIF fields we *do not* read: GPS, make/model for upload decisions, orientation.
-We only read date tags.
-
-Whether the original client uses a different tag priority (and a *hypothesised*
-`fallbackContentDate` query param reportedly seen in `Amazon Photos.dll`'s
-multipart init struct — unverified, no recon artifact cited) is **unknown** — our
-priority is our own, and PROTOCOL only says "optional; otherwise derived from EXIF/file time".
+Earlier behaviour (removed 2026-10-16): our own EXIF read (`DateTimeDigitized` →
+`DateTimeOriginal` → `DateTime`) with a file-time fallback — including the rule
+that aborted the upload when the file was younger than 10 minutes — was sent as
+`contentDate`. That whole derivation is gone; the server is the single source of
+the capture date.
 
 ### 2.5 Response handling
 
@@ -230,7 +211,8 @@ synonyms.
    `update_web_pictures_dir_node` (root → Pictures → Web) and cache.
 2. Compute `(contents, md5, size)` either from caller-provided slices/hash or
    by reading the file + `md5::compute` (hex string).
-3. Derive `capture_date_str` (§2.4).
+3. No capture date is computed; the request sends no `contentDate` — the server
+   derives it (§2.4).
 4. Choose `parent_node` = cached id (or `"NONE"` in dry run).
 5. Build URL (§2.1) and headers (§2.2).
 6. Dry run: return `Ok("")` with no request.
@@ -297,7 +279,7 @@ partial bytes; `RENAME` duplicate risk) are recorded in `AGENTS.todo.md`.
 | Upload raw bytes to content host | `PrimePhotos::upload_picture` → `POST {zone}…/v2/upload` |
 | Parent folder node id | cached `web_dir_node` (Root/Pictures/Web) |
 | MD5 of body | `md5::compute` hex, sent as `x-amzn-file-md5` |
-| Capture/content date | §2.4 algorithm |
+| Capture/content date | derived by the server; no `contentDate` sent (§2.4) |
 | Duplicate detection (server 409) | `ResponseUploadFail.error_details.conflict_node_ids`, returns first id |
 | Album = visual collection | `kind: "VISUAL_COLLECTION"` node + `PATCH …/children` `op: add` |
 | Concurrent workers + bandwidth cap | `run_upload` / `upload_worker` |
@@ -334,10 +316,10 @@ From `AGENTS.todo.md` (P1 upload items):
 
 ## 6. Unverifiable / unknown points
 
-- Server-side content-date truncation (to midnight) of our millisecond timestamp —
-  implied by PROTOCOL but not re-tested by us.
-- Exact EXIF tag priority of the original client (we chose Digitized → Original →
-  DateTime ourselves; original client may differ and may use `fallbackContentDate`).
+- Exact tag order the server applies when deriving `contentDate` from the file:
+  live-proven for one sample to be `DateTimeOriginal` + `SubSecTime`, but the full
+  precedence is not mapped. The original client never sets `contentDate` at all
+  (`docs/SPEC_CAPTURE_DATE.md`).
 - Whether the web host requires the omitted desktop headers (`Content-MD5`,
   `Content-Disposition`, trace ids, source id).
 - Error response shapes for non-409 failures (none observed in captures; our

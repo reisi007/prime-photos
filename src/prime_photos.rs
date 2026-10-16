@@ -6,7 +6,6 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use exif::{Tag, Value};
 use log::{debug, error, warn};
 use reqwest::{Client, Url, header::HeaderMap};
 use serde::{Deserialize, Serialize};
@@ -950,102 +949,6 @@ impl PrimePhotos {
                 )
             };
 
-        // Try to get capture date from EXIF data, or fall back to file creation time
-        let capture_date_str = {
-            let mut date_from_exif: Option<exif::DateTime> = None;
-
-            // Try to read EXIF data
-            let mut contents_cursor = std::io::Cursor::new(&contents_vec);
-            let exif_reader = exif::Reader::new();
-            if let Ok(exif_data) = exif_reader.read_from_container(&mut contents_cursor) {
-                // Try DateTimeDigitized first (when the photo was taken)
-                if let Some(field) = exif_data.get_field(Tag::DateTimeDigitized, exif::In::PRIMARY)
-                {
-                    if let Value::Ascii(ref vec) = field.value {
-                        if !vec.is_empty() {
-                            if let Ok(dt) = exif::DateTime::from_ascii(&vec[0]) {
-                                date_from_exif = Some(dt);
-                            }
-                        }
-                    }
-                }
-
-                // Fall back to DateTimeOriginal if DateTimeDigitized not found
-                if date_from_exif.is_none() {
-                    if let Some(field) =
-                        exif_data.get_field(Tag::DateTimeOriginal, exif::In::PRIMARY)
-                    {
-                        if let Value::Ascii(ref vec) = field.value {
-                            if !vec.is_empty() {
-                                if let Ok(dt) = exif::DateTime::from_ascii(&vec[0]) {
-                                    date_from_exif = Some(dt);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Fall back to DateTime if neither DateTimeDigitized nor DateTimeOriginal found
-                if date_from_exif.is_none() {
-                    if let Some(field) = exif_data.get_field(Tag::DateTime, exif::In::PRIMARY) {
-                        if let Value::Ascii(ref vec) = field.value {
-                            if !vec.is_empty() {
-                                if let Ok(dt) = exif::DateTime::from_ascii(&vec[0]) {
-                                    date_from_exif = Some(dt);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // If we have EXIF date, use it
-            if let Some(exif_dt) = date_from_exif {
-                format!(
-                    "{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0>2}.{:0>3}Z",
-                    exif_dt.year,
-                    exif_dt.month,
-                    exif_dt.day,
-                    exif_dt.hour,
-                    exif_dt.minute,
-                    exif_dt.second,
-                    exif_dt.nanosecond.unwrap_or(0)
-                )
-            } else {
-                // No EXIF data, check file creation/modification time
-                let metadata = fs::metadata(pic_path).map_err(|e| e.to_string())?;
-
-                // Get file creation or modification time
-                let file_time = metadata
-                    .created()
-                    .or_else(|_| metadata.modified())
-                    .map_err(|e| format!("Could not get file time: {}", e))?;
-
-                // Check if file is more than 10 minutes old
-                let now = SystemTime::now();
-                let ten_minutes = std::time::Duration::from_secs(10 * 60);
-
-                if let Ok(duration_since_file) = now.duration_since(file_time) {
-                    if duration_since_file > ten_minutes {
-                        // File is old enough, use its creation/modification time
-                        let datetime: DateTime<Utc> = file_time.into();
-                        datetime.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
-                    } else {
-                        // File is too recent, return error
-                        return Err(format!(
-                            "No EXIF data found and file is too recent (created/modified less than 10 minutes ago). \
-                            Cannot determine capture date for: {}",
-                            pic_path.display()
-                        ));
-                    }
-                } else {
-                    // File time is in the future somehow, use it anyway
-                    let datetime: DateTime<Utc> = file_time.into();
-                    datetime.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
-                }
-            }
-        };
-
         let parent_node = match self.dry_run {
             false => &self.web_dir_node.as_ref().unwrap().id,
             true => "NONE",
@@ -1063,7 +966,6 @@ impl PrimePhotos {
             file_size,
             &file_name,
             parent_node,
-            &capture_date_str,
         ))
         .expect("Can't parse the upload URL");
 
@@ -1220,7 +1122,7 @@ impl PrimePhotos {
                         // The PUT answers the node the 409 named. It carries
                         // **the same query set as the POST** (`conflictResolution`
                         // [wire value of the policy], `fileSize`, `name`,
-                        // `parentNodeId`, `contentDate`) — the host rejects a
+                        // `parentNodeId`) — the host rejects a
                         // PUT without `fileSize` with 400 `MissingFileSize`
                         // (live-proven 2026-10-15) — plus body and header set.
                         // `file_name` is passed **raw**; the URL helper applies
@@ -1233,7 +1135,6 @@ impl PrimePhotos {
                                 file_size,
                                 &file_name,
                                 parent_node,
-                                &capture_date_str,
                                 &headers,
                                 &contents_vec,
                                 pic_path,
@@ -1280,8 +1181,8 @@ impl PrimePhotos {
     /// conflict marker, see [`should_replace_after_conflict`]).
     ///
     /// The PUT carries **the same query set as the POST**: `conflictResolution`
-    /// (the `Replace` wire value `NONE`), `fileSize`, `name`, `parentNodeId` and
-    /// `contentDate` — built by `urls::upload_query`, shared with the POST URL so
+    /// (the `Replace` wire value `NONE`), `fileSize`, `name` and
+    /// `parentNodeId` — built by `urls::upload_query`, shared with the POST URL so
     /// the two cannot drift apart. Live-proven 2026-10-15: without `fileSize` the
     /// host rejects the PUT with HTTP **400 `MissingFileSize`** ("File size should
     /// not be empty."); only the path differs (the node id takes the place of the
@@ -1306,7 +1207,6 @@ impl PrimePhotos {
         file_size: usize,
         file_name: &str,
         parent_node_id: &str,
-        content_date: &str,
         headers: &HeaderMap,
         contents: &[u8],
         pic_path: &Path,
@@ -1318,7 +1218,6 @@ impl PrimePhotos {
             file_size,
             file_name,
             parent_node_id,
-            content_date,
         ))
         .expect("Can't parse the replace upload URL");
 

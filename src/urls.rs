@@ -297,11 +297,17 @@ pub(crate) fn thumbnail_url(node_id: &str, country: &str) -> String {
 
 /// `POST content-<zone>.drive.amazonaws.com/v2/upload` with the query in the
 /// order the desktop client uses (`conflictResolution`, `fileSize`, `name`,
-/// `parentNodeId`, `contentDate`). `name` is normalised to Unicode **NFC**
+/// `parentNodeId`). `name` is normalised to Unicode **NFC**
 /// before it enters the query ([`crate::text::nfc`]): macOS hands out NFD names
 /// and the server compares names exactly, so an unnormalised NFD name would not
 /// match a node created from Windows (see `text::nfc`). Nothing is encoded — the
 /// original does not pre-encode the name either.
+///
+/// No `contentDate` is sent (user decision 2026-10-16): the server derives the
+/// capture date from the uploaded file itself (`DateTimeOriginal` + `SubSecTime`,
+/// like the original, which never sets the field). A value computed client side
+/// would be taken over verbatim and thereby override that derivation — see
+/// `docs/SPEC_CAPTURE_DATE.md` and `docs/SPEC_UPLOAD.md` §2.4.
 ///
 /// The query itself is built by [`upload_query`] and shared with the replace
 /// `PUT` ([`replace_upload_url`]), so the two stages cannot drift apart.
@@ -311,22 +317,15 @@ pub(crate) fn upload_url(
     file_size: usize,
     name: &str,
     parent_node_id: &str,
-    content_date: &str,
 ) -> String {
     format!(
         "https://content-{zone}.drive.amazonaws.com/v2/upload?{q}",
-        q = upload_query(
-            conflict_resolution,
-            file_size,
-            name,
-            parent_node_id,
-            content_date
-        )
+        q = upload_query(conflict_resolution, file_size, name, parent_node_id)
     )
 }
 
 /// The query string **both** upload stages carry (`conflictResolution`,
-/// `fileSize`, `name`, `parentNodeId`, `contentDate`), in the order the desktop
+/// `fileSize`, `name`, `parentNodeId`), in the order the desktop
 /// client uses. Built once here so the `POST` ([`upload_url`]) and the replace
 /// `PUT` ([`replace_upload_url`]) can never disagree: live-proven 2026-10-15,
 /// the host answers a `PUT` without `fileSize` with HTTP 400
@@ -341,12 +340,11 @@ fn upload_query(
     file_size: usize,
     name: &str,
     parent_node_id: &str,
-    content_date: &str,
 ) -> String {
     let name = crate::text::nfc(name);
     format!(
-        "conflictResolution={}&fileSize={}&name={}&parentNodeId={}&contentDate={}",
-        conflict_resolution, file_size, name, parent_node_id, content_date
+        "conflictResolution={}&fileSize={}&name={}&parentNodeId={}",
+        conflict_resolution, file_size, name, parent_node_id
     )
 }
 
@@ -360,7 +358,7 @@ fn upload_query(
 ///
 /// The `PUT` carries **the same query set as the POST** ([`upload_query`]:
 /// `conflictResolution=NONE`, `fileSize`, `name` (NFC-normalised),
-/// `parentNodeId`, `contentDate`; only the path differs (the node id takes the
+/// `parentNodeId`; only the path differs (the node id takes the
 /// place of the bare `/v2/upload`). Live-proven 2026-10-15: without `fileSize`
 /// the host rejects the `PUT` with HTTP **400 `MissingFileSize`** ("File size
 /// should not be empty."). Body (the file bytes) and headers are the POST's,
@@ -380,17 +378,10 @@ pub(crate) fn replace_upload_url(
     file_size: usize,
     name: &str,
     parent_node_id: &str,
-    content_date: &str,
 ) -> String {
     format!(
         "https://content-{zone}.drive.amazonaws.com/v2/upload/{node_id}?{q}",
-        q = upload_query(
-            conflict_resolution,
-            file_size,
-            name,
-            parent_node_id,
-            content_date
-        )
+        q = upload_query(conflict_resolution, file_size, name, parent_node_id)
     )
 }
 
@@ -535,33 +526,17 @@ mod tests {
     fn replace_upload_url_is_zone_and_node_exact() {
         // The German marketplace uploads into the `eu` zone.
         assert_eq!(
-            replace_upload_url(
-                "eu",
-                "NODE1",
-                "NONE",
-                1234,
-                "foto.jpg",
-                "PARENT",
-                "2020-01-02T03:04:05.000Z"
-            ),
-            "https://content-eu.drive.amazonaws.com/v2/upload/NODE1?conflictResolution=NONE&fileSize=1234&name=foto.jpg&parentNodeId=PARENT&contentDate=2020-01-02T03:04:05.000Z"
+            replace_upload_url("eu", "NODE1", "NONE", 1234, "foto.jpg", "PARENT"),
+            "https://content-eu.drive.amazonaws.com/v2/upload/NODE1?conflictResolution=NONE&fileSize=1234&name=foto.jpg&parentNodeId=PARENT"
         );
         // A non-German marketplace (e.g. `us` → the `na` zone) uses its own
         // zone; only the host changes, path and query stay the same shape.
         assert_eq!(
-            replace_upload_url(
-                "na",
-                "B0ABCDEF123",
-                "NONE",
-                7,
-                "a b.jpg",
-                "P",
-                "2020-01-02T03:04:05.000Z"
-            ),
-            "https://content-na.drive.amazonaws.com/v2/upload/B0ABCDEF123?conflictResolution=NONE&fileSize=7&name=a b.jpg&parentNodeId=P&contentDate=2020-01-02T03:04:05.000Z"
+            replace_upload_url("na", "B0ABCDEF123", "NONE", 7, "a b.jpg", "P"),
+            "https://content-na.drive.amazonaws.com/v2/upload/B0ABCDEF123?conflictResolution=NONE&fileSize=7&name=a b.jpg&parentNodeId=P"
         );
         // The replace stage never sends the `OVERWRITE` value the host rejects.
-        let url = replace_upload_url("eu", "NODE1", "NONE", 1, "f.jpg", "P", "d");
+        let url = replace_upload_url("eu", "NODE1", "NONE", 1, "f.jpg", "P");
         assert!(!url.contains("OVERWRITE"));
         // The node id is a server value and is passed through byte-exactly.
         assert!(url.contains("/v2/upload/NODE1?"));
@@ -573,23 +548,8 @@ mod tests {
         // `PUT` without `fileSize` with HTTP 400 `MissingFileSize`, so the
         // replace stage must send exactly the POST's query set — the only
         // difference between the two URLs is the node id in the path.
-        let post = upload_url(
-            "eu",
-            "NONE",
-            1234,
-            "foto.jpg",
-            "PARENT",
-            "2020-01-02T03:04:05.000Z",
-        );
-        let put = replace_upload_url(
-            "eu",
-            "NODE1",
-            "NONE",
-            1234,
-            "foto.jpg",
-            "PARENT",
-            "2020-01-02T03:04:05.000Z",
-        );
+        let post = upload_url("eu", "NONE", 1234, "foto.jpg", "PARENT");
+        let put = replace_upload_url("eu", "NODE1", "NONE", 1234, "foto.jpg", "PARENT");
         let post_query = post.split_once('?').expect("POST URL has a query").1;
         let put_query = put.split_once('?').expect("PUT URL has a query").1;
         assert_eq!(post_query, put_query);
@@ -598,11 +558,13 @@ mod tests {
         assert!(put.contains("fileSize=1234"));
         assert!(put.contains("name=foto.jpg"));
         assert!(put.contains("parentNodeId=PARENT"));
-        assert!(put.contains("contentDate=2020-01-02T03:04:05.000Z"));
+        // No `contentDate`: the server derives the capture date from the file
+        // (user decision 2026-10-16).
+        assert!(!put.contains("contentDate"));
         // The PUT must be passed the **same** name, otherwise the two URLs
         // would normalise differently: `name` is NFC-folded in both stages.
         let nfd = "O\u{308}FB-Reisinger_01.dng";
-        let put = replace_upload_url("eu", "NODE1", "NONE", 7, nfd, "PARENT", "d");
+        let put = replace_upload_url("eu", "NODE1", "NONE", 7, nfd, "PARENT");
         assert!(put.contains("name=\u{D6}FB-Reisinger_01.dng"));
         assert!(!put.contains('\u{308}'));
     }
@@ -610,20 +572,13 @@ mod tests {
     #[test]
     fn upload_url_is_zone_and_query_exact() {
         assert_eq!(
-            upload_url(
-                "eu",
-                "RENAME",
-                1234,
-                "foto.jpg",
-                "NODE1",
-                "2020-01-02T03:04:05.000Z"
-            ),
-            "https://content-eu.drive.amazonaws.com/v2/upload?conflictResolution=RENAME&fileSize=1234&name=foto.jpg&parentNodeId=NODE1&contentDate=2020-01-02T03:04:05.000Z"
+            upload_url("eu", "RENAME", 1234, "foto.jpg", "NODE1"),
+            "https://content-eu.drive.amazonaws.com/v2/upload?conflictResolution=RENAME&fileSize=1234&name=foto.jpg&parentNodeId=NODE1"
         );
         // A different zone changes only the host; the query order is fixed.
         assert_eq!(
-            upload_url("na", "OVERWRITE", 5, "a b.jpg", "P", "d"),
-            "https://content-na.drive.amazonaws.com/v2/upload?conflictResolution=OVERWRITE&fileSize=5&name=a b.jpg&parentNodeId=P&contentDate=d"
+            upload_url("na", "OVERWRITE", 5, "a b.jpg", "P"),
+            "https://content-na.drive.amazonaws.com/v2/upload?conflictResolution=OVERWRITE&fileSize=5&name=a b.jpg&parentNodeId=P"
         );
     }
 
@@ -633,11 +588,11 @@ mod tests {
         // names exactly, so the request must carry the single NFC codepoint or a
         // name written from Windows would not match.
         let nfd = "O\u{308}FB-Reisinger_01.dng";
-        let url = upload_url("eu", "OVERWRITE", 7, nfd, "NODE", "2026-09-28T00:00:00.000Z");
+        let url = upload_url("eu", "OVERWRITE", 7, nfd, "NODE");
         assert!(url.contains("name=\u{D6}FB-Reisinger_01.dng"));
         assert!(!url.contains('\u{308}'));
         // An already-NFC name is passed through unchanged.
-        let url = upload_url("eu", "NONE", 7, "\u{D6}FB.dng", "NODE", "d");
+        let url = upload_url("eu", "NONE", 7, "\u{D6}FB.dng", "NODE");
         assert!(url.contains("name=\u{D6}FB.dng"));
     }
 
@@ -652,10 +607,10 @@ mod tests {
         // value carries; NFC folds them into the single "ö".
         let nfd = "B0o\u{308}x\u{F6}";
         assert_ne!(nfd, crate::text::nfc(nfd));
-        let url = replace_upload_url("eu", nfd, "NONE", 7, "O\u{308}FB.jpg", "P", "d");
+        let url = replace_upload_url("eu", nfd, "NONE", 7, "O\u{308}FB.jpg", "P");
         assert_eq!(
             url,
-            "https://content-eu.drive.amazonaws.com/v2/upload/B0o\u{308}x\u{F6}?conflictResolution=NONE&fileSize=7&name=\u{D6}FB.jpg&parentNodeId=P&contentDate=d"
+            "https://content-eu.drive.amazonaws.com/v2/upload/B0o\u{308}x\u{F6}?conflictResolution=NONE&fileSize=7&name=\u{D6}FB.jpg&parentNodeId=P"
         );
         // …so within one and the same URL the two treatments are visible: the
         // **raw** NFD id in the path, the **folded** name in the query.

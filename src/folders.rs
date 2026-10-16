@@ -167,7 +167,7 @@ pub enum ConflictResolution {
     /// `errorDetails.conflictNodeIds[0]` names the node to replace with
     /// `PUT /v2/upload/<nodeId>` — live-proven: 200, the same node id, content
     /// actually swapped, **but only with the POST's query set** (`conflictResolution`,
-    /// `fileSize`, `name`, `parentNodeId`, `contentDate`); without it the host
+    /// `fileSize`, `name`, `parentNodeId`); without it the host
     /// answers 400 `MissingFileSize`. The overwrite is therefore **not** a wire
     /// value, which is why `wire_value` reports `NONE`.
     Replace,
