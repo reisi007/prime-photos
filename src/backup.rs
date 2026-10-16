@@ -2618,7 +2618,7 @@ mod tests {
         // no folder the checkbox could name.
         let label = remember_checkbox_label(None);
 
-        assert_eq!(label, "Nicht noch einmal fragen");
+        assert_eq!(label, tr("Nicht noch einmal fragen").to_string());
         assert!(
             !label.contains("Ordner"),
             "the neutral label must not name any folder, got: {label}"
