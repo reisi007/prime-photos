@@ -47,6 +47,61 @@ Erledigt und gelöscht: Commits der verifizierten Runde (`9cad019`), Tray-Icon e
    Keychain-Dialog „… möchte den Schlüssel »refresh-token« verwenden" muss einmalig mit **„Immer
    erlauben"** bestätigt sein (stabiles Zertifikat, daher nur einmal).
 
+## Manueller Test 2026-10-16 — Rückmeldungen des Users am echten Fenster
+
+App aus `02e0fca` installiert und gestartet. Der Start war sauber: **keine** Warnung/kein Fehler im
+Log (Default-Filter `warn`, `src/logging.rs:74`) und der Dedup-Index steht unverworfen mit **591
+Zeilen** (`origin`+`node_id` vorhanden) — **Echtbeleg** für die Selbstheilung aus 5.4: der Fehlalarm
+(„gesunder Index wird verworfen") ist auf echten Daten nicht eingetreten.
+
+1. [ ] **Logo (User-Entscheidung: App-Logo überall).** Die Seitenleiste zeigt eine **im Code
+   gezeichnete** teal Kugel (`src/icons.rs::upload_logo`), nicht unser App-Logo. Unser Logo liegt
+   brach: `assets/logo.svg` → Dock-Icon (`logo.png`, 1024 px) und die **ungenutzte** kleine Variante
+   `assets/logo-small.svg` (256 px; `logo-small-black` ebenfalls ungenutzt — `build.rs` rastert
+   beide, kein `include_bytes!`). Umsetzung: Sidebar (24 px), About (64), Login-Kopf (30) und das
+   große Login-Logo (84) zeigen das App-Logo; die gezeichnete Kugel entfällt samt Code.
+2. [ ] **Inhaltsfilter (User-Entscheidung: zwei Checkboxen wie das Original).** Unser Dialog zeigt
+   **drei deaktivierte Buttons** („Alles" vorausgewählt); die Recon belegt: das Original zeigt
+   **zwei Checkboxen** mit den Labels **„Fotos sichern"** / **„Videos sichern"**, und „Alles" ist
+   dort **nicht** wählbar (`docs/SPEC_CONTENT_FILTER_DESTINATION.md` §2.1). Umsetzung: zwei
+   Checkboxen mit Original-Labels, „Fotos sichern" an und wählbar, „Videos sichern" sichtbar aber
+   deaktiviert mit ehrlichem Hinweis; Auswahl **pro Ziel** persistiert (Parität zu
+   `schedules.content_filter`, serde-Default = Fotos).
+3. [ ] **Kein Fortschritt, wenn nichts hochzuladen ist.** User-Erwartung: dort steht dann
+   **„100% hochgeladen"**. Heute rendert `status_text` für `Idle` mit `total == 0` einen **leeren**
+   Text. **Falle:** ein nie gescannter Ordner hat ebenfalls `total == 0` — „100%" darf dort nicht
+   stehen, sonst behauptet ein frisch angelegter Ordner Fortschritt.
+4. [ ] **Upload-Ort wie das Original — Spec läuft** (User-Auftrag 2026-10-16: „Upload Ort soll
+   gleich sein wie bei der Originalen App, bitte einem subagenten ein clean room spec schreiben
+   lassen"). Deliverable `docs/SPEC_UPLOAD_DESTINATION.md`. Grundlage:
+   `docs/SPEC_CONTENT_FILTER_DESTINATION.md` §3 (F3) — dort steht bereits „**F3 komplett offen** …
+   größte Architektur-Lücke: wir haben weder `BackupPathMapper` noch `destination_node_id` noch den
+   Cloud-Picker". **Erst nach der Spec** entscheidet der User über die Umsetzung.
+5. [ ] **Einstellungen (User-Entscheidung: Sektion weg + sofort speichern).** Die Sektion
+   „Erweitert (Konto)" fällt **samt Inhalt** weg (Konfigurationspfad, Marktplatz, Zone, User-Agent);
+   der **Speichern-Knopf** in beiden Reitern entfällt, jede Änderung wird **sofort** gespeichert.
+   **Bewusste Folge:** den Marktplatz kann nur noch beim Anmelden wählen, wer ihn später ändern
+   will, muss sich ab- und wieder anmelden.
+6. [ ] **Zusatzbefund (User-Entscheidung: mitbeheben).** „Gleichzeitige Uploads" und die Upload-Rate
+   liegen **nur im Speicher** (`src/app.rs:225-228`), `Config` kennt sie **gar nicht** — der
+   Speichern-Knopf hat sie **nie** gespeichert; nach einem Neustart standen sie auf dem Default. Sie
+   kommen als Felder in `Config` (serde-Default, damit eine alte `config.toml` weiter lädt).
+7. [ ] **Nicht angeschlossene Quelle (externe Festplatte) — Analyse läuft** (User-Auftrag
+   2026-10-16: „was wenn ich eine externe Festplatte synce und die nicht immer angeschlossen ist?
+   wie verhalten wir uns da, wie verhält sich die original App? cleanroom spec schreiben und TODOs
+   ableiten"). Deliverable `docs/SPEC_MISSING_SOURCE.md` + **abgeleitete TODOs** (die wandern nach
+   der Spec hierher). Berührt den Watcher (`Re-arm bei Fehler`), den Kaltstart-Wasserzeichen-Pass,
+   den manuellen Rescan, den manuellen Rescan und die Zeilen-Anzeige — **eine besondere Falle:** die
+   Wassermarke darf **nicht** vorrücken, wenn der Ordner weg war, sonst gelten die Dateien nach dem
+   Anschließen als „unverändert".
+   **Zielverhalten (User-Entscheidung 2026-10-16): „forced pause".** Ein nicht erreichbarer
+   Quellordner soll das Ziel **anhalten** statt in einen Fehler zu laufen: Zustand wie eine Pause
+   (`FolderStatus::Paused` existiert bereits, „Angehalten ({pct}%)", AMBER), **keine** Wassermarke,
+   **kein** Datenverlust, und beim Wiederanschließen läuft es weiter. Die Spec soll dieses Ziel
+   gegen das Verhalten des Originals stellen und die TODOs dorthin ableiten. **Achtung:** das ist
+   mehr als Kosmetik — „Pause pro Ordner" ist heute **Post-MVP** (Original hat ein Zeilen-Symbol);
+   der Unterschied ist, dass diese Pause **automatisch** aus dem fehlenden Ordner folgt.
+
 ## Prio 1 — Bugs aus der Live-Nutzung 2026-10-15 (User-Meldungen)
 
 Erledigt und gelöscht (jeweils implementiert, unabhängig verifiziert = Verifier APPROVE, committet):
