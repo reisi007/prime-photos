@@ -1,4 +1,5 @@
 mod prime_photos;
+mod about;
 mod app_menu;
 mod auth;
 mod config;

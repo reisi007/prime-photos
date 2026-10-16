@@ -1,0 +1,6 @@
+# Generated file: `packaging/gen-third-party-licenses.sh` copies the license
+# texts of the dependencies verbatim, so their bytes must be preserved exactly.
+# Without this rule Git normalises the line endings on the way into the index
+# (`core.autocrlf=input` strips the CR of the 1,446 treu kopierten source lines),
+# and the checked-in blob no longer matches the generator's output.
+assets/third-party-licenses.txt -text

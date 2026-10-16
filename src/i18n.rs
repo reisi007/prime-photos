@@ -392,4 +392,12 @@ const EN: &[(&str, &str)] = &[
     ("Beenden", "Quit"),
     ("Fenster anzeigen", "Show window"),
     ("Fortsetzen", "Resume"),
+    // -- about / third-party licenses (Welle 4b) ------------------------
+    ("Über Prime Photos", "About Prime Photos"),
+    ("Version: {}", "Version: {}"),
+    ("Drittanbieterlizenzen", "Third-Party Licenses"),
+    ("Schließen", "Close"),
+    ("© {} Prime Photos", "© {} Prime Photos"),
+    ("Komponenten und Lizenztexte", "Components and license texts"),
+    ("Icons und Grafiken", "Icons and graphics"),
 ];

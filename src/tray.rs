@@ -41,6 +41,7 @@ pub struct Tray {
     _tray: tray_icon::TrayIcon,
     pub show_item: tray_icon::menu::MenuItem,
     pub pause_item: tray_icon::menu::MenuItem,
+    pub about_item: tray_icon::menu::MenuItem,
     pub quit_item: tray_icon::menu::MenuItem,
     /// Decoded build-time glyphs, keyed by [`TrayState::index`].
     icons: TrayIcons,
@@ -55,9 +56,20 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
     let menu = tray_icon::menu::Menu::new();
     let show_item = tray_icon::menu::MenuItem::new(tr("Fenster anzeigen"), true, None);
     let pause_item = tray_icon::menu::MenuItem::new(tr("Anhalten"), true, None);
+    let about_item = tray_icon::menu::MenuItem::new(tr("Über Prime Photos"), true, None);
     let quit_item = tray_icon::menu::MenuItem::new(tr("Beenden"), true, None);
-    let separator = tray_icon::menu::PredefinedMenuItem::separator();
-    if let Err(e) = menu.append_items(&[&show_item, &pause_item, &separator, &quit_item]) {
+    // Separators like the original: "Über Prime Photos" sits between the pause
+    // entry and "Beenden", framed by a separator on each side.
+    let sep_before_about = tray_icon::menu::PredefinedMenuItem::separator();
+    let sep_before_quit = tray_icon::menu::PredefinedMenuItem::separator();
+    if let Err(e) = menu.append_items(&[
+        &show_item,
+        &pause_item,
+        &sep_before_about,
+        &about_item,
+        &sep_before_quit,
+        &quit_item,
+    ]) {
         log::error!("tray: Menü konnte nicht aufgebaut werden: {e}");
         return None;
     }
@@ -91,6 +103,7 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
         _tray: tray,
         show_item,
         pause_item,
+        about_item,
         quit_item,
         icons: TrayIcons::build(),
     };
@@ -117,6 +130,7 @@ impl Tray {
     pub fn set_labels(&self, paused: bool) {
         self.show_item.set_text(tr("Fenster anzeigen"));
         self.set_paused(paused);
+        self.about_item.set_text(tr("Über Prime Photos"));
         self.quit_item.set_text(tr("Beenden"));
     }
 

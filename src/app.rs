@@ -1,3 +1,4 @@
+use crate::about;
 use crate::app_menu;
 use crate::auth::TokenStore;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
@@ -204,6 +205,12 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) was_active: bool,
     /// Open "Datensicherungseinstellungen" window (Create or Edit), if any.
     pub(crate) config_form: Option<BackupConfigForm>,
+    /// Open "Über Prime Photos" window (Welle 4b).
+    pub(crate) about_open: bool,
+    /// Open third-party license window (raised from the About window).
+    pub(crate) license_open: bool,
+    /// Selected tab of the license window.
+    pub(crate) license_tab: about::LicenseTab,
     /// Tray / menu-bar icon (PORT-3); `None` if it could not be created.
     pub(crate) tray: Option<tray::Tray>,
     /// Set when the user really wants to quit (tray "Beenden" / ⌘Q), so the
@@ -277,7 +284,8 @@ impl PrimePhotoApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::apply(&cc.egui_ctx);
         // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
-        app_menu::install();
+        // The context is handed in so the menu's About item can wake the UI.
+        app_menu::install(&cc.egui_ctx);
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         // `config_loaded_ok` is derived directly from the `Config::load()`
         // result: a broken/unreadable file yields `Config::default()` (with
@@ -423,6 +431,9 @@ impl PrimePhotoApp {
             zone_override: String::new(),
             was_active: false,
             config_form: None,
+            about_open: false,
+            license_open: false,
+            license_tab: about::LicenseTab::Components,
             // Built lazily: the tray exists exactly while a refresh token does
             // (reconciled every frame in `update`) — no icon before sign-in.
             tray: None,
@@ -488,6 +499,16 @@ impl PrimePhotoApp {
         if let Some(tray) = self.tray.as_ref() {
             tray.set_labels(*self.paused.borrow());
         }
+    }
+
+    /// Open the About window and bring the main window to the front. The app
+    /// menu can be chosen while the window is hidden in tray mode, so this also
+    /// shows and focuses the window (like the tray's "Fenster anzeigen").
+    pub(crate) fn open_about(&mut self, ctx: &egui::Context) {
+        self.about_open = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.window_hidden = false;
     }
 
     /// Derive the tray glyph state from the current app state and apply it —
@@ -805,10 +826,19 @@ impl eframe::App for PrimePhotoApp {
                 // reports a failure through `config_error` as usual.
                 self.config.paused = next;
                 self.save_config();
+            } else if ev.id == *tray.about_item.id() {
+                self.open_about(ctx);
             } else if ev.id == *tray.quit_item.id() {
                 self.quitting = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+        }
+
+        // "Über Prime Photos" from the macOS app menu. The AppKit target object
+        // only set a flag and woke us (see `src/app_menu.rs`); `false` on every
+        // other platform.
+        if app_menu::take_about_request() {
+            self.open_about(ctx);
         }
 
         // Keep the tray's pause label in sync with the actual pause state
@@ -1057,6 +1087,16 @@ impl eframe::App for PrimePhotoApp {
 
         // Name-conflict prompt (`ConflictResolution::Ask`).
         self.conflict_dialog(ctx);
+
+        // About window + the third-party license window it can open (Welle 4b).
+        // Drawn outside the signed-in branch so the app menu can open them from
+        // the login screen too.
+        if self.about_open {
+            about::about_window(ctx, &mut self.about_open, &mut self.license_open);
+        }
+        if self.license_open {
+            about::license_window(ctx, &mut self.license_open, &mut self.license_tab);
+        }
 
         // Deferred login start: creating the webview needs the window handle.
         if self.pending_login {

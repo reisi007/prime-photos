@@ -175,6 +175,42 @@ fn main() {
     for (png, size) in APPICON_ICONSET {
         render(&manifest_dir, &iconset_dir, "logo.svg", Recolor::AsIs, png, size);
     }
+
+    // Best-effort build-time commit id for the About window (`src/about.rs`),
+    // which mirrors the original's `AssemblyVersion.CommitId` line. It is only
+    // emitted when `git` is actually available and answers; a source tarball or
+    // a missing `.git` must neither fail the build nor invent a value — the
+    // About window then simply shows the crate version alone.
+    //
+    // Deliberately **no** `cargo:rerun-if-changed` here: `build.rs` already
+    // emits one per SVG asset above, and emitting a directive switches Cargo
+    // away from its default "rebuild on any package change" — adding another
+    // one would not change that, but it would wrongly imply the commit id is
+    // tracked. It is picked up whenever `build.rs` runs anyway.
+    if let Some(sha) = git_short_sha(&manifest_dir) {
+        println!("cargo:rustc-env=PRIME_PHOTOS_GIT_COMMIT={sha}");
+    }
+}
+
+/// Best-effort `git rev-parse --short HEAD`, run in the crate root. `None` when
+/// `git` is missing, the directory is not a work tree, or the command fails for
+/// any other reason — the caller then emits no commit id at all.
+fn git_short_sha(dir: &Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let sha = String::from_utf8(output.stdout).ok()?;
+    let sha = sha.trim();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha.to_string())
+    }
 }
 
 /// Recover Cargo's `<target>` directory from `OUT_DIR`.
