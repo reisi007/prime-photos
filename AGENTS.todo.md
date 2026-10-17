@@ -68,19 +68,15 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
   bleiben laut `docs/dev/RELEASE.md` §9 unverifiziert bzw. nicht implementiert — dafür gibt es keinen
   Auftrag.
 
-## Offen für das Release v0.1.1 (2026-10-17)
+## Offen aus dem Release v0.1.1 (2026-10-17)
 
-Die 0.1.1-Wellen sind umgesetzt und verifiziert (Feature-Fixes + die Abstände aus dem UI-Review;
-Commits bis `e31a320`). Offen sind nur noch die Abnahme und der Release selbst:
+Ausgelöst und belegt: annotierter Tag `v0.1.1` auf `57ca172`, Release-Lauf `39051515118`
+(Windows/Linux grün), vier Assets am GitHub-Release (macOS-Zip/DMG von Hand angehängt) — Belege in
+`docs/dev/RELEASE.md` §9. Offen bleibt allein:
 
 - [ ] **Manueller Live-Test 0.1.1** (User): Ordner **während** eines Laufs hinzufügen; Laufwerk abziehen
   → Karte „Warten" bzw. „Ordner nicht gefunden", wieder anklemmen → Vollscan + Wiederanlauf (bis zu 30 s
-  nach Aufheben der Pause). Installiert ist `0.1.1` Build 3, ad-hoc signiert.
-- [ ] **Release `v0.1.1`:** annotierter Tag auf dem Tip, Push, CI (Windows/Linux) grün, GitHub-Release,
-  DMG/ZIP **aus dem Tag** anhängen, `docs/dev/RELEASE.md` §9 um den 0.1.1-Lauf ergänzen.
-  **Fallstrick dabei:** `build.rs` läuft bei unverändertem `build.rs` nicht neu, der eingebettete
-  Commit-Stempel bleibt alt (der installierte Build 3 zeigt im Über-Fenster noch `0a44a37`) — vor dem
-  Release-Build `touch build.rs` oder `cargo clean -p prime-photos` erzwingen.
+  nach Aufheben der Pause). Installiert ist `0.1.1` Build 2 (ad-hoc signiert, Stempel `57ca172`).
 
 ## Offen aus der Live-Abnahme 2026-10-17 (Bundle aus 5.21–5.24)
 
@@ -147,12 +143,12 @@ Ausdrücklich **ohne** Starttermin:
   (`src/app.rs`) ist die Identität, ihr Test damit tautologisch — die **Verdrahtung** in
   `set_autostart` sichert er nicht ab (nur mittelbar über `dead_code`, falls jemand die Funktion
   entfernt). Ein echter Guard bräuchte eine injizierbare Registrierung.
-- **Der DMG-Schritt ist nicht skriptet:** `packaging/make-app.sh` baut nur die `.app`; das DMG
-  entstand 2026-10-17 von Hand und ist damit nicht reproduzierbar. Gehört als eigener, dokumentierter
-  Schritt (Volname, Dist-Pfad, Reihenfolge `.app` → DMG) nach `docs/dev/BUILD.md`/`RELEASE.md`;
-  Anhängen ans Release ist inzwischen in `docs/dev/RELEASE.md` §4 beschrieben. **Belegt 2026-10-17:**
-  `hdiutil` warnt selbst zugunsten von `diskutil image create from/blank --volumeName --format …`
-  (das heutige Image war mit `hdiutil verify` gültig).
+- **DMG-Schritt bleibt unskriptet, ist aber dokumentiert (2026-10-17):** `packaging/make-app.sh` baut nur
+  die `.app`; der Rest (Zip, DMG mit Volname `Prime Photos`, Installation nach `/Applications`) steht als
+  copy-paste-fähiger Ablauf in `docs/dev/RELEASE.md` §4 und wurde beim 0.1.1-Release genau so gegangen.
+  Offen bleibt nur die Frage, ob der `hdiutil`-Aufruf auf den von Apple empfohlenen Nachfolger
+  `diskutil image create from/blank --volumeName --format …` umgestellt wird (`hdiutil` warnt selbst;
+  das 0.1.1-Image war mit `hdiutil verify` gültig).
 - **Token-Rotation offen (Vorfall 2026-10-16):** ein `security add-generic-password`-Aufruf hatte den
   Refresh-Token kurz in der Prozessliste (`ps`) stehen; eine **neue Anmeldung** rotiert ihn. Nur
   offen, falls seither nicht neu angemeldet wurde.
@@ -185,6 +181,10 @@ Ausdrücklich **ohne** Starttermin:
   **4,28:1** statt 4,5:1; der Kartenrahmen `BORDER` (`src/theme.rs:11`) liegt bei **1,32:1** (flache
   Optik, in der Praxis sichtbar). Nur auf ausdrückliche Vorgabe ändern — ein AMBER-Wechsel färbt
   Statuswörter sichtbar um.
+- **§9-Eintrag v0.1.1 ist zwei Belegteile schlanker als der v0.1.0-Eintrag (Verifier-Hinweis 2026-10-17):**
+  der Release-**Titel** (`v0.1.1`) und der Satz „sha256 nach dem Upload identisch mit der lokalen Datei"
+  fehlen (beides zutreffend: die macOS-Digests stimmen mit `shasum -a 256` überein) — bei der nächsten
+  Berührung von `docs/dev/RELEASE.md` mitziehen.
 - **Ungetrackte Junk-Datei im Repo-Wurzelverzeichnis:** `.!10517!AGENTS.todo.md` (279 B, abgebrochener
   Schreibvorgang von `AGENTS.todo.md` am 2026-10-17 14:48) — bewusst **nicht** angefasst; löschen nur
   nach User-OK.
