@@ -248,6 +248,10 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) slow_mode: bool,
     pub(crate) album_name: String,
     pub(crate) was_active: bool,
+    /// Handed to the detached supervisor: a backup folder the user added while a
+    /// run was busy. `None` until `ensure_background_sync` spawned the supervisor
+    /// (and `None` forever when background sync is off).
+    pub(crate) scan_tx: Option<tokio::sync::mpsc::UnboundedSender<PathBuf>>,
     /// Open "Datensicherungseinstellungen" window (Create or Edit), if any.
     pub(crate) config_form: Option<BackupConfigForm>,
     /// Open "Über Prime Photos" window (Welle 4b).
@@ -495,6 +499,7 @@ impl PrimePhotoApp {
             slow_mode: false,
             album_name: String::new(),
             was_active: false,
+            scan_tx: None,
             config_form: None,
             about_open: false,
             license_open: false,

@@ -104,6 +104,24 @@ pub(crate) struct UploadShared {
     /// Live per-file queue for the current run, in `items` order. `QueueEntry.folder`
     /// is the folder index, the vector position is the row handed to the worker.
     pub(crate) queue: Vec<QueueEntry>,
+    /// The live worker queue of the current run, in `items` order. `None` while no
+    /// run exists; the run's own `Arc` so an injection from outside the run can
+    /// append to the very same queue the workers drain.
+    pub(crate) item_queue: Option<Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>>,
+    /// Live per-folder options of the current run. Was an immutable `Arc<HashMap>`
+    /// handed to the workers at start; an injected folder must be able to add its
+    /// own entry while the run already uploads.
+    pub(crate) folder_opts: HashMap<usize, (bool, ConflictResolution)>,
+    /// Number of folder scans that were accepted and are still in flight (an
+    /// injection may land at any moment). While > 0 a worker that finds the queue
+    /// empty keeps the run open instead of ending it — otherwise an injection could
+    /// land in a queue nobody drains any more.
+    pub(crate) scans_in_flight: usize,
+    /// The run stopped accepting work: set **under the shared lock** by the worker
+    /// that finds the queue empty with no scan in flight. Together with
+    /// `scans_in_flight` this is what makes an injection either land before the last
+    /// worker exits or be refused — never to land in a dead queue.
+    pub(crate) sealed: bool,
     /// Revision of the run's *file states*. Bumped on every queue mutation, so
     /// the UI cache can skip rebuilding its (potentially thousands of entries)
     /// snapshot while only the counters moved.
@@ -349,6 +367,10 @@ pub(crate) fn outcome_text(
 // Async upload machinery
 // ---------------------------------------------------------------------------
 
+/// Poll interval of an idle run that is still waiting for a scan in flight
+/// (`scans_in_flight > 0`) to be folded in.
+const QUEUE_IDLE_POLL: Duration = Duration::from_millis(150);
+
 /// Outcome of one file's upload attempt, after the conflict policy has been
 /// applied (`Ignore`/`Ask→Ignore` become `ConflictSkipped`, everything else is
 /// an upload or a real failure).
@@ -448,13 +470,11 @@ async fn resolve_conflict(
 }
 
 pub(crate) async fn upload_worker(
-    queue: Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>,
     shared: Arc<Mutex<UploadShared>>,
     cfg: Config,
     mut pause_rx: watch::Receiver<bool>,
     limit_kbps: u32,
     dedup: Arc<Mutex<DedupIndex>>,
-    folder_opts: Arc<HashMap<usize, (bool, ConflictResolution)>>,
 ) {
     let mut uploader = PrimePhotos::new(&cfg, false);
     // A 401 mid-run means the session cookies expired, not that the file is
@@ -493,8 +513,31 @@ pub(crate) async fn upload_worker(
                 }
             }
         }
-        let item = { queue.lock().unwrap().pop_front() };
-        let Some((row, idx, path)) = item else { break };
+        let item = {
+            let s = shared.lock().unwrap();
+            s.item_queue
+                .as_ref()
+                .and_then(|q| q.lock().unwrap().pop_front())
+        };
+        let Some((row, idx, path)) = item else {
+            // Keine Arbeit *gerade jetzt*: den Lauf nur beenden, wenn kein Scan mehr
+            // unterwegs ist — und das Versiegeln passiert unter derselben Sperre, damit
+            // eine späte Einhängung niemals in eine tote Queue laufen kann.
+            let sealed_now = {
+                let mut s = shared.lock().unwrap();
+                if s.scans_in_flight > 0 {
+                    false
+                } else {
+                    s.sealed = true;
+                    true
+                }
+            };
+            if sealed_now {
+                break;
+            }
+            tokio::time::sleep(QUEUE_IDLE_POLL).await;
+            continue;
+        };
 
         // Mark the file as being worked on (guarded so an out-of-range row can
         // never panic; the queue is only mutated while `shared` is held). A row
@@ -509,10 +552,15 @@ pub(crate) async fn upload_worker(
             s.touch_queue();
         }
 
-        let (dedup_on, conflict) = folder_opts
-            .get(&idx)
-            .copied()
-            .unwrap_or((true, ConflictResolution::default()));
+        let (dedup_on, conflict) = {
+            shared
+                .lock()
+                .unwrap()
+                .folder_opts
+                .get(&idx)
+                .copied()
+                .unwrap_or((true, ConflictResolution::default()))
+        };
 
         // Stat before reading (user decision 2026-10-14): the recorded
         // `size`/`mtime` decide the cheap skip path, so an already-uploaded,
@@ -877,7 +925,12 @@ pub(crate) async fn upload_worker(
                 // persistently bad session cannot spin.
                 if !token_renewed_once && e.contains("Authentication failed") {
                     need_token_renew = true;
-                    queue.lock().unwrap().push_front((row, idx, path.clone()));
+                    {
+                        let s = shared.lock().unwrap();
+                        if let Some(q) = s.item_queue.as_ref() {
+                            q.lock().unwrap().push_front((row, idx, path.clone()));
+                        }
+                    }
                     let mut s = shared.lock().unwrap();
                     if let Some(en) = s.queue.get_mut(row) {
                         en.state = FileState::Waiting;
@@ -1027,18 +1080,28 @@ pub(crate) async fn run_upload(
     // One shared persistent MD5 index for the whole run (opened here, lives in
     // ~/Library/Application Support/prime_photos/dedup.sqlite3).
     let dedup = Arc::new(Mutex::new(DedupIndex::open()));
-    let folder_opts = Arc::new(folder_opts);
+
+    // Publish the run's live fields (Welle 5.31): the very queue the workers
+    // drain, the per-folder options and the scan-in-flight/sealed handshake — set
+    // together, under one lock, before any worker starts, so an injection from
+    // outside the run (`inject_into_live_run`) appends to the same queue the
+    // workers read and cannot land in a dead one.
+    {
+        let mut s = shared.lock().unwrap();
+        s.item_queue = Some(queue.clone());
+        s.folder_opts = folder_opts;
+        s.scans_in_flight = 0;
+        s.sealed = false;
+    }
 
     let mut set = JoinSet::new();
     for _ in 0..workers {
-        let q = queue.clone();
         let s = shared.clone();
         let c = cfg.clone();
         let p = paused.subscribe();
         let d = dedup.clone();
-        let o = folder_opts.clone();
         set.spawn(async move {
-            upload_worker(q, s, c, p, limit_kbps, d, o).await;
+            upload_worker(s, c, p, limit_kbps, d).await;
         });
     }
     while set.join_next().await.is_some() {}
@@ -1059,6 +1122,11 @@ pub(crate) async fn run_upload(
         s.active = false;
         s.started = None;
         s.current.clear();
+        // The run is over: no injection may land in this queue any more. The last
+        // worker already set `sealed`; clearing the queue handle closes the door
+        // for good.
+        s.item_queue = None;
+        s.folder_opts.clear();
         (s.done, s.failed, s.total, s.cancelled)
     };
     if cancelled {

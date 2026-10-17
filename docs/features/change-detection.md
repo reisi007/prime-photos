@@ -45,6 +45,17 @@ last run.
   merged list goes into **one** run. Implementation: `src/backup.rs`
   (`park_paths`, `pending`/`pending_seen`), commit `2eea96c`, verify round
   1 APPROVE.
+- **Folder added during a run is not dropped (Welle 5.31):** the detached
+  supervisor reads the folder in **parallel** to the running upload
+  (`UploadPlan::build_since` with watermark `None`, `handle_scan_requests` in
+  `src/backup.rs`) and takes its files into the **live** run via
+  `inject_into_live_run` (rows, worker queue, `folder_opts`, `folder_total`,
+  `total`). `scans_in_flight` keeps the run open for that, and the sealing
+  (`sealed`) happens under the same lock, so nothing lands in a dead queue. When
+  no run is left, the folder is parked (`pending_scans`) and started as an
+  ordinary run on the next allowed pass (no watermark progress, like the event
+  path). **Without** a supervisor (background sync off) the old behaviour stands
+  (`Es läuft bereits ein Upload.`, picked up again on the next app start).
 - **Open:** safety net for missed events (watcher limit, ejected volume,
   network mount) — as an optional switch, not yet decided.
 - Original parameters (documented): FSEvents latency 3 s, throttle 100 ms,
@@ -107,6 +118,23 @@ last run.
     Lauf, geht der vereinigte Bestand in **einen** Lauf. Umsetzung:
     `src/backup.rs` (`park_paths`, `pending`/`pending_seen`), Commit `2eea96c`,
     Verify Runde 1 APPROVE.
+  - **Ordner während eines laufenden Uploads hinzugefügt (User-Entscheidung
+    2026-10-17):** ein Backup-Ordner, den der Nutzer während eines Laufs
+    hinzufügt (Dialog „Speichern" oder Zeilenmenü „Jetzt scannen und
+    hochladen"), wird **nicht mehr still verworfen**. Befund: drei Ordner
+    schnell nacheinander hinzugefügt, nur der erste wurde gesichert;
+    Entscheidung: „Einlesen parallel, in den laufenden Lauf einhängen". Der
+    Supervisor liest den Ordner **parallel** zum laufenden Upload ein
+    (`UploadPlan::build_since` mit Wasserzeichen `None`, `handle_scan_requests`,
+    `src/backup.rs`) und hängt seine Dateien über `inject_into_live_run` in den
+    **laufenden** Lauf (Zeilen, Worker-Queue, `folder_opts`, `folder_total`,
+    `total`). `scans_in_flight` hält den Lauf dafür offen; die Versiegelung
+    (`sealed`) passiert unter derselben Sperre, damit nichts in eine tote Queue
+    läuft. Läuft keiner mehr, wird der Ordner geparkt (`pending_scans`) und beim
+    nächsten erlaubten Durchlauf als **normaler** Lauf gestartet (kein
+    Wasserzeichen-Fortschritt, wie beim Event-Pfad). **Grenze:** ohne Supervisor
+    (Hintergrund-Sync aus) bleibt es beim alten Verhalten (`Es läuft bereits ein
+    Upload.`, Wiederaufnahme beim nächsten App-Start).
   - **Verworfen:** der periodische Hintergrund-Scan als Erkennungsmechanismus
     (User 2026-10-14: „file add / edit per event abfragen"); ein
     `BackupScanIntervalInHours`-Takt.

@@ -608,6 +608,65 @@ fn can_start(cfg: &Config, paused: &watch::Sender<bool>, shared: &Arc<Mutex<Uplo
         && !shared.lock().unwrap().active
 }
 
+/// Take an already scanned plan into the **live** run: append its rows to the
+/// shared queue, its items to the very queue the workers drain, and its folder
+/// options/counts to the shared state. Returns the plan unchanged when there is
+/// no run to take it into (the caller starts an ordinary run then).
+///
+/// The decision happens **under the shared lock** and requires the run to still
+/// accept work (`active && !sealed && !cancelled && item_queue.is_some()`); the
+/// worker that ends the run sets `sealed` under the same lock, so the two can
+/// never race an item into a queue nobody drains.
+fn inject_into_live_run(
+    mut plan: UploadPlan,
+    store: &mut FolderStore,
+    shared: &Arc<Mutex<UploadShared>>,
+) -> Option<UploadPlan> {
+    // The takes below happen **after** the check, so the refusal path can hand
+    // the plan back untouched.
+    let per_folder = plan.per_folder.clone();
+    {
+        let mut s = shared.lock().unwrap();
+        if !(s.active && !s.sealed && !s.cancelled && s.item_queue.is_some()) {
+            return Some(plan);
+        }
+        let base = s.queue.len();
+        let rows = std::mem::take(&mut plan.queue); // Reihenfolge == items
+        let items = std::mem::take(&mut plan.items);
+        let n = items.len();
+        s.queue.extend(rows);
+        if let Some(q) = s.item_queue.as_ref() {
+            let mut q = q.lock().unwrap();
+            for (row, idx, path) in items {
+                q.push_back((base + row, idx, path));
+            }
+        }
+        s.total += n;
+        for (&i, &count) in &per_folder {
+            *s.folder_total.entry(i).or_insert(0) += count;
+        }
+        // Byte-ETA: nur weiterführen, wenn beide Seiten vollständig bekannt sind —
+        // sonst auf den Datei-Zähler-Fallback zurückfallen (wie `publish_state`).
+        s.bytes_total = if s.bytes_total > 0 && plan.sized_total == n {
+            s.bytes_total + plan.bytes_total
+        } else {
+            0
+        };
+        s.folder_opts.extend(std::mem::take(&mut plan.folder_opts));
+        s.touch_queue();
+        s.log(tr1("{} Datei(en) zusätzlich aufgenommen.", n));
+    }
+    // Der Ordner-Zähler gehört auch auf die persistierten Ziele (wie
+    // `publish_folder_status` es für einen normalen Plan tut).
+    for (&i, &count) in &per_folder {
+        if let Some(f) = store.folders.get_mut(i) {
+            f.total_files = count;
+        }
+    }
+    let _ = store.save();
+    None
+}
+
 /// Publish a plan and spawn its worker — the shared tail of every detached run
 /// (the start-time watermark pass and the watcher path), so both look and behave
 /// identically. Takes the live queue out of `plan`; the worker gets the items
@@ -943,6 +1002,151 @@ fn handle_files(
     );
 }
 
+/// Number of scans in flight — RAII so that no early return can leave the
+/// counter (and with it a waiting run) stuck.
+struct ScansInFlight(Arc<Mutex<UploadShared>>);
+
+impl ScansInFlight {
+    fn new(shared: &Arc<Mutex<UploadShared>>) -> Self {
+        shared.lock().unwrap().scans_in_flight += 1;
+        Self(shared.clone())
+    }
+}
+
+impl Drop for ScansInFlight {
+    fn drop(&mut self) {
+        // Eine Sperre, nicht zwei im selben Ausdruck: sonst könnte der Guard des
+        // einen Aufrufs den Zähler des anderen überschreiben.
+        let mut s = self.0.lock().unwrap();
+        s.scans_in_flight = s.scans_in_flight.saturating_sub(1);
+    }
+}
+
+/// Read folders the user added (or re-triggered) while a run was busy: resolve
+/// them against the **freshest** store, scan a single folder at a time and take
+/// its files into the live run; when nothing is running any more, start an
+/// ordinary run — or keep the folder parked until a run is allowed again.
+///
+/// The walk happens on the supervisor task, so it runs **parallel** to a
+/// running upload (the live workers keep uploading while this walks).
+fn handle_scan_requests(
+    pending_scans: &mut Vec<PathBuf>,
+    store: &mut FolderStore,
+    shared: &Arc<Mutex<UploadShared>>,
+    cfg: &Config,
+    paused: &watch::Sender<bool>,
+    concurrency: usize,
+    limit_kbps: u32,
+    album: &str,
+) {
+    if pending_scans.is_empty() {
+        return;
+    }
+    let wanted = std::mem::take(pending_scans);
+
+    // Resolve against the **fresh** store (a folder may have been removed while
+    // the request was parked) and flag a missing source the same way the manual
+    // path does — a missing source is reported, never parked.
+    let mut present: Vec<(usize, PathBuf)> = Vec::new();
+    let mut store_changed = false;
+    for p in wanted {
+        let Some(i) = store.folders.iter().position(|f| f.path == p) else {
+            // Removed meanwhile: nothing to scan.
+            continue;
+        };
+        let Some(f) = store.folders.get_mut(i) else {
+            continue;
+        };
+        let exists = p.is_dir();
+        let next = source_status(exists, f.status);
+        if next != f.status {
+            f.status = next;
+            store_changed = true;
+        }
+        if !exists {
+            // A missing source is not parked: the next attempt would fail again
+            // — it is flagged and reported like the manual path.
+            let _ = store.save();
+            shared.lock().unwrap().log(tr(
+                "Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).",
+            ));
+            continue;
+        }
+        present.push((i, p));
+    }
+    if store_changed {
+        let _ = store.save();
+    }
+    if present.is_empty() {
+        return;
+    }
+
+    // A run is in flight: hold it open (the RAII guard raises `scans_in_flight`
+    // for the whole scan+inject) and take every folder's plan into it. The walk
+    // runs here, on the supervisor task — the live workers keep uploading.
+    if shared.lock().unwrap().active {
+        let _guard = ScansInFlight::new(shared);
+        for (i, p) in present {
+            match UploadPlan::build_since(store, &[(i, None)]) {
+                Some(plan) => {
+                    // Refused only when the run stopped accepting work (cancel):
+                    // park the folder and retry on a later pass.
+                    if inject_into_live_run(plan, store, shared).is_some() {
+                        if !pending_scans.contains(&p) {
+                            pending_scans.push(p);
+                        }
+                    }
+                }
+                None => {
+                    shared
+                        .lock()
+                        .unwrap()
+                        .log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
+                }
+            }
+        }
+        return;
+    }
+
+    // Nothing is running: park everything until a run is allowed again, else
+    // start one ordinary run for all the folders at once.
+    if !can_start(cfg, paused, shared) {
+        for (_, p) in present {
+            if !pending_scans.contains(&p) {
+                pending_scans.push(p);
+            }
+        }
+        shared
+            .lock()
+            .unwrap()
+            .log(tr("Der Ordner wird beim nächsten Lauf gesichert."));
+        return;
+    }
+    let indices: Vec<usize> = present.iter().map(|(i, _)| *i).collect();
+    let Some(plan) = UploadPlan::build(store, &indices) else {
+        shared
+            .lock()
+            .unwrap()
+            .log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
+        return;
+    };
+    let count = plan.count();
+    start_background_run(
+        plan,
+        store,
+        shared.clone(),
+        cfg.clone(),
+        paused.clone(),
+        concurrency,
+        limit_kbps,
+        album.to_string(),
+        tr1("{} Datei(en) werden hochgeladen …", count),
+        // Like the event path: a run triggered by a user request advances no
+        // folder watermark (the watermark is the *start-time* safety net).
+        Vec::new(),
+    );
+}
+
 /// One watcher per enabled backup folder, re-synced with the persisted store on
 /// every pass: a folder that was added, enabled, disabled or removed (and the
 /// `background_sync` switch) is reflected within `WATCH_POLL`. A folder we
@@ -1044,6 +1248,7 @@ async fn watch_loop(
     concurrency: usize,
     limit_kbps: u32,
     album: String,
+    mut scan_rx: tokio::sync::mpsc::UnboundedReceiver<PathBuf>,
 ) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<notify::Result<notify::Event>>();
     let mut watchers: HashMap<PathBuf, notify::RecommendedWatcher> = HashMap::new();
@@ -1051,6 +1256,9 @@ async fn watch_loop(
     // `pending_seen` holds exactly the paths in `pending`; together they make the
     // merge O(1) per path instead of a linear scan of the list.
     let mut pending_seen: HashSet<PathBuf> = HashSet::new();
+    // Folders the user added (or re-triggered) while a run was busy: parked here
+    // and read in at the top of the loop (parallel to a running upload).
+    let mut pending_scans: Vec<PathBuf> = Vec::new();
     loop {
         // Freshest settings + store on every pass (the supervisor is detached
         // from the UI struct, so the persisted files are its source — except the
@@ -1084,14 +1292,44 @@ async fn watch_loop(
             );
         }
 
-        // Wait for the next event — or just for the poll tick, which is what
-        // keeps the watcher set and the pending list moving while nothing
-        // changes.
-        let first = match tokio::time::timeout(WATCH_POLL, rx.recv()).await {
-            Ok(Some(ev)) => ev,
-            // `Ok(None)`: every sender is gone, so every watcher is, too.
-            Ok(None) => break,
-            Err(_) => continue,
+        // A folder the user added while a run was busy: read it in here — on the
+        // supervisor task, so the walk runs **parallel** to a live upload and its
+        // files go into the running run (or a normal run starts, or it stays
+        // parked).
+        if !pending_scans.is_empty() {
+            let Some(mut store) = load_store_logged() else {
+                continue;
+            };
+            handle_scan_requests(
+                &mut pending_scans,
+                &mut store,
+                &shared,
+                &cfg,
+                &paused,
+                concurrency,
+                limit_kbps,
+                &album,
+            );
+        }
+
+        // Wait for the next event, the poll tick (which keeps the watcher set and
+        // the pending list moving while nothing changes) — or a folder the user
+        // just added while a run was busy.
+        let first = tokio::select! {
+            ev = rx.recv() => match ev {
+                Some(ev) => ev,
+                // `None`: every sender is gone, so every watcher is, too.
+                None => break,
+            },
+            // Park it; the top of the loop reads it in (parallel to the running
+            // upload).
+            Some(path) = scan_rx.recv() => {
+                if !pending_scans.contains(&path) {
+                    pending_scans.push(path);
+                }
+                continue;
+            }
+            _ = tokio::time::sleep(WATCH_POLL) => continue,
         };
         // Debounce: give the burst time to land, then take all of it at once.
         tokio::time::sleep(WATCH_DEBOUNCE).await;
@@ -1270,8 +1508,12 @@ impl PrimePhotoApp {
 
     /// Whether an upload run is currently active.
     ///
-    /// The UI paths use it for the "Es läuft bereits ein Upload." guard; the
-    /// background tick checks the same state through its shared handle.
+    /// The UI paths use it to route a new request while a run is busy; the
+    /// background tick checks the same state through its shared handle. In the
+    /// "add folder" path the guard no longer merely reports (user decision
+    /// 2026-10-17): the folder is handed to the detached supervisor and taken
+    /// into the live run (see [`Self::start_folder_upload`]), while
+    /// `start_one_time_upload` still answers with "Es läuft bereits ein Upload.".
     pub(crate) fn upload_busy(&self) -> bool {
         self.upload.lock().unwrap().active
     }
@@ -1283,7 +1525,25 @@ impl PrimePhotoApp {
     /// logged in) and must never navigate the UI.
     pub(crate) fn start_folder_upload(&mut self, indices: Vec<usize>) {
         if self.upload_busy() {
-            self.log(tr("Es läuft bereits ein Upload."));
+            // Never drop the add (user decision 2026-10-17): hand the folder to the
+            // detached supervisor, which reads it in **parallel** and takes its files
+            // into the running run. Without a supervisor (background sync off) there is
+            // nothing to hand it to, so the old message stands — the next app start
+            // picks the folder up through the start-time safety net.
+            let paths: Vec<PathBuf> = indices
+                .iter()
+                .filter_map(|&i| self.store.folders.get(i).map(|f| f.path.clone()))
+                .collect();
+            let sent = self
+                .scan_tx
+                .as_ref()
+                .map(|tx| paths.iter().all(|p| tx.send(p.clone()).is_ok()))
+                .unwrap_or(false);
+            if sent {
+                self.log(tr("Ordner wird eingelesen und in den laufenden Upload aufgenommen."));
+            } else {
+                self.log(tr("Es läuft bereits ein Upload."));
+            }
             return;
         }
         if !self.is_logged_in() {
@@ -1670,6 +1930,10 @@ impl PrimePhotoApp {
             0
         };
         let album = self.album_name.clone();
+        // The folder-add hand-off: a folder the user adds while a run is busy is
+        // sent to the detached supervisor over this channel (Welle 5.31).
+        let (scan_tx, scan_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
+        self.scan_tx = Some(scan_tx);
         self.rt.spawn(async move {
             background_sync_pass(
                 shared.clone(),
@@ -1682,7 +1946,7 @@ impl PrimePhotoApp {
             )
             .await;
             // From then on the OS events decide.
-            watch_loop(shared, paused, session, cfg, concurrency, limit, album).await;
+            watch_loop(shared, paused, session, cfg, concurrency, limit, album, scan_rx).await;
         });
     }
 
@@ -2506,6 +2770,7 @@ impl PrimePhotoApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     /// `n` distinct event entries for one folder, as `park_paths` takes them.
     fn files(range: std::ops::Range<usize>) -> Vec<(usize, PathBuf)> {
@@ -2925,5 +3190,171 @@ mod tests {
             conflict_remember_label(&store, 7, &own_file),
             remember_checkbox_label(None)
         );
+    }
+
+    // -- Welle 5.31: injecting a folder into a live run -----------------------
+
+    /// A plan of `(folder index, path)` entries with a known size each — the
+    /// shape `inject_into_live_run` consumes, built without walking a folder so
+    /// the tests need no filesystem. `sized_total`/`bytes_total` are set by the
+    /// caller when the byte-ETA path is under test.
+    fn literal_plan(files: &[(usize, &str)]) -> UploadPlan {
+        let mut plan = UploadPlan::empty();
+        for &(idx, name) in files {
+            let row = plan.items.len();
+            let path = PathBuf::from(name);
+            plan.queue.push(QueueEntry {
+                folder: idx,
+                name: name.to_string(),
+                state: FileState::Waiting,
+                size: 1,
+                path: path.clone(),
+                bytes_sent: 0,
+            });
+            plan.items.push((row, idx, path));
+            *plan.per_folder.entry(idx).or_insert(0) += 1;
+        }
+        plan
+    }
+
+    /// Run `f` with the **real** `folders.toml` preserved. `inject_into_live_run`
+    /// ends in `store.save()`, which writes the config file; a unit test must not
+    /// clobber the developer's real targets, so the bytes are snapshotted and put
+    /// back. A process-wide lock serializes the tests that need it.
+    fn preserving_real_store<T>(f: impl FnOnce() -> T) -> T {
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _g = LOCK.lock().unwrap();
+        let path = folders::store_path();
+        let before = std::fs::read(&path).ok();
+        let out = f();
+        match before {
+            Some(bytes) => {
+                let _ = std::fs::write(&path, bytes);
+            }
+            None => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn injection_takes_the_plan_into_the_live_run() {
+        // An active, unsealed run with one file already queued: the injected plan
+        // must land in the very queue the workers drain, shifted by the existing
+        // rows, and its counters must grow.
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        {
+            let mut s = shared.lock().unwrap();
+            s.active = true;
+            s.sealed = false;
+            s.cancelled = false;
+            s.item_queue = Some(queue.clone());
+            s.queue = vec![QueueEntry {
+                folder: 0,
+                name: "existing.jpg".into(),
+                state: FileState::Waiting,
+                size: 1,
+                path: PathBuf::from("/src/folder-a/existing.jpg"),
+                bytes_sent: 0,
+            }];
+            s.total = 1;
+            s.folder_total.insert(0, 1);
+            s.bytes_total = 100;
+        }
+        let mut store = FolderStore::default();
+        store
+            .folders
+            .push(folders::BackupFolder::new(PathBuf::from("/src/folder-a")));
+        store
+            .folders
+            .push(folders::BackupFolder::new(PathBuf::from("/src/folder-b")));
+
+        // Two files in folder 1, both sizes known: the byte ETA continues.
+        let mut plan = literal_plan(&[(1, "/src/folder-b/a.jpg"), (1, "/src/folder-b/b.jpg")]);
+        plan.bytes_total = 50;
+        plan.sized_total = 2;
+
+        let refused = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(refused.is_none(), "an active run must take the plan");
+
+        let s = shared.lock().unwrap();
+        assert_eq!(s.queue.len(), 3, "rows appended to the live queue");
+        assert_eq!(s.total, 3);
+        assert_eq!(s.folder_total.get(&0).copied(), Some(1));
+        assert_eq!(s.folder_total.get(&1).copied(), Some(2));
+        assert_eq!(s.bytes_total, 150, "100 + 50: both sides fully known");
+        {
+            let q = s.item_queue.as_ref().unwrap().lock().unwrap();
+            let rows: Vec<(usize, usize)> = q.iter().map(|(r, i, _)| (*r, *i)).collect();
+            assert_eq!(
+                rows,
+                vec![(1, 1), (2, 1)],
+                "item rows shifted by the existing queue length"
+            );
+        }
+        drop(s);
+        assert_eq!(
+            store.folders[1].total_files, 2,
+            "the folder counter is persisted"
+        );
+    }
+
+    #[test]
+    fn injection_is_refused_when_the_run_is_sealed() {
+        // The last worker sealed the run: a late injection must be refused and
+        // change nothing at all.
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        {
+            let mut s = shared.lock().unwrap();
+            s.active = true;
+            s.sealed = true;
+            s.item_queue = Some(queue.clone());
+            s.total = 1;
+            s.folder_total.insert(0, 1);
+            s.bytes_total = 100;
+        }
+        let mut store = FolderStore::default();
+        store
+            .folders
+            .push(folders::BackupFolder::new(PathBuf::from("/src/folder-a")));
+
+        let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
+        let refused = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(refused.is_some(), "a sealed run must refuse the plan");
+
+        let s = shared.lock().unwrap();
+        assert!(s.queue.is_empty(), "no row was appended");
+        assert_eq!(s.total, 1);
+        assert_eq!(s.bytes_total, 100);
+        assert_eq!(s.folder_total.get(&0).copied(), Some(1));
+        assert!(s.item_queue.as_ref().unwrap().lock().unwrap().is_empty());
+        drop(s);
+        assert_eq!(store.folders[0].total_files, 0);
+    }
+
+    #[test]
+    fn injection_is_refused_without_a_live_run() {
+        // No run at all: the plan comes back unchanged.
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let mut store = FolderStore::default();
+        let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
+        let out = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(out.is_some(), "no run: the plan comes back unchanged");
+        assert_eq!(shared.lock().unwrap().total, 0);
+
+        // A cancelled run (sign-out): still refused — it must take no new work.
+        {
+            let mut s = shared.lock().unwrap();
+            s.active = true;
+            s.cancelled = true;
+            s.item_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
+        }
+        let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
+        let out = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(out.is_some(), "a cancelled run must refuse the plan");
+        assert_eq!(shared.lock().unwrap().total, 0);
     }
 }

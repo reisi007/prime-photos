@@ -229,6 +229,7 @@ const EN: &[(&str, &str)] = &[
     ("Datensicherung hinzufügen …", "Add backup …"),
     ("Datensicherung stoppen", "Stop backup"),
     ("Datensicherung gestoppt: {}", "Backup stopped: {}"),
+    ("Der Ordner wird beim nächsten Lauf gesichert.", "The folder will be backed up on the next run."),
     // Missing source (user decisions 2026-10-16, 2026-10-17): a missing source
     // folder must not read as "no photos found" — the understandable cause is
     // the message.
@@ -259,6 +260,10 @@ const EN: &[(&str, &str)] = &[
     ("Ordner", "Folder"),
     ("Ordner nicht gefunden", "Folder not found"),
     (
+        "Ordner wird eingelesen und in den laufenden Upload aufgenommen.",
+        "The folder is being read in and added to the running upload.",
+    ),
+    (
         "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
         "Tip: folders are remembered and backed up again on every start.",
     ),
@@ -276,6 +281,10 @@ const EN: &[(&str, &str)] = &[
         "Drag here for a one-time backup",
     ),
     ("{} Datei(en) werden hochgeladen …", "{} file(s) being uploaded …"),
+    (
+        "{} Datei(en) zusätzlich aufgenommen.",
+        "{} additional file(s) taken up.",
+    ),
     ("{}% hochgeladen", "{}% uploaded"),
     // -- backup configuration dialog ------------------------------------
     (
