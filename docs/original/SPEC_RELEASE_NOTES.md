@@ -16,7 +16,7 @@ MD5 `7a9cd34f72be0973047ea88034afd15f`, Assembly-Attribut `AssemblyVersion("0.0.
 
 **Methode:** `ilspycmd 11.1.0.9782` (`ICSharpCode.Decompiler 11.1.0.9782`) — 2026-10-17 wurden die
 vier Kern-Typen **gezielt und neu** dekompiliert (`-t <Typ>`) und gegen den vorhandenen
-Voll-Decompil-Dump (`amzdec/`, 2026-10-14) gediffed: **identisch** (Abweichung nur in der
+Voll-Decompil-Dump (`amzdec/`, 2026-10-16) gediffed: **identisch** (Abweichung nur in der
 `base._002Ector()`-Schreibweise zwischen Projekt- und `-t`-Modus). Zusätzlich: `plutil -p` (Info.plist),
 `strings` über die Assembly, `sips` (Icon-Maße), `grep` über `Resources/*.lproj/Localizable.strings`,
 und das **Auswerten bereits vorhandener Mitschnitte** unter
@@ -37,7 +37,7 @@ Zähler; ein konkreter Kundenwert wurde nicht ausgelesen.
 | **Auto-Update** (Check, Manifeste, Eligibility, Installer, Dialoge) | `SPEC_PREFERENCES.md` **§3.10** | hier nur **verwiesen**, nicht wiederholt (§9) |
 | Start-Reihenfolge der Tasks | `SPEC_SYNC.md` **§3.9** | hier der **Notes-relevante Ausschnitt** (§3) |
 | Fenstergrößen/Screens | `UI_FLOWS.md` **§1 (#16)**, **§2.1** | Bestätigung + Widerspruch (§4.3) |
-| Konto-`settings.json`-Felder | `UI_STATES.md` **§5.3** | `ReleaseNotesVersion` als **Zähler** präzisiert (§2) |
+| Konto-`settings.json`-Felder | `UI_STATES.md` **§4.5** | `ReleaseNotesVersion` als **Zähler** präzisiert (§2) |
 
 **Neu hier** (in den obigen Specs **nicht**): der Auslöser ist **nicht** ein Versionsvergleich, sondern
 ein **build-fester Zähler** gegen einen gespeicherten Wert; der **Speicherort/-key** samt Default **0**;
@@ -216,7 +216,7 @@ die Metrik `OverflowMenuClick … "ReleaseNotes"`: → **belegt**
 - Text: `clouddrive_desktop_contextmenu_releasenotes` (de **„Versionshinweise"**), Icon
   `ic-notes-grey-16` (13 pt dargestellt), Identifier `ProfileContextMenu_ReleaseNotes_Button`
   → **belegt**
-- **Kein** Tastenkürzel (Details `SPEC_ABOUT.md` §5.3). → **belegt**
+- **Kein** Tastenkürzel (Details `SPEC_ABOUT.md` §5.2). → **belegt**
 - Im Statusleisten-Menü ist der Eintrag **netzabhängig gesperrt**:
   `_releaseNotesMainMenuItem.Enabled = _appStatus.IsNetworkAvailable` → **belegt**
   (`MenuBarController.cs:341`)
@@ -403,7 +403,7 @@ totes Erbe. → **belegt** (Fund), **UNKNOWN** (Zweck).
 | **Aussehen/Dauer des latenten `ShouldShowReleaseNotesWindow()`-GETs bei ausgeschaltetem Gate** | Ergebnis wird verworfen; blockierender Aufruf im Should-Run-Pfad | `ShowReleaseNotesWindowTask.cs:57-61`, `FeatureGateManager.cs:175-187` |
 | **Zweck von `ImageType.ReleaseNotes16`** | kein Verwendungsort, kein Asset | `UI/ImageType.cs:148` + Bundle-Suche nach Assets |
 | **Heutiger Inhalt/Zustand der CloudFront-Seite** | Mitschnitt ist Evidenz, kein Live-Beweis; kein neues Capture erlaubt | gelesene Mitschnitte (§5) |
-| **Default-Treatment von `EnableNewReleaseNotes`** | `RemoteExperiment`-Default ist Alles-Null; die Zuteilung ist server-/weblab-getrieben | `AppSettings.cs:515`; Mitschnitt zeigt den **alten** Host ⇒ zur Aufnahmezeit Gate aus (§5) |
+| **Default-Treatment von `EnableNewReleaseNotes`** | `RemoteExperiment`-Default ist Control 100 / T1 0 / T2 0; die Zuteilung ist server-/weblab-getrieben | `AppSettings.cs:515`; Mitschnitt zeigt den **alten** Host ⇒ zur Aufnahmezeit Gate aus (§5) |
 
 ---
 
@@ -415,7 +415,7 @@ totes Erbe. → **belegt** (Fund), **UNKNOWN** (Zweck).
 |---|---|
 | Bundle | `/Applications/Amazon Photos.app` — 11.3.0 (Build 36, Commit `1d7941b5`), Bundle-ID `com.amazon.clouddrive.mac`, `LSMinimumSystemVersion 10.15` (`plutil -p Contents/Info.plist`) |
 | Assembly | `Contents/MonoBundle/Amazon Photos.dll`, 4.591.616 B, MD5 `7a9cd34f72be0973047ea88034afd15f` |
-| Decompiler | `ilspycmd 11.1.0.9782` (2026-10-17, `-t` für 4 Typen; verifiziert gegen den Dump `amzdec/` vom 2026-10-14 — identisch) |
+| Decompiler | `ilspycmd 11.1.0.9782` (2026-10-17, `-t` für 4 Typen; verifiziert gegen den Dump `amzdec/` vom 2026-10-16 — identisch) |
 | Voll-Dump | `/private/var/folders/…/T/opencode/amzdec/<Namespace>/…` (aus derselben DLL) |
 | Mitschnitte | `/private/var/folders/…/T/opencode/amazon-photos.mitm` (u. a. Offsets 8087 HTML-Body, 15423817 `release_notes.js`), `amazon2.mitm`, `upload-capture.mitm` |
 | Lokalisierung | `Contents/Resources/{de,en,en-GB,es,fr,it,ja,pt,zh,ne}.lproj/Localizable.strings` |
