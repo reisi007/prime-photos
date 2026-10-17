@@ -152,3 +152,40 @@ with fixed row heights, and measured chrome dimensions.
   **18×18-Rect**. Ein blindes „Ausrichten" würde ändern, was der User noch
   nicht beurteilt hat. Die offene Arbeit (Nav-/Sidebar-Icons ausrichten) bleibt
   im Ledger.
+
+- **Abstands-Regel (Entscheidung 2026-10-17, UI-Review 0.1.1 F2/F3).**
+  *Innerhalb* einer logischen Gruppe gilt nur das `item_spacing` des Themes
+  (**8 px**, `src/theme.rs:57`); *zwischen* Gruppen kommt zusätzlich
+  `ui.add_space(8.0)` dazu (**16 px gesamt**). Umgesetzt in `src/settings.rs` —
+  `general_settings`: vier Checkbox-Gruppen, jede Checkbox mit ihrem eigenen
+  `theme::muted`-Hinweis darunter (die Benachrichtigungen-Checkbox ohne
+  Hinweis); `bandwidth_settings`: Widget → eigener Hinweis **ohne**
+  Zusatzabstand, Hinweis → neues Gruppen-Label `8.0` — und in `src/about.rs`
+  (`about_window`): Blocktrennung Version-Zeile → Schaltflächen-Block `8.0`.
+  Die **engen** Werte *innerhalb* eines Blocks bleiben bewusst (Name → Version
+  `4.0`, zwischen den zwei Schaltflächen `6.0`) — bewusste Kopplung, **kein**
+  Befund. Anlass: eine Checkbox und ihr eigener Hinweis lagen genauso weit
+  auseinander wie der Hinweis und die nächste Checkbox. Gemessen
+  (Einstellungen/Allgemeines): vorher innen ≈ 6 px / außen ≈ 5–7 px (optisch
+  nicht unterscheidbar), nachher innen ≈ 6 px / außen ≈ 13–15 px. **Nicht
+  zurückkorrigieren:** die 16 px zwischen Gruppen sind die Entscheidung — und
+  die engen Werte innerhalb eines Blocks ebenso.
+
+- **Überschrift → Ordnerliste: 8 px (Befund 2026-10-17, UI-Review F1).** Auf
+  der Seite „Datensicherung" steht vor der Ordner-Karten-`ScrollArea` jetzt
+  `ui.add_space(8.0)`. Ohne diese Luft klebte die Überschrift „Automatisch
+  gesicherte Ordner:" mit 0 px an der Liste, und im gescrollten Zustand klebte
+  eine halb sichtbare Karte daran. Die Luft ist Teil des gemessenen
+  Layout-Puffers `QUEUE_BELOW_H` (`src/backup.rs`), der deshalb von **88.0 auf
+  96.0** ging (gemessen: Abstand Überschrift → erste Karte +8 px).
+
+- **Scrollbalken-Reserve bleibt (kein Fix, 2026-10-17).** Die in `src/theme.rs`
+  reservierte Breite für den schwebenden Balken
+  (`floating_allocated_width = bar_width + SCROLL_BAR_GAP` = **18 px**; Griff =
+  `bar_width` 10 px + 8 px Abstand) bleibt bewusst. Sie greift nur, **während**
+  der Balken sichtbar ist — egui skaliert den reservierten Streifen mit
+  `show_bars_factor` auf 0, solange nichts zu scrollen ist
+  (`scroll_area.rs:557`); im Ruhezustand ist der Kartenrahmen links/rechts
+  symmetrisch (gemessen je 9 px). Der Review-Befund „sieht rechts breiter aus"
+  ist damit **gewollt**. **Verworfen:** den Streifen verkleinern oder auf der
+  Karte asymmetrisch ausgleichen.
