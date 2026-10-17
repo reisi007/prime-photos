@@ -311,6 +311,43 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   Laufs hinzufügen; Laufwerk abziehen/anklemmen → Vollscan + Wiederanlauf — sind noch nicht an
   einem echten Laufwerk bestätigt (im Ledger als offener Punkt geführt).
 
+**Durch den dritten echten Lauf belegt (2026-10-17):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.2` (Tag-Objekt `ca2d140e…`) auf Commit `1aceb25`;
+  GitHub-Release `v0.1.2`, veröffentlicht 2026-10-17T18:59:31Z, **nicht** Draft, **nicht**
+  Pre-Release.
+- **Run:** GitHub-Actions-Run `39059880076` (`release.yml`, ausgelöst durch den Tag-Push,
+  `headSha = 1aceb25`). Jobs `Build linux-x64` (4m45s), `Build windows-x64` (8m38s),
+  `Publish GitHub Release` (10s) — alle grün.
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.318.616 | `eaf7f67f7f8d916d7d654bb63035b568c43d378a1f0da99c943e18931eaedd20` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.441.910 | `dcf1ae910738d990bda524669f17f263cc64d7fa67fb0dda8fd9ec3fcf425f7b` |
+  | `Prime-Photos-windows-x64.zip` | 8.588.756 | `538a1d0c22a413164f09387ad375e72219cac238fe3b6f37d1c119b4c5a41adc` |
+
+  `v0.1.2` trägt damit von Anfang an nur **drei** Assets (das macOS-ZIP entfällt seit der
+  Asset-Entscheidung vom 2026-10-17, §4). Das DMG wurde **manuell** ans Release gehängt (§4) — der
+  Workflow baut nur Windows/Linux; seine sha256 wurde gegen die lokale Datei geprüft.
+- **macOS-Bundle (lokal aus dem Tag gebaut, §4):** `./packaging/make-app.sh` mit `VERSION=0.1.2`,
+  `BUILD=2`, ad-hoc signiert, Volname `Prime Photos`; der Commit-Stempel im Über-Fenster steht dank
+  `touch build.rs` auf `1aceb25`; `hdiutil verify` auf dem DMG: **VALID**.
+- **Windows unsigniert:** die Authenticode-Schritte des Workflows wurden ohne Secrets übersprungen
+  (§3) — dieselbe Lage wie bei v0.1.0 und v0.1.1.
+- **Release-Notes:** `generate_release_notes: true` erzeugte die Commit-Liste
+  `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.1...v0.1.2`.
+- **Inhalt dieses Releases:** das neue **Hintergrund-Verhalten** — das X versteckt nur das Fenster,
+  die App läuft weiter, das **Dock-Icon bleibt**; zurück kommt man per Dock-Klick, App-Neustart oder
+  Tray-Eintrag, und es läuft **immer nur eine Instanz** (macOS `LSMultipleInstancesProhibited` plus
+  Socket-Wächter). Dazu die README-Aktualisierung (jetzt versionsfrei, Regel in `AGENTS.md`) und die
+  macOS-Asset-Policy (nur DMG).
+- **Live abgenommen:** der User hat das Hintergrund-Verhalten am 0.1.2-Build am 2026-10-17 manuell
+  abgenommen („manuell ok").
+- **Weiterhin offen (kein 0.1.2-Defekt):** Windows/Linux werden weiterhin nur **kompiliert**, nicht
+  laufen getestet; die Live-Abnahme der **Laufwerk-Rückkehr** aus einem älteren Befund steht noch
+  aus (eigener Ledger-Punkt).
+
 **Weiterhin offen / nicht verifiziert:**
 
 - Windows-Authenticode-Signatur (§3) nicht ausgeführt; `signtool`-Verfügbarkeit auf dem Runner nicht
