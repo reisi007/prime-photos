@@ -184,8 +184,9 @@ impl Tray {
 // exactly one place per side and must be changed together:
 //   assets/<stem>.svg  ⇒  $OUT_DIR/<stem>-<colour>-<size>.png
 //   stems, in `TrayState::index()` order: tray, tray-active, tray-paused,
-//     tray-done, tray-error   (all `currentColor`, so black/white is a raster
-//     override the build injects — there are no coloured SVG files)
+//     tray-done, tray-error   (all Material Symbols, so black/white is a
+//     `path { fill: … }` raster override the build injects — there are no
+//     coloured SVG files)
 //   colours: black (#000000) / white (#ffffff)
 //   sizes:   32 (1×) / 64 ("@2x") — macOS takes the 64-px source, the other
 //     platforms the 32-px one (the tray scales to the menu-bar height).
@@ -437,11 +438,11 @@ mod tests {
         crate::i18n::set_lang(crate::i18n::Lang::De);
     }
 
-    /// The build-time `* { color: … }` override really lands in the raster: the
-    /// painted pixels of the white source are white, of the black source black.
-    /// Reads the `OUT_DIR` artifacts at run time (they exist once the crate has
-    /// been built), so this also holds in the macOS build, where the white set
-    /// is `cfg`-ed out of the binary.
+    /// The build-time `path { fill: … }` override really lands in the raster:
+    /// the painted pixels of the white tray source are white, of the black
+    /// source black. Reads the `OUT_DIR` artifacts at run time (they exist once
+    /// the crate has been built), so this also holds in the macOS build, where
+    /// the white set is `cfg`-ed out of the binary.
     #[test]
     fn build_rasters_carry_the_injected_colour() {
         assert_eq!(strongest_pixel_rgb(&read_out_png("tray-white-32.png")), [255, 255, 255]);
@@ -465,5 +466,41 @@ mod tests {
             }
         }
         best.0
+    }
+
+    /// The five macOS 64-px template glyphs are non-empty and pairwise
+    /// distinct: each decodes, each has a coverage in 5–60 % (a glyph, not a
+    /// blank or a full square) and no two are pixel-identical. That catches an
+    /// empty render and a swap against an *identical* raster — but **not** a
+    /// swap of two different glyphs (e.g. Done↔Error have both plausible
+    /// coverage and differ, so this stays green). Only the macOS 64-px rasters
+    /// are checked; the `#[cfg(not(target_os = "macos"))]` 32-px set is not.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_tray_glyphs_are_distinct_and_covered() {
+        let decoded: Vec<image::RgbaImage> = BLACK_PNGS_64
+            .iter()
+            .map(|png| image::load_from_memory(png).unwrap().to_rgba8())
+            .collect();
+
+        for (idx, image) in decoded.iter().enumerate() {
+            let total = (image.width() * image.height()) as usize;
+            let painted = image.pixels().filter(|px| px.0[3] > 0).count();
+            let ratio = painted as f64 / total as f64;
+            assert!(
+                (0.05..=0.60).contains(&ratio),
+                "Tray-Glyph {idx}: Deckung {ratio:.3} außerhalb 5–60 %"
+            );
+        }
+
+        for a in 0..decoded.len() {
+            for b in (a + 1)..decoded.len() {
+                assert_ne!(
+                    decoded[a].as_raw(),
+                    decoded[b].as_raw(),
+                    "Tray-Glyphen {a} und {b} sind pixelgleich"
+                );
+            }
+        }
     }
 }

@@ -83,10 +83,24 @@ and the "Mit Amazon anmelden" wording where a sign-in genuinely happens.
 - **UI-Icons: Bibliothek statt selbst gezeichnet (Welle 3c, 2026-10-16).**
   Die Sidebar-Icons sind Material-Symbols-SVGs; die Zeilen-Icons bleiben als
   Linie. **Selbst gezeichnet bleiben:** die Marktplatz-Flaggen und unser Logo
-  (`upload_logo`); der Status-Punkt ist ein Kreis, kein Glyph.
+  (`upload_logo`); der Status-Punkt ist ein Kreis, kein Glyph. Seit Welle 5.32
+  (2026-10-17) sind auch die fünf Tray-Glyphen Material-Symbols-SVGs (siehe
+  eigener Eintrag unten).
   **Verworfen:** `backup` (Wolke mit Hochpfeil) + `tune` (drei
   Schieberegler) — nicht die Motive des Originals; die
   **Outlined**-Variante für die Navigation — weicht sichtbar vom Original ab.
+
+- **Tray-Glyphen aus Material Symbols (Welle 5.32, 2026-10-17).** Die fünf
+  Tray-/Menüleisten-Glyphen kommen jetzt aus Material Symbols statt
+  handgezeichnet: Idle `upload`, Aktiv `progress_activity`, Paused `pause`
+  (gefüllte `fill1`-Variante — die Outlined-Variante rendert bei 32 px hohle
+  Balken), Done `check`, Error `priority_high`. **Grund:** handgezeichnete
+  Glyphen sind nach der Regel unzulässig („Icons werden nicht selbst
+  gezeichnet"), und das alte Aktiv-Glyph war bei 32 px unleserlich — zwei
+  kurze Striche verschmolzen mit dem Pfeilkopf, und ohne die Grundlinie des
+  Idle-Pfeils war „aktiv" kaum von „idle" zu unterscheiden (User-Befund
+  2026-10-17). **Selbst gezeichnet bleiben** damit nur noch die
+  Marktplatz-Flaggen und unser Logo (`upload_logo`).
 
 ## Original reference
 

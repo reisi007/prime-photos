@@ -59,3 +59,65 @@ Konvention je Eintrag: **Name**, **Urheber**, **Lizenz**, **Quell-URL**,
 - **Verändert:** nein — Datei unverändert als `assets/icon-settings.svg`
   übernommen. Die Einfärbung (weiß) passiert erst im Build (`build.rs`),
   die Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `upload` (Tray „Idle", Welle 5.32)
+
+- **Name:** Material Symbols (Outlined), Symbol `upload`, 24 px
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/upload/materialsymbolsoutlined/upload_24px.svg>
+- **Abrufdatum:** 2026-10-17
+- **sha256:** `c6a0a75ae88e1bb12f94777d88449a5153ae5d9fd6cb5549f7cb677900823c9e`
+- **Verändert:** nein — Datei unverändert als `assets/tray.svg` übernommen.
+  Die Einfärbung (schwarz/weiß) passiert erst im Build (`build.rs`), die
+  Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `progress_activity` (Tray „Aktiv", Welle 5.32)
+
+- **Name:** Material Symbols (Outlined), Symbol `progress_activity`, 24 px
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/progress_activity/materialsymbolsoutlined/progress_activity_24px.svg>
+- **Abrufdatum:** 2026-10-17
+- **sha256:** `d1f14e2e4001181fa6671d99b0720282901d6eb029b1cf04a4d137d7a43c197e`
+- **Verändert:** nein — Datei unverändert als `assets/tray-active.svg`
+  übernommen. Die Einfärbung (schwarz/weiß) passiert erst im Build
+  (`build.rs`), die Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `pause` (Tray „Angehalten", Welle 5.32)
+
+- **Name:** Material Symbols (Outlined), Symbol `pause`, **gefüllte Variante**
+  (`pause_fill1_24px.svg`), 24 px — bewusst die `fill1`-Variante: die
+  Outlined-Variante rendert bei 32 px **hohle** Balken.
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/pause/materialsymbolsoutlined/pause_fill1_24px.svg>
+- **Abrufdatum:** 2026-10-17
+- **sha256:** `fa51687e208210d5e5f579518e44706e187493bee834fc9d6e3d804251e9a806`
+- **Verändert:** nein — Datei unverändert als `assets/tray-paused.svg`
+  übernommen. Die Einfärbung (schwarz/weiß) passiert erst im Build
+  (`build.rs`), die Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `check` (Tray „Abgeschlossen", Welle 5.32)
+
+- **Name:** Material Symbols (Outlined), Symbol `check`, 24 px
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/check/materialsymbolsoutlined/check_24px.svg>
+- **Abrufdatum:** 2026-10-17
+- **sha256:** `01edd53418816632be08e9565b8ca40d9028c230a8a67baaf4b8a1de20db00e6`
+- **Verändert:** nein — Datei unverändert als `assets/tray-done.svg`
+  übernommen. Die Einfärbung (schwarz/weiß) passiert erst im Build
+  (`build.rs`), die Quelle selbst bleibt unangetastet.
+
+### Material Symbols — `priority_high` (Tray „Mit Fehlern", Welle 5.32)
+
+- **Name:** Material Symbols (Outlined), Symbol `priority_high`, 24 px
+- **Urheber:** Google LLC
+- **Lizenz:** Apache-2.0
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/priority_high/materialsymbolsoutlined/priority_high_24px.svg>
+- **Abrufdatum:** 2026-10-17
+- **sha256:** `3ff1e4546f4ec678ff6f63ec22a664e1702987394067052afc314b84b33a689b`
+- **Verändert:** nein — Datei unverändert als `assets/tray-error.svg`
+  übernommen. Die Einfärbung (schwarz/weiß) passiert erst im Build
+  (`build.rs`), die Quelle selbst bleibt unangetastet.

@@ -21,27 +21,29 @@ use std::path::{Path, PathBuf};
 // File-name contract with the consuming code
 // ---------------------------------------------------------------------------
 //
-// `src/tray.rs` embeds exactly the names built below and keys them by
-// (state, colour, size) in its `TRAY_PNGS` table. If a name, colour or size
-// changes here it must change there too — and vice versa. Keep this block and
-// that table in sync.
+// `src/tray.rs` embeds exactly the names built below, keyed by state in its
+// `BLACK_PNGS_64` / `BLACK_PNGS_32` / `WHITE_PNGS_32` tables. If a name,
+// colour or size changes here it must change there too — and vice versa. Keep
+// this block and those tables in sync.
 //
 //   Tray glyphs:  assets/<stem>.svg  ⇒  $OUT_DIR/<stem>-<colour>-<size>.png
 //     stems:  "tray" (idle), "tray-active", "tray-paused", "tray-done",
 //             "tray-error"
 //     colours: "black" (#000000), "white" (#ffffff)
-//     sizes:  32 and 64 px (square sources, 84×84 viewBox)
+//     sizes:  32 and 64 px (square 24×24 Material Symbols sources, viewBox
+//             "0 -960 960 960"; user decision 2026-10-17)
 //
 //   Logos (rastered as-is, no colour substitution):
 //     assets/logo.svg             ⇒ $OUT_DIR/logo.png             (1024 px)
 //     assets/logo-small.svg       ⇒ $OUT_DIR/logo-small.png       (256 px)
 //
-//   UI icons (Material Symbols, Apache-2.0 — see docs/dev/THIRD_PARTY.md): the two
-//   sidebar navigation icons and the two row-action icons, rastered white so
-//   `src/icons.rs` can tint them to the theme colour at run time. These sources
-//   carry **no** `fill`/`currentColor` (a bare `<path d="…"/>` paints black by
-//   default), so they get a `path { fill: … }` override instead of the
-//   `* { color: … }` one the tray glyphs use:
+//   Tray glyphs and UI icons are Material Symbols (Apache-2.0 — see
+//   docs/dev/THIRD_PARTY.md). The tray glyphs are the five states, the UI icons
+//   are the two sidebar navigation icons and the two row-action icons; the
+//   latter are rastered white so `src/icons.rs` can tint them to the theme
+//   colour at run time. All of these sources carry **no** `fill`/`currentColor`
+//   (a bare `<path d="…"/>` paints black by default), so they get a
+//   `path { fill: … }` override:
 //     assets/icon-cloud.svg     ⇒ $OUT_DIR/icon-cloud.png     (64 px, white)
 //     assets/icon-settings.svg  ⇒ $OUT_DIR/icon-settings.png  (64 px, white)
 //     assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
@@ -65,7 +67,8 @@ const TRAY_STEMS: [&str; 5] = [
 ];
 
 /// Colour name (used in the file name) plus the hex value injected as a
-/// `* { color: … }` override so the sources' `currentColor` resolves to it.
+/// `path { fill: … }` override — the Material Symbols tray sources carry no
+/// paint of their own (a bare `<path>` paints black by default).
 const TRAY_COLORS: [(&str, &str); 2] = [("black", "#000000"), ("white", "#ffffff")];
 
 /// Pixel side of the generated tray glyphs.
@@ -112,10 +115,9 @@ const APPICON_ICONSET: [(&str, u32); 10] = [
 enum Recolor {
     /// Leave the source untouched (the logos carry their own colours).
     AsIs,
-    /// Inject `* { color: <hex> }` — for sources that paint with `currentColor`.
-    CurrentColor(&'static str),
     /// Inject `path { fill: <hex> }` — for sources with no paint of their own
-    /// (a bare `<path>` defaults to black), e.g. the Material Symbols icons.
+    /// (a bare `<path>` defaults to black), e.g. the tray glyphs and the UI
+    /// icons (Material Symbols).
     Fill(&'static str),
 }
 
@@ -133,7 +135,7 @@ fn main() {
                     &manifest_dir,
                     &out_dir,
                     &svg,
-                    Recolor::CurrentColor(color_hex),
+                    Recolor::Fill(color_hex),
                     &png,
                     size,
                 );
@@ -264,21 +266,18 @@ fn render(
             svg_path.display()
         )
     });
-    // Two recolour paths, chosen by what the source actually paints with:
+    // The recolour path is chosen by what the source actually paints with:
     //
-    // * Tray glyphs use `stroke`/`fill="currentColor"`. `usvg` resolves
-    //   `currentColor` against the *inherited* `color` presentation attribute,
-    //   so the requested colour goes in as a CSS rule (`* { color: … }`) before
-    //   parsing — the documented raster override (AGENTS.md „Assets":
-    //   `*{color:#fff}` / `#000`), no per-colour SVG files.
-    // * The Material Symbols icons carry **no** paint at all (a bare
-    //   `<path d="…"/>` defaults to black), so a `color` rule would leave them
-    //   black. They get a `path { fill: … }` rule instead, which the same CSS
-    //   engine applies to the shape. The white result is asserted by
+    // * The tray glyphs and the UI icons (Material Symbols, Apache-2.0 — see
+    //   docs/dev/THIRD_PARTY.md) carry **no** paint at all (a bare
+    //   `<path d="…"/>` defaults to black), so a `path { fill: … }` rule is
+    //   injected before parsing. That is the only way the requested colour
+    //   lands in the raster; there are no per-colour SVG files. The white
+    //   result for the UI icons is asserted by
     //   `src/icons.rs::icon_rasters_are_white_and_covered`.
+    // * The logos keep their own colours (`Recolor::AsIs`).
     let source = match recolor {
         Recolor::AsIs => source,
-        Recolor::CurrentColor(hex) => inject_color_override(&source, hex, &svg_path),
         Recolor::Fill(hex) => inject_fill_override(&source, hex, &svg_path),
     };
 
@@ -317,22 +316,12 @@ fn render(
     });
 }
 
-/// Insert a `* { color: <hex> }` rule right after the opening `<svg …>` tag.
-///
-/// The tray sources carry no colour of their own (`stroke`/`fill=
-/// "currentColor"`); this rule makes `currentColor` resolve to `hex` through
-/// the inheritable `color` attribute — the same path a browser would take.
-/// Panics (with the file name) when there is no opening tag to inject into.
-fn inject_color_override(svg: &str, hex: &str, path: &Path) -> String {
-    inject_style(svg, &format!("*{{color:{hex}}}"), path)
-}
-
 /// Insert a `path { fill: <hex> }` rule right after the opening `<svg …>` tag.
 ///
-/// The Material Symbols icons have no `fill`/`currentColor` of their own, so a
-/// `color` rule would not touch them: they would stay black (the SVG default).
-/// A `fill` rule on the shape does apply, which is what turns them white for
-/// the run-time tint.
+/// The tray glyphs and the UI icons (Material Symbols) have no
+/// `fill`/`currentColor` of their own, so a `color` rule would not touch them:
+/// they would stay black (the SVG default). A `fill` rule on the shape does
+/// apply, which is what turns them the requested colour.
 fn inject_fill_override(svg: &str, hex: &str, path: &Path) -> String {
     inject_style(svg, &format!("path{{fill:{hex}}}"), path)
 }
