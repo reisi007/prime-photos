@@ -19,6 +19,24 @@ der Doku-Neuaufbau (22 Feature-Dateien, `FEATURES.md`, `docs/dev/`). Dauerhafte 
   prime_photos.rs settings.rs text.rs tray.rs upload.rs urls.rs` — auch in unangetasteten). Danach
   gilt `cargo fmt --check` als Gate (User-Entscheidung 2026-10-16).
 
+## Offen nach dem Release v0.1.0 (2026-10-17)
+
+Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0.1.0` auf `1de3e2b`,
+`macOS-DMG` manuell angehängt. Offen daraus:
+
+- [ ] **Actions von Node 20 auf Node 24 anheben** (User-Entscheidung 2026-10-17: **eigener** Durchgang,
+  nicht im Release erledigt). Beide Job-Arten melden `Node.js 20 is deprecated` für
+  `actions/checkout@v4`, `actions/upload-artifact@v4`, `actions/download-artifact@v4` — sie werden auf
+  Node.js 24 gezwungen; dazu der Hinweis, dass `ubuntu-latest` ab **2026-10-19** auf Ubuntu 26
+  migriert. Zu prüfen: Zielversionen in `.github/workflows/ci.yml` **und** `release.yml` (beide Dateien
+  haben eigene Action-Referenzen) und die Verträglichkeit mit `--locked`; Beleg braucht einen echten
+  Lauf (CI auf `main`; das nächste Release erst beim nächsten Tag). **Dabei mitziehen:** die Aufzählung
+  in `docs/dev/RELEASE.md` §9 nennt `softprops/action-gh-release@v2` nicht, das ebenfalls „Node.js 20 is
+  deprecated" meldet (Verifier-`nit` aus Welle 5.25).
+- **Nicht** offen, nur zur Einordnung: Windows-Authenticode, macOS-Notarisierung und Prüfsummendateien
+  bleiben laut `docs/dev/RELEASE.md` §9 unverifiziert bzw. nicht implementiert — dafür gibt es keinen
+  Auftrag.
+
 ## Manueller Test 2026-10-17 — offen (Bundle aus 5.21–5.24)
 
 Vier Fixes sind umgesetzt, unabhängig verifiziert und committet (5.21 Systemsprache, 5.22 „Ordner
