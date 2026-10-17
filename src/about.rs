@@ -154,12 +154,13 @@ pub(crate) fn license_window(ctx: &egui::Context, open: &mut bool, tab: &mut Lic
         .default_size(egui::vec2(760.0, 560.0))
         // Minimum width so the widest license line is never clipped. The text is
         // wrapped to `WRAP_COLS` (100) monospace characters, measured 700.25 px
-        // wide (7.0025 px per character); the default floating scroll bar (10 px
-        // plus a 4 px inner margin) floats over the right edge and would cover
-        // the last characters. `min_width` sets the inner content width — the
-        // scroll area fills it and a floating bar allocates no space — so
-        // 700.25 + 14 ≈ 715 px, rounded up to 720 px for a small margin. There is
-        // only vertical scrolling, so without this a user could shrink the window
+        // wide (7.0025 px per character). `min_width` sets the inner content
+        // width. The floating scroll bar now reserves its width
+        // (`floating_allocated_width = bar_width` in `theme.rs`), so the scroll
+        // area no longer lets content run under the bar and the former slack for
+        // the 10 px handle plus 4 px inner margin is no longer needed: 720 px is
+        // a deliberately chosen round minimum, not a computed fit. There is only
+        // vertical scrolling, so without this a user could shrink the window
         // until the line is cut off.
         .min_width(720.0)
         .show(ctx, |ui| {
