@@ -18,6 +18,9 @@ Cross-platform Rust desktop app (egui) für den Upload zu Amazon Photos; Ziel ma
 ## Regeln
 
 - **Branding:** Projekt, Repo und App heißen **„Prime Photos"**; nichts darf wie eine offizielle Amazon-App aussehen (keine Amazon-Logos/-Identität im eigenen Fenster) — funktional Notwendiges (echte Hosts/URLs, `x-amzn-*`-Header, „Bei Amazon anmelden") bleibt erlaubt.
+- **README bleibt versionsfrei (User 2026-10-17):** keine Release-Anzahl und keine Versionsnummern in
+  der `README.md` — Releases werden dort nur über den Link auf die Release-Seite sichtbar (dort steht das
+  Neueste). So veraltet die README bei keinem Release.
 - **Subagenten führen nichts Neues ein:** jeder Auftrag bleibt strikt auf die beauftragte Änderung begrenzt; Unklarheiten zurückmelden statt eigenmächtig lösen.
 
 ## Arbeitsweise
