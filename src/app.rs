@@ -583,21 +583,19 @@ impl PrimePhotoApp {
         }
     }
 
-    /// Show and focus the main window and restore the Dock icon — the one path
-    /// every "bring the app back" trigger uses: the tray's "Fenster anzeigen",
-    /// an app activation (Dock icon / relaunch, see `src/app_activation.rs`), a
-    /// second launch (see `src/single_instance.rs`) and the expired-session
-    /// fallback.
+    /// Show and focus the main window — the one path every "bring the app back"
+    /// trigger uses: the tray's "Fenster anzeigen", an app activation (Dock
+    /// click / relaunch, see `src/app_activation.rs`), a second launch (see
+    /// `src/single_instance.rs`) and the expired-session fallback.
     fn show_main_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        app_activation::set_dock_icon(true);
     }
 
     /// Open the About window and bring the main window to the front. The app
     /// menu can be chosen while the window is hidden in tray mode, so this goes
-    /// through the shared show path (which also restores the Dock icon).
+    /// through the shared show path.
     pub(crate) fn open_about(&mut self, ctx: &egui::Context) {
         self.about_open = true;
         self.show_main_window(ctx);
@@ -1120,12 +1118,10 @@ impl eframe::App for PrimePhotoApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.window_hidden = true;
-            // A hidden window leaves no Dock icon behind: the original is a
-            // menu-bar app that only borrows a Dock presence while a window is
-            // open (original parity, SPEC_OS_INTEGRATION.md §3.4). Back via the
-            // tray, or via an app activation / second launch, which both
-            // restore it through `show_main_window`.
-            app_activation::set_dock_icon(false);
+            // The Dock icon stays: closing only hides the window, the app keeps
+            // running in the background. Back via the tray, or via an app
+            // activation / second launch, which both restore the window through
+            // `show_main_window`.
         }
 
         // Account fetch (name + avatar): first attempt after a successful

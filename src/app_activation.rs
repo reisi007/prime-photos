@@ -1,5 +1,4 @@
-//! macOS app activation: bring the (possibly hidden) window back and keep the
-//! Dock presence in sync.
+//! macOS app activation: bring the (possibly hidden) window back.
 //!
 //! **Why there is no `NSApplicationDelegate` here.** winit 0.30 registers an
 //! `NSApplicationDelegate` of its own (`WinitApplicationDelegate`, see
@@ -26,10 +25,13 @@
 //! `PrimePhotoApp::update` drains the flag via [`take_become_active_request`]
 //! and then shows and focuses the window.
 //!
-//! [`set_dock_icon`] controls the Dock presence: the original is a menu-bar app
-//! that only "borrows" a Dock icon while a window is open (original parity,
-//! `docs/original/SPEC_OS_INTEGRATION.md` §3.4), so a hidden window means
-//! `Accessory` and a shown one `Regular`.
+//! **The Dock icon stays** (user decision 2026-10-17): the app is a normal
+//! windowed app whose Dock icon — and app menu bar — remains for as long as the
+//! app runs. Closing the window only hides it (the app keeps running in the
+//! background), and the icon stays; it disappears only when the app is really
+//! quit (normal macOS behaviour). An app activation — a Dock click, a relaunch
+//! from Finder/Spotlight/`open`, or switching back to it — brings the hidden
+//! window back and focuses it, which is what this module is for.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
@@ -45,9 +47,7 @@ use objc2::runtime::NSObject;
 #[cfg(target_os = "macos")]
 use objc2::{MainThreadMarker, MainThreadOnly};
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDidBecomeActiveNotification,
-};
+use objc2_app_kit::NSApplicationDidBecomeActiveNotification;
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSNotification, NSNotificationCenter};
 
@@ -159,29 +159,6 @@ pub fn take_become_active_request() -> bool {
     BECOME_ACTIVE_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
-/// Show or hide the Dock icon (and the app menu bar with it).
-///
-/// `false` switches the activation policy to `Accessory` and deactivates the
-/// app: a window hidden in the tray leaves no Dock icon behind, exactly like
-/// the original menu-bar app (`docs/original/SPEC_OS_INTEGRATION.md` §3.4).
-/// `true` goes back to `Regular` and activates the app.
-///
-/// Must run on the main thread (AppKit); a call from anywhere else is a no-op.
-#[cfg(target_os = "macos")]
-pub fn set_dock_icon(visible: bool) {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    let app = NSApplication::sharedApplication(mtm);
-    if visible {
-        app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-        app.activate();
-    } else {
-        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-        app.deactivate();
-    }
-}
-
 /// Non-macOS: there is no activation observer to install.
 #[cfg(not(target_os = "macos"))]
 pub fn install(_ctx: &eframe::egui::Context) {}
@@ -191,7 +168,3 @@ pub fn install(_ctx: &eframe::egui::Context) {}
 pub fn take_become_active_request() -> bool {
     false
 }
-
-/// Non-macOS: the Dock presence only exists on macOS.
-#[cfg(not(target_os = "macos"))]
-pub fn set_dock_icon(_visible: bool) {}

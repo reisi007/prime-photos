@@ -38,18 +38,17 @@ closing the window quits the app.
 - **Close-to-tray (unchanged):** closing the window **hides** it (the close is
   cancelled) and the app keeps running in the background; only the tray's
   "Beenden" (or a real quit) exits.
-- **No Dock icon while hidden (macOS):** as long as the window is hidden the app
-  has **no Dock icon and no app menu bar** — the activation policy goes to
-  `Accessory` and the app deactivates; showing the window goes back to `Regular`
-  and activates it. Original parity: the original is a menu-bar app that only
-  "borrows" a Dock presence while a window is open
-  (`../original/SPEC_OS_INTEGRATION.md` §3.4). Implemented in
-  `src/app_activation.rs` (`set_dock_icon`).
+- **Dock icon stays (macOS, user decision 2026-10-17):** the app is a normal
+  windowed app whose Dock icon — and app menu bar — remains for as long as the
+  app runs. Closing the window only hides it (the app keeps running in the
+  background), and the icon stays; it disappears only when the app is really
+  quit (normal macOS behaviour). This is a **deliberate deviation** from the
+  original's `LSUIElement`/agent model
+  (`../original/SPEC_OS_INTEGRATION.md` §3.4), which has no Dock icon by default.
 - **Ways back — always the same path:** the tray's "Fenster anzeigen", an app
   **relaunch** (Finder/Spotlight/`open` activate the already running instance)
-  or a **Dock click** (while an icon is present) all end in the same
-  `show_main_window` path: show + focus the window and restore the Dock icon.
-  The activation arrives through an observer of
+  or a **Dock click** all end in the same `show_main_window` path: show + focus
+  the window. The activation arrives through an observer of
   `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`).
 - **Only one instance:** a second start does **not** open a second window — it
   asks the running instance to show its window and exits. On macOS the bundle's
@@ -115,17 +114,19 @@ closing the window quits the app.
   anhalten" ↔ „… fortsetzen"). Anlass: „Es ist alles abgeschlossen, da macht ‚Anhalten' keinen
   Sinn."
 
-- **Hintergrund-App: Close-to-Tray, Dock-Icon, Einzelinstanz (User-Entscheidung 2026-10-17) —
-  Original-Parität.** Der User wollte als Rückweg aus dem versteckten Zustand **nur** Tray und
-  Neustart. Umgesetzt: (1) Schließen versteckt das Fenster weiterhin (Close-to-Tray, unverändert);
-  (2) im versteckten Zustand **kein Dock-Icon** und keine Menüleiste (Activation-Policy `Accessory`
-  + Deaktivierung, beim Anzeigen wieder `Regular` + Aktivierung); (3) Rückweg über den Tray-Eintrag
-  „Fenster anzeigen", einen **App-Neustart** (Finder/Spotlight/`open` aktivieren die laufende
-  Instanz) oder einen Dock-Klick, sofern ein Icon da ist — immer derselbe Weg (Fenster zeigen +
-  fokussieren + Dock-Icon zurück); (4) **immer nur eine Instanz**: ein zweiter Start erzeugt **kein**
-  zweites Fenster, sondern bittet die laufende Instanz, ihr Fenster zu zeigen, und beendet sich.
-  Alles Original-Parität (`../original/SPEC_OS_INTEGRATION.md` §3.3/§3.4: `LSUIElement`/Agent-App,
-  dynamisches Dock-Icon, `LSMultipleInstancesProhibited` „single instance only"). Auf macOS lehnt
+- **Hintergrund-App: Close-to-Tray, Dock-Icon, Einzelinstanz (User-Entscheidung 2026-10-17).**
+  Der User wollte als Rückweg aus dem versteckten Zustand **nur** Tray und Neustart — und (Korrektur
+  vom selben Tag) das **Dock-Icon bleibt**; anders als beim Original ist das eine **bewusste
+  Abweichung**. Umgesetzt: (1) Schließen versteckt das Fenster weiterhin (Close-to-Tray,
+  unverändert), die App läuft im Hintergrund weiter; (2) das **Dock-Icon bleibt, solange die App
+  läuft** (kein `Accessory`/Deaktivieren mehr), es verschwindet erst beim echten Beenden (normales
+  macOS-Verhalten); (3) Rückweg über den Tray-Eintrag „Fenster anzeigen", einen **App-Neustart**
+  (Finder/Spotlight/`open` aktivieren die laufende Instanz) oder einen Dock-Klick — immer derselbe
+  Weg (Fenster zeigen + fokussieren); (4) **immer nur eine Instanz**: ein zweiter Start erzeugt
+  **kein** zweites Fenster, sondern bittet die laufende Instanz, ihr Fenster zu zeigen, und beendet
+  sich. Die **Einzelinstanz** ist Original-Parität (`../original/SPEC_OS_INTEGRATION.md`
+  §3.3/§3.4: `LSMultipleInstancesProhibited` „single instance only"), das **bleibende Dock-Icon**
+  dagegen weicht bewusst vom `LSUIElement`-Agent-Modell des Originals ab. Auf macOS lehnt
   Launch Services den zweiten Start schon über `LSMultipleInstancesProhibited` ab; für Startwege
   daran vorbei (zweiter Aufruf aus der Shell, Linux/Windows) wacht `src/single_instance.rs`
   (Unix-Socket `instance.sock` bzw. TCP-Loopback, gleicher Handshake).
