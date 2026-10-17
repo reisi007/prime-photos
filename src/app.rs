@@ -58,15 +58,19 @@ const AUTOSTART_APP_NAME: &str = "Prime Photos";
 /// the toggle simply stays off.
 ///
 /// The builder is used instead of the platform-specific `AutoLaunch::new`
-/// constructors so this helper stays `#[cfg]`-free. `MacOSLaunchMode::LaunchAgent`
-/// is also the crate default; it is spelled out because that is the mode we
-/// want on macOS (a plist in `~/Library/LaunchAgents`, no AppleScript).
+/// constructors so this helper stays `#[cfg]`-free. `MacOSLaunchMode::SMAppService`
+/// is spelled out (not the crate default `LaunchAgent`) because that is the mode
+/// we want on macOS: `SMAppService.mainApp.register()` enters the app into the
+/// **Anmeldeobjekte** (System Settings → General → Login Items) — a `LaunchAgent`
+/// plist under `~/Library/LaunchAgents` never shows up there. Requires macOS 13+;
+/// a freshly registered entry may first be `RequiresApproval` until the user
+/// approves it in the login-items list.
 fn build_autostart() -> Option<auto_launch::AutoLaunch> {
     let exe = std::env::current_exe().ok()?;
     auto_launch::AutoLaunchBuilder::new()
         .set_app_name(AUTOSTART_APP_NAME)
         .set_app_path(&exe.display().to_string())
-        .set_macos_launch_mode(auto_launch::MacOSLaunchMode::LaunchAgent)
+        .set_macos_launch_mode(auto_launch::MacOSLaunchMode::SMAppService)
         .build()
         .ok()
 }
@@ -134,6 +138,20 @@ fn autostart_action(intent: Option<bool>, os_enabled: bool) -> AutostartAction {
         Some(true) if !os_enabled => AutostartAction::Enable,
         _ => AutostartAction::Nothing,
     }
+}
+
+/// What to persist after a successful enable/disable: the user's **intent**,
+/// never the OS state that was read back (PKG-3 veto trap, user decision
+/// 2026-10-17).
+///
+/// `is_smappservice_enabled()` is `status() == Enabled`, but a freshly
+/// registered `SMAppService` entry is first `RequiresApproval` — so the
+/// read-back would be `false` right after a successful `enable()`. Persisting
+/// that read-back would silently turn a deliberate "on" into the `Some(false)`
+/// veto, after which [`autostart_action`] returns `Nothing` forever and the app
+/// never registers anything again. Pure and OS-free so it stays unit-testable.
+fn autostart_intent_to_record(enabled: bool) -> Option<bool> {
+    Some(enabled)
 }
 
 /// Payload of the background account fetch: the display name plus, when it
@@ -601,8 +619,11 @@ impl PrimePhotoApp {
     /// UI flag from the OS state.
     ///
     /// **Persisted intent (PKG-3, user decision 2026-10-14):** a successful
-    /// change is recorded in `Config.autostart_enabled` (`Some(true)`/`Some(false)`)
-    /// and saved, so a deliberate "off" survives a restart. On an unsupported
+    /// change records the user's **intent** in `Config.autostart_enabled`
+    /// (`Some(true)`/`Some(false)`) and saves it, so a deliberate "off" survives
+    /// a restart. What is stored is the intent, **not** the OS state read back
+    /// afterwards — see `autostart_intent_to_record` for why that distinction is
+    /// load-bearing (SMAppService `RequiresApproval`). On an unsupported
     /// platform or a failing registration nothing is persisted.
     ///
     /// Never panics: on failure the cause is reported on the `log` facade and
@@ -613,14 +634,22 @@ impl PrimePhotoApp {
         } else {
             self.autostart.disable()
         };
-        // Report the real state, not the intent: a failed enable/disable must
-        // not leave the checkbox claiming something the OS does not do.
+        // The checkbox mirrors the real OS state, not the intent: a failed
+        // enable/disable must not leave it claiming something the OS does not
+        // do. `autostart_enabled` is UI state only — never persisted (see
+        // below).
         self.autostart_enabled = self.autostart.is_enabled().unwrap_or(false);
         match result {
             Ok(()) => {
-                // Record the achieved intent so it is re-applied on the next
-                // start (including a deliberate "off").
-                self.config.autostart_enabled = Some(self.autostart_enabled);
+                // Persist the user's **intent**, not the read-back OS state
+                // (PKG-3 veto trap, user decision 2026-10-17). A freshly
+                // registered SMAppService entry is first `RequiresApproval`,
+                // so `is_enabled()` would report `false` right after a
+                // successful `enable()`; persisting that would silently turn
+                // the intent into the `Some(false)` veto and the app would
+                // never register again. `Some(false)` therefore only ever
+                // comes from an explicit user "off".
+                self.config.autostart_enabled = autostart_intent_to_record(enabled);
                 if let Err(e) = self.config.save() {
                     log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
                     self.config_error =
@@ -1469,6 +1498,16 @@ mod tests {
             autostart_action(Some(false), true),
             AutostartAction::Nothing
         );
+    }
+
+    #[test]
+    fn autostart_intent_to_record_persists_the_intent_not_the_read_back() {
+        // The veto trap: after a successful `enable()` the OS read-back can
+        // still be `false` (SMAppService `RequiresApproval`). What gets
+        // persisted is the user's intent — `Some(true)` — so the intent never
+        // silently degrades into the `Some(false)` veto.
+        assert_eq!(autostart_intent_to_record(true), Some(true));
+        assert_eq!(autostart_intent_to_record(false), Some(false));
     }
 
     #[test]
