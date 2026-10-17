@@ -15,11 +15,6 @@ erledigt **und** verifiziert = **löschen** (Historie = Git).
 Priorisiert nach **Nutzen und Spec-Reife**, nicht nach Alter. Details stehen in den Abschnitten darunter —
 hier nur die Reihenfolge und die Spec-Lage (Recon-Abgleich am 2026-10-17).
 
-**0. Vordringlich — ein Live-Bug (2026-10-17):** nach der Rückkehr eines fehlenden Laufwerks setzt der
-Lauf **nicht** von selbst fort (Details im Abschnitt „Offen aus der Live-Abnahme 2026-10-17").
-**Sondiert (2026-10-17, am Code):** das Status-Lifting funktioniert, es fehlt allein der **Scan-Anstoß
-bei der Rückkehr**. Schnitt = Welle 5.33, **nach** 5.31/5.32 (nutzt deren Park-/Scan-Mechanik).
-
 **1. Kleine Hygiene, kein Recon nötig, sofort machbar:** `cargo fmt` einmalig (schaltet ein Gate frei)
 → Actions Node 20 → 24.
 
@@ -77,29 +72,16 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
 Zwei der drei Checks sind **bestanden und belegt** — Systemsprache (Finder-Start deutsch, ohne
 `LANG`/`LC_ALL`) und Autostart (Eintrag **sofort** sichtbar, **keine** Freigabe; damit ist auch das
 Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs/features/LIVE_ACCEPTANCE.md`,
-`docs/features/languages.md`, `docs/features/autostart.md`. Der dritte hat einen **Bug** aufgedeckt:
+`docs/features/languages.md`, `docs/features/autostart.md`. Der dritte hat einen **Bug** aufgedeckt
+(behoben in Welle 5.33):
 
-- [ ] **Rückkehr eines fehlenden Laufwerks setzt den Lauf nicht von selbst fort (Bug, Live 2026-10-17).**
-  Das Label **„Ordner nicht gefunden"** in Bernstein war korrekt (nicht „ANGEHALTEN") — aber als das
-  Laufwerk zurückkam, lief **kein** Upload von selbst an, und der Zeilenzustand war uneinheitlich
-  (ein Ordner „Warten", einmal **gar kein** Status). Unsere Doku sagt, dass `NotFound` bei
-  zurückkehrendem Pfad nach Idle hebt (`docs/features/backup-targets.md`, dort als „Live open"
-  markiert) — live **nicht** bestätigt.
-  **Sondiert (2026-10-17, am Code):** das **Status-Lifting funktioniert** — `sync_watchers` prüft in jedem
-  Durchlauf `source_status(f.path.is_dir(), f.status)` und hebt `NotFound` → `Idle` (und speichert). Es
-  fehlt allein der **Scan-Anstoß bei der Rückkehr**: unser Lauf startet nur über OS-Events (die für bereits
-  vorhandene Dateien nichts melden), über den Kaltstart-Pass (**einmal pro Prozess**) oder manuell — das
-  Original fordert bei der Ankunft dagegen aktiv `RequestScan` mit `ForceScan = !IsPaused`
-  (`HandleDeviceArrival`, §3.3.3) bzw. hebt in `HandleDisconnectedDevice` (§3.3.6) die Pausierung auf und
-  ruft `ResumeUploadsForSchedule`. Der uneinheitliche Zeilenzustand folgt daraus: der gehobene Ordner steht
-  als `Idle` mit `total > 0` („Warten"), ein nie gescannter als `Idle` mit `total == 0` (leer — die
-  dokumentierte Nie-gescannt-Falle).
-  Soll = Original: `docs/original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6 und §4.4 Schritt 5 sowie
-  `docs/original/SPEC_BACKGROUND_SYNC.md` §3/§3.5 („external-drive arrival", `ForceScan = !IsPaused`).
-  **Schnitt (Welle 5.33, nach 5.31/5.32):** die Rückkehr (`NotFound` → vorhanden) stößt einen **vollständigen
-  Scan dieses Ordners** an (kein Wasserzeichen-Vorschub) und nutzt dafür dieselbe Park-/Scan-Mechanik wie
-  Welle 5.31 (`pending_scans`/`handle_scan_requests`). Offen zu entscheiden: ob dieser Scan die **globale**
-  Pause des Users respektiert (unser `can_start`) — das Original hebt die *Schedule*-Pause selbst auf.
+- [ ] **Live-Re-Check offen: Rückkehr eines fehlenden Laufwerks.** Der Live-Bug vom 2026-10-17 (Label
+  „Ordner nicht gefunden" korrekt, aber **kein** Wiederanlauf; uneinheitlicher Zeilenzustand) ist in
+  Welle 5.33 umgesetzt und verifiziert (`83c4f07`): die Flanke `NotFound` → Pfad vorhanden stößt einen
+  **Vollscan des Bestands** an, flankengetriggert (einmal pro Rückkehr) und **ohne** Umweg um die globale
+  Pause. Offen bleibt allein die **Live-Bestätigung** an einem echten Laufwerk (samt der bis zu 30 s
+  Latenz nach dem Aufheben der Pause): `docs/features/backup-targets.md` („Still open") und
+  `docs/features/LIVE_ACCEPTANCE.md`.
 - **Nicht getrackt, weil dokumentiert:** ob `LSMinimumSystemVersion 11.0` (Info.plist) vs. Autostart ab
   macOS 13 je relevant wird — bekannte Degradation in den „unsupported"-Pfad
   (`docs/features/autostart.md`; „not live-checked" in `docs/features/LIVE_ACCEPTANCE.md`).
@@ -169,14 +151,20 @@ Ausdrücklich **ohne** Starttermin:
 - Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte Drosselung; Logout während
   laufendem Upload; Nav-Accessibility — Lage und Belege: `docs/features/scope.md` und
   `docs/features/change-detection.md`/`sign-out.md`.
-- **Kleinigkeiten aus den Verifikationen der Wellen 5.31/5.32 (bewusst zurückgestellt, nicht blockierend):**
+- **Kleinigkeiten aus den Verifikationen der Wellen 5.31–5.33 (bewusst zurückgestellt, nicht blockierend):**
   der Worker nimmt seinen Queue-Pop unter der `shared`-Sperre (`src/upload.rs`) — Worker serialisieren
   also am selben Mutex (Laufzeit, keine Korrektheit); der `ScansInFlight`-Guard in `inject_into_live_run`
   entsteht **nach** dem `active`-Check (`src/backup.rs`), das Fenster führt nur zu Ablehnung + Parken
   (kein Verlust); ein bereits laufender, erneut angestoßener Ordner wird pro Durchlauf erneut gewalkt und
   dann abgelehnt (Dedupe-Guard in `inject_into_live_run`) — Parken statt Doppel-Upload. Das
   Test-Scratch-Verzeichnis `prime-photos-test-store-<pid>` bleibt in `$TMPDIR` liegen (`src/folders.rs`),
-  konsistent zu den vorhandenen `prime-photos-folders-*`.
+  konsistent zu den vorhandenen `prime-photos-folders-*`. Aus **5.33** (Verifier-Beobachtungen, `low`):
+  das „stay parked" in `docs/features/backup-targets.md` gilt nur **ohne** aktiven Lauf (läuft einer, wird
+  der Ordner eingehängt und die Pause hält stattdessen die Worker an — die Zusage „kein Upload während der
+  Pause" bleibt in beiden Zweigen wahr); derselbe Absatz nennt die Hintergrund-Sync-Abhängigkeit des
+  Wiederanlaufs nicht explizit (sie steht in `change-detection.md`); ein **dauerhaft** fehlschlagendes
+  `store.save()` würde den Ordner pro 30-s-Pass erneut einparken (degenerativer I/O-Fall, kein
+  Doppel-Upload).
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
   `docs/original/SPEC_SCOPE_INVENTORY.md` und in `docs/features/scope.md`.
 
