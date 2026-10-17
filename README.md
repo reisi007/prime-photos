@@ -9,11 +9,24 @@ Prime Photos is **not** an official Amazon product and is **not** affiliated wit
 ## Status
 
 - **Pre-release / MVP.**
-- **macOS (Apple Silicon) is the primary target and the only platform that has been built and run-tested.**
-- **Windows and Linux are declared, equal targets**, but are **not run-tested**. The intended proof is a cross-compile check (`cargo check --target …`), which has **not been performed yet**.
-- No release has actually been triggered; the CI workflows are only syntactically checked.
+- **Two releases so far:** `v0.1.0` and `v0.1.1` (GitHub Releases, tag-driven — every `v*` tag runs the release workflow).
+- **macOS (Apple Silicon) is the primary target and the only platform that has been built *and* run-tested.** The macOS bundle is built locally, not in CI.
+- **Windows and Linux are declared, equal targets.** The release workflow **builds** them (Windows x64 on `windows-latest`, Linux x64 on `ubuntu-latest`), and both legs were green for `v0.1.0` and `v0.1.1` — they are **compiled in CI but not run-tested**. (An earlier draft of this file expected only a `cargo check --target …` cross-compile check; that is no longer the state of the pipeline.)
+- Windows binaries are **unsigned** (the Authenticode steps are skipped when the certificate secrets are absent); macOS bundles are **ad-hoc signed** and **not notarized**.
 
 See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
+
+## Download
+
+Current builds are attached to the [GitHub Releases](https://github.com/reisi007/prime-photos/releases) page. macOS is built locally and uploaded by hand; Windows/Linux come from the release workflow.
+
+| Asset | Platform | Install |
+|---|---|---|
+| `Prime-Photos-macos-arm64.dmg` | macOS (Apple Silicon) | Open the DMG, drag **Prime Photos** into `/Applications`. The bundle is ad-hoc signed and not notarized, so Gatekeeper blocks the first start — see [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §5. |
+| `Prime-Photos-windows-x64.zip` | Windows x64 | Unzip, then run `prime-photos.exe`. |
+| `Prime-Photos-linux-x64.tar.gz` | Linux x64 | `tar -xzf Prime-Photos-linux-x64.tar.gz`, then run `./prime-photos`. |
+
+Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §7.
 
 ## Features
 
@@ -60,6 +73,7 @@ Exact paths per platform: [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §6.
 
 ## Documentation
 
+- [`docs/features/FEATURES.md`](docs/features/FEATURES.md) — feature documentation (one file per feature).
 - [`docs/dev/BUILD.md`](docs/dev/BUILD.md) — build & run per platform, prerequisites, config paths.
 - [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) — release process, artifacts, signing, verification.
 - [`docs/protocol/PROTOCOL.md`](docs/protocol/PROTOCOL.md) — the wire protocol notes.

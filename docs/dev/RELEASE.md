@@ -98,10 +98,9 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
   berücksichtigt: das Skript liest das iconset aus `target/`.)
 - Kein `codesign --deep` (von Apple abgeraten). Details: `packaging/README.md`.
 - Das fertige Bundle wird bei Bedarf **manuell** an ein bestehendes GitHub Release gehängt — das ist
-  **nicht** automatisierter Teil des Workflows. Als Asset-Name gilt das Schema
-  `Prime-Photos-macos-arm64.{zip,dmg}`:
-  - **Zip** (erhält die Bundle-Struktur):
-    `ditto -c -k --keepParent "Prime Photos.app" Prime-Photos-macos-arm64.zip`
+  **nicht** automatisierter Teil des Workflows. Ausgeliefert wird **nur das DMG** (Entscheidung
+  2026-10-17: für macOS ist das ZIP-Asset redundant); als Asset-Name gilt das Schema
+  `Prime-Photos-macos-arm64.dmg`:
   - **DMG** (lokale Quelle war `target/dist/PrimePhotos.dmg`): `gh release upload <tag> <datei>`
 
   Der **Asset-Name ist der Dateiname** der hochgeladenen Datei. `gh release upload <tag> <datei>#<text>`
@@ -112,8 +111,8 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
 
 ### Ablauf beim Release (genau diese Reihenfolge)
 
-Zuerst die `.app` bauen, **dann** Zip und DMG — beide entstehen aus **demselben** Bundle; sonst
-weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liegen in `target/dist/`.
+Zuerst die `.app` bauen, **dann** das DMG — es entsteht aus **demselben** Bundle. Alle erzeugten
+Dateien liegen in `target/dist/`.
 
 1. **Commit-Stempel erzwingen** — `touch` **vor** dem Build aus Schritt 2:
 
@@ -133,14 +132,7 @@ weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liege
    # Ergebnis: target/dist/Prime Photos.app
    ```
 
-3. **Zip** — im `target/dist/`:
-
-   ```sh
-   cd target/dist
-   ditto -c -k --keepParent "Prime Photos.app" Prime-Photos-macos-arm64.zip
-   ```
-
-4. **DMG** — im `target/dist/`, Volname `Prime Photos`:
+3. **DMG** — im `target/dist/`, Volname `Prime Photos`:
 
    ```sh
    hdiutil create -volname "Prime Photos" -srcfolder "Prime Photos.app" -ov -format UDZO Prime-Photos-macos-arm64.dmg
@@ -150,7 +142,7 @@ weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liege
    `hdiutil` meldet sich inzwischen selbst als veraltet und verweist auf einen Nachfolger —
    Details siehe der Hinweis am Ende dieses Abschnitts.
 
-5. **App installieren** (vom Repo-Wurzelverzeichnis aus):
+4. **App installieren** (vom Repo-Wurzelverzeichnis aus):
 
    ```sh
    rm -rf "/Applications/Prime Photos.app"
@@ -162,7 +154,7 @@ weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liege
    `ditto` statt `cp -R`, weil es Signatur und Bundle-Struktur erhält. Der Startweg bei
    **unsignierten Downloads** ist §5; das hier lokal installierte Bundle betrifft das nicht.
 
-6. **Ans GitHub-Release hängen:** Zip und DMG hochladen (beide aus demselben Bundle, siehe oben).
+5. **Ans GitHub-Release hängen:** das DMG hochladen.
    Der **Asset-Name ist der Dateiname** — siehe der vorstehende Aufzählungspunkt.
 
 > **Nicht verifiziert:** die `hdiutil`-Aufrufe (`attach`/`detach`/`create`) warnen inzwischen und
@@ -236,11 +228,14 @@ Unsigniert/ohne gültige Signatur ⇒ SmartScreen: „Weitere Informationen" →
 
 **macOS**
 
+DMG öffnen und **Prime Photos** nach `/Applications` ziehen (Finder-Weg); per Terminal:
+
 ```sh
-ditto -x -k Prime-Photos-macos-arm64.zip .            # oder Doppelklick im Finder
-codesign --verify --verbose=2 "Prime Photos.app"      # gültige Signatur?
-codesign -dv "Prime Photos.app"                        # Authority / "Signature=adhoc"
-spctl -a -vvv --type execute "Prime Photos.app"        # Gatekeeper-Bewertung
+hdiutil attach Prime-Photos-macos-arm64.dmg
+ditto "/Volumes/Prime Photos/Prime Photos.app" "/Applications/Prime Photos.app"
+codesign --verify --verbose=2 "/Applications/Prime Photos.app"   # gültige Signatur?
+codesign -dv "/Applications/Prime Photos.app"                    # Authority / "Signature=adhoc"
+spctl -a -vvv --type execute "/Applications/Prime Photos.app"    # Gatekeeper-Bewertung
 ```
 
 Bei einem ad-hoc-/selbstsignierten Bundle meldet `spctl` „rejected" → Workaround aus §5.
@@ -297,6 +292,11 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   | `Prime-Photos-macos-arm64.dmg` | 9.426.818 | `51a4f9425be8a461c381eefa48aca892f816fcd77039ff48fb81573dd1249446` |
   | `Prime-Photos-macos-arm64.zip` | 8.489.069 | `7a18cb9a3851762b9c94458d90f7e407d1e380f55fa27118156981ce0cb83b7b` |
   | `Prime-Photos-windows-x64.zip` | 8.579.930 | `ca02d28cc4561b1a465606db683dce26cdf7e6bfbd546fbf476e16fcc073e4b7` |
+
+  Die Tabelle ist der **historische** Beleg des Release-Stands vom 2026-10-17. Das ZIP-Asset
+  `Prime-Photos-macos-arm64.zip` wurde **am 2026-10-17 nachträglich entfernt** (Entscheidung:
+  für macOS wird nur noch das DMG ausgeliefert) — `v0.1.1` trägt seither genau drei Assets
+  (`linux-x64.tar.gz`, `macos-arm64.dmg`, `windows-x64.zip`); `v0.1.0` war ohnehin DMG-only.
 
   Zip und DMG wurden **manuell** ans Release gehängt (§4) — der Workflow baut nur Windows/Linux.
 - **macOS-Bundle (lokal aus dem Tag gebaut, §4):** `./packaging/make-app.sh` mit `VERSION=0.1.1`,
