@@ -19,6 +19,11 @@ Lauf **nicht** von selbst fort (Details im Abschnitt „Offen aus der Live-Abnah
 **Erst sondieren, dann schneiden** — der Bug kann in der Rückkehr-Erkennung, im Status-Lifting oder im
 Anstoßen des Laufs sitzen.
 
+**0b. In Umsetzung (Welle 5.31, User-Entscheidung 2026-10-17):** ein Ordner, der während eines laufenden
+Uploads hinzugefügt wird, wird **parallel eingelesen** und seine Dateien **in den laufenden Lauf
+aufgenommen**, statt still verworfen zu werden. Gleiche Fehlerklasse wie 0 (fehlender Auslöser). Herkunft
+und Code-Belege: Abschnitt „Offen aus der Live-Nutzung 2026-10-17".
+
 **1. Kleine Hygiene, kein Recon nötig, sofort machbar:** `cargo fmt` einmalig (schaltet ein Gate frei)
 → Actions Node 20 → 24.
 
@@ -91,6 +96,23 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
 - **Nicht getrackt, weil dokumentiert:** ob `LSMinimumSystemVersion 11.0` (Info.plist) vs. Autostart ab
   macOS 13 je relevant wird — bekannte Degradation in den „unsupported"-Pfad
   (`docs/features/autostart.md`; „not live-checked" in `docs/features/LIVE_ACCEPTANCE.md`).
+
+## Offen aus der Live-Nutzung 2026-10-17 (mehrere Ordner schnell nacheinander hinzufügen)
+
+- [ ] **Ein während eines laufenden Uploads hinzugefügter Ordner wird nicht gesichert (Bug, Live 2026-10-17).**
+  Beobachtung: drei Ordner schnell hintereinander hinzugefügt — gesichert wurde nur der erste. Ursache am
+  Code belegt: der Dialog ruft nach dem Speichern **sofort** `start_folder_upload([idx])`
+  (`src/backup_config.rs:214`), und das **bricht bei laufendem Upload ab** — nur die Log-Zeile
+  `Es läuft bereits ein Upload.` (`src/backup.rs:1285-1288`, Guard `upload_busy()`, `:1275`). Eine
+  Vormerkung gibt es nicht, und der Hintergrund-Supervisor holt es **nicht** nach: die
+  Start-Sicherheitsnetz-Prüfung `background_sync_pass` läuft **einmal pro Prozess**
+  (`src/backup.rs:1674-1685`, `BG_SYNC_STARTED`), danach entscheiden nur OS-Events; das Park-Feld `pending`
+  wird **nur** aus Wächter-Events gefüllt (`map_to_folders` `:852`, `park_paths` `:878`) — ein neu
+  hinzugefügter Ordner erzeugt kein Event, und beim Armieren des Wächters meldet macOS keine bereits
+  vorhandenen Dateien. Verloren geht damit der **vorhandene Bestand** eines während eines Laufs
+  hinzugefügten Ordners (nachgeholt erst beim nächsten App-Start); spätere **Änderungen** in ihm holt der
+  Park-Pfad korrekt nach. Soll (User-Entscheidung 2026-10-17): Einlesen **parallel** zum laufenden Lauf,
+  Dateien **in den laufenden Lauf einhängen** — Welle 5.31, Doku `docs/features/change-detection.md`.
 
 ## Offen aus dem geschlossenen Test 2026-10-16
 
