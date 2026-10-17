@@ -101,8 +101,8 @@ Upload-Algorithmus — der MD5 wird immer gelesen, gehasht, verglichen. Die
 | Schritt | Code | Bedingung |
 |---|---|---|
 | **Stat** (size + mtime) | `DedupIndex::stat_matches` (`src/dedup.rs:355`) | exakter Pfad + gleiche Größe + gleiche mtime |
-| Skip ohne Lesen | `src/upload.rs:485` | `dedup_on` und `stat_matches` ⇒ `Some(origin)` |
-| **MD5** (ganze Datei) | `md5::compute` über den gelesenen Inhalt (`src/upload.rs:544`) | Datei gelesen, Hash berechnet |
+| Skip ohne Lesen | `src/upload.rs:541` | `dedup_on` und `stat_matches` ⇒ `Some(origin)` |
+| **MD5** (ganze Datei) | `md5::compute` über den gelesenen Inhalt (`src/upload.rs:603`) | Datei gelesen, Hash berechnet |
 | Skip nach Hash | `DedupIndex::should_skip` (`src/dedup.rs:284`) | exakter Pfad + gleicher MD5 |
 | Cross-path Skip | `DedupIndex::content_seen` (`src/dedup.rs:323`) | MD5 irgendwo im Index (Pfad egal) |
 
@@ -126,11 +126,11 @@ Grenze, kein Bug.
 |---|---|---|
 | **Request** | `POST /v2/upload` (Host aus `uploadServiceUrl`) | `POST content-<zone>.drive.amazonaws.com/v2/upload` |
 | **Antwort bei Duplikat** | **409 Conflict** | **409 Conflict** |
-| **Ursache — Inhalt** | `ErrorType ∈ {MD5_DUPLICATE, DuplicatesConflictError}` — **am Code geprüft** (`HandleNodeResponse`: bei Antwort-Status `Conflict` und übereinstimmendem MD5 in den Inhaltseigenschaften der Antwort) | `DuplicatesConflictError` / `MD5_DUPLICATE` (case-insensitive, `src/prime_photos.rs:368`) |
+| **Ursache — Inhalt** | `ErrorType ∈ {MD5_DUPLICATE, DuplicatesConflictError}` — **am Code geprüft** (`HandleNodeResponse`: bei Antwort-Status `Conflict` und übereinstimmendem MD5 in den Inhaltseigenschaften der Antwort) | `DuplicatesConflictError` / `MD5_DUPLICATE` (case-insensitive, `src/prime_photos.rs:449`) |
 | **Ursache — Name** | Fehler-Typ `NameAlreadyExists` — **am Code geprüft** (`UploadHelper.RetryForNameConflict`: bei abweichendem MD5 und einer der beiden Schreibweisen des Namenskonflikt-Typs) | `NameAlreadyExists` |
-| **Felder** | `errorDetails.conflictNodeIds` (Node-Ids der Konflikt-Knoten) | `ResponseUploadFailDetails.conflict_node_ids` (`src/prime_photos.rs:314`) |
-| **Normalisierung** | **Am Code geprüft** (`HandleNodeResponse`): 409 mit MD5-Match ⇒ Status `OK`, Knoten via `SaveNode` gecacht, dann `FileIgnoredException` ⇒ `Ignored` („Zuvor hochgeladen") | `FileOutcome::ConflictSkipped` (`src/upload.rs:305`), `Origin::ContentSkip` bei Content-Duplicate (`src/upload.rs:816`) |
-| **Name-Konflikt** | **Am Code geprüft** (`UploadViaSimpleOrLegacyUploader`): `NameConflictStrategy.GetConflictResolution` → `FileUploadNameConflictException` → Error-Pfad, gelöst durch `ConflictResolution` | `resolve_conflict` (`src/upload.rs:702`) oder automatisch `Replace`→PUT |
+| **Felder** | `errorDetails.conflictNodeIds` (Node-Ids der Konflikt-Knoten) | `ResponseUploadFailDetails.conflict_node_ids` (`src/prime_photos.rs:323`) |
+| **Normalisierung** | **Am Code geprüft** (`HandleNodeResponse`): 409 mit MD5-Match ⇒ Status `OK`, Knoten via `SaveNode` gecacht, dann `FileIgnoredException` ⇒ `Ignored` („Zuvor hochgeladen") | `FileOutcome::ConflictSkipped` (`src/upload.rs:358`), `Origin::ContentSkip` bei Content-Duplicate (`src/upload.rs:933`) |
+| **Name-Konflikt** | **Am Code geprüft** (`UploadViaSimpleOrLegacyUploader`): `NameConflictStrategy.GetConflictResolution` → `FileUploadNameConflictException` → Error-Pfad, gelöst durch `ConflictResolution` | `resolve_conflict` (`src/upload.rs:375`) oder automatisch `Replace`→PUT |
 
 **Unterschied „Inhalt schon da" vs. „Name schon da":**
 
@@ -203,12 +203,12 @@ Zielknoten (Korrektur in `SPEC_CONTENT_FILTER_DESTINATION.md` §8) —
 `None` ⇒ `"NONE"`, `Rename` ⇒ `"RENAME"`, `RenameExisting` ⇒ `"RENAME_EXISTING"`.
 
 **Unser Code (Reihenfolge):**
-1. Stat-Skip (`src/upload.rs:485`)
-2. MD5-Skip (Pfad+MD5, `src/upload.rs:558`)
-3. Cross-path Content-Skip (`src/upload.rs:602`)
+1. Stat-Skip (`src/upload.rs:541`)
+2. MD5-Skip (Pfad+MD5, `src/upload.rs:617`)
+3. Cross-path Content-Skip (`src/upload.rs:661`)
 4. Upload POST
 5. Bei 409: Content-Duplicate ⇒ Skip; Name-Konflikt ⇒ `resolve_conflict` oder
-   automatisch `Replace`→PUT / `SaveAsNew`→Rename (`src/upload.rs:640-726`)
+   automatisch `Replace`→PUT / `SaveAsNew`→Rename (`src/upload.rs:747-972`)
 
 ---
 
@@ -216,11 +216,11 @@ Zielknoten (Korrektur in `SPEC_CONTENT_FILTER_DESTINATION.md` §8) —
 
 | Zustand | Original | Unser Code | Quelle |
 |---|---|---|---|
-| „Zuvor hochgeladen" / `Ignored` | PreUploadCheck-Treffer (lokal, kein Request) **oder** 409-Inhalts-Duplikat — **am Code geprüft** (`TransferStatus.Ignored = 0x400`) | `Origin::ContentSkip`, `conflict_skipped` | `src/upload.rs:494,567,612` |
+| „Zuvor hochgeladen" / `Ignored` | PreUploadCheck-Treffer (lokal, kein Request) **oder** 409-Inhalts-Duplikat — **am Code geprüft** (`TransferStatus.Ignored = 0x400`) | `Origin::ContentSkip`, `conflict_skipped` | `src/upload.rs:551,627,671` |
 | „Verworfen" / `Skipped` | `Ignore`-Politik bei Namenskonflikt — **am Code geprüft** (`TransferStatus.Skipped = 0x800`) | — (wir haben keinen separaten `Skipped`-Zustand; `Ignore` ⇒ `ConflictSkipped`) | — |
-| „Erfolgreich hochgeladen" | 200/201 | `FileOutcome::Uploaded`, `uploaded_new` | `src/upload.rs:729` |
-| Unverändert (Stat-Skip) | **nicht vorgesehen** (kein Stat-Pfad) | `Origin::Uploaded`, `unchanged_skipped` | `src/upload.rs:498` |
-| Fehler | 409-Name-Konflikt, andere HTTP-Fehler | `FileOutcome::Failed`, `failed` | `src/upload.rs:761` |
+| „Erfolgreich hochgeladen" | 200/201 | `FileOutcome::Uploaded`, `uploaded_new` | `src/upload.rs:853` |
+| Unverändert (Stat-Skip) | **nicht vorgesehen** (kein Stat-Pfad) | `Origin::Uploaded`, `unchanged_skipped` | `src/upload.rs:555` |
+| Fehler | 409-Name-Konflikt, andere HTTP-Fehler | `FileOutcome::Failed`, `failed` | `src/upload.rs:893` |
 
 **Bewusste Abweichung:** Unser Stat-Pfad erzeugt den Zustand „unverändert" (diese
 Datei wurde schon hochgeladen) — das Original kennt den nicht, weil es nicht
@@ -245,24 +245,24 @@ getrennte Zähler.
 
 | Thema | Original | Unser Stand | Beleg (unser Code) | Bewusst? |
 |---|---|---|---|---|
-| **MD5-Identität** | ja, hex lower-case | ja | `md5::compute` über die Bytes, als Hex ausgegeben (`src/upload.rs:544`) | Parität |
-| **Cross-path Dedup** | `GetNodeByMd5` über `cloud.db` | `DedupIndex::content_seen` über `ix_uploads_md5` | `src/dedup.rs:323`, `src/upload.rs:602` | **Umgesetzt** (2026-10-14) |
-| **Stat-Schnellpfad** | **nein** | ja (size+mtime) | `src/dedup.rs:355`, `src/upload.rs:485` | **Bewusste Erweiterung** |
-| **`origin`-Trennung** | **nein** | ja (`uploaded` / `content_skip`) | `src/dedup.rs:41`, `src/upload.rs:820` | **Bewusste Erweiterung** |
+| **MD5-Identität** | ja, hex lower-case | ja | `md5::compute` über die Bytes, als Hex ausgegeben (`src/upload.rs:603`) | Parität |
+| **Cross-path Dedup** | `GetNodeByMd5` über `cloud.db` | `DedupIndex::content_seen` über `ix_uploads_md5` | `src/dedup.rs:323`, `src/upload.rs:661` | **Umgesetzt** (2026-10-14) |
+| **Stat-Schnellpfad** | **nein** | ja (size+mtime) | `src/dedup.rs:355`, `src/upload.rs:541` | **Bewusste Erweiterung** |
+| **`origin`-Trennung** | **nein** | ja (`uploaded` / `content_skip`) | `src/dedup.rs:41`, `src/upload.rs:549` | **Bewusste Erweiterung** |
 | **`node_id`-Bindung** | `cloud.db` Knoten | `uploads.node_id` | `src/dedup.rs:462` | **Umgesetzt** (2026-10-16) |
 | **NFC-Normalisierung** | **nein** (roh NFD auf macOS) | **ja** | `crate::text::nfc` (`src/urls.rs:344`) | **Bewusste Abweichung**, dokumentiert |
-| **PreUploadCheck** | ja, vor jedem Request | äquivalent: Stat→MD5→content_seen vor POST | `src/upload.rs:484-627` | Parität (implementiert als Worker-Schleife) |
+| **PreUploadCheck** | ja, vor jedem Request | äquivalent: Stat→MD5→content_seen vor POST | `src/upload.rs:540-686` | Parität (implementiert als Worker-Schleife) |
 | **Knoten-Cache (`cloud.db`)** | ja | **nein** | — | **Bewusste Grenze** (AGENTS.md) |
-| **Name-Konflikt-Erkennung** | lokal vor Request | nur aus 409 | `src/upload.rs:702` | **Lücke** — pragmatisch akzeptiert |
-| **409-Ursache gesplitzt** | ja | ja (`conflict_cause`, `is_content_duplicate_code`) | `src/prime_photos.rs:368` | **Umgesetzt** (2026-10-15) |
-| **`Replace` via PUT** | ja (Überschreiben gesetzt plus Knoten-Id) | ja (`PUT /v2/upload/<nodeId>` mit POST-Query-Satz) | `src/urls.rs:374`, `src/prime_photos.rs:1203` | **Umgesetzt** (2026-10-15) |
-| **Sichere Ersetz-Regel** | **nicht belegt** | nur bei `node_id`-Bindung | `src/prime_photos.rs:413` (`should_replace_after_conflict`) | **Bewusste Erweiterung** |
+| **Name-Konflikt-Erkennung** | lokal vor Request | nur aus 409 | `src/upload.rs:766` | **Lücke** — pragmatisch akzeptiert |
+| **409-Ursache gesplitzt** | ja | ja (`conflict_cause`, `is_content_duplicate_code`) | `src/prime_photos.rs:449` | **Umgesetzt** (2026-10-15) |
+| **`Replace` via PUT** | ja (Überschreiben gesetzt plus Knoten-Id) | ja (`PUT /v2/upload/<nodeId>` mit POST-Query-Satz) | `src/urls.rs:374`, `src/prime_photos.rs:1302` | **Umgesetzt** (2026-10-15) |
+| **Sichere Ersetz-Regel** | **nicht belegt** | nur bei `node_id`-Bindung | `src/prime_photos.rs:494` (`should_replace_after_conflict`) | **Bewusste Erweiterung** |
 | **Apple-Photos-Heuristik** | ja | **nein** | — | Bewusst außen vor |
 | **Dedup-Default** | Onboarding an, Post-Off | `true` | `src/folders.rs` (`default_true`) | Parität (dokumentiert) |
 | **Konflikt-Default** | `None` („Jedes Mal nachfragen") | Application `Replace` | `src/folders.rs` | **Bewusste Abweichung** |
 | **„Nicht noch einmal fragen"** | pro Schedule, dauerhaft | pro Ordner, dauerhaft | `src/backup.rs` (`remember_conflict_in_folder`) | Parität |
 | **Dedup pro Ziel** | ja (`dedupe_photos_videos`) | ja (`BackupFolder.dedup`) | `src/folders.rs` | Parität |
-| **Server 409 bei `RENAME`** | (nicht belegt) | ja (Content-Duplikat auch mit `RENAME`) | `src/upload.rs:641` | Live belegt (2026-10-15) |
+| **Server 409 bei `RENAME`** | (nicht belegt) | ja (Content-Duplikat auch mit `RENAME`) | `src/upload.rs:700` | Live belegt (2026-10-15) |
 
 ---
 
@@ -351,19 +351,19 @@ getrennte Zähler.
   `PendingNodeCompleting = 7`
 - `Amazon.CloudDrive.Database.ManualUpload.SuppressFileUpload` — `Deduplication`
 
-**Unser Code (neu geprüft, 2026-10-16):**
+**Unser Code (neu geprüft, 2026-10-16; Zeilenverweise nachgezogen 2026-10-17):**
 - `src/dedup.rs:355` — `stat_matches`
 - `src/dedup.rs:284` — `should_skip`
 - `src/dedup.rs:323` — `content_seen`
 - `src/dedup.rs:462` — `node_id_for`
 - `src/dedup.rs:41` — `Origin` enum
-- `src/upload.rs:485` — Stat-Skip im Worker
-- `src/upload.rs:544` — MD5-Berechnung
-- `src/upload.rs:558` — `should_skip` Aufruf
-- `src/upload.rs:602` — `content_seen` Aufruf
-- `src/upload.rs:640-726` — 409-Behandlung und Konflikt-Logik
-- `src/prime_photos.rs:368` — `is_content_duplicate_code`
-- `src/prime_photos.rs:413` — `should_replace_after_conflict`
+- `src/upload.rs:541` — Stat-Skip im Worker
+- `src/upload.rs:603` — MD5-Berechnung
+- `src/upload.rs:617` — `should_skip` Aufruf
+- `src/upload.rs:661` — `content_seen` Aufruf
+- `src/upload.rs:747-972` — 409-Behandlung und Konflikt-Logik
+- `src/prime_photos.rs:449` — `is_content_duplicate_code`
+- `src/prime_photos.rs:494` — `should_replace_after_conflict`
 - `src/urls.rs:344` — NFC-Normalisierung in `upload_query`
 - `src/urls.rs:374` — `replace_upload_url`
 

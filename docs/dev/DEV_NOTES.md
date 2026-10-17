@@ -168,3 +168,13 @@ der User hat schlicht wieder zurückgestellt.
 
 **Regel:** ein Wechsel — zurück auf dieses oder auf ein anderes Modell — braucht eine **neue**
 User-Entscheidung, nicht den alten, zurückgenommenen Eintrag.
+
+## 12. Zeilenverweise auf unseren Code in den Recon-Specs sind Stichtage
+
+Die `docs/original/SPEC_*.md` zitieren unseren Code als `src/<datei>:<zeile>` — diese
+Nummern sind **Momentaufnahmen** und driften mit jedem Umbau (z. B.
+`is_content_duplicate_code` in `SPEC_FILE_IDENTITY.md`: als `:368` genannt, richtig ist
+`:449`; der `content_seen`-Aufruf als `:602` genannt, richtig ist `:661`). **Regel:**
+beim Lesen eines solchen Verweises die **Symbolstelle** nachschlagen
+(Codegraph/`grep -n`) statt der Zahl zu vertrauen; wer so eine Datei anfasst, korrigiert
+die Verweise, die er verifiziert hat. Bestehende Abschnitte werden nicht umnummeriert.
