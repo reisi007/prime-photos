@@ -92,6 +92,12 @@ fehlt `NSHighResolutionCapable`, die Darstellung erscheint pixelig. Das gebaute
 | Warnungen | **Baseline 0**, maschiniell erzwungen über `[lints.rust] warnings = "deny"` in `Cargo.toml` — jede Warnung ist ein harter Fehler, nichts wird mit `#[allow]` zugedeckt |
 | `cargo fmt --check` | **kein Gate** — das Repo ist nicht fmt-clean, ein fmt-Diff ist kein Regressionssignal |
 
+**Warum die Warnungs-Baseline 0 ist (User-Entscheidung):** die Warnungen wurden **nicht** pauschal
+mit `#[allow(...)]` stumm gestellt — das beseitigt das Rauschen, versteckt aber genau die toten
+Funktionen, um die es geht. Ebenfalls verworfen: nur die **future-incompatible** Warnung zu fixen
+und die Baseline bei sechs zu lassen — der User wollte **0** als Vergleichsbasis. Deshalb ist
+„Warnungen" ein hartes Gate und keine Sammlung von Ausnahmen.
+
 ## 9. Modul-Struktur (User-Entscheidung 2026-10-13)
 
 `src/main.rs` war ein Monolith (~1780 Zeilen: State + Rendering + Upload-Worker + Formular +
@@ -149,4 +155,16 @@ byteweise gleich, nur Sichtbarkeit (`pub(crate)`) und Modulzugehörigkeit änder
 - **Reserve bei Wiederauftreten:** `npm i -g rea-agents@6.4.0` + MCP-Command auf den absoluten
   Binary-Pfad (kein Netz im Startpfad); Maschinen-DNS prüfen (Public Resolver flackerten hinter
   dem 10.x-LAN).
-- Protokoll/Begründung: `AGENTS.todo.md` „OpenCode-MCP: rea-Server".
+- Protokoll/Begründung: Git-Historie (`git log -p -- AGENTS.todo.md`); der damalige
+  Ledger-Abschnitt „OpenCode-MCP: rea-Server" wurde mit `dace89b` entfernt.
+
+## 11. Umsetzer-/Verifier-Modell: `deepseek-v4.1-flash` (2026-10-14 gesetzt, 2026-10-15 zurückgenommen)
+
+Das Modell war am **2026-10-14** als Umsetzer- und Verifier-Modell gesetzt und am **2026-10-15**
+wieder zurückgenommen — es lief genau einen Tag, ohne dass ein Fehler oder Gate daran schuld war;
+der User hat schlicht wieder zurückgestellt.
+
+**Stand 2026-10-16:** seit der Kürzung von `AGENTS.md` ist das Modell dort **nicht mehr** fixiert.
+
+**Regel:** ein Wechsel — zurück auf dieses oder auf ein anderes Modell — braucht eine **neue**
+User-Entscheidung, nicht den alten, zurückgenommenen Eintrag.
