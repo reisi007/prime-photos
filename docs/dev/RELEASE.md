@@ -53,7 +53,10 @@ läuft damit **nur, wenn beide Beine grün sind** — sonst entsteht kein Releas
 - Beide bauen mit `cargo build --release --locked`.
 - Der Linux-Job installiert die System-Abhängigkeiten aus `BUILD.md` §5:
   `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libssl-dev pkg-config build-essential`.
-- **Es werden keine SHA256-Prüfsummen erzeugt** (nicht implementiert).
+- **Es werden keine SHA256-Prüfsummen erzeugt** (nicht implementiert) — im Release liegt **keine**
+  mitgelieferte Prüfsummendatei. Davon zu unterscheiden ist der `sha256`-**Digest**, den die
+  GitHub-API **je Asset** liefert (abfragbar z. B. mit `gh release view <tag> --json assets`); das ist
+  keine Datei im Release.
 
 ---
 
@@ -94,9 +97,22 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
   per `CFBundleIconFile = AppIcon` darauf. (`CARGO_TARGET_DIR` wird dabei nicht
   berücksichtigt: das Skript liest das iconset aus `target/`.)
 - Kein `codesign --deep` (von Apple abgeraten). Details: `packaging/README.md`.
-- Das fertige Bundle wird bei Bedarf **manuell** an ein bestehendes GitHub Release gehängt
-  (ein `.zip` per `ditto -c -k --keepParent "Prime Photos.app" Prime-Photos-macos-arm64.zip`
-  erhält die Bundle-Struktur). Das ist **nicht** automatisierter Teil des Workflows.
+- Das fertige Bundle wird bei Bedarf **manuell** an ein bestehendes GitHub Release gehängt — das ist
+  **nicht** automatisierter Teil des Workflows. Als Asset-Name gilt das Schema
+  `Prime-Photos-macos-arm64.{zip,dmg}`:
+  - **Zip** (erhält die Bundle-Struktur):
+    `ditto -c -k --keepParent "Prime Photos.app" Prime-Photos-macos-arm64.zip`
+  - **DMG** (lokale Quelle war `target/dist/PrimePhotos.dmg`): `gh release upload <tag> <datei>`
+
+  Der **Asset-Name ist der Dateiname** der hochgeladenen Datei. `gh release upload <tag> <datei>#<text>`
+  setzt **nur das `label`-Feld**, **nicht** den Asset-Namen: ein Upload von `PrimePhotos.dmg` mit
+  `#Prime-Photos-macos-arm64.dmg` hieß danach weiterhin `PrimePhotos.dmg`. Korrekturweg — lokale Datei
+  korrekt benennen, dann das falsch benannte Asset löschen und neu hochladen:
+  `gh release delete-asset <tag> <falscher-name> --yes`.
+
+> **Nicht verifiziert:** die `hdiutil`-Aufrufe (`attach`/`detach`/`create`) warnen inzwischen und
+> verweisen auf `diskutil image attach --mountOptions nobrowse --readOnly`, `diskutil eject` bzw.
+> `diskutil image create from/blank --volumeName --format`. Ob/wann hier umgestellt wird, ist offen.
 
 ---
 
@@ -184,15 +200,45 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
 
 ---
 
-## 9. Nicht verifiziert / offen
+## 9. Belegter Stand und offene Punkte
 
-- **Kein Release wurde tatsächlich ausgelöst.** Die Workflows sind nur syntaktisch geprüft
-  (YAML-`safe_load`), kein CI-Lauf fand statt.
-- Windows-Authenticode-Signatur (§3) nicht ausgeführt; `signtool`-Verfügbarkeit nicht geprüft.
-- macOS-Notarisierung/Stapling nicht eingerichtet und nicht geprüft.
-- Keine SHA256-Prüfsummen im Release (nicht implementiert).
-- Ob `softprops/action-gh-release@v2` + `actions/download-artifact@v4` in dieser Kombination das
-  gewünschte Release erzeugen, ist nicht durch einen echten Lauf belegt.
+**Durch den ersten echten Lauf belegt (2026-10-17):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.0` auf Commit `1de3e2b`; GitHub-Release `v0.1.0`,
+  veröffentlicht 2026-10-17T09:30:37Z, **nicht** Draft, **nicht** Pre-Release.
+- **Run:** GitHub-Actions-Run `39020871814` (`release.yml`, ausgelöst durch den Tag-Push). Jobs
+  `Build linux-x64` (5m03s), `Build windows-x64` (7m59s), `Publish GitHub Release` (12s) — alle grün.
+  Damit ist auch die Kombination `softprops/action-gh-release@v2` + `actions/download-artifact@v4`
+  **durch einen echten Lauf belegt**.
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.296.488 | `f9d0a2039f1fd028e98ea78e7edb6e792337245c411a65778f4c17d33570c8e4` |
+  | `Prime-Photos-windows-x64.zip` | 8.479.078 | `5233e6e0b72c6e2b9775d022420edcec14a5a97cf3a335870477aaed5cbae4c4` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.429.019 | `a2cb9a520ef83ad137f7171758507c8194ab92c6a1ceabdb7127bf4e8ab70843` |
+
+  Das DMG wurde **manuell** angehängt (§4); sein sha256 nach dem Upload war identisch mit der lokalen
+  Datei.
+- **Release-Notes:** `generate_release_notes: true` erzeugte beim **ersten** Release nur die Zeile
+  `**Full Changelog**: https://github.com/reisi007/prime-photos/commits/v0.1.0` (kein Vorgänger-Tag,
+  also keine Commit-Liste); die Beschreibung wurde danach von Hand ersetzt. Titel des Releases:
+  `v0.1.0`.
+- **DMG-Inhalt geprüft:** gemountet → `CFBundleShortVersionString = 0.1.0`, `CFBundleVersion = 1`,
+  `CFBundleIdentifier = de.reisinger.prime-photos`; `codesign --verify --deep --strict` auf das
+  enthaltene Bundle **ok**; `hdiutil verify` **VALID**.
+
+**Weiterhin offen / nicht verifiziert:**
+
+- Windows-Authenticode-Signatur (§3) nicht ausgeführt; `signtool`-Verfügbarkeit auf dem Runner nicht
+  geprüft.
+- macOS-Notarisierung/Stapling (§6) nicht eingerichtet und nicht geprüft.
+- Keine SHA256-Prüfsummen-**Dateien** im Release (nicht implementiert); die GitHub-API liefert je
+  Asset aber ein `sha256`-Digest (§2).
+- **Beobachtung (nicht Teil dieses Stands):** beide Job-Arten melden `Node.js 20 is deprecated` für
+  `actions/checkout@v4`, `actions/upload-artifact@v4`, `actions/download-artifact@v4` (werden auf
+  Node.js 24 gezwungen); außerdem der Hinweis, dass `ubuntu-latest` ab 2026-10-19 auf Ubuntu 26
+  migriert. Die Anhebung ist eine eigene, spätere Welle.
 
 ---
 
