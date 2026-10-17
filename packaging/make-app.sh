@@ -15,8 +15,8 @@
 #
 # Umgebungsvariablen:
 #   SKIP_BUILD=1                 überspringt `cargo build --release`
-#   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.1.0)
-#   BUILD=<n>                    CFBundleVersion             (Standard: 1)
+#   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.1.1)
+#   BUILD=<n>                    CFBundleVersion             (Standard: 2)
 #   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; "-" = ad-hoc (Standard)
 #   DIST_DIR=<dir>               Ausgabeordner des Bundles (Standard: target/dist)
 #
@@ -36,8 +36,8 @@ cd "${REPO_ROOT}"
 APP_NAME="Prime Photos"
 BIN_NAME="prime-photos"
 
-VERSION="${VERSION:-0.1.0}"
-BUILD="${BUILD:-1}"
+VERSION="${VERSION:-0.1.1}"
+BUILD="${BUILD:-2}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
 BIN_SRC="target/release/${BIN_NAME}"
