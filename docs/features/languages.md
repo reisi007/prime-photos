@@ -10,6 +10,18 @@ and could alter the sign-in page.
 - The UI language is stored in `Config.language` (`Option<String>`, serde
   default = system locale).
 - Default = OS locale; override in settings.
+- **Detection order** (only when `Config.language` is `None`, i.e. the
+  "Automatic (system)" default): the POSIX environment variables come first, in
+  their precedence order `LC_ALL`, `LC_MESSAGES`, `LANG` — the first one that is
+  set and non-empty decides, so an explicit POSIX override keeps winning. A GUI
+  app launched from **Finder**, however, inherits none of them, so on **macOS**
+  the real OS locale is read via `NSLocale::currentLocale().localeIdentifier()`
+  as a fallback. On **Windows/Linux** there is no such API — the environment is
+  all there is.
+- **Classification:** the language prefix `de*` (case-insensitive; `de_AT`,
+  `de-DE`, `de`) ⇒ German, everything else (`en_US`, `fr_FR`, `C`, `POSIX`,
+  unset) ⇒ English. On the reference machine (`AppleLocale = de_AT`) this makes
+  the app start in German.
 - The embedded sign-in page keeps the marketplace's own language — Amazon
   decides it from the TLD + cookies/`Accept-Language`. We force **nothing**.
   Consequence: German UI + `amazon.com` ⇒ English sign-in page — deliberately

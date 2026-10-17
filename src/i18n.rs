@@ -112,17 +112,64 @@ pub(crate) fn tr_n(n: usize, singular: &'static str, plural: &'static str) -> St
     tr(key).replace("{n}", &n.to_string())
 }
 
-/// Best-effort system language from the environment. `de*` → German; anything
-/// else (including `C`/`POSIX`/unset) → English. No OS API, no extra crate.
+/// Classify a POSIX locale / locale identifier by its language prefix: `de*`
+/// (case-insensitive, surrounding whitespace trimmed) → German, everything else
+/// → English. Accepts both the POSIX form (`de_AT`, `de_AT.UTF-8`) and the
+/// BCP-47 form (`de-DE`). `C`/`POSIX`/empty count as English.
+fn lang_from_locale_id(id: &str) -> Lang {
+    if id.trim().to_ascii_lowercase().starts_with("de") {
+        Lang::De
+    } else {
+        Lang::En
+    }
+}
+
+/// A single environment value's vote: empty or whitespace-only means "not set"
+/// and casts **no** vote (`None`); anything else is classified by
+/// [`lang_from_locale_id`].
+fn lang_from_env_value(value: &str) -> Option<Lang> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(lang_from_locale_id(value))
+    }
+}
+
+/// Best-effort system language.
+///
+/// The POSIX environment variables are consulted first, in their precedence
+/// order (`LC_ALL`, then `LC_MESSAGES`, then `LANG`): the **first** one that is
+/// set and non-empty decides, so an explicit POSIX override keeps winning.
+///
+/// The environment alone is not enough, though: a GUI app launched from
+/// **Finder** inherits none of these variables, which would make the app start
+/// in English on a German system. On macOS the real OS locale (`NSLocale`) is
+/// therefore read as a fallback when no variable is set. Windows/Linux have no
+/// such fallback and stay on the environment. Anything unrecognised (including
+/// `C`/`POSIX`/unset) → English.
 pub(crate) fn system_lang() -> Lang {
     for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
         if let Ok(value) = std::env::var(var) {
-            if value.trim().to_ascii_lowercase().starts_with("de") {
-                return Lang::De;
+            if let Some(lang) = lang_from_env_value(&value) {
+                return lang;
             }
         }
     }
-    Lang::En
+    os_lang().unwrap_or(Lang::En)
+}
+
+/// The OS UI language on macOS, via `NSLocale`. Works for a Finder-launched GUI
+/// app that has no `LANG`/`LC_*` at all. `None` on other platforms (no such OS
+/// API — Windows/Linux keep using the environment).
+#[cfg(target_os = "macos")]
+fn os_lang() -> Option<Lang> {
+    let id = objc2_foundation::NSLocale::currentLocale().localeIdentifier();
+    Some(lang_from_locale_id(&id.to_string()))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn os_lang() -> Option<Lang> {
+    None
 }
 
 /// German source → English translation, grouped by feature module and sorted
@@ -433,7 +480,7 @@ const EN: &[(&str, &str)] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::EN;
+    use super::{EN, Lang, lang_from_env_value, lang_from_locale_id};
     use std::collections::HashSet;
 
     /// Every German key must appear exactly once. The table is a linear lookup
@@ -448,5 +495,36 @@ mod tests {
                 "duplicate German key in EN table: {de:?}"
             );
         }
+    }
+
+    /// Locale identifiers are classified by their `de` prefix only, in both the
+    /// POSIX (`de_AT`) and the BCP-47 (`de-DE`) form, case-insensitively and
+    /// ignoring surrounding whitespace.
+    #[test]
+    fn locale_ids_classify_by_language_prefix() {
+        for id in ["de_AT", "de-DE", "de", "DE_at", "  de_AT.UTF-8  "] {
+            assert_eq!(
+                lang_from_locale_id(id),
+                Lang::De,
+                "expected German for {id:?}"
+            );
+        }
+        for id in ["en_US", "fr_FR", "C", "POSIX", ""] {
+            assert_eq!(
+                lang_from_locale_id(id),
+                Lang::En,
+                "expected English for {id:?}"
+            );
+        }
+    }
+
+    /// An empty or whitespace-only environment value means "not set" and casts
+    /// no vote (`None`); a real value is classified like a locale id.
+    #[test]
+    fn env_value_ignores_unset_like_values() {
+        assert_eq!(lang_from_env_value(""), None);
+        assert_eq!(lang_from_env_value("   "), None);
+        assert_eq!(lang_from_env_value("de_AT.UTF-8"), Some(Lang::De));
+        assert_eq!(lang_from_env_value("C"), Some(Lang::En));
     }
 }
