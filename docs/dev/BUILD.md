@@ -9,14 +9,15 @@ nicht belegbar war, steht in §7 ausdrücklich als „nicht verifiziert" und wir
 
 ## 1. Testgrenze (wichtig)
 
-**Gebaut und getestet wird derzeit ausschließlich auf macOS (Apple Silicon, `aarch64-apple-darwin`).**
-Auf dem Referenzrechner sind nur die Rust-Targets `aarch64-apple-darwin` und `wasm32-unknown-unknown`
-installiert (`rustup target list --installed`); ein Windows- oder Linux-Target ist **nicht** installiert.
-
-Windows und Linux sind erklärte, gleichwertige Ziele (`docs/features/platform.md`), werden aber
-**hier nicht laufgetestet**. Der dort beschriebene Nachweis ist ein Cross-Compile-Check
-(`cargo check --target …`), kein echter Lauf — ein solcher Cross-Check ist bisher **nicht durchgeführt**
-worden. Die Abschnitte 4 und 5 sind daher Anleitungen auf Basis der Crate-Vorgaben, kein Erfahrungsbericht.
+**Gebaut *und* laufen getestet ist ausschließlich macOS (Apple Silicon, `aarch64-apple-darwin`).**
+Windows und Linux sind erklärte, gleichwertige Ziele (`docs/features/platform.md`) und werden im
+Release-Workflow **kompiliert** (Windows x64 auf `windows-latest`, Linux x64 auf `ubuntu-latest`;
+beide Beine waren bisher bei jedem Release grün) — **laufgetestet** sind sie damit nicht. Ein
+Cross-Compile-Check auf dem Referenzrechner (`cargo check --target …`) ist weiterhin **nicht
+durchgeführt**: dort sind nur die Rust-Targets `aarch64-apple-darwin` und `wasm32-unknown-unknown`
+installiert (`rustup target list --installed`), ein Windows- oder Linux-Target **nicht**. Die
+Abschnitte 4 und 5 sind daher Anleitungen auf Basis der Crate-Vorgaben und des CI-Builds, kein
+Erfahrungsbericht aus eigenen Läufen.
 
 ### Warnungs-Baseline: 0 (User-Entscheidung 2026-10-15)
 
@@ -244,7 +245,10 @@ zusätzlicher GTK-Integrationstest ist hier aber nicht durchgeführt (§7).
 `src/config.rs` (`Config::get_config_path`) legt den Pfad als
 `dirs::config_dir()/prime_photos/config.toml` fest. Denselben Basisordner benutzen
 `src/folders.rs` (`store_path()` → `…/prime_photos/folders.toml`) und
-`src/dedup.rs` (`db_path()` → `…/prime_photos/dedup.sqlite3`).
+`src/dedup.rs` (`db_path()` → `…/prime_photos/dedup.sqlite3`). Dort liegt unter Unix auch
+`…/prime_photos/instance.sock` — der Unix-Socket des Einzelinstanz-Schutzes
+(`src/single_instance.rs`, `acquire()`); auf Windows benutzt derselbe Schutz statt einer Datei
+einen Loopback-TCP-Port.
 
 `dirs` 6.0.0 dokumentiert `config_dir()` so:
 
@@ -263,8 +267,9 @@ Es ist **nicht** Teil des Builds.
 
 ## 7. Nicht verifiziert / offen
 
-- **Kein Windows- und kein Linux-Lauf getestet.** Aussagen in §4/§5 beruhen auf der Crate-Dokumentation
-  und dem aufgelösten Abhängigkeitsgraphen, nicht auf einem Build auf diesen Systemen.
+- **Kein Windows- und kein Linux-Lauf getestet.** Aussagen in §4/§5 stützen sich auf die
+  Crate-Dokumentation, den aufgelösten Abhängigkeitsgraphen und den CI-Build (Release-Workflow, §1),
+  nicht auf einen eigenen Lauf auf diesen Systemen.
 - **Cross-Compile-Check** (`cargo check --target x86_64-pc-windows-msvc` bzw. `…-unknown-linux-gnu`)
   ist **nicht durchgeführt**; die Targets sind auf dem Referenzrechner nicht installiert.
 - `xcode-select --install` als macOS-Voraussetzung: der C-Compiler-Bedarf ist über rusqlite belegt,

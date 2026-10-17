@@ -27,9 +27,12 @@ macOS-specific APIs.
   is delivered as a separate package.
 - **Verification boundary:** On this machine only the **macOS build is
   runnable and testable**. Windows/Linux are covered by `cfg` guards and
-  cross-platform crates and — as far as toolchain-wise possible — by a
-  cross-compile check (`cargo check --target …`), **not** by real runs.
-  This is a known, accepted limitation.
+  cross-platform crates and are **compiled** in the release workflow
+  (Windows x64 on `windows-latest`, Linux x64 on `ubuntu-latest`; both legs
+  green so far) — **not** run-tested. A cross-compile check on the reference
+  machine (`cargo check --target …`) is still **not performed** (only
+  `aarch64-apple-darwin` and `wasm32-unknown-unknown` are installed). This is
+  a known, accepted limitation.
 - **Marketplace URLs central (project rule, user decision 2026-10-14):**
   Every URL that depends on the **marketplace** (or the zone) is built
   **exclusively in `src/urls.rs`**. Outside this file there must be **no**
@@ -69,10 +72,14 @@ macOS-specific APIs.
     Windows/Linux brauchen keine. Das macOS-`.app`-Bundling + Signatur wird
     als eigenes Paket geliefert.
   - **Verifikationsgrenze:** Auf diesem Rechner ist nur der **macOS-Build
-    lauffähig und testbar**. Windows/Linux werden durch `cfg`-Guards et
-    cross-platform Crates abgedeckt und — soweit toolchainseitig möglich —
-    per Cross-Compile-Check (`cargo check --target …`) belegt, **nicht** durch
-    echte Läufe. Das ist eine bekannte, akzeptierte Einschränkung.
+    lauffähig und testbar**. Windows/Linux werden durch `cfg`-Guards und
+    cross-platform Crates abgedeckt und im Release-Workflow **kompiliert**
+    (Windows x64 auf `windows-latest`, Linux x64 auf `ubuntu-latest`; beide
+    Beine bisher grün) — **laufgetestet** sind sie damit nicht. Ein
+    Cross-Compile-Check auf dem Referenzrechner (`cargo check --target …`) ist
+    weiterhin **nicht durchgeführt** (dort sind nur `aarch64-apple-darwin` und
+    `wasm32-unknown-unknown` installiert). Das ist eine bekannte, akzeptierte
+    Einschränkung.
   - **Verworfen:** „selbstsigniertes `.app` nur für macOS, sonst nichts" als
     Antwort auf den Benachrichtigungs-/Menüleisten-Wunsch (war die erste
     Teilantwort des Users, ersetzt durch „voll cross-platform").
@@ -91,6 +98,14 @@ macOS-specific APIs.
   prüft. Marktplatzneutral heißt: kein Literal-TLD im Code, die Ableitung
   passiert nur in der Util.
 
-- **Win/Linux: In-App-„Beenden" fehlt (Residuum aus PORT-3).** Ohne sichtbares
-  Tray-Icon gibt es dort keinen Weg zurück (macOS ist über ⌘Q safe). Die offene
-  Arbeit bleibt im Ledger.
+- **Win/Linux: In-App-„Beenden" fehlt (Residuum aus PORT-3) — Rückweg jetzt auch dort
+  (User-Entscheidung 2026-10-17).** Ohne sichtbares Tray-Icon gibt es dort keinen
+  In-App-„Beenden"-Knopf (macOS ist über ⌘Q safe); der **Rückweg** aus dem versteckten Zustand
+  existiert aber jetzt plattformübergreifend: der Tray-Eintrag „Fenster anzeigen", ein
+  **App-Neustart** (unter macOS aktiviert Launch Services die laufende Instanz; ein Dock-/Taskbar-
+  Klick ist ein weiterer Weg, sofern ein Icon vorhanden ist) — immer über denselben
+  `show_main_window`-Pfad (Fenster zeigen + fokussieren + Dock-Icon zurück,
+  `src/app_activation.rs`/`src/app.rs`). Der **Einzelinstanz-Schutz** greift plattformabhängig: auf
+  macOS lehnt Launch Services den zweiten Start über `LSMultipleInstancesProhibited` ab, sonst
+  fängt `src/single_instance.rs` ihn über den Socket-/TCP-Handshake ab. Die offene Arbeit
+  (In-App-„Beenden" unter Win/Linux) bleibt im Ledger.

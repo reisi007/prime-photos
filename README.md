@@ -38,6 +38,7 @@ Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §
 - **Pause/resume** (globally, from the backup header and the tray).
 - **One-off queue via drag & drop** (persisted so a restart resumes it).
 - **Tray icon**, **desktop notifications**, and an **About window with third-party licenses**.
+- **Background app**: closing the window hides it and keeps the app running (no Dock icon while hidden); bring it back from the tray or by relaunching the app. Only one instance runs at a time — a second launch shows the running window instead of opening a new one.
 - **UI language: German** (German/English i18n layer; the OS locale is the default).
 
 ## Build & run
