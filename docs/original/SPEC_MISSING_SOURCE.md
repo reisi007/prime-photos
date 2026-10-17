@@ -3,8 +3,10 @@
 Analyse des Verhaltens bei einer **nicht erreichbaren Quellquelle** (externe Festplatte, USB-Stick,
 Netzwerk-Laufwerk): was passiert beim App-Start, beim Watcher, bei manuellem Rescan, beim
 Wasserzeichen, in der Ordner-Zeile, auf Datei-Ebene und beim Wiederanschließen — und wie sich
-das Original verhält. Ziel ist das **„forced pause"-Verhalten** (User-Entscheidung 2026-10-16):
-ein fehlender Ordner soll das Ziel **anhalten** statt in einen Fehler zu laufen.
+das Original verhält. Ziel ist das Verhalten bei fehlendem Quellordner
+(User-Entscheidung 2026-10-16, präzisiert 2026-10-17): ein fehlender Ordner soll
+als eigener Zustand **„Ordner nicht gefunden"** (`FolderStatus::NotFound`, AMBER)
+geführt werden — nicht als echte Pause und nicht als Fehler.
 
 Clean-room: eigene Worte und Tabellen, **keine** verbatim Code-Auszüge, **keine** Personendaten,
 **keine** Live-Werte. Belege über Symbol-/Key-Namen und `Datei:Zeile`.
@@ -283,16 +285,22 @@ In `BackupWatcherWorker.HandleDisconnectedDevice`:
 
 ---
 
-## 4. Zielverhalten „forced pause" konkret
+## 4. Zielverhalten „Ordner nicht gefunden" konkret
+
+> **Umgesetzt 2026-10-17:** Statt der ursprünglich geplanten Wiederverwendung von
+> `FolderStatus::Paused` führt der Port den fehlenden Quellordner jetzt als eigenen
+> Zustand `FolderStatus::NotFound` („Ordner nicht gefunden", AMBER), getrennt vom
+> globalen PAUSED (`Config::paused`). Die Analyse-Tabellen in §2.5, §4.2 und §5
+> beschreiben den Stand **vor** dieser Umsetzung.
 
 ### 4.1 Was passieren müsste
 
 | Schritt | Zielverhalten | Wo umsetzen |
 |---|---|---|
 | **Erkennung** | Ein fehlender Ordner wird erkannt (beim Kaltstart, beim Watcher, bei manuellem Rescan) | `src/backup.rs` (`background_sync_pass`, `sync_watchers`, `start_scheduled_upload`) |
-| **Zustand** | `FolderStatus::Paused` wird gesetzt | `src/folders.rs` (`FolderStatus`), `src/backup.rs` (`finalize_upload`, `finalize_background_store`) |
+| **Zustand** | `FolderStatus::NotFound` wird gesetzt | `src/folders.rs` (`FolderStatus`), `src/backup.rs` (`source_status`) |
 | **Wasserzeichen** | **Nicht** vorschieben — der Ordner gilt als „nicht gescannt" | `src/backup.rs` (`start_background_run`) |
-| **UI** | „Angehalten (X%)" in AMBER | `src/upload.rs` (`status_text`) — existiert bereits |
+| **UI** | „Ordner nicht gefunden" in AMBER | `src/upload.rs` (`status_text`) |
 | **Wiederanschließen** | Aktive Erkennung (Watcher-Reset oder Scan-Trigger) | `src/backup.rs` (`sync_watchers`, `watch_loop`) |
 | **Weiterlaufen** | Beim Wiederanschließen läuft der Ordner weiter | `src/backup.rs` (`background_sync_pass`, `watch_loop`) |
 
@@ -321,22 +329,22 @@ bereits im Index sind). Das Wasserzeichen wird vorgeschoben.
 **Beleg:** `src/backup.rs:519-525` — `record_folder_scan` wird nach jedem erfolgreichen Lauf
 aufgerufen, unabhängig davon, ob der Ordner während des Laufs vorhanden war.
 
-### 4.4 Konkreter Umsetzungsplan für „forced pause"
+### 4.4 Konkreter Umsetzungsplan für „Ordner nicht gefunden"
 
 | Schritt | Änderung | Details |
 |---|---|---|
-| **1. Erkennung im Kaltstart** | `background_sync_pass` soll prüfen ob `max_mtime` `None` liefert | Statt `continue`: `FolderStatus::Paused` setzen, Log-Eintrag, **kein** Wasserzeichen-Update |
-| **2. Erkennung im Watcher** | `sync_watchers` soll den fehlenden Ordner erkennen | Statt nur Warnung: `FolderStatus::Paused` setzen, Log-Eintrag |
-| **3. Erkennung im Rescan** | `start_scheduled_upload` soll `None`-Ordner erkennen | Statt „Keine Fotos gefunden": `FolderStatus::Paused` setzen, verständliche Meldung |
+| **1. Erkennung im Kaltstart** | `background_sync_pass` soll prüfen ob `max_mtime` `None` liefert | Statt `continue`: `FolderStatus::NotFound` setzen, Log-Eintrag, **kein** Wasserzeichen-Update |
+| **2. Erkennung im Watcher** | `sync_watchers` soll den fehlenden Ordner erkennen | Statt nur Warnung: `FolderStatus::NotFound` setzen, Log-Eintrag |
+| **3. Erkennung im Rescan** | `start_scheduled_upload` soll `None`-Ordner erkennen | Statt „Keine Fotos gefunden": `FolderStatus::NotFound` setzen, verständliche Meldung |
 | **4. Wasserzeichen-Guard** | `record_folder_scan` soll nur bei erfolgreichem **und** vorhandenem Ordner laufen | `FolderScan` um ein Flag für den fehlenden Ordner erweitern; bei gesetztem Flag überspringen |
-| **5. Wiederanschließen** | `watch_loop` soll erkennen wenn ein Ordner wieder verfügbar ist | Nach `sync_watchers`: für jeden pausierten Ordner `path.exists()` prüfen → wenn ja: Status zurücksetzen, Scan starten |
-| **6. UI** | `status_text` zeigt `Paused` in AMBER | Existiert bereits (`src/upload.rs:153-156`) — nur zugewiesen bekommen |
+| **5. Wiederanschließen** | `watch_loop` soll erkennen wenn ein Ordner wieder verfügbar ist | Nach `sync_watchers`: für jeden `NotFound`-Ordner `path.exists()` prüfen → wenn ja: Status zurücksetzen, Scan starten |
+| **6. UI** | `status_text` zeigt `NotFound` („Ordner nicht gefunden") in AMBER | Existiert seit 2026-10-17 (`src/upload.rs`) |
 
 ### 4.5 Konflikt mit bestehenden Regeln
 
 | Regel | Konflikt | Lösung |
 |---|---|---|
-| „Abmelden bei laufendem Upload" | Setzt `cancelled`-Flag, kein Status-Update | Unabhängig — `cancelled` und `Paused` sind verschiedene Zustände |
+| „Abmelden bei laufendem Upload" | Setzt `cancelled`-Flag, kein Status-Update | Unabhängig — `cancelled` und `NotFound` sind verschiedene Zustände |
 | „Keine technischen Fehlermeldungen im UI" | Der User soll einen **verständlichen** Text sehen | „Laufwerk nicht verfügbar — bitte anschließen" statt `ENOENT` |
 | „Wasserzeichen wird nach fehlgeschlagenem Lauf nicht vorgeschoben" | Neu: auch nicht wenn der Ordner fehlt | `folder_missing`-Flag in `FolderScan` |
 
@@ -363,9 +371,9 @@ aufgerufen, unabhängig davon, ob der Ordner während des Laufs vorhanden war.
 
 | # | TODO | Begründung | Kosten | Betroffene Dateien |
 |---|---|---|---|---|
-| **T1** | **`FolderStatus::Paused` zuweisen:** Ein fehlender Ordner soll `FolderStatus::Paused` setzen, nicht still übersprungen werden. | User-Entscheidung „forced pause": der Zustand soll wie eine Pause sein, nicht wie ein Fehler. | Mittel | `src/backup.rs`, `src/folders.rs` |
+| **T1** | **`FolderStatus::NotFound` zuweisen:** Ein fehlender Ordner soll `FolderStatus::NotFound` setzen, nicht still übersprungen werden. | User-Entscheidung 2026-10-17: der Zustand ist „Ordner nicht gefunden" (AMBER), getrennt vom globalen PAUSED und nicht als Fehler. | Mittel | `src/backup.rs`, `src/folders.rs` |
 | **T2** | **Wasserzeichen-Guard:** `record_folder_scan` soll nur aufgerufen werden, wenn der Ordner während des gesamten Laufs vorhanden war. | Gefährlichster Fall: sonst werden Reste nie nachgeholt. | Mittel | `src/backup.rs` |
-| **T3** | **UI-Hinweis:** Die Ordner-Zeile soll „Angehalten (X%)" in AMBER zeigen, wenn der Ordner fehlt. | User sieht sonst keinen Hinweis auf das fehlende Laufwerk. | Klein | `src/upload.rs` (existiert bereits), `src/backup.rs` |
+| **T3** | **UI-Hinweis:** Die Ordner-Zeile soll „Ordner nicht gefunden" in AMBER zeigen, wenn der Ordner fehlt. | User sieht sonst keinen Hinweis auf das fehlende Laufwerk. | Klein | `src/upload.rs` (existiert seit 2026-10-17), `src/backup.rs` |
 | **T4** | **Wiederanschließen-Erkennung:** Ein Mechanismus, der den Wiederanschluss aktiv erkennt (Watcher-Reset oder Scan-Trigger). | Das Original hat `HandleDeviceArrival` — wir haben nichts. | Mittel | `src/backup.rs` |
 | **T5** | **Verständliche Fehlermeldung:** Statt „Keine Fotos gefunden" soll eine klare Meldung erscheinen, dass der Ordner nicht erreichbar ist. | User-Regel „keine technischen Fehlermeldungen im Endnutzer-UI". | Klein | `src/backup.rs`, `src/i18n.rs` |
 

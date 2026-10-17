@@ -45,6 +45,21 @@ The dialog is shared between creating and editing a target.
   Rest ausgegraut"); functional now: source folder (read-only when editing),
   dedup, name-conflict policy.
 
+- **Missing source ⇒ `NotFound`, not PAUSED (user decision 2026-10-17):** a
+  target whose source folder is gone (external drive unplugged, folder renamed
+  or deleted) is flagged `FolderStatus::NotFound` and shown as
+  **"Ordner nicht gefunden"** in **AMBER** — a state of its own, deliberately
+  distinct from the global PAUSED (`Config::paused`) and its per-row
+  "ANGEHALTEN" wording. The rule (`source_status` in `backup.rs`) is total: a
+  missing path wins from any state; once the path is back, both `NotFound` and
+  a `Paused` written by an older `folders.toml` lift to `Idle` (the
+  never-advanced watermark makes the next cold start re-scan the missed
+  files), while every other state stays untouched. `NotFound` claims **no
+  progress** (`folder_progress_text` is empty); the upload gate and watermark
+  are unchanged — a missing path simply yields no files. Original reference:
+  `ScheduleError.LocalFolderNotFound`
+  (`../original/SPEC_MISSING_SOURCE.md` §3.1/§3.2).
+
 - **Inhaltsfilter wie das Original (F2, Welle 5.7, `0d486e2`):** zwei
   Checkboxen mit Original-Labels „Fotos sichern" (an, wählbar) / „Videos
   sichern" (sichtbar, **deaktiviert**); „Alles" ist im Original nicht wählbar.

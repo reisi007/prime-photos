@@ -175,6 +175,7 @@ impl UploadShared {
 /// | `Uploading` | „Upload-Vorgang läuft" | Info → TEAL |
 /// | `Done` | „Datensicherung abgeschlossen" | Success → GREEN |
 /// | `Paused` | „ANGEHALTEN" | Warning → AMBER |
+/// | `NotFound` | „Ordner nicht gefunden" | Warning → AMBER |
 /// | `Error` | „Fehler" | Error → RED |
 /// | `Scanning` | „Konfiguration wird durchgeführt" | Info → TEAL |
 /// | `Idle`, `total > 0` | „Warten" (the original's cold-boot waiting word) | Info → TEAL |
@@ -193,6 +194,7 @@ pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, Color3
         FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), theme::TEAL),
         FolderStatus::Done => (tr("Datensicherung abgeschlossen").to_string(), theme::GREEN),
         FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), theme::AMBER),
+        FolderStatus::NotFound => (tr("Ordner nicht gefunden").to_string(), theme::AMBER),
         FolderStatus::Error => (tr("Fehler").to_string(), theme::RED),
         FolderStatus::Scanning => (tr("Konfiguration wird durchgeführt").to_string(), theme::TEAL),
         FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), theme::TEAL),
@@ -205,9 +207,11 @@ pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, Color3
 /// `{0}% hochgeladen` while running, the original's own completion word
 /// `Vollständig` at 100 % (`docs/original/UI_FLOWS.md` §11.5), `Angehalten bei {0} %`
 /// while paused. Empty when the target has no total: a never-scanned folder
-/// must not claim any progress (same trap as [`status_text`]'s empty arm).
+/// must not claim any progress (same trap as [`status_text`]'s empty arm) —
+/// and empty for `NotFound`: a missing source must not claim any progress
+/// either, regardless of the last known total.
 pub(crate) fn folder_progress_text(status: FolderStatus, done: usize, total: usize) -> String {
-    if total == 0 {
+    if total == 0 || status == FolderStatus::NotFound {
         return String::new();
     }
     let pct = format!("{:.0}", done as f32 / total as f32 * 100.0);
@@ -1247,6 +1251,10 @@ mod tests {
             tr("Datensicherung abgeschlossen")
         );
         assert_eq!(status_text(FolderStatus::Paused, 0).0, tr("ANGEHALTEN"));
+        assert_eq!(
+            status_text(FolderStatus::NotFound, 0).0,
+            tr("Ordner nicht gefunden")
+        );
         assert_eq!(status_text(FolderStatus::Error, 0).0, tr("Fehler"));
         assert_eq!(
             status_text(FolderStatus::Scanning, 0).0,
@@ -1269,6 +1277,7 @@ mod tests {
         assert_eq!(status_text(FolderStatus::Uploading, 0).1, TEAL);
         assert_eq!(status_text(FolderStatus::Done, 0).1, GREEN);
         assert_eq!(status_text(FolderStatus::Paused, 0).1, AMBER);
+        assert_eq!(status_text(FolderStatus::NotFound, 0).1, AMBER);
         assert_eq!(status_text(FolderStatus::Error, 0).1, RED);
         assert_eq!(status_text(FolderStatus::Scanning, 0).1, TEAL);
     }
@@ -1278,6 +1287,15 @@ mod tests {
         // Same trap as the status word: no total, no claim.
         assert_eq!(folder_progress_text(FolderStatus::Done, 0, 0), "");
         assert_eq!(folder_progress_text(FolderStatus::Uploading, 0, 0), "");
+    }
+
+    #[test]
+    fn progress_is_empty_for_a_missing_folder() {
+        // A missing source must not claim progress, even with a known total
+        // from the last run — the state is "not found", not "x % done".
+        assert_eq!(folder_progress_text(FolderStatus::NotFound, 0, 0), "");
+        assert_eq!(folder_progress_text(FolderStatus::NotFound, 3, 4), "");
+        assert_eq!(folder_progress_text(FolderStatus::NotFound, 4, 4), "");
     }
 
     #[test]

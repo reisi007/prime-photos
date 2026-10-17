@@ -125,6 +125,12 @@ pub enum FolderStatus {
     Scanning,
     Uploading,
     Paused,
+    /// The source folder is gone (external drive unplugged, folder renamed or
+    /// deleted). Written by the forced-state rule in `backup.rs`
+    /// (`source_status`) and **separate** from the global user pause
+    /// (`Config::paused`); lifts itself back to `Idle` once the path returns.
+    /// Persisted as the wire value `notfound`.
+    NotFound,
     Done,
     Error,
 }
@@ -577,6 +583,42 @@ name = "Fotos"
             let back: BackupFolder = toml::from_str(&text).unwrap();
             assert_eq!(back.content_filter, filter);
         }
+    }
+
+    #[test]
+    fn folder_status_round_trips_and_a_legacy_file_loads() {
+        // The new `NotFound` state persists under its lowercase wire value and
+        // reads back unchanged.
+        let folder = BackupFolder {
+            status: FolderStatus::NotFound,
+            ..BackupFolder::new(PathBuf::from("/tmp/photos"))
+        };
+        let text = toml::to_string(&folder).unwrap();
+        assert!(text.contains("notfound"), "wire value missing: {text}");
+        let back: BackupFolder = toml::from_str(&text).unwrap();
+        assert_eq!(back.status, FolderStatus::NotFound);
+
+        // A legacy `folders.toml` entry without the key still loads (as `Idle`)
+        // ...
+        let legacy: BackupFolder = toml::from_str(
+            r#"
+path = "/tmp/photos"
+name = "Fotos"
+"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.status, FolderStatus::Idle);
+
+        // ... and an existing `Paused` entry still deserializes unchanged.
+        let paused: BackupFolder = toml::from_str(
+            r#"
+path = "/tmp/photos"
+name = "Fotos"
+status = "paused"
+"#,
+        )
+        .unwrap();
+        assert_eq!(paused.status, FolderStatus::Paused);
     }
 
     #[test]

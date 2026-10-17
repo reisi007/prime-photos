@@ -73,25 +73,27 @@ fn capped_done(done: usize, total: usize) -> usize {
     done.min(total)
 }
 
-/// Forced pause (user decision 2026-10-16, `docs/original/SPEC_MISSING_SOURCE.md`): a
-/// backup target whose source folder is gone must be **paused**, not errored —
-/// and it must recover by itself once the source is back.
+/// Forced state for a missing source (user decisions 2026-10-16, 2026-10-17,
+/// `docs/original/SPEC_MISSING_SOURCE.md`): a backup target whose source folder
+/// is gone must be flagged **`NotFound`** — the original's
+/// `ScheduleError.LocalFolderNotFound` ("Ordner nicht gefunden", AMBER), not
+/// errored — and it must recover by itself once the source is back.
 ///
 /// Pure and total, so every path that decides a folder's state reaches the same
 /// verdict:
-/// - the source is not stat-able (`path_exists == false`) ⇒ `Paused`,
-/// - the source is back and the folder was `Paused` ⇒ `Idle` (the forced pause
-///   is lifted; the never-advanced watermark makes the next cold start re-scan
-///   the files that were missed),
+/// - the source is not stat-able (`path_exists == false`) ⇒ `NotFound`,
+/// - the source is back and the folder was `NotFound` — or a `Paused` written
+///   by an older `folders.toml` — ⇒ `Idle` (the state is lifted; the
+///   never-advanced watermark makes the next cold start re-scan the files that
+///   were missed),
 /// - otherwise the status is left untouched.
 ///
-/// `FolderStatus::Paused` is *only* ever written by this rule, so it cannot
-/// collide with the **global** user pause (`Config::paused`), which is a separate
-/// switch and stays untouched here.
+/// This rule never touches the **global** user pause (`Config::paused`): that is
+/// a separate switch and keeps the `Paused` wording of the real pause.
 fn source_status(path_exists: bool, current: FolderStatus) -> FolderStatus {
     if !path_exists {
-        FolderStatus::Paused
-    } else if current == FolderStatus::Paused {
+        FolderStatus::NotFound
+    } else if current == FolderStatus::NotFound || current == FolderStatus::Paused {
         FolderStatus::Idle
     } else {
         current
@@ -756,11 +758,12 @@ async fn background_sync_pass(
         let Some(f) = store.folders.get_mut(i) else {
             continue;
         };
-        // Forced pause (user decision 2026-10-16): a source folder that is not
-        // stat-able is *paused*, not silently skipped, so the row says why it
-        // stopped — and a folder whose drive came back is lifted to `Idle`
-        // again. The watermark of a missing folder is never touched (no `scans`
-        // entry), so the next cold start re-scans everything it missed.
+        // Missing source (user decisions 2026-10-16, 2026-10-17): a source
+        // folder that is not stat-able is flagged `NotFound` ("Ordner nicht
+        // gefunden"), not silently skipped, so the row says why it stopped —
+        // and a folder whose drive came back is lifted to `Idle` again. The
+        // watermark of a missing folder is never touched (no `scans` entry), so
+        // the next cold start re-scans everything it missed.
         let exists = f.path.is_dir();
         let next = source_status(exists, f.status);
         if next != f.status {
@@ -788,8 +791,8 @@ async fn background_sync_pass(
             scanned_max: current,
         });
     }
-    // Persist a status change even when nothing is left to scan: a pause or its
-    // lifting must survive the pass.
+    // Persist a status change even when nothing is left to scan: the missing
+    // source (`NotFound`) or its lifting must survive the pass.
     if store_changed {
         let _ = store.save();
     }
@@ -961,13 +964,13 @@ fn sync_watchers(
     } else {
         None
     };
-    // Forced pause on the watcher path (user decision 2026-10-16): every pass
-    // re-decides each enabled folder's source state with the same pure rule the
-    // cold-start pass and the row use — a folder whose drive is gone becomes
-    // `Paused`, one whose drive came back is lifted to `Idle` again. This is
-    // also why a folder we cannot watch is already `Paused` before the watcher
-    // attempt below. Nothing else is touched; in particular the global user
-    // pause is a separate switch.
+    // Missing source on the watcher path (user decisions 2026-10-16,
+    // 2026-10-17): every pass re-decides each enabled folder's source state with
+    // the same pure rule the cold-start pass and the row use — a folder whose
+    // drive is gone becomes `NotFound`, one whose drive came back is lifted to
+    // `Idle` again. This is also why a folder we cannot watch is already
+    // `NotFound` before the watcher attempt below. Nothing else is touched; in
+    // particular the global user pause is a separate switch.
     let mut store_changed = false;
     if let Some(s) = store.as_mut() {
         for i in s.enabled_indices() {
@@ -1299,11 +1302,12 @@ impl PrimePhotoApp {
     /// starts its runs through the very same steps — `UploadPlan::build` for the
     /// scan and `publish_plan` for the state/folder side effects.
     pub(crate) fn start_scheduled_upload(&mut self, indices: Vec<usize>) {
-        // Forced pause (user decision 2026-10-16): a target whose source folder
-        // is gone is paused, not scanned — and it is kept **out** of the plan so
-        // a run can never settle it as `Done`. A folder whose drive came back is
-        // lifted to `Idle` here as well. The missing source gets a plain-language
-        // message instead of "no photos found".
+        // Missing source (user decisions 2026-10-16, 2026-10-17): a target whose
+        // source folder is gone is flagged `NotFound`, not scanned — and it is
+        // kept **out** of the plan so a run can never settle it as `Done`. A
+        // folder whose drive came back is lifted to `Idle` here as well. The
+        // missing source gets a plain-language message instead of "no photos
+        // found".
         let mut changed = false;
         let mut missing = false;
         let mut present: Vec<usize> = Vec::new();
@@ -1839,12 +1843,13 @@ impl PrimePhotoApp {
                     let status = if s.active && s.folder_total.contains_key(&i) {
                         FolderStatus::Uploading
                     } else if f.enabled {
-                        // The forced pause is a *live* condition (user decision
-                        // 2026-10-16): the detached supervisor writes a missing
-                        // source to `folders.toml`, which the UI's in-memory store
-                        // never reloads — so the row applies the very same rule
-                        // (`source_status`) itself. Same helper, no second logic;
-                        // a returned drive flips the row back on its own.
+                        // The missing-source state is a *live* condition (user
+                        // decisions 2026-10-16, 2026-10-17): the detached
+                        // supervisor writes a missing source to `folders.toml`,
+                        // which the UI's in-memory store never reloads — so the
+                        // row applies the very same rule (`source_status`) itself.
+                        // Same helper, no second logic; a returned drive flips
+                        // the row back on its own.
                         source_status(f.path.is_dir(), f.status)
                     } else {
                         f.status
@@ -2640,13 +2645,15 @@ mod tests {
     }
 
     #[test]
-    fn source_status_pauses_missing_and_lifts_when_back() {
-        use FolderStatus::{Done, Error, Idle, Paused, Scanning, Uploading};
-        // A missing source pauses the target, from any state.
-        for current in [Idle, Scanning, Uploading, Paused, Done, Error] {
-            assert_eq!(source_status(false, current), Paused);
+    fn source_status_flags_missing_and_lifts_when_back() {
+        use FolderStatus::{Done, Error, Idle, NotFound, Paused, Scanning, Uploading};
+        // A missing source flags the target as not found, from any state.
+        for current in [Idle, Scanning, Uploading, Paused, Done, Error, NotFound] {
+            assert_eq!(source_status(false, current), NotFound);
         }
-        // A source that is back lifts the forced pause ...
+        // A source that is back lifts the state, both for `NotFound` and for a
+        // `Paused` written by an older `folders.toml` ...
+        assert_eq!(source_status(true, NotFound), Idle);
         assert_eq!(source_status(true, Paused), Idle);
         // ... and leaves every other state alone (no run state is rewritten).
         for current in [Idle, Scanning, Uploading, Done, Error] {

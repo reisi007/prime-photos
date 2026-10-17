@@ -229,8 +229,9 @@ const EN: &[(&str, &str)] = &[
     ("Datensicherung hinzufügen …", "Add backup …"),
     ("Datensicherung stoppen", "Stop backup"),
     ("Datensicherung gestoppt: {}", "Backup stopped: {}"),
-    // Forced pause (user decision 2026-10-16): a missing source folder must not
-    // read as "no photos found" — the understandable cause is the message.
+    // Missing source (user decisions 2026-10-16, 2026-10-17): a missing source
+    // folder must not read as "no photos found" — the understandable cause is
+    // the message.
     (
         "Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).",
         "The source folder is currently unreachable (e.g. an external drive is not connected).",
@@ -256,6 +257,7 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Konfiguration wird durchgeführt", "Configuration in progress"),
     ("Ordner", "Folder"),
+    ("Ordner nicht gefunden", "Folder not found"),
     (
         "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
         "Tip: folders are remembered and backed up again on every start.",

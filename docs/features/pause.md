@@ -16,6 +16,9 @@ and restored at start-up.
   configured folders.
 - A set pause also blocks the background sync (guard already existed).
   **Pause per folder** remains Post-MVP (original has a row icon).
+- A **missing source folder** is **not** this pause: it is its own state
+  (`FolderStatus::NotFound`, "Ordner nicht gefunden", AMBER), deliberately
+  separate from the global PAUSED — see [backup-targets.md](backup-targets.md).
 - **Slow mode** (see [queue-progress.md](queue-progress.md)) is a separate
   run-time setting that forces `concurrency = 1`.
 
