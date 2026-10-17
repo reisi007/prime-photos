@@ -32,6 +32,19 @@
 //! quit (normal macOS behaviour). An app activation — a Dock click, a relaunch
 //! from Finder/Spotlight/`open`, or switching back to it — brings the hidden
 //! window back and focuses it, which is what this module is for.
+//!
+//! **Why closing steps the app back (`step_back` / `come_forward`).** A Dock
+//! click on the app that is *already* the frontmost one activates nothing:
+//! AppKit posts no `NSApplicationDidBecomeActiveNotification`, so the observer
+//! above would never fire and the way back would look dead until the user
+//! focused some other app first. Hiding the window alone leaves the app in
+//! exactly that frontmost-but-inactive state. [`step_back`] therefore calls
+//! `NSApplication::hide` when the window is closed: AppKit hides the app **and
+//! activates the next app**, so our app is no longer frontmost and the next
+//! Dock click activates it again — the notification fires and the window comes
+//! back. The activation policy is deliberately **not** touched, so the Dock icon
+//! stays (see above). [`come_forward`] is the counterpart on the way back:
+//! unhide (if hidden) and activate.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
@@ -47,7 +60,7 @@ use objc2::runtime::NSObject;
 #[cfg(target_os = "macos")]
 use objc2::{MainThreadMarker, MainThreadOnly};
 #[cfg(target_os = "macos")]
-use objc2_app_kit::NSApplicationDidBecomeActiveNotification;
+use objc2_app_kit::{NSApplication, NSApplicationDidBecomeActiveNotification};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSNotification, NSNotificationCenter};
 
@@ -158,6 +171,46 @@ pub fn install(ctx: &eframe::egui::Context) {
 pub fn take_become_active_request() -> bool {
     BECOME_ACTIVE_REQUESTED.swap(false, Ordering::Relaxed)
 }
+
+/// macOS: step the app out of the foreground right before the window is hidden.
+///
+/// `NSApplication::hide` hides the app **and activates the next app**, so our
+/// app is no longer frontmost. That restores the precondition for the observer
+/// above: a Dock click only activates a non-frontmost app (see the module docs),
+/// and the activation then fires `NSApplicationDidBecomeActiveNotification` and
+/// brings the window back. The activation policy is deliberately left alone —
+/// the Dock icon stays. Main-thread-bound: returns early without a
+/// [`MainThreadMarker`] (AppKit may only be messaged from the main thread).
+#[cfg(target_os = "macos")]
+pub fn step_back() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    NSApplication::sharedApplication(mtm).hide(None);
+}
+
+/// macOS: the counterpart to [`step_back`] — undo a previous hide (if any) and
+/// then activate the app, so the restored window also comes to the front. Main-
+/// thread-bound like [`step_back`].
+#[cfg(target_os = "macos")]
+pub fn come_forward() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let app = NSApplication::sharedApplication(mtm);
+    if app.isHidden() {
+        app.unhide(None);
+    }
+    app.activate();
+}
+
+/// Non-macOS: there is no AppKit app to step back.
+#[cfg(not(target_os = "macos"))]
+pub fn step_back() {}
+
+/// Non-macOS: there is no AppKit app to bring forward.
+#[cfg(not(target_os = "macos"))]
+pub fn come_forward() {}
 
 /// Non-macOS: there is no activation observer to install.
 #[cfg(not(target_os = "macos"))]

@@ -45,11 +45,19 @@ closing the window quits the app.
   quit (normal macOS behaviour). This is a **deliberate deviation** from the
   original's `LSUIElement`/agent model
   (`../original/SPEC_OS_INTEGRATION.md` §3.4), which has no Dock icon by default.
-- **Ways back — always the same path:** the tray's "Fenster anzeigen", an app
-  **relaunch** (Finder/Spotlight/`open` activate the already running instance)
-  or a **Dock click** all end in the same `show_main_window` path: show + focus
-  the window. The activation arrives through an observer of
-  `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`).
+- **Ways back — always the same path, and immediately:** the tray's "Fenster
+  anzeigen", an app **relaunch** (Finder/Spotlight/`open` activate the already
+  running instance) or a **Dock click** all end in the same `show_main_window`
+  path: show + focus the window. The activation arrives through an observer of
+  `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`). So that
+  the Dock click works **without** focusing another app first, closing first
+  **steps the app back into the background** (`NSApplication::hide`): the app
+  gives up the foreground position (AppKit activates the next app), because a
+  Dock click on the app that is *already* the frontmost one activates nothing —
+  AppKit posts no `didBecomeActive` and the way back would look dead. The
+  counterpart on the way back is `unhide` (if hidden) + `activate` in
+  `show_main_window`. The activation policy is deliberately left alone, so the
+  **Dock icon stays**.
 - **Only one instance:** a second start does **not** open a second window — it
   asks the running instance to show its window and exits. On macOS the bundle's
   `LSMultipleInstancesProhibited` (`packaging/Info.plist`) already makes Launch
@@ -122,9 +130,12 @@ closing the window quits the app.
   läuft** (kein `Accessory`/Deaktivieren mehr), es verschwindet erst beim echten Beenden (normales
   macOS-Verhalten); (3) Rückweg über den Tray-Eintrag „Fenster anzeigen", einen **App-Neustart**
   (Finder/Spotlight/`open` aktivieren die laufende Instanz) oder einen Dock-Klick — immer derselbe
-  Weg (Fenster zeigen + fokussieren); (4) **immer nur eine Instanz**: ein zweiter Start erzeugt
-  **kein** zweites Fenster, sondern bittet die laufende Instanz, ihr Fenster zu zeigen, und beendet
-  sich. Die **Einzelinstanz** ist Original-Parität (`../original/SPEC_OS_INTEGRATION.md`
+  Weg (Fenster zeigen + fokussieren) und **sofort**, ohne vorher woanders hinzufokussieren: Schließen
+  gibt die Vordergrund-Position ab (`NSApplication::hide`, AppKit aktiviert die nächste App), weil
+  ein Dock-Klick auf die bereits vorderste App nichts aktiviert; `show_main_window` holt die App mit
+  `unhide` + `activate` zurück (siehe `src/app_activation.rs`); (4) **immer nur eine Instanz**: ein
+  zweiter Start erzeugt **kein** zweites Fenster, sondern bittet die laufende Instanz, ihr Fenster zu
+  zeigen, und beendet sich. Die **Einzelinstanz** ist Original-Parität (`../original/SPEC_OS_INTEGRATION.md`
   §3.3/§3.4: `LSMultipleInstancesProhibited` „single instance only"), das **bleibende Dock-Icon**
   dagegen weicht bewusst vom `LSUIElement`-Agent-Modell des Originals ab. Auf macOS lehnt
   Launch Services den zweiten Start schon über `LSMultipleInstancesProhibited` ab; für Startwege

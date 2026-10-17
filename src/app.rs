@@ -589,6 +589,9 @@ impl PrimePhotoApp {
     /// `src/single_instance.rs`) and the expired-session fallback.
     fn show_main_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
+        // Undo the `step_back` from close-to-tray (unhide if needed) and make
+        // the app active again, so the restored window also comes to the front.
+        app_activation::come_forward();
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
@@ -1118,10 +1121,14 @@ impl eframe::App for PrimePhotoApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.window_hidden = true;
-            // The Dock icon stays: closing only hides the window, the app keeps
-            // running in the background. Back via the tray, or via an app
-            // activation / second launch, which both restore the window through
-            // `show_main_window`.
+            // Step the app back out of the foreground (macOS): a Dock click on
+            // an already-frontmost app activates nothing, so without this the
+            // way back would be dead until the user focused another app first
+            // (see `src/app_activation.rs`). The Dock icon stays: closing only
+            // hides the window, the app keeps running in the background. Back
+            // via the tray, or via an app activation / second launch, which both
+            // restore the window through `show_main_window`.
+            app_activation::step_back();
         }
 
         // Account fetch (name + avatar): first attempt after a successful
