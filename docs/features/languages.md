@@ -58,6 +58,15 @@ and could alter the sign-in page.
     Strings kommen direkt zweisprachig dazu. Die Marktplatz-Ländernamen in
     `countries.rs` sind ebenfalls UI-Text (→ i18n).
 
+- **macOS-Sprachquelle live bestätigt (2026-10-17):** Ein Finder-/Doppelklick-Start
+  erbt kein `LANG`/`LC_ALL`/`LC_MESSAGES`; seit 5.21 liest macOS deshalb zusätzlich
+  `NSLocale::currentLocale().localeIdentifier()` als Zusatzquelle (die
+  Env-Variablen bleiben vorrangig). Live geprüft am installierten Bundle
+  (Version 0.1.0): der Start war **deutsch** (Systemsprache `de_AT`) — ohne diesen
+  macOS-Zweig war die UI englisch. Die Einstellung „Automatisch (Systemsprache)"
+  greift damit auch ohne POSIX-Umgebung; der Override in den Einstellungen bleibt
+  unverändert.
+
 - **Dateinamen-Kodierung: NFC (User-Entscheidung 2026-10-14):** die
   Upload-Namens-Kodierung (NFC) betrifft auch den Anzeigetext — Details in
   [upload.md](upload.md).

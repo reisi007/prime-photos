@@ -30,9 +30,15 @@ sleep.
   `~/Library/LaunchAgents`). Grund: ein LaunchAgent erscheint in macOS **nicht**
   unter „Anmeldeobjekte" (allenfalls unter „Erlauben im Hintergrund") — der User
   sah den Eintrag deshalb nicht, obwohl Autostart gewünscht war. SMAppService ist
-  der moderne Apple-Weg (macOS 13+) und macht den Eintrag sichtbar; ein frisch
-  registrierter Eintrag kann zunächst `RequiresApproval` sein, bis der User ihn
-  freigibt. **Abweichung vom Original:** Das Original schaltet Autostart per
+  der moderne Apple-Weg (macOS 13+) und macht den Eintrag sichtbar. **Live
+  bestätigt am 2026-10-17:** nach einmaligem Aus- und Wiedereinschalten des
+  Schalters stand der Eintrag **sofort** unter *Systemeinstellungen → Allgemein →
+  Anmeldeobjekte*, **ohne** zusätzliche Freigabe — die selbstsignierte Identität
+  („Prime Photos Local Signer") war für `SMAppService.mainApp.register()` also
+  ausreichend. Der `RequiresApproval`-Fall trat **nicht** auf; er bleibt als
+  theoretischer Fall im Code (die `RequiresApproval`-Behandlung in „How it works"
+  und die Veto-Falle unten beschreiben ihn weiterhin).
+  **Abweichung vom Original:** Das Original schaltet Autostart per
   `osascript` / System Events (`../original/SPEC_OS_INTEGRATION.md` §3.6,
   Vergleichstabelle Z. 357); wir weichen davon bewusst ab, weil SMAppService der
   stabile und in den Anmeldeobjekten sichtbare Weg ist.

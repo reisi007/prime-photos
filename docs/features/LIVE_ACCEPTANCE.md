@@ -96,3 +96,26 @@ The streamed upload therefore sets the header itself
 inspects the raw request head of the real builder against a loopback listener:
 `Content-Length` present and naming the file size, `Transfer-Encoding` absent.
 
+## Live acceptance of waves 5.21–5.23 (2026-10-17)
+
+The installed bundle (version 0.1.0, `SMAppService` autostart, the `NSLocale`
+language fix) was run by the user. Two of the three due checks passed; the third
+is a bug the user wants recorded.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | **System language** — start the app from Finder / by double-click | **pass** — the app starts in **German** (system locale `de_AT`) |
+| 2 | **Autostart** — toggle the login-item switch off and on once | **pass** — the entry appeared **immediately** under *System Settings → General → Login Items*, **no** extra approval was needed |
+| 3 | **"Ordner nicht gefunden"** — a source folder on a removed drive | **label pass, resume bug** — the row correctly showed **"Ordner nicht gefunden"** in **AMBER** (not "ANGEHALTEN"), **but** the run did **not** resume on its own when the drive came back |
+
+Point 3 is the bug: on drive return there is **no** automatic resume, and the row
+state is inconsistent — one folder sat on "Warten", one showed no status at all.
+The intended behaviour is the original's device-return path
+(`../original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6 — `HandleDeviceArrival` /
+`HandleDisconnectedDevice`: refresh the path, lift the pause,
+`ResumeUploadsForSchedule`; `../original/SPEC_BACKGROUND_SYNC.md` §3
+"external-drive arrival", `ForceScan = !IsPaused`). Open item: `AGENTS.todo.md`.
+
+Not live-checked: whether `LSMinimumSystemVersion 11.0` versus autostart from
+macOS 13 on plays a role.
+
