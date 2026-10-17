@@ -4,12 +4,38 @@
 „Ledger-Hygiene". Doku → `docs/` (Feature-Dateien: `docs/features/`). „Verworfen" wird **nie**
 gelöscht.
 
-## Erledigt am 2026-10-16 — Einträge gelöscht (Historie in Git)
+## Reihenfolge (Stand 2026-10-17)
 
-Runden **K–O** umgesetzt, unabhängig verifiziert, committet und gepusht: die UX-Punkte (Ordner-Zelle
-kurz, Balken ≤ 100 %, Wöchentlich-Zeile, Logo/Tray, Ordnerliste-Höhe, Tray-Tooltip + Labels) sowie
-der Doku-Neuaufbau (22 Feature-Dateien, `FEATURES.md`, `docs/dev/`). Dauerhafte Entscheidungen →
-`docs/features/`.
+Priorisiert nach **Nutzen und Spec-Reife**, nicht nach Alter. Details stehen in den Abschnitten darunter —
+hier nur die Reihenfolge und die Spec-Lage (Recon-Abgleich am 2026-10-17).
+
+**0. Beim User (blockiert nichts, ist aber die Abnahme der letzten vier Wellen):** die drei Live-Checks
+aus „Manueller Test 2026-10-17" (Systemsprache, Autostart-Veto, „Ordner nicht gefunden").
+
+**1. Kleine Hygiene, kein Recon nötig, sofort machbar:** `cargo fmt` einmalig (schaltet ein Gate frei)
+→ Actions Node 20 → 24.
+
+**2. Spec vollständig vorhanden — umsetzbar ohne neue Recon**, in dieser Reihenfolge:
+1. Upload-Ziel-Spiegelung (`SPEC_UPLOAD_DESTINATION.md`; Live-Beleg fürs Ordner-Anlegen liegt vor)
+2. Größe-Spalte + relatives „Letzte Aktualisierung" (`SPEC_UPLOAD_PROGRESS.md` §7.2,
+   `SPEC_STATUS_DETAIL.md` §3.4; im Scope-Inventar als **In** geführt)
+3. Queue-Paginierung: 300er-Kappung raus, `ScrollArea::show_rows` (`SPEC_STATUS_DETAIL.md` §3,
+   `SPEC_UPLOAD_PROGRESS.md` §7)
+4. „Details anzeigen"-Panel (`UI_FLOWS.md` §4.7)
+5. Fehlerfenster `readdtoqueue`/`retryall` (`SPEC_STATUS_DETAIL.md` §3; Inventar #21 „teilweise In")
+6. Sortierung/Filter der Tabelle (Inventar #16, `SPEC_STATUS_DETAIL.md` §3.3)
+7. Pause **pro Ordner** (`SPEC_BACKGROUND_SYNC.md` §7: „Datensicherung anhalten" je Schedule)
+8. Tray-Status-Popup (Inventar #15, `SPEC_UPLOAD_PROGRESS.md`/`SPEC_NOTIFICATIONS.md`)
+
+**3. Braucht erst eine Entscheidung oder neue Recon** (nicht einfach „nächste Welle"): Netz-/Kosten-Gate
+(im Original **nicht** belegt — „netzwerkgesteuerte Drosselung" wäre eine Neuerung), „Pro-Ziel-Limit"
+(Begriff im Original unbelegt, dort nur globale Concurrency), Videos (Konzept belegt,
+Details **UNKNOWN**), Nav-Icon-Maße (Recon liefert keine Pixelwerte), echte Speichernutzung (Inventar #7
+bereits **Out**), macOS-Signatur/Benachrichtigungen, Multi-Fenster-Zeile, Win/Linux-„Beenden".
+
+**4. Hygiene-Reste aus Verifikationen** — bei der nächsten Berührung der jeweiligen Datei mitziehen
+(`src/login.rs:491`, `src/i18n.rs:149`, Naht-Test Autostart, `aggregate_progress`-Designfrage,
+DMG-Skript, Token-Rotation) plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
 
 ## Erster Punkt beim nächsten Mal
 
@@ -40,8 +66,9 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
 ## Manueller Test 2026-10-17 — offen (Bundle aus 5.21–5.24)
 
 Vier Fixes sind umgesetzt, unabhängig verifiziert und committet (5.21 Systemsprache, 5.22 „Ordner
-nicht gefunden", 5.23 Autostart/SMAppService, 5.24 Doku-Drift). Das Bundle ist neu zu bauen und zu
-installieren; live abzunehmen:
+nicht gefunden", 5.23 Autostart/SMAppService, 5.24 Doku-Drift). Das Bundle ist gebaut und installiert
+(`/Applications/Prime Photos.app`, Version 0.1.0, Signatur verifiziert, Quarantäne entfernt) und geht
+so auch als `Prime-Photos-macos-arm64.dmg` aus dem Release `v0.1.0` heraus. Live abzunehmen:
 
 1. [ ] **Systemsprache:** Die App muss beim Finder-/Doppelklick-Start **deutsch** starten (vorher
    englisch: ein GUI-Start erbt kein `LANG`/`LC_ALL`/`LC_MESSAGES`, und `system_lang()` las nur die
@@ -65,13 +92,7 @@ installieren; live abzunehmen:
    Pause bleibt davon getrennt und behält Wortlaut + Farbe); kommt das Laufwerk zurück, muss der
    Ordner von selbst nach Idle gehen.
 
-## Manueller Test 2026-10-16 — abgeschlossen, offene Reste
-
-App aus `02e0fca` installiert und gestartet; Start sauber (**keine** Warnung/kein Fehler im Log,
-Default-Filter `warn`, `src/logging.rs:74`), Dedup-Index unverworfen mit **591 Zeilen** — Echtbeleg
-für die Selbstheilung aus 5.4. Der Test ist **geschlossen**: die Rückmeldungen 1–3, 5, 6, 8–14 sind
-umgesetzt, unabhängig verifiziert und gelöscht; die dauerhaften Entscheidungen stehen in
-`docs/features/` (`window-layout.md`, `queue-progress.md`, `settings.md`). **Offen ist nur noch:**
+## Offen aus dem geschlossenen Test 2026-10-16
 
 1. [ ] **Upload-Ziel-Spiegelung wie das Original.** Das Zielfeld ist aus dem Dialog **entfernt**
    (Welle 5.7); die App wählt das Ziel heute automatisch (`Pictures/Web`,
@@ -138,7 +159,6 @@ Ausdrücklich **ohne** Starttermin:
 - Fehlerfenster mit `readdtoqueue`/`retryall`; Semantik laut `SPEC_STATUS_DETAIL.md` §3.
 - Pause **pro Ordner** (Zeilen-Symbol) — im Original vorhanden, bei uns Post-MVP.
 - Sortierung/Filter der Tabelle; Spalte „Größe" + relative Zeit (`datetimeago_*`).
-- Tray-Status-Popup mit Statistiken (`statuspopup_stats_*`).
 - Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte Drosselung; Logout während
   laufendem Upload; Nav-Accessibility.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
@@ -153,14 +173,17 @@ Commits, Entscheidungen in `docs/features/`); offen ist nur **Welle 6** — plus
 Listen weiter oben.
 
 ### Welle 6 — Post-MVP / bewusst später (dokumentiert, **nicht** eingeplant)
+
+Reihenfolge und Spec-Lage: Abschnitt „Reihenfolge" oben. Die Liste hier ist die **Bündelung**, keine
+zweite Quelle — Details und §-Verweise stehen in den Abschnitten darüber.
+
 Pro-Ziel-Limit, netzwerkgesteuerte Drosselung, Cooldown nach Event-Läufen, Watcher-Sicherheitsnetz,
 Queue-Paginierung, Fehlerfenster (`readdtoqueue`/`retryall`), Pause **pro Ordner**, Sortierung/Filter
-+ Größen-Spalte, Tray-Status-Popup, „Details anzeigen"-Panel, Videos, echte Speichernutzung (Quota),
-`.app`-Bundle + Icon, „Startseite".
++ Größen-Spalte, Tray-Status-Popup, „Details anzeigen"-Panel, Videos, echte Speichernutzung (Quota).
 
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
-Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
+Nichts davon ist umgesetzt; alle Punkte brauchen eine Vorgabe.
 
 1. **Hintergrund-Sync-Rest:** (a) ob nach einem Event-Lauf ein Cooldown gelten soll (mehrere Drops
    kurz hintereinander) und (b) ob ein Lauf nur bei bestehendem WLAN/nicht-kostenpflichtigem Netz
@@ -174,10 +197,10 @@ Nichts davon ist umgeszt; alle Punkte brauchen eine Vorgabe.
 ## Offen (Backlog)
 
 - [ ] „Details anzeigen"-Panel (verschachtelt/flach wie das Original, `docs/original/UI_FLOWS.md` §4.7).
-- [ ] Menüleisten-Status-Item (Status-Popup: Status, Benachrichtigungen, Speicher, §9).
+- [ ] Menüleisten-Status-Item / Tray-Status-Popup (Status, Benachrichtigungen, Speicher; Strings
+  `statuspopup_stats_*` und `contextmenu_*`, `UI_FLOWS.md` §9, `SPEC_UPLOAD_PROGRESS.md` §1,
+  `SPEC_NOTIFICATIONS.md`; Inventar #15).
 - [ ] Videos hochladen (bisher nur Fotos). Offene Fragen dazu: `docs/original/SPEC_SCOPE_INVENTORY.md`.
-- [ ] „Startseite"/Übersichtsseite? (Strings vorhanden, im Build ungenutzt.)
-- [ ] `.app`-Icon für das Bundle — gehört zu `packaging/make-app.sh`.
 - [ ] Rest aus `Amazon Photos.dll`: Quota-Form, exakter Extension-Filter, Watcher-Intervall,
   Konfliktbehandlung, Video-Support.
 - [ ] Echte „Speichernutzung"-Anzeige (nur Prime; bis dahin bewusst nichts anzeigen).
@@ -243,3 +266,9 @@ Kein Eintrag hier darf nachträglich „doch noch" umgesetzt werden — verworfe
   (2026-10-15): er trifft nicht zu — der Dialog entsteht **vor** dem Fallback.
 - **Die Vermutung, der User habe das LaunchServices-Panel für den Finder gehalten** (2026-10-15):
   ausdrücklich vom User korrigiert — es geht **kein** Finder auf. Keine Klick-Logik daraus ableiten.
+- **Eine „Startseite"/Übersichtsseite (User-Entscheidung 2026-10-17).** Der Recon beantwortet die
+  frühere Backlog-Frage: `…_navigationMenu_home` („Startseite") und `…_navigationMenu_smartscan`
+  („Intelligenter Scan") existieren als **Strings**, haben im Original aber **keinen** Menüpunkt und
+  keinen Screen (`UI_STATES.md:61`, `SPEC_LIBRARY.md:535` — Spalte „no", `UI_FLOWS.md:754`). Ein
+  eigener Screen wäre damit eine Erfindung statt Parität; die ungenutzten Strings im Build bleiben
+  liegen (**nicht** „aufräumend" entfernen und **nicht** doch noch bauen).
