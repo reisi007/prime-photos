@@ -58,6 +58,14 @@ pub fn apply(ctx: &egui::Context) {
     style.spacing.button_padding = Vec2::new(12.0, 7.0);
     style.spacing.interact_size = Vec2::new(36.0, 26.0);
 
+    // Platz für den Floating-Balken reservieren, damit kein Inhalt unter ihm
+    // liegt. egui 0.31 nutzt per Default `ScrollStyle::floating()`, dessen
+    // `floating_allocated_width` 0 ist — die ScrollArea rechnete deshalb mit
+    // voller Innenbreite, und der rechte Rand der Ordner-Karte lag unter dem
+    // 10 px breiten Griff (der erst bei Hover so breit wird). Bugreport 2026-10-17.
+    let scroll = &mut style.spacing.scroll;
+    scroll.floating_allocated_width = scroll.bar_width;
+
     // --- Type scale ----------------------------------------------------
     style.text_styles = [
         (
@@ -93,4 +101,20 @@ pub fn secondary_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(egui::RichText::new(text).color(INK).size(14.0))
         .fill(Color32::from_rgb(0xFA, 0xFB, 0xFB))
         .stroke(Stroke::new(1.0_f32, BORDER))
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+
+    #[test]
+    fn floating_scroll_bar_reserves_its_full_width() {
+        // Der reservierte Streifen muss den breitesten Griff decken (sonst malt
+        // egui den Balken über die Ordner-Karte).
+        let ctx = egui::Context::default();
+        super::apply(&ctx);
+        let scroll = ctx.style().spacing.scroll;
+        assert!(scroll.allocated_width() > 0.0);
+        assert!(scroll.allocated_width() >= scroll.bar_width);
+    }
 }
