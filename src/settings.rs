@@ -77,12 +77,14 @@ impl PrimePhotoApp {
             ui.label(tr("Album (optional):"));
             changed |= ui.text_edit_singleline(&mut self.album_name).changed();
         });
+        ui.add_space(8.0);
         changed |= ui
             .checkbox(
                 &mut self.config.notifications,
                 tr("Desktop-Benachrichtigungen (Upload fertig / Fehler)"),
             )
             .changed();
+        ui.add_space(8.0);
         changed |= ui
             .checkbox(
                 &mut self.config.background_sync,
@@ -92,6 +94,7 @@ impl PrimePhotoApp {
         ui.label(theme::muted(tr(
             "Sucht automatisch nach neuen Dateien in den aktiven Sicherungszielen. Läuft nur, solange Prime Photos geöffnet ist.",
         )));
+        ui.add_space(8.0);
         let autostart_resp =
             ui.checkbox(&mut self.autostart_enabled, tr("Nach dem Anmelden starten"));
         if autostart_resp.changed() {
@@ -103,6 +106,7 @@ impl PrimePhotoApp {
         )));
         // `slow_mode` stays transient on purpose (documented below the checkbox):
         // it must never reach `Config`, so it does not set `changed`.
+        ui.add_space(8.0);
         ui.checkbox(&mut self.slow_mode, tr("Slow-Mode (1 Datei gleichzeitig)"));
         ui.label(theme::muted(tr("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.")));
 
@@ -143,7 +147,6 @@ impl PrimePhotoApp {
                 .changed();
             ui.label(tr("KB/Sekunde"));
         });
-        ui.add_space(6.0);
         ui.label(theme::muted(tr(
             "Hinweis: Die Begrenzung wird pro Datei nach dem Upload angewendet.",
         )));
@@ -153,7 +156,7 @@ impl PrimePhotoApp {
         // queue — the same role the conflict default below plays, which is why
         // the two are shown as one block and share the closing note. Persisted
         // immediately like every other setting here.
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         ui.label(theme::muted(tr("Standard für neue Upload-Ziele")));
         changed |= ui
             .checkbox(&mut self.config.dedup_default, tr("Duplikate überspringen"))
@@ -165,7 +168,7 @@ impl PrimePhotoApp {
         // Application default for the name-conflict policy (user decision
         // 2026-10-15): the preselection of a new backup target and the policy
         // of the one-time (drag & drop) queue. Persisted immediately.
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         ui.label(theme::muted(tr("Standard bei Dateikonflikten")));
         changed |= ui
             .radio_value(
@@ -195,7 +198,6 @@ impl PrimePhotoApp {
                 tr("Ersetzen"),
             )
             .changed();
-        ui.add_space(6.0);
         ui.label(theme::muted(tr(
             "Gilt für neue Upload-Ziele und für Drag&Drop.",
         )));

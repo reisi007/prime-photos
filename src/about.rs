@@ -113,7 +113,7 @@ pub(crate) fn about_window(ctx: &egui::Context, open: &mut bool, license_open: &
                 };
                 ui.label(RichText::new(tr1("Version: {}", version)).color(theme::MUTED));
             });
-            ui.add_space(14.0);
+            ui.add_space(8.0);
             ui.vertical_centered(|ui| {
                 if ui
                     .add(theme::secondary_button(tr("Drittanbieterlizenzen")))
