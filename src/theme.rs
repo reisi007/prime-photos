@@ -63,8 +63,14 @@ pub fn apply(ctx: &egui::Context) {
     // `floating_allocated_width` 0 ist — die ScrollArea rechnete deshalb mit
     // voller Innenbreite, und der rechte Rand der Ordner-Karte lag unter dem
     // 10 px breiten Griff (der erst bei Hover so breit wird). Bugreport 2026-10-17.
+    // Der reservierte Streifen besteht aus breitester Griff **plus** sichtbarem
+    // Abstand: egui malt den Griff rechtsbündig in den Streifen, ein reiner
+    // Griffsstreifen ließ ihn also bündig am Kartenrand kleben (im Live-Bild vom
+    // Nutzer am 2026-10-17 als „nicht gefixt" zurückgemeldet). Der Abstand
+    // entspricht dem `item_spacing` des Themes.
+    const SCROLL_BAR_GAP: f32 = 8.0;
     let scroll = &mut style.spacing.scroll;
-    scroll.floating_allocated_width = scroll.bar_width;
+    scroll.floating_allocated_width = scroll.bar_width + SCROLL_BAR_GAP;
 
     // --- Type scale ----------------------------------------------------
     style.text_styles = [
@@ -110,11 +116,14 @@ mod tests {
     #[test]
     fn floating_scroll_bar_reserves_its_full_width() {
         // Der reservierte Streifen muss den breitesten Griff decken (sonst malt
-        // egui den Balken über die Ordner-Karte).
+        // egui den Balken über die Ordner-Karte) und darüber hinaus den
+        // sichtbaren Abstand zwischen Inhalt und Balken freihalten.
         let ctx = egui::Context::default();
         super::apply(&ctx);
         let scroll = ctx.style().spacing.scroll;
         assert!(scroll.allocated_width() > 0.0);
         assert!(scroll.allocated_width() >= scroll.bar_width);
+        // Der Reststreifen neben dem Griff ist der sichtbare Abstand zum Inhalt.
+        assert!(scroll.allocated_width() - scroll.bar_width >= 8.0);
     }
 }

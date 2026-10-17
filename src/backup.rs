@@ -2370,7 +2370,7 @@ impl PrimePhotoApp {
         // Shared geometry: header and rows derive the name width the same way so
         // the four columns line up. The scroll bar's width is reserved with the
         // floating style too: `theme.rs` sets `floating_allocated_width =
-        // bar_width`, so `allocated_width()` yields 10, not 0.
+        // bar_width + 8`, so `allocated_width()` yields 18, not 0.
         let avail = ui.available_width();
         let spacing_x = ui.spacing().item_spacing.x;
         let bar_w = ui.spacing().scroll.allocated_width();
