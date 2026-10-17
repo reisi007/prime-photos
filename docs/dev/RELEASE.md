@@ -125,7 +125,7 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (Default `VERSION=0.1.1`, `BUILD=2`, ad-hoc signiert):
+2. **Bundle bauen** (Default `VERSION=0.1.2`, `BUILD=2`, ad-hoc signiert):
 
    ```sh
    ./packaging/make-app.sh
