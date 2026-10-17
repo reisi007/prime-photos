@@ -1,4 +1,5 @@
 use crate::about;
+use crate::app_activation;
 use crate::app_menu;
 use crate::auth::TokenStore;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
@@ -10,6 +11,7 @@ use crate::i18n::{self, tr, tr1, tr3};
 use crate::icons::{app_logo, draw_flag_badge, nav_backup_icon, nav_settings_icon};
 use crate::login;
 use crate::notify;
+use crate::single_instance;
 use crate::theme;
 use crate::tray;
 use crate::upload::{eta_suffix, FileState, UploadShared};
@@ -338,6 +340,11 @@ impl PrimePhotoApp {
         // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
         // The context is handed in so the menu's About item can wake the UI.
         app_menu::install(&cc.egui_ctx);
+        // App activation (Dock icon / relaunch) and the single-instance
+        // handshake both only flag + wake the UI, so they get the context here
+        // (see `src/app_activation.rs`, `src/single_instance.rs`).
+        app_activation::install(&cc.egui_ctx);
+        single_instance::attach_ctx(&cc.egui_ctx);
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         // `config_loaded_ok` is derived directly from the `Config::load()`
         // result: a broken/unreadable file yields `Config::default()` (with
@@ -576,14 +583,24 @@ impl PrimePhotoApp {
         }
     }
 
-    /// Open the About window and bring the main window to the front. The app
-    /// menu can be chosen while the window is hidden in tray mode, so this also
-    /// shows and focuses the window (like the tray's "Fenster anzeigen").
-    pub(crate) fn open_about(&mut self, ctx: &egui::Context) {
-        self.about_open = true;
+    /// Show and focus the main window and restore the Dock icon — the one path
+    /// every "bring the app back" trigger uses: the tray's "Fenster anzeigen",
+    /// an app activation (Dock icon / relaunch, see `src/app_activation.rs`), a
+    /// second launch (see `src/single_instance.rs`) and the expired-session
+    /// fallback.
+    fn show_main_window(&mut self, ctx: &egui::Context) {
+        self.window_hidden = false;
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        self.window_hidden = false;
+        app_activation::set_dock_icon(true);
+    }
+
+    /// Open the About window and bring the main window to the front. The app
+    /// menu can be chosen while the window is hidden in tray mode, so this goes
+    /// through the shared show path (which also restores the Dock icon).
+    pub(crate) fn open_about(&mut self, ctx: &egui::Context) {
+        self.about_open = true;
+        self.show_main_window(ctx);
     }
 
     /// Derive the tray glyph state from the current app state and apply it —
@@ -973,9 +990,7 @@ impl eframe::App for PrimePhotoApp {
                 break;
             };
             if ev.id == *tray.show_item.id() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                self.window_hidden = false;
+                self.show_main_window(ctx);
             } else if ev.id == *tray.pause_item.id() {
                 let next = !*self.paused.borrow();
                 self.paused.send_replace(next);
@@ -997,6 +1012,20 @@ impl eframe::App for PrimePhotoApp {
         // other platform.
         if app_menu::take_about_request() {
             self.open_about(ctx);
+        }
+
+        // App activation (macOS `NSApplicationDidBecomeActiveNotification`):
+        // the user relaunched the app from Finder/Spotlight/`open` or clicked
+        // its Dock icon. The observer only flagged + woke us (see
+        // `src/app_activation.rs`); `false` on every other platform.
+        if app_activation::take_become_active_request() {
+            self.show_main_window(ctx);
+        }
+
+        // A second launch asked this instance to show its window and exited
+        // (see `src/single_instance.rs`). `false` while nobody asked.
+        if single_instance::take_show_request() {
+            self.show_main_window(ctx);
         }
 
         // Keep the tray's pause label in sync with the actual pause state
@@ -1076,8 +1105,7 @@ impl eframe::App for PrimePhotoApp {
                 // restart on an invalidated session, user decision
                 // 2026-10-15).
                 if self.window_hidden {
-                    self.window_hidden = false;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    self.show_main_window(ctx);
                 }
             }
         }
@@ -1092,6 +1120,12 @@ impl eframe::App for PrimePhotoApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.window_hidden = true;
+            // A hidden window leaves no Dock icon behind: the original is a
+            // menu-bar app that only borrows a Dock presence while a window is
+            // open (original parity, SPEC_OS_INTEGRATION.md §3.4). Back via the
+            // tray, or via an app activation / second launch, which both
+            // restore it through `show_main_window`.
+            app_activation::set_dock_icon(false);
         }
 
         // Account fetch (name + avatar): first attempt after a successful

@@ -1,5 +1,6 @@
 mod prime_photos;
 mod about;
+mod app_activation;
 mod app_menu;
 mod auth;
 mod config;
@@ -21,6 +22,7 @@ mod app;
 mod backup;
 mod backup_config;
 mod settings;
+mod single_instance;
 
 use app::PrimePhotoApp;
 use eframe::egui;
@@ -43,6 +45,16 @@ fn window_icon() -> egui::IconData {
 
 fn main() -> eframe::Result<()> {
     logging::init();
+
+    // Only one instance at a time: a second start asks the running instance to
+    // show its window (see `src/single_instance.rs`) and exits instead of
+    // opening a second window. Runs before `notify::init()` so that a start
+    // which immediately gives up never builds the notification binding.
+    if !single_instance::acquire() {
+        log::info!("Prime Photos läuft bereits — Fenster der laufenden Instanz angefordert");
+        return Ok(());
+    }
+
     notify::init();
 
     let options = eframe::NativeOptions {

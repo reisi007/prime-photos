@@ -33,6 +33,14 @@
 	<key>CFBundleVersion</key>
 	<string>__BUILD__</string>
 
+	<!-- Einzelinstanz-Schutz auf macOS-Seite (Original-Parität,
+	     SPEC_OS_INTEGRATION.md §3.3: "single instance only"): Launch Services
+	     lehnt einen zweiten Start ab und aktiviert stattdessen die laufende
+	     Instanz. Startwege, die daran vorbeigehen (zweiter Aufruf aus der
+	     Shell, Linux/Windows), deckt der Handshake in `src/single_instance.rs` ab. -->
+	<key>LSMultipleInstancesProhibited</key>
+	<true/>
+
 	<key>LSMinimumSystemVersion</key>
 	<string>11.0</string>
 	<key>NSHighResolutionCapable</key>
