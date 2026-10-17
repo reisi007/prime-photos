@@ -22,6 +22,7 @@ Clean-room-Specs zum Amazon-Photos-Desktop-Client (REA der .NET-Assembly + Resso
 - [SPEC_ACCOUNT_BILLING.md](original/SPEC_ACCOUNT_BILLING.md) — Konto- und Billing-Bereich.
 - [SPEC_OS_INTEGRATION.md](original/SPEC_OS_INTEGRATION.md) — OS-Integration (Tray, Autostart, Menü).
 - [SPEC_ABOUT.md](original/SPEC_ABOUT.md) — About-Fenster und Versionshinweise.
+- [SPEC_RELEASE_NOTES.md](original/SPEC_RELEASE_NOTES.md) — Release Notes nach einem Update (Auslöser, Merker, Fenster).
 - [SPEC_FILE_IDENTITY.md](original/SPEC_FILE_IDENTITY.md) — Datei-Identität (MD5, Stat-Check, Pfad-Bindung).
 - [SPEC_FOLDERS.md](original/SPEC_FOLDERS.md) — Ordner-Scan und Filter-Logik.
 - [SPEC_UPLOAD_DESTINATION.md](original/SPEC_UPLOAD_DESTINATION.md) — Upload-Ziel und Zielauflösung.
