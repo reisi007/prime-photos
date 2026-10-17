@@ -60,20 +60,33 @@ The dialog is shared between creating and editing a target.
   `ScheduleError.LocalFolderNotFound`
   (`../original/SPEC_MISSING_SOURCE.md` §3.1/§3.2).
 
-  **Live open (2026-10-17):** the *lifting* half above is **not** live-confirmed.
-  In the installed bundle (0.1.0) a target whose drive was removed correctly
-  showed "Ordner nicht gefunden" in AMBER, **but** when the drive returned the
-  run did **not** resume on its own, and the row state was inconsistent — one
-  folder sat on "Warten", one showed no status at all. So the status lifting
-  (`source_status`) and/or the trigger that should start the run do not take
-  effect in the live case; the paragraph above still describes what
-  `source_status` *does*, this is about the missing follow-up. The original's
-  device-return path is `../original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6
-  (`HandleDeviceArrival` / `HandleDisconnectedDevice`: refresh the path, lift the
-  pause, `ResumeUploadsForSchedule`) and `../original/SPEC_BACKGROUND_SYNC.md` §3
-  ("external-drive arrival", `ForceScan = !IsPaused`). Open item:
-  `AGENTS.todo.md` (live acceptance 2026-10-17 — "Ordner nicht gefunden": resume
-  on drive return).
+  **Live open (2026-10-17):** a live run of the installed bundle (0.1.0) showed a
+  target whose drive was removed correctly as "Ordner nicht gefunden" in AMBER
+  (not "ANGEHALTEN"), **but** the run did **not** resume on its own when the
+  drive returned, and the row state was inconsistent — one folder sat on
+  "Warten", one showed no status at all.
+
+  **Resume on return (Welle 5.33, 2026-10-17):** the missing half was the scan
+  trigger, not the status lifting — `source_status` was already applied live in
+  `sync_watchers` (every `WATCH_POLL` pass, `src/backup.rs`). The return is now
+  edge-triggered: `returned_from_missing` fires only for `NotFound` → present,
+  `lift_returned_sources` lifts the state to `Idle` and hands the path back, and
+  `watch_loop` parks it (`pending_scans`) so its **full stock** is read in once —
+  no watermark, no "only changes" — in the same pass, parallel to a live run or
+  as a normal run. A `Paused` folder is **not** a return (only `NotFound` →
+  present). The **global pause** is respected: with the pause set the folder
+  stays parked (`can_start` in `handle_scan_requests`) and starts on its own as
+  soon as the pause is lifted (within `WATCH_POLL`, 30 s). Original reference:
+  the device-return path in `../original/SPEC_MISSING_SOURCE.md`
+  §3.3.3/§3.3.6 (`HandleDeviceArrival` / `HandleDisconnectedDevice`: refresh the
+  path, lift the pause, `ResumeUploadsForSchedule`) and
+  `../original/SPEC_BACKGROUND_SYNC.md` §3 ("external-drive arrival",
+  `ForceScan = !IsPaused`).
+
+  **Still open:** the resume on a **real** drive return is not live-confirmed
+  (no live test on a removable drive yet); the row-state inconsistency ("Warten"
+  / no status) is a separate UI observation. Open item: `AGENTS.todo.md` (live
+  acceptance 2026-10-17 — "Ordner nicht gefunden": resume on drive return).
 
 - **Inhaltsfilter wie das Original (F2, Welle 5.7, `0d486e2`):** zwei
   Checkboxen mit Original-Labels „Fotos sichern" (an, wählbar) / „Videos

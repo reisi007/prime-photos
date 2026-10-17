@@ -100,6 +100,49 @@ fn source_status(path_exists: bool, current: FolderStatus) -> FolderStatus {
     }
 }
 
+/// Whether this pass is the **return of a missing source**: the folder was
+/// `NotFound` and its path is back. Exactly this edge (`NotFound` → present)
+/// must read the folder's stock in once, so `watch_loop` parks it for a full
+/// scan (no watermark, no "only changes"). Deliberately narrow:
+/// - a folder that was `Paused` is **not** a return (user decision 2026-10-17),
+/// - an `Idle`/`Done`/… folder whose path is simply still there is not one
+///   either — otherwise every `WATCH_POLL` pass would scan again.
+///
+/// Pure (no store, no filesystem), so the edge is testable on its own.
+fn returned_from_missing(current: FolderStatus, path_exists: bool) -> bool {
+    path_exists && current == FolderStatus::NotFound
+}
+
+/// Re-decide every enabled folder's source state with the pure rule
+/// [`source_status`] and return the paths that just **came back**
+/// ([`returned_from_missing`]) — the folders `watch_loop` parks for a
+/// full-stock scan. Also reports whether any state actually moved, so the
+/// caller saves the store only then.
+///
+/// The existence check is a parameter (`Path::is_dir` at the real call site, a
+/// plain predicate in the tests), so no test needs a real drive.
+fn lift_returned_sources(
+    store: &mut FolderStore,
+    path_exists: impl Fn(&Path) -> bool,
+) -> (Vec<PathBuf>, bool) {
+    let mut returned = Vec::new();
+    let mut changed = false;
+    for i in store.enabled_indices() {
+        if let Some(f) = store.folders.get_mut(i) {
+            let exists = path_exists(&f.path);
+            if returned_from_missing(f.status, exists) {
+                returned.push(f.path.clone());
+            }
+            let next = source_status(exists, f.status);
+            if next != f.status {
+                f.status = next;
+                changed = true;
+            }
+        }
+    }
+    (returned, changed)
+}
+
 /// Label of a backup folder in the queue (rows and group headers): the folder
 /// name, plus the **parent folder's name** in parentheses when **more than
 /// one** backup folder carries that name (`ambiguous`) — two folders both
@@ -1165,11 +1208,14 @@ fn handle_scan_requests(
 /// every pass: a folder that was added, enabled, disabled or removed (and the
 /// `background_sync` switch) is reflected within `WATCH_POLL`. A folder we
 /// cannot watch (gone, ejected) is logged and simply absent until the next pass.
+///
+/// Returns the paths that just **came back** from `NotFound` (Welle 5.33), so
+/// the caller can park them for a one-time full-stock scan.
 fn sync_watchers(
     watchers: &mut HashMap<PathBuf, notify::RecommendedWatcher>,
     tx: &tokio::sync::mpsc::UnboundedSender<notify::Result<notify::Event>>,
     cfg: &Config,
-) {
+) -> Vec<PathBuf> {
     // No switch or no sign-in → no watcher at all (the same guard that keeps a
     // run from starting).
     let mut store = if cfg.background_sync
@@ -1189,18 +1235,13 @@ fn sync_watchers(
     // `Idle` again. This is also why a folder we cannot watch is already
     // `NotFound` before the watcher attempt below. Nothing else is touched; in
     // particular the global user pause is a separate switch.
-    let mut store_changed = false;
-    if let Some(s) = store.as_mut() {
-        for i in s.enabled_indices() {
-            if let Some(f) = s.folders.get_mut(i) {
-                let next = source_status(f.path.is_dir(), f.status);
-                if next != f.status {
-                    f.status = next;
-                    store_changed = true;
-                }
-            }
-        }
-    }
+    //
+    // The paths that just came back are handed to the caller: `watch_loop` parks
+    // them so the returned folder's stock is read in **once** (Welle 5.33).
+    let (returned, store_changed) = match store.as_mut() {
+        Some(s) => lift_returned_sources(s, |p| p.is_dir()),
+        None => (Vec::new(), false),
+    };
     let desired: Vec<PathBuf> = store
         .as_ref()
         .map(|s| {
@@ -1242,6 +1283,7 @@ fn sync_watchers(
             let _ = s.save();
         }
     }
+    returned
 }
 
 /// The supervising watcher task, for the rest of the process: one watcher per
@@ -1283,7 +1325,18 @@ async fn watch_loop(
         // the cookie fields are `#[serde(skip)]`).
         let mut cfg = Config::load().unwrap_or(last_config.clone());
         overlay_session_cookies(&mut cfg, &session);
-        sync_watchers(&mut watchers, &tx, &cfg);
+        // A source folder that just came back (`NotFound` → present) is read in
+        // **once**, with its full stock: park it here — before the scan block
+        // below — so this same pass handles it (parallel to a live run, or as a
+        // normal run). The global pause is respected downstream: when it is set,
+        // `handle_scan_requests` keeps the folder parked and it starts as soon as
+        // the pause is lifted. The edge is one-shot (`NotFound` is lifted to
+        // `Idle`), so no pass parks it twice.
+        for path in sync_watchers(&mut watchers, &tx, &cfg) {
+            if !pending_scans.contains(&path) {
+                pending_scans.push(path);
+            }
+        }
 
         // Retry what was remembered while a run was busy or paused: no new burst,
         // just the parked stock — merged with itself (a no-op) so no path is taken
@@ -2953,6 +3006,82 @@ mod tests {
         for current in [Idle, Scanning, Uploading, Done, Error] {
             assert_eq!(source_status(true, current), current);
         }
+    }
+
+    #[test]
+    fn returned_from_missing_only_fires_for_a_back_folder_that_was_not_found() {
+        use FolderStatus::{Done, Error, Idle, NotFound, Paused, Scanning, Uploading};
+        // (a) The one edge that triggers: was `NotFound`, the path is back.
+        assert!(returned_from_missing(NotFound, true));
+        // (b) `NotFound` with the path still gone: nothing to read in.
+        assert!(!returned_from_missing(NotFound, false));
+        // (c)/(d) Every other state with the path present is **not** a return:
+        // `Idle` must not re-scan every pass, and `Paused` is not a return by
+        // design (user decision 2026-10-17).
+        for current in [Idle, Scanning, Uploading, Paused, Done, Error] {
+            assert!(!returned_from_missing(current, true), "{current:?}");
+            assert!(!returned_from_missing(current, false), "{current:?}");
+        }
+    }
+
+    /// A store with one enabled folder at `path` in `status`.
+    fn store_with(path: &str, status: FolderStatus) -> FolderStore {
+        let mut store = FolderStore::default();
+        let mut folder = folders::BackupFolder::new(PathBuf::from(path));
+        folder.status = status;
+        store.folders.push(folder);
+        store
+    }
+
+    #[test]
+    fn a_returned_source_is_parked_once_and_lifted_to_idle() {
+        // (a) `NotFound` + path back ⇒ the path is returned (parked for a
+        // full-stock scan) and the state lifts to `Idle`.
+        let mut store = store_with("/photos/returned", FolderStatus::NotFound);
+        let (returned, changed) = lift_returned_sources(&mut store, |_| true);
+        assert_eq!(returned, vec![PathBuf::from("/photos/returned")]);
+        assert!(changed);
+        assert_eq!(store.folders[0].status, FolderStatus::Idle);
+
+        // (c) The next pass sees `Idle` + present: **no** second park — exactly
+        // one scan trigger per return.
+        let (again, changed) = lift_returned_sources(&mut store, |_| true);
+        assert!(again.is_empty());
+        assert!(!changed);
+    }
+
+    #[test]
+    fn a_still_missing_source_is_not_parked() {
+        // (b) `NotFound` + path still gone ⇒ nothing is returned, the state
+        // stays `NotFound`.
+        let mut store = store_with("/photos/still-gone", FolderStatus::NotFound);
+        let (returned, changed) = lift_returned_sources(&mut store, |_| false);
+        assert!(returned.is_empty());
+        assert!(!changed);
+        assert_eq!(store.folders[0].status, FolderStatus::NotFound);
+    }
+
+    #[test]
+    fn a_present_idle_source_is_not_parked_again() {
+        // (c) `Idle` + path present is the steady state, not a return: nothing
+        // is parked (no repeat every `WATCH_POLL`), the state is untouched.
+        let mut store = store_with("/photos/idle", FolderStatus::Idle);
+        let (returned, changed) = lift_returned_sources(&mut store, |_| true);
+        assert!(returned.is_empty());
+        assert!(!changed);
+        assert_eq!(store.folders[0].status, FolderStatus::Idle);
+    }
+
+    #[test]
+    fn a_present_paused_source_is_not_a_return() {
+        // (d) `Paused` + path present: **not** a return (only `NotFound` →
+        // present triggers, user decision 2026-10-17). The state lifts to
+        // `Idle` (older `folders.toml`), but no scan is parked.
+        let mut store = store_with("/photos/paused", FolderStatus::Paused);
+        let (returned, changed) = lift_returned_sources(&mut store, |_| true);
+        assert!(returned.is_empty());
+        assert!(changed);
+        assert_eq!(store.folders[0].status, FolderStatus::Idle);
     }
 
     #[test]

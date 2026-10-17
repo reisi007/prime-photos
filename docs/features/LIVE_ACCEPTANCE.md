@@ -116,6 +116,14 @@ The intended behaviour is the original's device-return path
 `ResumeUploadsForSchedule`; `../original/SPEC_BACKGROUND_SYNC.md` §3
 "external-drive arrival", `ForceScan = !IsPaused`). Open item: `AGENTS.todo.md`.
 
+**Code now implements the resume (Welle 5.33, 2026-10-17):** the missing part was
+the scan trigger, not the status lifting (`source_status` was already applied
+live in `sync_watchers`). `watch_loop` now detects the `NotFound` → present edge
+(`returned_from_missing`/`lift_returned_sources` in `src/backup.rs`) and parks the
+returned folder for a one-time full-stock scan, respecting the global pause — see
+[backup-targets.md](backup-targets.md). The live re-check on a real drive return
+is still open (`AGENTS.todo.md`).
+
 Not live-checked: whether `LSMinimumSystemVersion 11.0` versus autostart from
 macOS 13 on plays a role.
 

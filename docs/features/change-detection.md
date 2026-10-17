@@ -58,6 +58,19 @@ last run.
   (`Es läuft bereits ein Upload.`). Automatically picked up again only **with**
   background sync — the next app start's safety net; without it, only a manual
   run does.
+- **Return of a missing drive (Welle 5.33):** a target held as `NotFound`
+  whose path comes back gets its **whole stock read in once** (no watermark, no
+  "only changes"). The detection is edge-triggered (`returned_from_missing`:
+  only `NotFound` → present; a `Paused` folder does **not** fire) and runs in
+  the supervisor (`sync_watchers` → `lift_returned_sources`; `watch_loop` parks
+  the path in `pending_scans` and handles it in the same pass via
+  `handle_scan_requests` — parallel to a live run, or as a normal run). Exactly
+  **once** per return: after the lift the folder stands as `Idle`, so no later
+  30 s pass triggers it again. The **global pause** is respected (`can_start`):
+  while paused the folder stays parked and runs on its own once the pause is
+  lifted (within `WATCH_POLL`, 30 s). **Without** background sync there is no
+  supervisor — the path does not exist then (the safety net is the next app
+  start).
 - **Open:** safety net for missed events (watcher limit, ejected volume,
   network mount) — as an optional switch, not yet decided.
 - Original parameters (documented): FSEvents latency 3 s, throttle 100 ms,
@@ -139,6 +152,21 @@ last run.
     Upload.`); automatisch geholt wird der Ordner nur **mit** Hintergrund-Sync
     (Sicherheitsnetz beim nächsten App-Start), ohne ihn nur durch einen manuellen
     Lauf.
+  - **Rückkehr eines fehlenden Laufwerks (User-Entscheidung 2026-10-17):** ist
+    ein Backup-Ordner als `NotFound` geführt und kommt sein Pfad zurück, wird
+    sein **vorhandener Bestand vollständig** eingelesen — flankengetriggert
+    (nur `NotFound` → vorhanden; ein `Paused`-Ordner ist **kein** Rückkehr-Fall),
+    genau **einmal** pro Rückkehr. Der Supervisor erkennt den Übergang in
+    `sync_watchers` (`returned_from_missing`/`lift_returned_sources`) und parkt
+    den Pfad in `pending_scans`; `handle_scan_requests` arbeitet ihn im selben
+    Durchlauf ab (parallel zu einem laufenden Upload oder als normaler Lauf).
+    Die **globale Pause** wird über `can_start` respektiert: bei gedrückter
+    Pause bleibt der Ordner geparkt und läuft beim Aufheben von selbst (innerhalb
+    `WATCH_POLL`, 30 s). Original-Vorbild: `HandleDeviceArrival` /
+    `HandleDisconnectedDevice` (`../original/SPEC_MISSING_SOURCE.md`
+    §3.3.3/§3.3.6, `../original/SPEC_BACKGROUND_SYNC.md` §3,
+    `ForceScan = !IsPaused`). **Grenze:** ohne Hintergrund-Sync gibt es den
+    Supervisor nicht — der Pfad fehlt dann ganz.
   - **Verworfen:** der periodische Hintergrund-Scan als Erkennungsmechanismus
     (User 2026-10-14: „file add / edit per event abfragen"); ein
     `BackupScanIntervalInHours`-Takt.
