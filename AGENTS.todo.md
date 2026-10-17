@@ -14,8 +14,10 @@ erledigt **und** verifiziert = **löschen** (Historie = Git).
 Priorisiert nach **Nutzen und Spec-Reife**, nicht nach Alter. Details stehen in den Abschnitten darunter —
 hier nur die Reihenfolge und die Spec-Lage (Recon-Abgleich am 2026-10-17).
 
-**0. Beim User (blockiert nichts, ist aber die Abnahme der letzten vier Wellen):** die drei Live-Checks
-aus „Manueller Test 2026-10-17" (Systemsprache, Autostart-Veto, „Ordner nicht gefunden").
+**0. Vordringlich — ein Live-Bug (2026-10-17):** nach der Rückkehr eines fehlenden Laufwerks setzt der
+Lauf **nicht** von selbst fort (Details im Abschnitt „Offen aus der Live-Abnahme 2026-10-17").
+**Erst sondieren, dann schneiden** — der Bug kann in der Rückkehr-Erkennung, im Status-Lifting oder im
+Anstoßen des Laufs sitzen.
 
 **1. Kleine Hygiene, kein Recon nötig, sofort machbar:** `cargo fmt` einmalig (schaltet ein Gate frei)
 → Actions Node 20 → 24.
@@ -69,34 +71,26 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
   bleiben laut `docs/dev/RELEASE.md` §9 unverifiziert bzw. nicht implementiert — dafür gibt es keinen
   Auftrag.
 
-## Manueller Test 2026-10-17 — offen (Bundle aus 5.21–5.24)
+## Offen aus der Live-Abnahme 2026-10-17 (Bundle aus 5.21–5.24)
 
-Vier Fixes sind umgesetzt, unabhängig verifiziert und committet (5.21 Systemsprache, 5.22 „Ordner
-nicht gefunden", 5.23 Autostart/SMAppService, 5.24 Doku-Drift). Das Bundle ist gebaut und installiert
-(`/Applications/Prime Photos.app`, Version 0.1.0, Signatur verifiziert, Quarantäne entfernt) und geht
-so auch als `Prime-Photos-macos-arm64.dmg` aus dem Release `v0.1.0` heraus. Live abzunehmen:
+Zwei der drei Checks sind **bestanden und belegt** — Systemsprache (Finder-Start deutsch, ohne
+`LANG`/`LC_ALL`) und Autostart (Eintrag **sofort** sichtbar, **keine** Freigabe; damit ist auch das
+Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs/features/LIVE_ACCEPTANCE.md`,
+`docs/features/languages.md`, `docs/features/autostart.md`. Der dritte hat einen **Bug** aufgedeckt:
 
-1. [ ] **Systemsprache:** Die App muss beim Finder-/Doppelklick-Start **deutsch** starten (vorher
-   englisch: ein GUI-Start erbt kein `LANG`/`LC_ALL`/`LC_MESSAGES`, und `system_lang()` las nur die
-   Umgebung — seit 5.21 liest macOS zusätzlich
-   `NSLocale::currentLocale().localeIdentifier()`). Die Einstellung „Automatisch (Systemsprache)"
-   muss weiter greifen, der Override in den Einstellungen unverändert bleiben.
-2. [ ] **Autostart — das Veto muss weg:** In `config.toml` steht `autostart_enabled = false`; das ist
-   per Design ein **Veto** („nie wieder registrieren") und war die eigentliche Ursache dafür, dass
-   nichts in den Anmeldeobjekten stand. Der Schalter muss **einmal** aus- und wieder eingeschaltet
-   werden (schreibt `Some(true)`); danach muss der Eintrag unter **Systemeinstellungen → Allgemein →
-   Anmeldeobjekte** erscheinen (ggf. erst nach expliziter Freigabe).
-   **Offenes Risiko:** ob macOS `SMAppService.mainApp.register()` mit unserer **selbstsignierten**
-   Signatur („Prime Photos Local Signer") akzeptiert, ist nicht belegt. Schlägt es fehl, steht die
-   Ursache im Log (`Autostart (Login-Item) konnte nicht geändert werden`) und es wird **nichts**
-   persistiert; der Rückfallweg wäre dann `MacOSLaunchMode::AppleScript` (wie das Original,
-   `SPEC_OS_INTEGRATION.md` §3.6). Ebenfalls offen: `Info.plist` deklariert
-   `LSMinimumSystemVersion 11.0`, der Autostart kann aber erst ab macOS 13 (darunter degradiert er
-   in den „unsupported"-Pfad, dokumentiert in `docs/features/autostart.md`).
-3. [ ] **„Ordner nicht gefunden":** Ein Quellordner auf einem abgezogenen Laufwerk muss die Zeile
-   **„Ordner nicht gefunden"** in Bernstein zeigen — nicht mehr „ANGEHALTEN" (die vom User gewollte
-   Pause bleibt davon getrennt und behält Wortlaut + Farbe); kommt das Laufwerk zurück, muss der
-   Ordner von selbst nach Idle gehen.
+- [ ] **Rückkehr eines fehlenden Laufwerks setzt den Lauf nicht von selbst fort (Bug, Live 2026-10-17).**
+  Das Label **„Ordner nicht gefunden"** in Bernstein war korrekt (nicht „ANGEHALTEN") — aber als das
+  Laufwerk zurückkam, lief **kein** Upload von selbst an, und der Zeilenzustand war uneinheitlich
+  (ein Ordner „Warten", einmal **gar kein** Status). Unsere Doku sagt, dass `NotFound` bei
+  zurückkehrendem Pfad nach Idle hebt (`docs/features/backup-targets.md`, dort als „Live open"
+  markiert) — live **nicht** bestätigt. Offen ist, **welcher** Teil fehlt: die Rückkehr-Erkennung
+  (Scan/Watcher), das Status-Lifting oder das Anstoßen des Laufs. Soll = Original:
+  `docs/original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6 (`HandleDeviceArrival`/`HandleDisconnectedDevice`:
+  Pfad aktualisieren, Pausierung aufheben, `ResumeUploadsForSchedule`) und
+  `docs/original/SPEC_BACKGROUND_SYNC.md` §3 („external-drive arrival", `ForceScan = !IsPaused`).
+- **Nicht getrackt, weil dokumentiert:** ob `LSMinimumSystemVersion 11.0` (Info.plist) vs. Autostart ab
+  macOS 13 je relevant wird — bekannte Degradation in den „unsupported"-Pfad
+  (`docs/features/autostart.md`; „not live-checked" in `docs/features/LIVE_ACCEPTANCE.md`).
 
 ## Offen aus dem geschlossenen Test 2026-10-16
 
@@ -105,6 +99,10 @@ so auch als `Prime-Photos-macos-arm64.dmg` aus dem Release `v0.1.0` heraus. Live
    `docs/original/SPEC_UPLOAD_DESTINATION.md`: Spiegelung `Backup/<Macname>/<Quellpfad>`, Segmente bei
    Bedarf anlegen. Bestehende Uploads in `Pictures/Web` bleiben. Umsetzung ist **frei** — Live-Beleg
    und Entscheidungslage: `docs/features/destination.md`.
+   **Beim Bauen beachten (User-Frage 2026-10-17):** der Content-Skip ist **kein** Move im Konto — eine
+   **verschobene/umbenannte** Datei (gleicher MD5, anderer Quellpfad) wird lokal übersprungen und bekommt
+   **keinen** Knoten am neuen gespiegelten Pfad; ihr alter Knoten bleibt unter dem **alten** Pfad liegen.
+   Doku: `docs/features/duplicates-conflicts.md` (Cross-path-Entscheidung) und `destination.md`.
 
 ## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
 
