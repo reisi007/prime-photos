@@ -415,10 +415,19 @@ fn corrupt_path(path: &Path) -> PathBuf {
 }
 
 pub fn store_path() -> PathBuf {
-    dirs::config_dir()
+    // Unit tests must never write the developer's real `folders.toml`
+    // (convention: "No test here may touch the real folders.toml"). Under
+    // `cfg(test)` every store read/write goes to a scratch file in the temp dir
+    // instead; the file name stays `folders.toml`, so the code under test is
+    // unchanged. The scratch path is process-wide (same pid), so tests that write
+    // it serialize on their own lock.
+    #[cfg(test)]
+    let base = std::env::temp_dir().join(format!("prime-photos-test-store-{}", std::process::id()));
+    #[cfg(not(test))]
+    let base = dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("prime_photos")
-        .join("folders.toml")
+        .join("prime_photos");
+    base.join("folders.toml")
 }
 
 #[cfg(test)]

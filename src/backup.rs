@@ -616,7 +616,9 @@ fn can_start(cfg: &Config, paused: &watch::Sender<bool>, shared: &Arc<Mutex<Uplo
 /// The decision happens **under the shared lock** and requires the run to still
 /// accept work (`active && !sealed && !cancelled && item_queue.is_some()`); the
 /// worker that ends the run sets `sealed` under the same lock, so the two can
-/// never race an item into a queue nobody drains.
+/// never race an item into a queue nobody drains. A folder that is **already**
+/// part of this run (`folder_total` holds its index) is refused too, so a
+/// re-triggered folder cannot queue its rows twice.
 fn inject_into_live_run(
     mut plan: UploadPlan,
     store: &mut FolderStore,
@@ -627,7 +629,12 @@ fn inject_into_live_run(
     let per_folder = plan.per_folder.clone();
     {
         let mut s = shared.lock().unwrap();
-        if !(s.active && !s.sealed && !s.cancelled && s.item_queue.is_some()) {
+        // Deduplicate across time (Verify B): a folder that is already part of
+        // this run must not be injected again — its rows would land twice and
+        // `folder_total`/`total` would read "x von 2x". The caller parks the
+        // folder on this refusal, like on any other.
+        let already_here = per_folder.keys().any(|i| s.folder_total.contains_key(i));
+        if already_here || !(s.active && !s.sealed && !s.cancelled && s.item_queue.is_some()) {
             return Some(plan);
         }
         let base = s.queue.len();
@@ -1031,6 +1038,7 @@ impl Drop for ScansInFlight {
 /// running upload (the live workers keep uploading while this walks).
 fn handle_scan_requests(
     pending_scans: &mut Vec<PathBuf>,
+    park_logged: &mut bool,
     store: &mut FolderStore,
     shared: &Arc<Mutex<UploadShared>>,
     cfg: &Config,
@@ -1116,10 +1124,16 @@ fn handle_scan_requests(
                 pending_scans.push(p);
             }
         }
-        shared
-            .lock()
-            .unwrap()
-            .log(tr("Der Ordner wird beim nächsten Lauf gesichert."));
+        // Log once per parking episode (Verify E): the 30 s tick and every FS
+        // event run this branch again while the folder stays parked, so a repeat
+        // would spam the run log.
+        if !*park_logged {
+            shared
+                .lock()
+                .unwrap()
+                .log(tr("Der Ordner wird beim nächsten Lauf gesichert."));
+            *park_logged = true;
+        }
         return;
     }
     let indices: Vec<usize> = present.iter().map(|(i, _)| *i).collect();
@@ -1259,6 +1273,9 @@ async fn watch_loop(
     // Folders the user added (or re-triggered) while a run was busy: parked here
     // and read in at the top of the loop (parallel to a running upload).
     let mut pending_scans: Vec<PathBuf> = Vec::new();
+    // The "next run" notice is logged once per parking episode (Verify E): reset
+    // whenever the parked list drains (a run took the folders over).
+    let mut scan_park_logged = false;
     loop {
         // Freshest settings + store on every pass (the supervisor is detached
         // from the UI struct, so the persisted files are its source — except the
@@ -1302,6 +1319,7 @@ async fn watch_loop(
             };
             handle_scan_requests(
                 &mut pending_scans,
+                &mut scan_park_logged,
                 &mut store,
                 &shared,
                 &cfg,
@@ -1310,6 +1328,9 @@ async fn watch_loop(
                 limit_kbps,
                 &album,
             );
+            if pending_scans.is_empty() {
+                scan_park_logged = false;
+            }
         }
 
         // Wait for the next event, the poll tick (which keeps the watcher set and
@@ -1528,12 +1549,20 @@ impl PrimePhotoApp {
             // Never drop the add (user decision 2026-10-17): hand the folder to the
             // detached supervisor, which reads it in **parallel** and takes its files
             // into the running run. Without a supervisor (background sync off) there is
-            // nothing to hand it to, so the old message stands — the next app start
-            // picks the folder up through the start-time safety net.
+            // nothing to hand it to, so the old message stands. Automatically picked up
+            // again only **with** background sync — the next app start's safety net
+            // (`background_sync_pass`, spawned by `ensure_background_sync`); without it
+            // only a manual run does.
             let paths: Vec<PathBuf> = indices
                 .iter()
                 .filter_map(|&i| self.store.folders.get(i).map(|f| f.path.clone()))
                 .collect();
+            // No valid index (a stale UI row): nothing to send and nothing to
+            // report — `all()` would be vacuously true and the "wird eingelesen"
+            // notice would lie.
+            if paths.is_empty() {
+                return;
+            }
             let sent = self
                 .scan_tx
                 .as_ref()
@@ -3217,25 +3246,14 @@ mod tests {
         plan
     }
 
-    /// Run `f` with the **real** `folders.toml` preserved. `inject_into_live_run`
-    /// ends in `store.save()`, which writes the config file; a unit test must not
-    /// clobber the developer's real targets, so the bytes are snapshotted and put
-    /// back. A process-wide lock serializes the tests that need it.
-    fn preserving_real_store<T>(f: impl FnOnce() -> T) -> T {
+    /// Serialize the tests that make `inject_into_live_run` write the store.
+    /// With the `#[cfg(test)]` redirect in `folders::store_path` this writes a
+    /// scratch file, never the developer's real `folders.toml` (Verify C); the
+    /// lock only keeps two writers from interleaving.
+    fn with_store_lock<T>(f: impl FnOnce() -> T) -> T {
         static LOCK: Mutex<()> = Mutex::new(());
         let _g = LOCK.lock().unwrap();
-        let path = folders::store_path();
-        let before = std::fs::read(&path).ok();
-        let out = f();
-        match before {
-            Some(bytes) => {
-                let _ = std::fs::write(&path, bytes);
-            }
-            None => {
-                let _ = std::fs::remove_file(&path);
-            }
-        }
-        out
+        f()
     }
 
     #[test]
@@ -3276,7 +3294,7 @@ mod tests {
         plan.bytes_total = 50;
         plan.sized_total = 2;
 
-        let refused = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(refused.is_none(), "an active run must take the plan");
 
         let s = shared.lock().unwrap();
@@ -3302,6 +3320,39 @@ mod tests {
     }
 
     #[test]
+    fn injection_is_refused_for_a_folder_already_in_the_run() {
+        // Verify B: a folder that already hangs in this run must not be injected
+        // again — its rows would land twice and `total`/`folder_total` would read
+        // "x von 2x". Folder 0 is already part of the run, so a second plan for it
+        // is refused untouched.
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        {
+            let mut s = shared.lock().unwrap();
+            s.active = true;
+            s.sealed = false;
+            s.cancelled = false;
+            s.item_queue = Some(queue.clone());
+            s.total = 1;
+            s.folder_total.insert(0, 1);
+            s.bytes_total = 100;
+        }
+        let mut store = FolderStore::default();
+        store
+            .folders
+            .push(folders::BackupFolder::new(PathBuf::from("/src/folder-a")));
+
+        let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
+        let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(refused.is_some(), "an already-running folder is refused");
+
+        let s = shared.lock().unwrap();
+        assert_eq!(s.total, 1, "total must not double");
+        assert_eq!(s.folder_total.get(&0).copied(), Some(1));
+        assert!(s.item_queue.as_ref().unwrap().lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn injection_is_refused_when_the_run_is_sealed() {
         // The last worker sealed the run: a late injection must be refused and
         // change nothing at all.
@@ -3322,7 +3373,7 @@ mod tests {
             .push(folders::BackupFolder::new(PathBuf::from("/src/folder-a")));
 
         let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
-        let refused = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(refused.is_some(), "a sealed run must refuse the plan");
 
         let s = shared.lock().unwrap();
@@ -3341,7 +3392,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(UploadShared::default()));
         let mut store = FolderStore::default();
         let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
-        let out = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        let out = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(out.is_some(), "no run: the plan comes back unchanged");
         assert_eq!(shared.lock().unwrap().total, 0);
 
@@ -3353,7 +3404,7 @@ mod tests {
             s.item_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
         }
         let plan = literal_plan(&[(0, "/src/folder-a/a.jpg")]);
-        let out = preserving_real_store(|| inject_into_live_run(plan, &mut store, &shared));
+        let out = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(out.is_some(), "a cancelled run must refuse the plan");
         assert_eq!(shared.lock().unwrap().total, 0);
     }

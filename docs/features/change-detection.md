@@ -55,7 +55,9 @@ last run.
   no run is left, the folder is parked (`pending_scans`) and started as an
   ordinary run on the next allowed pass (no watermark progress, like the event
   path). **Without** a supervisor (background sync off) the old behaviour stands
-  (`Es läuft bereits ein Upload.`, picked up again on the next app start).
+  (`Es läuft bereits ein Upload.`). Automatically picked up again only **with**
+  background sync — the next app start's safety net; without it, only a manual
+  run does.
 - **Open:** safety net for missed events (watcher limit, ejected volume,
   network mount) — as an optional switch, not yet decided.
 - Original parameters (documented): FSEvents latency 3 s, throttle 100 ms,
@@ -134,7 +136,9 @@ last run.
     nächsten erlaubten Durchlauf als **normaler** Lauf gestartet (kein
     Wasserzeichen-Fortschritt, wie beim Event-Pfad). **Grenze:** ohne Supervisor
     (Hintergrund-Sync aus) bleibt es beim alten Verhalten (`Es läuft bereits ein
-    Upload.`, Wiederaufnahme beim nächsten App-Start).
+    Upload.`); automatisch geholt wird der Ordner nur **mit** Hintergrund-Sync
+    (Sicherheitsnetz beim nächsten App-Start), ohne ihn nur durch einen manuellen
+    Lauf.
   - **Verworfen:** der periodische Hintergrund-Scan als Erkennungsmechanismus
     (User 2026-10-14: „file add / edit per event abfragen"); ein
     `BackupScanIntervalInHours`-Takt.

@@ -469,6 +469,31 @@ async fn resolve_conflict(
     }
 }
 
+/// Whether a worker that just found the queue empty may end the run.
+///
+/// The decision runs **under the shared lock** and re-checks the queue: between
+/// a worker's empty pop and this call an injection may have appended rows
+/// (`inject_into_live_run`) — sealing then would leave them in a queue nobody
+/// drains (`workers == 1`), the exact failure class this wave removes. `sealed`
+/// is set only when the queue is still empty and no scan is in flight; together
+/// with `inject_into_live_run`'s `sealed` check under the same lock, an injection
+/// either lands before the last worker exits or is refused — never in a dead
+/// queue.
+fn seal_now(shared: &Arc<Mutex<UploadShared>>) -> bool {
+    let mut s = shared.lock().unwrap();
+    // Lock order `shared` → `item_queue`, same as the pop above.
+    let queue_empty = s
+        .item_queue
+        .as_ref()
+        .map_or(true, |q| q.lock().unwrap().is_empty());
+    if s.scans_in_flight > 0 || !queue_empty {
+        false
+    } else {
+        s.sealed = true;
+        true
+    }
+}
+
 pub(crate) async fn upload_worker(
     shared: Arc<Mutex<UploadShared>>,
     cfg: Config,
@@ -521,18 +546,10 @@ pub(crate) async fn upload_worker(
         };
         let Some((row, idx, path)) = item else {
             // Keine Arbeit *gerade jetzt*: den Lauf nur beenden, wenn kein Scan mehr
-            // unterwegs ist — und das Versiegeln passiert unter derselben Sperre, damit
-            // eine späte Einhängung niemals in eine tote Queue laufen kann.
-            let sealed_now = {
-                let mut s = shared.lock().unwrap();
-                if s.scans_in_flight > 0 {
-                    false
-                } else {
-                    s.sealed = true;
-                    true
-                }
-            };
-            if sealed_now {
+            // unterwegs ist **und** die Queue immer noch leer ist. `seal_now`
+            // entscheidet und versiegelt unter derselben Sperre wie die Injektion,
+            // damit eine späte Einhängung niemals in eine tote Queue laufen kann.
+            if seal_now(&shared) {
                 break;
             }
             tokio::time::sleep(QUEUE_IDLE_POLL).await;
@@ -1259,6 +1276,40 @@ mod tests {
         assert!(queue[2].state == FileState::Waiting);
         assert!(queue[1].state == FileState::Done);
         assert!(queue[3].state == FileState::Failed);
+    }
+
+    /// A shared state with a live (empty) worker queue — the shape the worker's
+    /// idle path sees. `scans_in_flight` and the queue are set by the caller.
+    fn shared_with_queue(queue: VecDeque<(usize, usize, PathBuf)>) -> Arc<Mutex<UploadShared>> {
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        shared.lock().unwrap().item_queue = Some(Arc::new(Mutex::new(queue)));
+        shared
+    }
+
+    #[test]
+    fn seal_now_seals_an_empty_idle_queue() {
+        // (1) Queue empty, no scan in flight ⇒ the run may end, `sealed` is set.
+        let shared = shared_with_queue(VecDeque::new());
+        assert!(seal_now(&shared));
+        assert!(shared.lock().unwrap().sealed, "sealed must be set");
+    }
+
+    #[test]
+    fn seal_now_refuses_while_rows_are_still_queued() {
+        // (2) An injection landed after the worker's empty pop: the queue is not
+        // empty, so sealing would strand those rows in a queue nobody drains.
+        let shared = shared_with_queue(VecDeque::from(vec![(0, 0, PathBuf::from("/a.jpg"))]));
+        assert!(!seal_now(&shared));
+        assert!(!shared.lock().unwrap().sealed, "sealed must stay false");
+    }
+
+    #[test]
+    fn seal_now_refuses_while_a_scan_is_in_flight() {
+        // (3) A scan in flight keeps the run open even with an empty queue.
+        let shared = shared_with_queue(VecDeque::new());
+        shared.lock().unwrap().scans_in_flight = 1;
+        assert!(!seal_now(&shared));
+        assert!(!shared.lock().unwrap().sealed, "sealed must stay false");
     }
 
     #[test]
