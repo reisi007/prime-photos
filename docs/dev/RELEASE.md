@@ -115,14 +115,7 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
 Zuerst die `.app` bauen, **dann** Zip und DMG — beide entstehen aus **demselben** Bundle; sonst
 weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liegen in `target/dist/`.
 
-1. **Bundle bauen** (Default `VERSION=0.1.1`, `BUILD=2`, ad-hoc signiert):
-
-   ```sh
-   ./packaging/make-app.sh
-   # Ergebnis: target/dist/Prime Photos.app
-   ```
-
-2. **Commit-Stempel erzwingen** — `touch` **vor** dem Build aus Schritt 1:
+1. **Commit-Stempel erzwingen** — `touch` **vor** dem Build aus Schritt 2:
 
    ```sh
    touch build.rs
@@ -132,6 +125,13 @@ weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liege
    `PRIME_PHOTOS_GIT_COMMIT` (gesetzt in `build.rs`, für das Über-Fenster) bleibt dann auf einem
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
+
+2. **Bundle bauen** (Default `VERSION=0.1.1`, `BUILD=2`, ad-hoc signiert):
+
+   ```sh
+   ./packaging/make-app.sh
+   # Ergebnis: target/dist/Prime Photos.app
+   ```
 
 3. **Zip** — im `target/dist/`:
 
@@ -147,9 +147,8 @@ weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liege
    hdiutil verify Prime-Photos-macos-arm64.dmg
    ```
 
-   `hdiutil` meldet sich inzwischen selbst als veraltet und verweist auf
-   `diskutil image create from/blank --volumeName --format` — Details siehe der Hinweis am Ende
-   dieses Abschnitts.
+   `hdiutil` meldet sich inzwischen selbst als veraltet und verweist auf einen Nachfolger —
+   Details siehe der Hinweis am Ende dieses Abschnitts.
 
 5. **App installieren** (vom Repo-Wurzelverzeichnis aus):
 
@@ -283,6 +282,34 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
 - **DMG-Inhalt geprüft:** gemountet → `CFBundleShortVersionString = 0.1.0`, `CFBundleVersion = 1`,
   `CFBundleIdentifier = de.reisinger.prime-photos`; `codesign --verify --deep --strict` auf das
   enthaltene Bundle **ok**; `hdiutil verify` **VALID**.
+
+**Durch den zweiten echten Lauf belegt (2026-10-17):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.1` auf Commit `57ca172`; GitHub-Release `v0.1.1`,
+  veröffentlicht 2026-10-17T17:03:56Z, **nicht** Draft, **nicht** Pre-Release.
+- **Run:** GitHub-Actions-Run `39051515118` (`release.yml`, ausgelöst durch den Tag-Push). Jobs
+  `Build windows-x64` (8m9s), `Build linux-x64` (7m12s), `Publish GitHub Release` (12s) — alle grün.
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.308.405 | `4ccf24e687c3537a5e78e8302ff87132583928d3440e9264dd2afb8673fea1be` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.426.818 | `51a4f9425be8a461c381eefa48aca892f816fcd77039ff48fb81573dd1249446` |
+  | `Prime-Photos-macos-arm64.zip` | 8.489.069 | `7a18cb9a3851762b9c94458d90f7e407d1e380f55fa27118156981ce0cb83b7b` |
+  | `Prime-Photos-windows-x64.zip` | 8.579.930 | `ca02d28cc4561b1a465606db683dce26cdf7e6bfbd546fbf476e16fcc073e4b7` |
+
+  Zip und DMG wurden **manuell** ans Release gehängt (§4) — der Workflow baut nur Windows/Linux.
+- **macOS-Bundle (lokal aus dem Tag gebaut, §4):** `./packaging/make-app.sh` mit `VERSION=0.1.1`,
+  `BUILD=2`, ad-hoc signiert, Volname `Prime Photos`; `CFBundleShortVersionString = 0.1.1`,
+  `CFBundleVersion = 2`, `CFBundleIdentifier = de.reisinger.prime-photos`; der Commit-Stempel im
+  Über-Fenster steht dank `touch build.rs` auf `57ca172`; `hdiutil verify` auf dem DMG: **VALID**.
+- **Windows unsigniert:** die Authenticode-Schritte des Workflows wurden ohne Secrets übersprungen
+  (§3) — dieselbe Lage wie bei v0.1.0.
+- **Release-Notes:** `generate_release_notes: true` erzeugte diesmal eine echte Commit-Liste —
+  `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.0...v0.1.1`.
+- **Noch nicht live abgenommen:** die beiden 0.1.1-Verhaltensänderungen — Ordner *während* eines
+  Laufs hinzufügen; Laufwerk abziehen/anklemmen → Vollscan + Wiederanlauf — sind noch nicht an
+  einem echten Laufwerk bestätigt (im Ledger als offener Punkt geführt).
 
 **Weiterhin offen / nicht verifiziert:**
 
