@@ -167,11 +167,59 @@ the app** in an embedded web view — same window, no external browser, no CDP.
   Texte. **Verworfen:** den Rückfall asynchron über `objc2` am `WKWebView`
   neu zu bauen (mehr Aufwand, kein Bedarf).
 
+- **Verworfen: separates Login-Fenster** (`ppu-login`-Helper-Prozess mit eigener
+  `tao`-Eventloop): wirkte ungewohnt und passte nicht zum Original, das im
+  Hauptfenster anmeldet. Ersetzt durch die eingebettete Child-WebView im
+  Hauptfenster.
+
+- **Verworfen: synchrone Cookie-Abfrage in `update`** (wry `WebView::cookies`):
+  Panic durch winit-Reentrancy (dreht die NSRunLoop) — Mechanik oben bei
+  „Auth (GUI)". Ersetzt durch `dispatch_async` auf der Main-Queue; später
+  **komplett entfernt**, weil sie aus einem Main-Queue-Block immer in den
+  Timeout lief (der Geräteweg ist der einzige Anmeldeweg).
+
+- **Verworfen: mitmproxy live capture** als Teil der App — bleibt nur ein
+  **Debug-Werkzeug**; die App nutzt den eigenen Upload-Weg (zum Zeitpunkt der
+  Entscheidung den Cookie-Weg).
+
+- **Verworfen: Device registration / OAuth from scratch** — war abgelöst durch
+  Browser-Cookie-Auth, **aufgehoben am 2026-10-15** (User-Entscheidung „so gut
+  es geht wie das Original"): genau dieser Weg ist jetzt das **Ziel**.
+  Verworfen bleibt daran nur der **CDP-Browser-Login** (externer Browser) und
+  die **Paste-Variante** als Hauptweg.
+
+- **Verworfen: Standalone paste-only login** — abgelöst durch den
+  CDP-Browser-Login (Paste bleibt Rückfall).
+
+- **Verworfen: der reine Web-/Cookie-Weg als Ziel** — und mit der Live-Abnahme
+  auch als **Rückfall** (siehe oben „Kein Cookie-Rückfall mehr"). Der
+  **CDP-Browser-Login** und die **Paste-Variante** als Hauptweg bleiben
+  ebenfalls verworfen (siehe oben „Device registration / OAuth from scratch").
+  Ebenfalls verworfen: die Original-Login-**UI** (zwei Spalten,
+  Willkommens-Panel, Fenster 880 × 530) zu übernehmen — unsere UI bleibt.
+
 - **Flow note:** this is the **web** flow (cookie-based). The desktop client's
   **device** flow (`amzn_photos_desktop_*` signin -> `/auth/register` ->
   refresh token -> `/auth/token` ->
   `upload-photos.amazon.de/v2/upload`) is documented in
   `../protocol/openapi.yaml` but not used.
+
+- **Avatar-Thumbnail (Erkenntnis 2026-10-14): „per Raten/Probieren" ist
+  verworfen.** `/drive/v1/nodes/{id}/content` (mit und ohne `tempLink=true`),
+  `/drive/v1/nodes/{id}/thumbnail` (mit `width`/`height`/`transform`),
+  `/drive/v1/nodes/{id}/transforms/IMAGE_THUMBNAIL` (mit und ohne
+  `?tempLink=true`) sowie
+  `/drive/v1/nodes/{id}/content?transform=IMAGE_THUMBNAIL&tempLink=true`
+  lieferten **alle HTTP 404**. Der Parameter `?transform=IMAGE_THUMBNAIL` wird
+  **ignoriert** (der `tempLink` liefert weiterhin die Rohdatei). Das
+  `transforms: ["IMAGE_THUMBNAIL"]` eines Suchtreffers ist eine
+  **Deklaration**, keine URL. Stattdessen belegbar über das Assembly
+  (`GetSmartCroppedThumbnail`/`GetThumbnailUrl`).
+
+- **Avatar lokal dekodieren/schneiden (Erkenntnis 2026-10-14): verworfen.** Der
+  Avatar-Quellknoten kann ein RAW sein (bei diesem Konto ein Canon CR3,
+  13,5 MB), die `image`-Crate kann kein CR3. Der 60×60-Crop muss daher
+  **serverseitig** passieren (wie im Original), nicht bei uns.
 
 - **Account/avatar block in the sidebar:** when signed in, show the Amazon
   profile picture (no API identified yet — placeholder until then) plus

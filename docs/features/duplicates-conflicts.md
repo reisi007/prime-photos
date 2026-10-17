@@ -121,7 +121,14 @@ SQLite index is the primary defence; the server 409 is a safety net.
   3. **Kein Per-Datei-Default** — einzelne Dateien haben keine eigene
      Einstellung. Innerhalb eines Laufs bleibt ein angekreuztes „Nicht noch
      einmal fragen" **run-weit** wirksam (unverändert); persistiert wird es
-     **pro Ordner**.
+     **pro Ordner**. **Verworfen:** ein **„Nicht noch einmal fragen" pro Datei
+     als neues persistiertes Feld** — **kein** Schemawechsel; die Antwort
+     gehört in das **bestehende** `BackupFolder.conflict_resolution` des
+     Ordners der gefragten Datei (plus Application Default für neue Ziele und
+     Drag&Drop).
+
+- **Verworfen: den Application Default beim Drag&Drop still überschreiben**
+  (statt ihn nur run-weit zu merken).
 
 - **Globaler Dedupe-Default (User-Entscheidung 2025-10-15):** neues Feld
   `Config.dedup_default` (Default **`true`**, ebenso der serde-Default, damit

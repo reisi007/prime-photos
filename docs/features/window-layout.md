@@ -143,3 +143,12 @@ with fixed row heights, and measured chrome dimensions.
   (/Users/florianreisinger/Pictures)" wurde in der 120-px-Spalte
   abgeschnitten. **Verworfen:** nur den Namen zeigen (gleichnamige Ordner
   wären in der Zeile ununterscheidbar); die Spalte breiter machen.
+
+- **Nav-Icon-Maße (Stand 2026-10-16): kein Rate-Wert.** Die Doku-Werte
+  (`../original/UI_FLOWS.md` §3.1: Header 64 pt bzw. 104 pt mit Banner, 4 pt
+  Akzentleiste, Nav-Spalte) sind für die **Icon-Maße** der Nav unzureichend —
+  der Recon liefert dafür **keine** Pixelwerte. Entscheidung: **kein**
+  geratener Wert; nach Welle 3c sitzen die Icons in einem festen
+  **18×18-Rect**. Ein blindes „Ausrichten" würde ändern, was der User noch
+  nicht beurteilt hat. Die offene Arbeit (Nav-/Sidebar-Icons ausrichten) bleibt
+  im Ledger.

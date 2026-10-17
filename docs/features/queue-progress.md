@@ -80,6 +80,14 @@ target row reports its own outcome.
     des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs,
     Post-MVP).
 
+- **Queue-Paginierung (Abweichung vom Original, Stand 2026-10-17):** unsere
+  Warteschlange kappt das Rendering bei **300 Zeilen** — das Original
+  paginiert im View-Model mit **1000 Items/Seite**
+  (`../original/SPEC_STATUS_DETAIL.md` §3,
+  `../original/SPEC_UPLOAD_PROGRESS.md` §7.4). egui kann stattdessen
+  virtualisieren (`ScrollArea::show_rows`); die Kappung ist damit eine
+  **Abweichung**, die Umsetzung bleibt offene Arbeit im Ledger.
+
 - **Zeilen-Aktionen & Ergebnis-Anzeige (User-Entscheidung 2026-10-14):**
   Anlass: Der User suchte einen Rescan-Button und erwartete ein **vertikales
   „…"-Icon** mit Popup bei Linksklick; außerdem zweifelte er die Zahl „480

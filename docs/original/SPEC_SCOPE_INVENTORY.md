@@ -48,8 +48,9 @@ Belegt über `Infrastructure.AppSettings` / `CustomerSettings` der App-Assembly.
 | Begründung der 8 | **UNKNOWN** — im Code steht nur der gesetzte Wert, keine inhaltliche Herleitung |
 
 **Folge für uns:** der Slider `1..=8` trifft die Obergrenze; unser Default weicht
-vom Geräte-Default ab. Die geltende Entscheidung steht in `AGENTS.md` →
-„Upload-Queue & Concurrency".
+vom Geräte-Default ab. Die geltende Entscheidung steht in
+`docs/features/queue-progress.md` → „Upload-Queue & Concurrency
+(User-Entscheidung 2026-10-13)".
 
 ## Video-Support — offene Fragen (falls er je drankommt)
 

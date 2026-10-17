@@ -90,3 +90,7 @@ macOS-specific APIs.
   Util-Funktion + Test, der mindestens `de` **und** einen Nicht-DE-Marktplatz
   prüft. Marktplatzneutral heißt: kein Literal-TLD im Code, die Ableitung
   passiert nur in der Util.
+
+- **Win/Linux: In-App-„Beenden" fehlt (Residuum aus PORT-3).** Ohne sichtbares
+  Tray-Icon gibt es dort keinen Weg zurück (macOS ist über ⌘Q safe). Die offene
+  Arbeit bleibt im Ledger.

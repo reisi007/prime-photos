@@ -19,6 +19,14 @@ original's mirroring scheme is documented but not yet implemented.
   ist ein **eigener Auftrag** nach `../original/SPEC_UPLOAD_DESTINATION.md`.
   **Verworfen:** das Feld behalten und bei `Pictures/Web` bleiben.
 
+- **Live-Beleg Upload-Ziel-Spiegelung (2026-10-16):** der Cookie-Host **kann**
+  Ordner anlegen — `POST /drive/v1/nodes` mit `kind: "FOLDER"` und **Cookies
+  nur** ⇒ **201** (Probe-Ordner angelegt, danach gelöscht ⇒ 202); ein
+  Access-Token ist **nicht** nötig. Damit ist die Umsetzung der
+  Original-Spiegelung `Backup/<Macname>/<Quellpfad>` (Segmente bei Bedarf
+  anlegen) **frei**. Bestehende Uploads in `Pictures/Web` bleiben. Die
+  **Umsetzung** selbst bleibt offene Arbeit im Ledger.
+
 ## Original reference
 
 - `../original/SPEC_UPLOAD_DESTINATION.md` — Upload destination and resolution.

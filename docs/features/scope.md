@@ -87,6 +87,17 @@ keinen Umsetzungs- oder Verify-Lauf aus.
   ⇒ praktisch `min(4, Cores)`). Eine sachliche Begründung der 8 ist im
   Original **nicht** belegt.
 
+- **Spec-Abgleich 2026-10-17 — zwei Backlog-Begriffe sind im Original nicht
+  belegt:** (a) ein **Netz-/Kosten-Gate** — das Original kennt nur die
+  **Bandbreiten-Drosselung** (`../original/SPEC_PREFERENCES.md` §3.3: KB/s,
+  clamp 1..99999, **0 = unbegrenzt**, **keine** Netztyp-Bedingung); (b) ein
+  **„Pro-Ziel-Limit"** — belegt ist nur die **globale** Concurrency
+  (`../original/SPEC_SCOPE_INVENTORY.md` #24: `UploadMaxQueues = 4`, Cap 8).
+  Beides wäre damit eine **Neuerung**, keine Parität.
+
+- **Oberziel des Users (2026-10-13):** „nur neue Dateien hochladen, keine
+  Bandbreite verschwenden."
+
 - **„Nicht umsetzen" heißt hier:** dokumentiert und bewusst draußen — nicht
   „später automatisch".
 
@@ -99,7 +110,17 @@ keinen Umsetzungs- oder Verify-Lauf aus.
 
 - **"Speichernutzung"/storage bar is intentionally omitted for now:** it only
   applies to Prime members and needs a real quota fetch; no placeholder is
-  shown.
+  shown (inventory #7, **Out**; the open work stays in the ledger).
+
+- **„Startseite"/Übersichtsseite (User-Entscheidung 2026-10-17): verworfen.**
+  Der Recon beantwortet die frühere Backlog-Frage: `…_navigationMenu_home`
+  („Startseite") und `…_navigationMenu_smartscan` („Intelligenter Scan")
+  existieren als **Strings**, haben im Original aber **keinen** Menüpunkt und
+  keinen Screen (`../original/UI_STATES.md:61`,
+  `../original/SPEC_LIBRARY.md:535` — Spalte „no",
+  `../original/UI_FLOWS.md:754`). Ein eigener Screen wäre damit eine Erfindung
+  statt Parität; die ungenutzten Strings im Build bleiben liegen (**nicht**
+  „aufräumend" entfernen und **nicht** doch noch bauen).
 
 ## Original reference
 

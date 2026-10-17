@@ -37,7 +37,9 @@ and restored at start-up.
     (a) Pause im Leerlauf verhinderte und (b) einen reinen Drag&Drop-Lauf ohne
     angelegte Ordner sperrte. Eine gesetzte Pause blockt auch den
     Hintergrund-Sync (Guard existierte bereits). **Pause pro Ordner** bleibt
-    Post-MVP (Original hat ein Zeilen-Symbol).
+    Post-MVP — im Original vorhanden (`../original/SPEC_BACKGROUND_SYNC.md` §7
+    „Datensicherung anhalten" je Schedule, `../original/UI_FLOWS.md:298`
+    `…_scheduletab_pauseschedule`). Die offene Arbeit bleibt im Ledger.
 
 - **Tray: Statuszeile + Pause-Labels (User-Entscheidung 2026-10-16).** Das
   Tray-Menü bekommt ganz oben eine **nicht klickbare Statuszeile** („Bereit" /
