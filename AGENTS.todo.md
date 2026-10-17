@@ -38,7 +38,8 @@ bereits **Out**), macOS-Signatur/Benachrichtigungen, Multi-Fenster-Zeile, Win/Li
 
 **4. Hygiene-Reste aus Verifikationen** — bei der nächsten Berührung der jeweiligen Datei mitziehen
 (`src/login.rs:491`, `src/i18n.rs:149`, Naht-Test Autostart, `aggregate_progress`-Designfrage,
-DMG-Skript, Token-Rotation) plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
+DMG-Skript, Token-Rotation, **Marge im `QUEUE_BELOW_H`/`page_heights`-Kommentar in `src/backup.rs`**)
+plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
 
 ## Erster Punkt beim nächsten Mal
 
@@ -66,6 +67,20 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
 - **Nicht** offen, nur zur Einordnung: Windows-Authenticode, macOS-Notarisierung und Prüfsummendateien
   bleiben laut `docs/dev/RELEASE.md` §9 unverifiziert bzw. nicht implementiert — dafür gibt es keinen
   Auftrag.
+
+## Offen für das Release v0.1.1 (2026-10-17)
+
+Die 0.1.1-Wellen sind umgesetzt und verifiziert (Feature-Fixes + die Abstände aus dem UI-Review;
+Commits bis `e31a320`). Offen sind nur noch die Abnahme und der Release selbst:
+
+- [ ] **Manueller Live-Test 0.1.1** (User): Ordner **während** eines Laufs hinzufügen; Laufwerk abziehen
+  → Karte „Warten" bzw. „Ordner nicht gefunden", wieder anklemmen → Vollscan + Wiederanlauf (bis zu 30 s
+  nach Aufheben der Pause). Installiert ist `0.1.1` Build 3, ad-hoc signiert.
+- [ ] **Release `v0.1.1`:** annotierter Tag auf dem Tip, Push, CI (Windows/Linux) grün, GitHub-Release,
+  DMG/ZIP **aus dem Tag** anhängen, `docs/dev/RELEASE.md` §9 um den 0.1.1-Lauf ergänzen.
+  **Fallstrick dabei:** `build.rs` läuft bei unverändertem `build.rs` nicht neu, der eingebettete
+  Commit-Stempel bleibt alt (der installierte Build 3 zeigt im Über-Fenster noch `0a44a37`) — vor dem
+  Release-Build `touch build.rs` oder `cargo clean -p prime-photos` erzwingen.
 
 ## Offen aus der Live-Abnahme 2026-10-17 (Bundle aus 5.21–5.24)
 
@@ -165,6 +180,9 @@ Ausdrücklich **ohne** Starttermin:
   Wiederanlaufs nicht explizit (sie steht in `change-detection.md`); ein **dauerhaft** fehlschlagendes
   `store.save()` würde den Ordner pro 30-s-Pass erneut einparken (degenerativer I/O-Fall, kein
   Doppel-Upload).
+- **Ungetrackte Junk-Datei im Repo-Wurzelverzeichnis:** `.!10517!AGENTS.todo.md` (279 B, abgebrochener
+  Schreibvorgang von `AGENTS.todo.md` am 2026-10-17 14:48) — bewusst **nicht** angefasst; löschen nur
+  nach User-OK.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
   `docs/original/SPEC_SCOPE_INVENTORY.md` und in `docs/features/scope.md`.
 
