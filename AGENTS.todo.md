@@ -104,7 +104,11 @@ Ausdrücklich **ohne** Starttermin:
 - **Der DMG-Schritt ist nicht skriptet:** `packaging/make-app.sh` baut nur die `.app`; das DMG
   entstand 2026-10-17 von Hand (`hdiutil create -volname …`) und ist damit nicht reproduzierbar.
   Gehört als eigener, dokumentierter Schritt (Volname, Dist-Pfad, Reihenfolge `.app` → DMG) nach
-  `docs/dev/BUILD.md`/`RELEASE.md`.
+  `docs/dev/BUILD.md`/`RELEASE.md`. **Belegt 2026-10-17:** `hdiutil` warnt dabei selbst —
+  „`hdiutil create -volname -format …` is deprecated. Please use `diskutil image create from/blank
+  --volumeName --format …` instead." Der neue Weg wäre also
+  `diskutil image create from "<app>" --volumeName "Prime Photos" --format UDZO <ziel>.dmg`; das
+  Ergebnis ist zu prüfen (das heutige Image war mit `hdiutil verify` gültig).
 - **Token-Rotation offen (Vorfall 2026-10-16):** ein `security add-generic-password`-Aufruf hatte den
   Refresh-Token kurz in der Prozessliste (`ps`) stehen; eine **neue Anmeldung** rotiert ihn. Nur
   offen, falls seither nicht neu angemeldet wurde.
