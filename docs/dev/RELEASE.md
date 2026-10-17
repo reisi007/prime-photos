@@ -110,6 +110,62 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
   korrekt benennen, dann das falsch benannte Asset löschen und neu hochladen:
   `gh release delete-asset <tag> <falscher-name> --yes`.
 
+### Ablauf beim Release (genau diese Reihenfolge)
+
+Zuerst die `.app` bauen, **dann** Zip und DMG — beide entstehen aus **demselben** Bundle; sonst
+weichen die hochgeladenen Artefakte voneinander ab. Alle erzeugten Dateien liegen in `target/dist/`.
+
+1. **Bundle bauen** (Default `VERSION=0.1.1`, `BUILD=2`, ad-hoc signiert):
+
+   ```sh
+   ./packaging/make-app.sh
+   # Ergebnis: target/dist/Prime Photos.app
+   ```
+
+2. **Commit-Stempel erzwingen** — `touch` **vor** dem Build aus Schritt 1:
+
+   ```sh
+   touch build.rs
+   ```
+
+   Grund: `build.rs` läuft bei unverändertem Quellstand **nicht** neu, der eingebettete Stempel
+   `PRIME_PHOTOS_GIT_COMMIT` (gesetzt in `build.rs`, für das Über-Fenster) bleibt dann auf einem
+   **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
+   `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
+
+3. **Zip** — im `target/dist/`:
+
+   ```sh
+   cd target/dist
+   ditto -c -k --keepParent "Prime Photos.app" Prime-Photos-macos-arm64.zip
+   ```
+
+4. **DMG** — im `target/dist/`, Volname `Prime Photos`:
+
+   ```sh
+   hdiutil create -volname "Prime Photos" -srcfolder "Prime Photos.app" -ov -format UDZO Prime-Photos-macos-arm64.dmg
+   hdiutil verify Prime-Photos-macos-arm64.dmg
+   ```
+
+   `hdiutil` meldet sich inzwischen selbst als veraltet und verweist auf
+   `diskutil image create from/blank --volumeName --format` — Details siehe der Hinweis am Ende
+   dieses Abschnitts.
+
+5. **App installieren** (vom Repo-Wurzelverzeichnis aus):
+
+   ```sh
+   rm -rf "/Applications/Prime Photos.app"
+   ditto "target/dist/Prime Photos.app" "/Applications/Prime Photos.app"
+   codesign --verify --verbose=1 "/Applications/Prime Photos.app"
+   open "/Applications/Prime Photos.app"
+   ```
+
+   `ditto` statt `cp -R`, weil es Signatur und Bundle-Struktur erhält. Der Startweg bei
+   **unsignierten Downloads** ist §5; das hier lokal installierte Bundle betrifft das nicht.
+
+6. **Ans GitHub-Release hängen:** Zip und DMG hochladen (beide aus demselben Bundle, siehe oben).
+   Der **Asset-Name ist der Dateiname** — siehe der vorstehende Aufzählungspunkt.
+
 > **Nicht verifiziert:** die `hdiutil`-Aufrufe (`attach`/`detach`/`create`) warnen inzwischen und
 > verweisen auf `diskutil image attach --mountOptions nobrowse --readOnly`, `diskutil eject` bzw.
 > `diskutil image create from/blank --volumeName --format`. Ob/wann hier umgestellt wird, ist offen.
