@@ -331,8 +331,11 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   Asset-Entscheidung vom 2026-10-17, §4). Das DMG wurde **manuell** ans Release gehängt (§4) — der
   Workflow baut nur Windows/Linux; seine sha256 wurde gegen die lokale Datei geprüft.
 - **macOS-Bundle (lokal aus dem Tag gebaut, §4):** `./packaging/make-app.sh` mit `VERSION=0.1.2`,
-  `BUILD=2`, ad-hoc signiert, Volname `Prime Photos`; der Commit-Stempel im Über-Fenster steht dank
-  `touch build.rs` auf `1aceb25`; `hdiutil verify` auf dem DMG: **VALID**.
+  `BUILD=2`, ad-hoc signiert, Volname `Prime Photos`; `CFBundleShortVersionString = 0.1.2`,
+  `CFBundleVersion = 2`, `CFBundleIdentifier = de.reisinger.prime-photos` (identisch im lokalen
+  `target/dist`-Bundle und im installierten `/Applications`-Bundle, per `plutil -p` geprüft); der
+  Commit-Stempel im Über-Fenster steht dank `touch build.rs` auf `1aceb25`; `hdiutil verify` auf dem
+  DMG: **VALID**.
 - **Windows unsigniert:** die Authenticode-Schritte des Workflows wurden ohne Secrets übersprungen
   (§3) — dieselbe Lage wie bei v0.1.0 und v0.1.1.
 - **Release-Notes:** `generate_release_notes: true` erzeugte die Commit-Liste

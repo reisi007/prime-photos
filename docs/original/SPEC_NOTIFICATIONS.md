@@ -347,6 +347,12 @@ visibility preference, the state→icon mapping, hide-on-close) is portable; the
 (tray item, native notifications, login item, accessory activation policy) are all macOS-only
 and must sit behind `cfg(target_os = "macos")` with portable stubs elsewhere.
 
+> **Note (our app, 2026-10-17):** the **accessory activation policy** item does **not** apply to
+> us — Prime Photos is a normal windowed app and deliberately sets **no** accessory policy: its
+> Dock icon stays for as long as it runs (a conscious deviation from the original's `LSUIElement`
+> agent model; see `docs/features/tray.md`). So there is nothing here to gate; the paragraph
+> above still describes the **original's** APIs, unchanged.
+
 ---
 
 ## 6. Redaction note
