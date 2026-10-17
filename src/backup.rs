@@ -204,13 +204,15 @@ const QUEUE_MAX_FRAC: f32 = 0.50;
 /// **Measured** chrome the queue table must leave **below itself** so the rest
 /// of the page stays reachable (headless with egui 0.31.1): the aggregate
 /// progress bar with its 6 px gap (56 px to the folder heading, i.e. the bar,
-/// a 12 px gap and the "Automatisch gesicherte Ordner:" heading) plus the folder
-/// list's own footer room ([`QUEUE_FOOTER_H`]). 80 px measured, 88 px with a
-/// small margin. This is measured content, not a panel share — it stays
-/// absolute on purpose; only the *range caps/floors* of the two scroll areas
-/// are relative. The Backup page has no scroll area of its own, so the table
-/// may never eat this space; the list below then gets what is left.
-const QUEUE_BELOW_H: f32 = 88.0;
+/// a 12 px gap and the "Automatisch gesicherte Ordner:" heading), the 8 px air
+/// between that heading and the folder list (UI review 0.1.1) plus the folder
+/// list's own footer room ([`QUEUE_FOOTER_H`]). That is 80 px measured plus the
+/// 8 px air = 88 px, 96 px with a small margin. This is measured content, not a
+/// panel share — it stays absolute on purpose; only the *range caps/floors* of
+/// the two scroll areas are relative. The Backup page has no scroll area of its
+/// own, so the table may never eat this space; the list below then gets what is
+/// left.
+const QUEUE_BELOW_H: f32 = 96.0;
 /// Height the folder list must leave for the footer below it (8 px gap + line).
 const QUEUE_FOOTER_H: f32 = 30.0;
 /// Height of one folder card (Variant A), **measured headless** with egui
@@ -238,7 +240,7 @@ const FOLDER_CARD_GAP: f32 = 8.0;
 /// Guarantees for every `free >= 0`:
 /// - `queue_h + list_h + QUEUE_HEADER_H + QUEUE_BELOW_H <= free` — nothing
 ///   runs off the bottom edge (the 2 px margin inside `QUEUE_BELOW_H` covers
-///   the header being 2 px more conservative than the measured 106 px);
+///   the header being 2 px more conservative than the measured 114 px);
 /// - `queue_h <= QUEUE_MAX_FRAC * free` — the queue stays at or below 50 %;
 /// - `list_h` never spends the queue's floor reservation — the queue keeps
 ///   at least `QUEUE_MIN_FRAC * free` whenever the chrome fits at all.
@@ -2662,6 +2664,12 @@ impl PrimePhotoApp {
             )));
         }
 
+        // 8 px air between the heading above and the card list below (UI review
+        // 0.1.1): without it the list touched the "Automatisch gesicherte
+        // Ordner:" heading, and a scrolled half-visible card stuck to it. The
+        // gap is part of the chrome `QUEUE_BELOW_H` reserves.
+        ui.add_space(8.0);
+
         // The folder list gets exactly the height `page_heights` promised it
         // before the queue was drawn (user decision 2026-10-16: the folders
         // matter more than the queue). The draw-time clamp keeps the footer
@@ -2924,7 +2932,7 @@ mod tests {
     fn page_heights_three_cards_fit_when_tight() {
         // A tight window (400 px free): the list claims exactly its content —
         // three cards (3×60) plus two gaps (2×8) = 196 px — and the cap
-        // (400 − 108 chrome − 80 queue floor = 212) leaves room for all of it.
+        // (400 − 116 chrome − 80 queue floor = 204) leaves room for all of it.
         // Before Welle 5.17 the list was capped at 45 % of `free` (180 px) and
         // the third card was visibly cut off.
         let (queue_h, list_h) = page_heights(400.0, 3);
@@ -2937,7 +2945,9 @@ mod tests {
     fn page_heights_ten_cards_keep_the_queue_floor() {
         // Ten cards (672 px of content) in a 500 px window: the list is capped
         // at exactly the point where the queue keeps its floor
-        // (500 − 108 − 100 = 292) — never below `QUEUE_MIN_FRAC * free`.
+        // (500 − 116 − 100 = 284) — never below `QUEUE_MIN_FRAC * free`.
+        // `QUEUE_BELOW_H` grew by the 8 px heading→list air (UI review 0.1.1),
+        // so the chrome term is 116 px, not the earlier 108 px.
         let (queue_h, list_h) = page_heights(500.0, 10);
         assert_eq!(
             list_h,
@@ -2959,7 +2969,7 @@ mod tests {
 
     #[test]
     fn page_heights_tiny_window_never_overflows() {
-        // Below the chrome (108 px) both areas collapse to zero — nothing may
+        // Below the chrome (116 px) both areas collapse to zero — nothing may
         // run off the bottom edge.
         let (queue_h, list_h) = page_heights(50.0, 5);
         assert_eq!(queue_h, 0.0);
