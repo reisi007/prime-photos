@@ -16,8 +16,8 @@ hier nur die Reihenfolge und die Spec-Lage (Recon-Abgleich am 2026-10-17).
 
 **0. Vordringlich — ein Live-Bug (2026-10-17):** nach der Rückkehr eines fehlenden Laufwerks setzt der
 Lauf **nicht** von selbst fort (Details im Abschnitt „Offen aus der Live-Abnahme 2026-10-17").
-**Erst sondieren, dann schneiden** — der Bug kann in der Rückkehr-Erkennung, im Status-Lifting oder im
-Anstoßen des Laufs sitzen.
+**Sondiert (2026-10-17, am Code):** das Status-Lifting funktioniert, es fehlt allein der **Scan-Anstoß
+bei der Rückkehr**. Schnitt = Welle 5.32, **nach** 5.31 (nutzt dessen Park-/Scan-Mechanik).
 
 **0b. In Umsetzung (Welle 5.31, User-Entscheidung 2026-10-17):** ein Ordner, der während eines laufenden
 Uploads hinzugefügt wird, wird **parallel eingelesen** und seine Dateien **in den laufenden Lauf
@@ -88,11 +88,22 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
   Laufwerk zurückkam, lief **kein** Upload von selbst an, und der Zeilenzustand war uneinheitlich
   (ein Ordner „Warten", einmal **gar kein** Status). Unsere Doku sagt, dass `NotFound` bei
   zurückkehrendem Pfad nach Idle hebt (`docs/features/backup-targets.md`, dort als „Live open"
-  markiert) — live **nicht** bestätigt. Offen ist, **welcher** Teil fehlt: die Rückkehr-Erkennung
-  (Scan/Watcher), das Status-Lifting oder das Anstoßen des Laufs. Soll = Original:
-  `docs/original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6 (`HandleDeviceArrival`/`HandleDisconnectedDevice`:
-  Pfad aktualisieren, Pausierung aufheben, `ResumeUploadsForSchedule`) und
-  `docs/original/SPEC_BACKGROUND_SYNC.md` §3 („external-drive arrival", `ForceScan = !IsPaused`).
+  markiert) — live **nicht** bestätigt.
+  **Sondiert (2026-10-17, am Code):** das **Status-Lifting funktioniert** — `sync_watchers` prüft in jedem
+  Durchlauf `source_status(f.path.is_dir(), f.status)` und hebt `NotFound` → `Idle` (und speichert). Es
+  fehlt allein der **Scan-Anstoß bei der Rückkehr**: unser Lauf startet nur über OS-Events (die für bereits
+  vorhandene Dateien nichts melden), über den Kaltstart-Pass (**einmal pro Prozess**) oder manuell — das
+  Original fordert bei der Ankunft dagegen aktiv `RequestScan` mit `ForceScan = !IsPaused`
+  (`HandleDeviceArrival`, §3.3.3) bzw. hebt in `HandleDisconnectedDevice` (§3.3.6) die Pausierung auf und
+  ruft `ResumeUploadsForSchedule`. Der uneinheitliche Zeilenzustand folgt daraus: der gehobene Ordner steht
+  als `Idle` mit `total > 0` („Warten"), ein nie gescannter als `Idle` mit `total == 0` (leer — die
+  dokumentierte Nie-gescannt-Falle).
+  Soll = Original: `docs/original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6 und §4.4 Schritt 5 sowie
+  `docs/original/SPEC_BACKGROUND_SYNC.md` §3/§3.5 („external-drive arrival", `ForceScan = !IsPaused`).
+  **Schnitt (Welle 5.32, nach 5.31):** die Rückkehr (`NotFound` → vorhanden) stößt einen **vollständigen
+  Scan dieses Ordners** an (kein Wasserzeichen-Vorschub) und nutzt dafür dieselbe Park-/Scan-Mechanik wie
+  Welle 5.31 (`pending_scans`/`handle_scan_requests`). Offen zu entscheiden: ob dieser Scan die **globale**
+  Pause des Users respektiert (unser `can_start`) — das Original hebt die *Schedule*-Pause selbst auf.
 - **Nicht getrackt, weil dokumentiert:** ob `LSMinimumSystemVersion 11.0` (Info.plist) vs. Autostart ab
   macOS 13 je relevant wird — bekannte Degradation in den „unsupported"-Pfad
   (`docs/features/autostart.md`; „not live-checked" in `docs/features/LIVE_ACCEPTANCE.md`).
