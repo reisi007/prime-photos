@@ -13,9 +13,39 @@ der Doku-Neuaufbau (22 Feature-Dateien, `FEATURES.md`, `docs/dev/`). Dauerhafte 
 
 ## Erster Punkt beim nächsten Mal
 
-- [ ] **Einmal `cargo fmt` über das ganze Repo** (mechanischer Commit; verifiziert 2026-10-16:
-  `cargo fmt --check` liefert **99 Abweichungen** in ~20 Dateien, auch in unangetasteten). Danach
+- [ ] **Einmal `cargo fmt` über das ganze Repo** (mechanischer Commit; nachgemessen 2026-10-17:
+  `cargo fmt --check` liefert **102 Abweichungen in 19 Dateien** — `app.rs auth.rs backup_config.rs
+  backup.rs build.rs countries.rs dedup.rs i18n.rs icons.rs logging.rs login.rs main.rs platform.rs
+  prime_photos.rs settings.rs text.rs tray.rs upload.rs urls.rs` — auch in unangetasteten). Danach
   gilt `cargo fmt --check` als Gate (User-Entscheidung 2026-10-16).
+
+## Manueller Test 2026-10-17 — offen (Bundle aus 5.21–5.24)
+
+Vier Fixes sind umgesetzt, unabhängig verifiziert und committet (5.21 Systemsprache, 5.22 „Ordner
+nicht gefunden", 5.23 Autostart/SMAppService, 5.24 Doku-Drift). Das Bundle ist neu zu bauen und zu
+installieren; live abzunehmen:
+
+1. [ ] **Systemsprache:** Die App muss beim Finder-/Doppelklick-Start **deutsch** starten (vorher
+   englisch: ein GUI-Start erbt kein `LANG`/`LC_ALL`/`LC_MESSAGES`, und `system_lang()` las nur die
+   Umgebung — seit 5.21 liest macOS zusätzlich
+   `NSLocale::currentLocale().localeIdentifier()`). Die Einstellung „Automatisch (Systemsprache)"
+   muss weiter greifen, der Override in den Einstellungen unverändert bleiben.
+2. [ ] **Autostart — das Veto muss weg:** In `config.toml` steht `autostart_enabled = false`; das ist
+   per Design ein **Veto** („nie wieder registrieren") und war die eigentliche Ursache dafür, dass
+   nichts in den Anmeldeobjekten stand. Der Schalter muss **einmal** aus- und wieder eingeschaltet
+   werden (schreibt `Some(true)`); danach muss der Eintrag unter **Systemeinstellungen → Allgemein →
+   Anmeldeobjekte** erscheinen (ggf. erst nach expliziter Freigabe).
+   **Offenes Risiko:** ob macOS `SMAppService.mainApp.register()` mit unserer **selbstsignierten**
+   Signatur („Prime Photos Local Signer") akzeptiert, ist nicht belegt. Schlägt es fehl, steht die
+   Ursache im Log (`Autostart (Login-Item) konnte nicht geändert werden`) und es wird **nichts**
+   persistiert; der Rückfallweg wäre dann `MacOSLaunchMode::AppleScript` (wie das Original,
+   `SPEC_OS_INTEGRATION.md` §3.6). Ebenfalls offen: `Info.plist` deklariert
+   `LSMinimumSystemVersion 11.0`, der Autostart kann aber erst ab macOS 13 (darunter degradiert er
+   in den „unsupported"-Pfad, dokumentiert in `docs/features/autostart.md`).
+3. [ ] **„Ordner nicht gefunden":** Ein Quellordner auf einem abgezogenen Laufwerk muss die Zeile
+   **„Ordner nicht gefunden"** in Bernstein zeigen — nicht mehr „ANGEHALTEN" (die vom User gewollte
+   Pause bleibt davon getrennt und behält Wortlaut + Farbe); kommt das Laufwerk zurück, muss der
+   Ordner von selbst nach Idle gehen.
 
 ## Manueller Test 2026-10-16 — abgeschlossen, offene Reste
 
@@ -62,6 +92,26 @@ Ausdrücklich **ohne** Starttermin:
   `session → upload`. Der Verifier hat das als **deadlock-frei** belegt (es gibt keine
   Gegenrichtung `upload → session`); beim nächsten Anfassen von `poll_session` nach außen ziehen,
   damit die Reihenfolge nicht von einer Abwesenheit abhängt.
+- **Footer-Summe und fehlende Ordner (Verifier-Befund 2026-10-17, `low`):** `aggregate_progress`
+  (`src/backup.rs`) summiert `done/total` **statusunabhängig** — ein `NotFound`-Ordner trägt also
+  weiter zur Zeile „Gesamt: X von Y" bei, obwohl seine eigene Fortschrittszeile leer ist. Vor 5.22
+  war das für den damaligen `Paused`-Zustand identisch (kein Regress); es ist eine **Design-Frage**
+  (soll ein fehlendes Ziel in der Gesamt-Summe mitzählen?), keine Fehlfunktion.
+- **Naht-Test ohne Aussage (Verifier-Befund 2026-10-17, `nit`):** `autostart_intent_to_record()`
+  (`src/app.rs`) ist die Identität, ihr Test damit tautologisch — die **Verdrahtung** in
+  `set_autostart` sichert er nicht ab (nur mittelbar über `dead_code`, falls jemand die Funktion
+  entfernt). Ein echter Guard bräuchte eine injizierbare Registrierung.
+- **Der DMG-Schritt ist nicht skriptet:** `packaging/make-app.sh` baut nur die `.app`; das DMG
+  entstand 2026-10-17 von Hand (`hdiutil create -volname …`) und ist damit nicht reproduzierbar.
+  Gehört als eigener, dokumentierter Schritt (Volname, Dist-Pfad, Reihenfolge `.app` → DMG) nach
+  `docs/dev/BUILD.md`/`RELEASE.md`.
+- **Token-Rotation offen (Vorfall 2026-10-16):** ein `security add-generic-password`-Aufruf hatte den
+  Refresh-Token kurz in der Prozessliste (`ps`) stehen; eine **neue Anmeldung** rotiert ihn. Nur
+  offen, falls seither nicht neu angemeldet wurde.
+- **Code-Kommentar hinter der Doku (Verifier-Merker 2026-10-17):** der Kommentar an
+  `src/i18n.rs:149` nennt weiterhin „`C`/`POSIX`/`unset` → Englisch“ — auf macOS ist der
+  unset-Fall seit 5.21 die `NSLocale`-Abfrage. Die Doku wurde korrigiert, der Code-Kommentar
+  nicht; bei der nächsten Berührung von `src/i18n.rs` mitziehen.
 - Queue-Paginierung (heute bricht das Panel bei 300 Zeilen ab, Original lädt seitenweise 1000).
 - Fehlerfenster mit `readdtoqueue`/`retryall`; Semantik laut `SPEC_STATUS_DETAIL.md` §3.
 - Pause **pro Ordner** (Zeilen-Symbol) — im Original vorhanden, bei uns Post-MVP.
