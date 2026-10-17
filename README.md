@@ -8,10 +8,9 @@ Prime Photos is **not** an official Amazon product and is **not** affiliated wit
 
 ## Status
 
-- **Pre-release / MVP.**
-- **Two releases so far:** `v0.1.0` and `v0.1.1` (GitHub Releases, tag-driven — every `v*` tag runs the release workflow).
+- **Early stage / MVP.**
 - **macOS (Apple Silicon) is the primary target and the only platform that has been built *and* run-tested.** The macOS bundle is built locally, not in CI.
-- **Windows and Linux are declared, equal targets.** The release workflow **builds** them (Windows x64 on `windows-latest`, Linux x64 on `ubuntu-latest`), and both legs were green for `v0.1.0` and `v0.1.1` — they are **compiled in CI but not run-tested**. (An earlier draft of this file expected only a `cargo check --target …` cross-compile check; that is no longer the state of the pipeline.)
+- **Windows and Linux are declared, equal targets.** The release workflow **builds** them (Windows x64 on `windows-latest`, Linux x64 on `ubuntu-latest`), and both legs have been green on every release so far — they are **compiled in CI but not run-tested**.
 - Windows binaries are **unsigned** (the Authenticode steps are skipped when the certificate secrets are absent); macOS bundles are **ad-hoc signed** and **not notarized**.
 
 See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
