@@ -1,7 +1,8 @@
 # TODO / decisions ledger
 
-**Nur offene Arbeit** — kurze Checkliste, **keine Doku**. Regel: `AGENTS.md` → „Arbeitsweise" →
-„Ledger-Hygiene". Doku → `docs/` (Feature-Dateien: `docs/features/`).
+**Nur offene Arbeit** — kurze Checkliste, **keine Doku**. Regel: erledigt **und** verifiziert = löschen
+(globale `AGENTS.md` → „Arbeitsregeln"; Historie = Git). Doku → `docs/` (Feature-Dateien:
+`docs/features/`).
 
 **Entscheidungen stehen hier nicht mehr** (User-Entscheidung 2026-10-17, auch kein „Verworfen"): sie
 liegen bei der jeweiligen Sache — in `docs/features/<gebiet>.md` (Abschnitt „Decisions" bzw.
@@ -17,12 +18,7 @@ hier nur die Reihenfolge und die Spec-Lage (Recon-Abgleich am 2026-10-17).
 **0. Vordringlich — ein Live-Bug (2026-10-17):** nach der Rückkehr eines fehlenden Laufwerks setzt der
 Lauf **nicht** von selbst fort (Details im Abschnitt „Offen aus der Live-Abnahme 2026-10-17").
 **Sondiert (2026-10-17, am Code):** das Status-Lifting funktioniert, es fehlt allein der **Scan-Anstoß
-bei der Rückkehr**. Schnitt = Welle 5.32, **nach** 5.31 (nutzt dessen Park-/Scan-Mechanik).
-
-**0b. In Umsetzung (Welle 5.31, User-Entscheidung 2026-10-17):** ein Ordner, der während eines laufenden
-Uploads hinzugefügt wird, wird **parallel eingelesen** und seine Dateien **in den laufenden Lauf
-aufgenommen**, statt still verworfen zu werden. Gleiche Fehlerklasse wie 0 (fehlender Auslöser). Herkunft
-und Code-Belege: Abschnitt „Offen aus der Live-Nutzung 2026-10-17".
+bei der Rückkehr**. Schnitt = Welle 5.33, **nach** 5.31/5.32 (nutzt deren Park-/Scan-Mechanik).
 
 **1. Kleine Hygiene, kein Recon nötig, sofort machbar:** `cargo fmt` einmalig (schaltet ein Gate frei)
 → Actions Node 20 → 24.
@@ -100,30 +96,13 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
   dokumentierte Nie-gescannt-Falle).
   Soll = Original: `docs/original/SPEC_MISSING_SOURCE.md` §3.3.3/§3.3.6 und §4.4 Schritt 5 sowie
   `docs/original/SPEC_BACKGROUND_SYNC.md` §3/§3.5 („external-drive arrival", `ForceScan = !IsPaused`).
-  **Schnitt (Welle 5.32, nach 5.31):** die Rückkehr (`NotFound` → vorhanden) stößt einen **vollständigen
+  **Schnitt (Welle 5.33, nach 5.31/5.32):** die Rückkehr (`NotFound` → vorhanden) stößt einen **vollständigen
   Scan dieses Ordners** an (kein Wasserzeichen-Vorschub) und nutzt dafür dieselbe Park-/Scan-Mechanik wie
   Welle 5.31 (`pending_scans`/`handle_scan_requests`). Offen zu entscheiden: ob dieser Scan die **globale**
   Pause des Users respektiert (unser `can_start`) — das Original hebt die *Schedule*-Pause selbst auf.
 - **Nicht getrackt, weil dokumentiert:** ob `LSMinimumSystemVersion 11.0` (Info.plist) vs. Autostart ab
   macOS 13 je relevant wird — bekannte Degradation in den „unsupported"-Pfad
   (`docs/features/autostart.md`; „not live-checked" in `docs/features/LIVE_ACCEPTANCE.md`).
-
-## Offen aus der Live-Nutzung 2026-10-17 (mehrere Ordner schnell nacheinander hinzufügen)
-
-- [ ] **Ein während eines laufenden Uploads hinzugefügter Ordner wird nicht gesichert (Bug, Live 2026-10-17).**
-  Beobachtung: drei Ordner schnell hintereinander hinzugefügt — gesichert wurde nur der erste. Ursache am
-  Code belegt: der Dialog ruft nach dem Speichern **sofort** `start_folder_upload([idx])`
-  (`src/backup_config.rs:214`), und das **bricht bei laufendem Upload ab** — nur die Log-Zeile
-  `Es läuft bereits ein Upload.` (`src/backup.rs:1285-1288`, Guard `upload_busy()`, `:1275`). Eine
-  Vormerkung gibt es nicht, und der Hintergrund-Supervisor holt es **nicht** nach: die
-  Start-Sicherheitsnetz-Prüfung `background_sync_pass` läuft **einmal pro Prozess**
-  (`src/backup.rs:1674-1685`, `BG_SYNC_STARTED`), danach entscheiden nur OS-Events; das Park-Feld `pending`
-  wird **nur** aus Wächter-Events gefüllt (`map_to_folders` `:852`, `park_paths` `:878`) — ein neu
-  hinzugefügter Ordner erzeugt kein Event, und beim Armieren des Wächters meldet macOS keine bereits
-  vorhandenen Dateien. Verloren geht damit der **vorhandene Bestand** eines während eines Laufs
-  hinzugefügten Ordners (nachgeholt erst beim nächsten App-Start); spätere **Änderungen** in ihm holt der
-  Park-Pfad korrekt nach. Soll (User-Entscheidung 2026-10-17): Einlesen **parallel** zum laufenden Lauf,
-  Dateien **in den laufenden Lauf einhängen** — Welle 5.31, Doku `docs/features/change-detection.md`.
 
 ## Offen aus dem geschlossenen Test 2026-10-16
 
@@ -190,6 +169,14 @@ Ausdrücklich **ohne** Starttermin:
 - Kaltstart-Verhalten nach Login; Pro-Ziel-Limit; netzwerkgesteuerte Drosselung; Logout während
   laufendem Upload; Nav-Accessibility — Lage und Belege: `docs/features/scope.md` und
   `docs/features/change-detection.md`/`sign-out.md`.
+- **Kleinigkeiten aus den Verifikationen der Wellen 5.31/5.32 (bewusst zurückgestellt, nicht blockierend):**
+  der Worker nimmt seinen Queue-Pop unter der `shared`-Sperre (`src/upload.rs`) — Worker serialisieren
+  also am selben Mutex (Laufzeit, keine Korrektheit); der `ScansInFlight`-Guard in `inject_into_live_run`
+  entsteht **nach** dem `active`-Check (`src/backup.rs`), das Fenster führt nur zu Ablehnung + Parken
+  (kein Verlust); ein bereits laufender, erneut angestoßener Ordner wird pro Durchlauf erneut gewalkt und
+  dann abgelehnt (Dedupe-Guard in `inject_into_live_run`) — Parken statt Doppel-Upload. Das
+  Test-Scratch-Verzeichnis `prime-photos-test-store-<pid>` bleibt in `$TMPDIR` liegen (`src/folders.rs`),
+  konsistent zu den vorhandenen `prime-photos-folders-*`.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
   `docs/original/SPEC_SCOPE_INVENTORY.md` und in `docs/features/scope.md`.
 
