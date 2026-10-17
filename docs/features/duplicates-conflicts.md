@@ -44,6 +44,30 @@ SQLite index is the primary defence; the server 409 is a safety net.
   **every** run — otherwise the folder (~3,6 GB for "Sport") would be read and
   hashed again on each scan. That is a deliberate one-column schema change and
   matches the original, whose `uploads` table also carries a `status` column.
+  **Moved across folders (user decision 2026-10-17):** the cross-path check is
+  **path-independent** and the index is **global** — one `uploads` table with
+  `ix_uploads_md5` for **all** source folders — so a file **moved to another
+  folder** (same content, new path) is caught exactly like a rename **within**
+  one folder. Evidence: `content_seen` (`src/dedup.rs:323`), test
+  `content_seen_is_path_independent` (`src/dedup.rs:640`); the path-centric
+  checks (`stat_matches`, `should_skip`) do **not** apply here (test
+  `skip_only_on_same_path_and_md5`, `src/dedup.rs:621` — "different path, same
+  md5 → upload"). The skip is the **whole** effect: **no move/rename happens in
+  the account** — the node created for the **old** path stays under the old
+  path, and **no** node is created for the **new** path (the skip runs before
+  the POST, `src/upload.rs:661-686`). Original parity: the original only skips
+  too, on `GetNodeByMd5` across paths (`../original/SPEC_FILE_IDENTITY.md`
+  §1 A, §2, §9). **Three limits:** (1) it only catches what **we** recorded
+  locally — content another device or the original placed into the account is
+  unknown here, so a POST goes out and the server 409 (`MD5_DUPLICATE`,
+  `is_content_duplicate_code`, `src/prime_photos.rs:449`) stays the safety net:
+  same outcome, one network round. Whether the **server** deduplicates content
+  **across different destination folders** is **not** documented — do not claim
+  it. (2) `dedup = false` for the source folder ⇒ the moved file is
+  **re-uploaded** (the 409 remains the net). (3) changed content ⇒ a different
+  MD5 ⇒ **not** a duplicate ⇒ upload (§2). The log line reads
+  `Bereits im Konto, nur umbenannt: <Pfad>` in **both** cases — that stays as it
+  is (user decision 2026-10-17).
 
 - **Conflict handling (user decision 2026-10-13):** all **four original
   options** per upload target (Nachfragen / Ignorieren / Als neue Datei
