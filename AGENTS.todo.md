@@ -39,6 +39,9 @@ bereits **Out**), macOS-Signatur/Benachrichtigungen, Multi-Fenster-Zeile, Win/Li
 **4. Hygiene-Reste aus Verifikationen** — bei der nächsten Berührung der jeweiligen Datei mitziehen
 (`src/login.rs:491`, `src/i18n.rs:149`, Naht-Test Autostart, `aggregate_progress`-Designfrage,
 DMG-Skript, Token-Rotation, **Marge im `QUEUE_BELOW_H`/`page_heights`-Kommentar in `src/backup.rs`**,
+**`RELEASE.md` §9, Eintrag v0.1.2:** er nennt noch „das Dock-Icon bleibt" — zum Release-Zeitpunkt war das
+korrekt (Tag `1aceb25`); bei der nächsten Berührung als überholt kennzeichnen (der 0.1.3-Eintrag sagt
+ohnehin das Gegenteil),
 **Test-Isolations-Race:** `src/tray.rs` setzt global `set_lang(En)`, während `upload::tests` denselben
 globalen Zustand parallel liest — Verifier-Befund 2026-10-17, isoliert und single-thread grün)
 plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
@@ -51,6 +54,23 @@ plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
   prime_photos.rs settings.rs text.rs tray.rs upload.rs urls.rs` — auch in unangetasteten). Danach
   gilt `cargo fmt --check` als Gate (User-Entscheidung 2026-10-16; Warum es das Gate bisher nicht gab:
   `docs/dev/DEV_NOTES.md` §8).
+
+## Offen aus dem Autostart-/Dock-Fenster-Verhalten (2026-10-18)
+
+Umgesetzt und verifiziert (`fb5e133`, Nachzügler `326e332`/`1b34354`): Als Login-Item gestartet läuft die
+App **still** (kein Fenster, kein Dock-Icon, nur Tray); ein manueller Start zeigt das Fenster. Das
+Dock-Icon folgt der Fenstersichtbarkeit (`Accessory` versteckt / `Regular` sichtbar) — damit ist es
+**Original-Parität** statt Abweichung (die Recon-Gap-Zeile nennt jetzt „parity"). Am Release-Build live
+belegt: das Apple-Event wird gelesen (`vorhanden=true, als Login-Item gestartet=false`), X ⇒ `Accessory`,
+`open -a` holt das Fenster zurück, ein zweiter Start beendet sich (genau 1 Instanz); das Login-Item ist
+registriert (`sfltool dumpbtm`). Offen:
+
+- [ ] **Live-Abnahme des Autostart-Falls** (User, „erst nach einer Pause"): Beim nächsten Login muss die
+  App ohne Fenster und ohne Dock-Icon hochkommen (nur Menüleisten-Icon); „Fenster anzeigen" holt sie
+  sichtbar, Schließen nimmt das Dock-Icon wieder weg.
+- [ ] **Release 0.1.3 — erst nach dieser Abnahme** (User-Entscheidung 2026-10-18): Version-Bump
+  (`Cargo.toml`/`Cargo.lock`, `packaging/make-app.sh`, `packaging/Info.plist`, `RELEASE.md` §4), Tag,
+  Release-Workflow, macOS-DMG aus dem Tag, `RELEASE.md` §9.
 
 ## Offen nach dem Release v0.1.0 (2026-10-17)
 
