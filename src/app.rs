@@ -354,7 +354,7 @@ impl PrimePhotoApp {
         // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
         // The context is handed in so the menu's About item can wake the UI.
         app_menu::install(&cc.egui_ctx);
-        // App activation (Dock icon / relaunch) and the single-instance
+        // App activation (relaunch / switch-back) and the single-instance
         // handshake both only flag + wake the UI, so they get the context here
         // (see `src/app_activation.rs`, `src/single_instance.rs`).
         app_activation::install(&cc.egui_ctx);
@@ -1171,8 +1171,8 @@ impl eframe::App for PrimePhotoApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.window_hidden = true;
-            // Step the app back out of the foreground (macOS): a Dock click on
-            // an already-frontmost app activates nothing, so without this the
+            // Step the app back out of the foreground (macOS): reactivating an
+            // already-frontmost app activates nothing, so without this the
             // way back would be dead until the user focused another app first
             // (see `src/app_activation.rs`). The Dock icon (and the app menu)
             // disappear with the window — `step_back` drops to `Accessory`; the

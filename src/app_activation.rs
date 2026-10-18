@@ -16,9 +16,9 @@
 //! pattern as [`crate::app_menu`]'s `AboutTarget`). That notification fires
 //! whenever the app becomes the active one: the user relaunches it from
 //! Finder/Spotlight/`open` (Launch Services activates the already running
-//! instance instead of starting a second one), clicks its Dock icon, or
-//! switches back to it. That is exactly the "come back from close-to-tray"
-//! moment, so no delegate is needed for it.
+//! instance instead of starting a second one) or switches back to it while it
+//! is `Regular` (e.g. a Dock click with an open window). That covers the "come
+//! back from close-to-tray" moment, so no delegate is needed for it.
 //!
 //! Like [`crate::app_menu`], the AppKit callback must never touch the UI
 //! directly: it only records the request in a flag and wakes the render loop.
@@ -31,10 +31,12 @@
 //! it becomes `Accessory` (no Dock icon, no app menu), exactly like the
 //! original's dynamic `WindowManager` policy. [`step_back`] drops to
 //! `Accessory`, [`come_forward`] restores `Regular` **first** (otherwise the
-//! following `activate` would not take effect). An app activation — a Dock
-//! click, a relaunch from Finder/Spotlight/`open`, or switching back to it —
-//! brings the hidden window back and focuses it, which is what this module is
-//! for.
+//! following `activate` would not take effect). A relaunch from
+//! Finder/Spotlight/`open` activates the running app, which brings the hidden
+//! window back and focuses it — that is what this module is for. (While a
+//! window is open the app is `Regular`, so a Dock click also activates it; in
+//! the hidden `Accessory` state there is no Dock icon, and the return paths are
+//! the tray, a relaunch, and a second start.)
 //!
 //! **Silent login-item start** (user decision 2026-10-18, original behaviour —
 //! `SPEC_OS_INTEGRATION.md` §3.5): [`launched_as_log_in_item`] reads the Apple
@@ -45,18 +47,18 @@
 //! unreachable app. Only the event is **read**; no handler is registered (that
 //! would replace AppKit's own handler).
 //!
-//! **Why closing steps the app back (`step_back` / `come_forward`).** A Dock
-//! click on the app that is *already* the frontmost one activates nothing:
+//! **Why closing steps the app back (`step_back` / `come_forward`).**
+//! Reactivating an app that is *already* the frontmost one activates nothing:
 //! AppKit posts no `NSApplicationDidBecomeActiveNotification`, so the observer
 //! above would never fire and the way back would look dead until the user
 //! focused some other app first. Hiding the window alone leaves the app in
 //! exactly that frontmost-but-inactive state. [`step_back`] therefore calls
 //! `NSApplication::hide` when the window is closed: AppKit hides the app **and
-//! activates the next app**, so our app is no longer frontmost and the next
-//! Dock click activates it again — the notification fires and the window comes
-//! back. It then also drops to `Accessory`, so the Dock icon disappears with the
-//! window. [`come_forward`] is the counterpart on the way back: `Regular` first,
-//! then unhide (if hidden) and activate.
+//! activates the next app**, so our app is no longer frontmost and a later
+//! activation (a relaunch from Finder/Spotlight/`open`) fires the notification
+//! and brings the window back. It then also drops to `Accessory`, so the Dock
+//! icon disappears with the window. [`come_forward`] is the counterpart on the
+//! way back: `Regular` first, then unhide (if hidden) and activate.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
@@ -244,8 +246,9 @@ pub fn launched_as_log_in_item() -> bool {
 }
 
 /// macOS: switch to `Accessory` — no Dock icon and no app menu (the window is
-/// hidden / not open). Main-thread-bound like the other functions; a refusal by
-/// AppKit is logged.
+/// hidden / not open). Main-thread-bound like the other functions. The `bool`
+/// return value of `setActivationPolicy` is **not** an error signal (see
+/// [`become_regular`]).
 #[cfg(target_os = "macos")]
 pub fn become_accessory() {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -254,13 +257,17 @@ pub fn become_accessory() {
     if !NSApplication::sharedApplication(mtm)
         .setActivationPolicy(NSApplicationActivationPolicy::Accessory)
     {
-        log::warn!("Aktivierungs-Policy Accessory konnte nicht gesetzt werden");
+        log::debug!("setActivationPolicy(Accessory) meldete false");
     }
 }
 
 /// macOS: switch back to `Regular` — the Dock icon and the app menu return with
-/// the window. Main-thread-bound like the other functions; a refusal by AppKit
-/// is logged.
+/// the window. Main-thread-bound like the other functions. The `bool` return
+/// value of `setActivationPolicy` is **not** an error signal: in the live test
+/// of 2026-10-18 it returned `false` although the policy verifiably switched to
+/// `Regular` (external check: `activationPolicy` changes, the window comes
+/// back). The assignment itself is therefore unconditional and a `false` is
+/// only logged, at debug level.
 #[cfg(target_os = "macos")]
 pub fn become_regular() {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -269,7 +276,7 @@ pub fn become_regular() {
     if !NSApplication::sharedApplication(mtm)
         .setActivationPolicy(NSApplicationActivationPolicy::Regular)
     {
-        log::warn!("Aktivierungs-Policy Regular konnte nicht gesetzt werden");
+        log::debug!("setActivationPolicy(Regular) meldete false");
     }
 }
 
@@ -277,12 +284,13 @@ pub fn become_regular() {
 ///
 /// `NSApplication::hide` hides the app **and activates the next app**, so our
 /// app is no longer frontmost. That restores the precondition for the observer
-/// above: a Dock click only activates a non-frontmost app (see the module docs),
-/// and the activation then fires `NSApplicationDidBecomeActiveNotification` and
-/// brings the window back. It then drops to `Accessory`, so the Dock icon (and
-/// the app menu) disappear with the window — the original's dynamic policy
-/// (`SPEC_OS_INTEGRATION.md` §3.4). Main-thread-bound: returns early without a
-/// [`MainThreadMarker`] (AppKit may only be messaged from the main thread).
+/// above: an app is only activated when it is not already frontmost (see the
+/// module docs), and the activation then fires
+/// `NSApplicationDidBecomeActiveNotification` and brings the window back. It
+/// then drops to `Accessory`, so the Dock icon (and the app menu) disappear with
+/// the window — the original's dynamic policy (`SPEC_OS_INTEGRATION.md` §3.4).
+/// Main-thread-bound: returns early without a [`MainThreadMarker`] (AppKit may
+/// only be messaged from the main thread).
 #[cfg(target_os = "macos")]
 pub fn step_back() {
     let Some(mtm) = MainThreadMarker::new() else {
@@ -291,7 +299,7 @@ pub fn step_back() {
     let app = NSApplication::sharedApplication(mtm);
     app.hide(None);
     if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
-        log::warn!("Aktivierungs-Policy Accessory konnte nicht gesetzt werden");
+        log::debug!("setActivationPolicy(Accessory) meldete false");
     }
 }
 
@@ -307,7 +315,7 @@ pub fn come_forward() {
     };
     let app = NSApplication::sharedApplication(mtm);
     if !app.setActivationPolicy(NSApplicationActivationPolicy::Regular) {
-        log::warn!("Aktivierungs-Policy Regular konnte nicht gesetzt werden");
+        log::debug!("setActivationPolicy(Regular) meldete false");
     }
     if app.isHidden() {
         app.unhide(None);
