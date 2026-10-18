@@ -38,7 +38,7 @@ Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §
 - **Pause/resume** (globally, from the backup header and the tray).
 - **One-off queue via drag & drop** (persisted so a restart resumes it).
 - **Tray icon**, **desktop notifications**, and an **About window with third-party licenses**.
-- **Background app**: closing the window hides it and keeps the app running; the Dock icon stays while the app runs and disappears only when the app is really quit. Bring the window back from the tray, by a Dock click, or by relaunching the app. Only one instance runs at a time — a second launch shows the running window instead of opening a new one.
+- **Background app**: closing the window hides it and keeps the app running, and the Dock icon follows the window — there while a window is open, gone while the app sits in the tray. Started at login it runs silently (no window, tray only). Bring the window back from the tray, by relaunching the app, or by a second launch. Only one instance runs at a time — a second launch shows the running window instead of opening a new one.
 - **UI language: German** (German/English i18n layer; the OS locale is the default).
 
 ## Build & run

@@ -38,26 +38,44 @@ closing the window quits the app.
 - **Close-to-tray (unchanged):** closing the window **hides** it (the close is
   cancelled) and the app keeps running in the background; only the tray's
   "Beenden" (or a real quit) exits.
-- **Dock icon stays (macOS, user decision 2026-10-17):** the app is a normal
-  windowed app whose Dock icon — and app menu bar — remains for as long as the
-  app runs. Closing the window only hides it (the app keeps running in the
-  background), and the icon stays; it disappears only when the app is really
-  quit (normal macOS behaviour). This is a **deliberate deviation** from the
-  original's `LSUIElement`/agent model
-  (`../original/SPEC_OS_INTEGRATION.md` §3.4), which has no Dock icon by default.
+- **Dock icon follows the window (macOS, user decision 2026-10-18):** while a
+  window is open the app is a normal windowed app — Dock icon and app menu bar
+  present (`Regular`). Once the window is hidden (close-to-tray) it switches to
+  the **`Accessory`** activation policy — no Dock icon, no app menu — and back
+  to `Regular` when the window is shown again. This is **original parity**: the
+  original runs a dynamic Dock icon the same way (`Regular` while a window is
+  open, `Accessory` when none is — `../original/SPEC_OS_INTEGRATION.md` §3.4).
+  The only deliberate deviation left is that our bundle does **not** set
+  `LSUIElement` — the policy is switched at runtime instead (the original sets
+  it in its `Info.plist`).
+- **Silent login-item start (macOS, user decision 2026-10-18):** when the app is
+  started **as a login item** (autostart) it runs **without a window and without
+  a Dock icon** — tray only; a **manual** start (Finder, Dock, Spotlight,
+  `open -a`, shell) shows the window as before. The login-item start is
+  recognised the same way the original does it: the current Apple event
+  `kAEOpenApplication` (`oapp`) whose `prdt` property-data is
+  `kAELaunchedAsLogInItem` (`lgit`) (`../original/SPEC_OS_INTEGRATION.md` §3.5).
+  The start decision is the pure, unit-tested
+  `should_start_hidden(launched_as_log_in_item, has_tray)` — silent only for a
+  login-item start **with** a possible tray; without one the window stays
+  visible, so the app can never end up with no window *and* no menu-bar icon.
 - **Ways back — always the same path, and immediately:** the tray's "Fenster
-  anzeigen", an app **relaunch** (Finder/Spotlight/`open` activate the already
-  running instance) or a **Dock click** all end in the same `show_main_window`
-  path: show + focus the window. The activation arrives through an observer of
-  `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`). So that
-  the Dock click works **without** focusing another app first, closing first
-  **steps the app back into the background** (`NSApplication::hide`): the app
-  gives up the foreground position (AppKit activates the next app), because a
-  Dock click on the app that is *already* the frontmost one activates nothing —
-  AppKit posts no `didBecomeActive` and the way back would look dead. The
-  counterpart on the way back is `unhide` (if hidden) + `activate` in
-  `show_main_window`. The activation policy is deliberately left alone, so the
-  **Dock icon stays**.
+  anzeigen", an app **relaunch** (Finder/Spotlight/`open -a` activate the already
+  running instance) or a **second start** (the single-instance guard) all end in
+  the same `show_main_window` path: show + focus the window. A **Dock click** is
+  no longer among them while the window is hidden: the hidden app is `Accessory`,
+  so there is no Dock icon to click. The activation arrives through an observer
+  of `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`). So
+  that the Dock click still works **while the window is visible** without
+  focusing another app first, closing first **steps the app back into the
+  background** (`NSApplication::hide`): the app gives up the foreground position
+  (AppKit activates the next app), because a Dock click on the app that is
+  *already* the frontmost one activates nothing — AppKit posts no
+  `didBecomeActive` and the way back would look dead. Closing then also drops to
+  `Accessory`, so the Dock icon disappears with the window. The counterpart on
+  the way back is `Regular` **first**, then `unhide` (if hidden) + `activate` in
+  `show_main_window` — the policy must be `Regular` before `activate`, or the
+  activation does not take effect.
 - **Only one instance:** a second start does **not** open a second window — it
   asks the running instance to show its window and exits. On macOS the bundle's
   `LSMultipleInstancesProhibited` (`packaging/Info.plist`) already makes Launch
@@ -122,7 +140,7 @@ closing the window quits the app.
   anhalten" ↔ „… fortsetzen"). Anlass: „Es ist alles abgeschlossen, da macht ‚Anhalten' keinen
   Sinn."
 
-- **Hintergrund-App: Close-to-Tray, Dock-Icon, Einzelinstanz (User-Entscheidung 2026-10-17).**
+- **Hintergrund-App: Close-to-Tray, Dock-Icon, Einzelinstanz (User-Entscheidung 2026-10-17) — überholt (2026-10-18).**
   Der User wollte als Rückweg aus dem versteckten Zustand **nur** Tray und Neustart — und (Korrektur
   vom selben Tag) das **Dock-Icon bleibt**; anders als beim Original ist das eine **bewusste
   Abweichung**. Umgesetzt: (1) Schließen versteckt das Fenster weiterhin (Close-to-Tray,
@@ -142,11 +160,35 @@ closing the window quits the app.
   daran vorbei (zweiter Aufruf aus der Shell, Linux/Windows) wacht `src/single_instance.rs`
   (Unix-Socket `instance.sock` bzw. TCP-Loopback, gleicher Handshake).
 
+- **Stiller Login-Start + Dock-Icon folgt dem Fenster (User-Entscheidung 2026-10-18) — gültig;
+  löst die Entscheidung vom 2026-10-17 ab.** Neu: (1) ein Start **als Login-Item** (Autostart)
+  läuft **ohne Fenster und ohne Dock-Icon**, nur mit Tray; ein **manueller** Start (Finder, Dock,
+  Spotlight, `open -a`, Shell) zeigt das Fenster wie bisher; (2) das **Dock-Icon folgt dem
+  Fenster**: versteckt ⇒ `Accessory` (kein Dock-Icon, kein App-Menü), sichtbar ⇒ `Regular`
+  (Dock-Icon + Menü); (3) damit ist es **Original-Parität** statt Abweichung — das Original führt
+  ein dynamisches Dock-Icon (`Regular` bei offenem, `Accessory` bei keinem Fenster,
+  `../original/SPEC_OS_INTEGRATION.md` §3.4) und erkennt den Login-Start am Apple Event
+  `kAEOpenApplication` mit `keyAEPropData == keyAELaunchedAsLogInItem` (`'lgit'`, §3.5); unsere
+  Umsetzung macht beides genauso. **Einzige bewusste Abweichung bleibt:** `LSUIElement` in der
+  Bundle-Plist ist **nicht** gesetzt — die Policy wird zur Laufzeit geschaltet (das Original setzt
+  `LSUIElement = true`). Die **Einzelinstanz** bleibt unverändert Original-Parität
+  (`LSMultipleInstancesProhibited` + Socket-Wächter, s. o.); der Ein-Instanz-Schutz ist
+  **unverändert**.
+
   **Technischer Grund für den Weg (nicht „verbessern"):** winit 0.30 registriert **selbst** einen
   `NSApplicationDelegate` und panict, wenn man ihn ersetzt („tried to get a delegate that was not
   the one Winit has registered"); die winit-Doku, die anderes behauptet, ist für 0.30 veraltet.
-  Deshalb **kein** Delegate, sondern ein Beobachter von `NSApplicationDidBecomeActiveNotification`
-  in `src/app_activation.rs`.
+  Deshalb **kein** Delegate — und **kein** eigener Apple-Event-Handler: der Login-Start wird nur
+  **gelesen** (`NSAppleEventManager::currentAppleEvent` in `src/app_activation.rs`,
+  `launched_as_log_in_item`), ein registrierter Handler würde AppKits eigenen ersetzen. Das
+  Fenster startet mit `.with_visible(false)` (`src/main.rs`) — das **hält es aber nicht
+  versteckt**: eframe schaltet es nach dem ersten Frame selbst (bedingungslos) sichtbar, deshalb
+  hält der stille Pfad den versteckten Zustand mit einem expliziten
+  `ViewportCommand::Visible(false)` in `PrimePhotoApp::new` (live mit einer Scratch-App belegt).
+  Die Startentscheidung ist die pure, unit-getestete Funktion
+  `should_start_hidden(launched_as_log_in_item, has_tray)`; `has_tray` ist eine **Näherung** über
+  die vorhandene Session (`has_pending_session()`), weil der Tray lazy im `update` gebaut wird —
+  ohne möglichen Tray bleibt das Fenster sichtbar, damit die App erreichbar ist.
 
 ## Original reference
 

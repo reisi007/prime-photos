@@ -103,9 +103,12 @@ macOS-specific APIs.
   In-App-„Beenden"-Knopf (macOS ist über ⌘Q safe); der **Rückweg** aus dem versteckten Zustand
   existiert aber jetzt plattformübergreifend: der Tray-Eintrag „Fenster anzeigen", ein
   **App-Neustart** (unter macOS aktiviert Launch Services die laufende Instanz; ein Dock-/Taskbar-
-  Klick ist ein weiterer Weg) — immer über denselben `show_main_window`-Pfad (Fenster zeigen +
-  fokussieren, `src/app_activation.rs`/`src/app.rs`). Auf macOS bleibt das **Dock-Icon**, solange
-  die App läuft (das Schließen versteckt nur das Fenster; User-Entscheidung 2026-10-17). Der
+  Klick ist dort **kein** Weg zurück mehr, solange das Fenster versteckt ist — ohne Fenster ist die
+  App `Accessory` und hat kein Dock-Icon) — immer über denselben `show_main_window`-Pfad (Fenster
+  zeigen + fokussieren, `src/app_activation.rs`/`src/app.rs`). Auf macOS **folgt das Dock-Icon dem
+  Fenster** (sichtbar ⇒ Dock-Icon + Menü, versteckt ⇒ `Accessory` ohne Icon; ein Login-Start läuft
+  still nur im Tray — User-Entscheidung 2026-10-18, Original-Parität, löst die
+  2026-10-17-Entscheidung ab). Der
   **Einzelinstanz-Schutz** greift plattformabhängig: auf
   macOS lehnt Launch Services den zweiten Start über `LSMultipleInstancesProhibited` ab, sonst
   fängt `src/single_instance.rs` ihn über den Socket-/TCP-Handshake ab. Die offene Arbeit

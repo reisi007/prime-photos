@@ -333,25 +333,27 @@ Our app is a Rust/egui+eframe native macOS app. The original's behaviour maps as
 | Status icon states (idle/uploading/done/error/paused/offline) | portable logic, Mac-only rendering | Map our uploader state to an icon; ship monochrome template images + a coloured unread variant. |
 | Tooltip "Amazon Photos - {state}" | portable | Reuse our German status strings; one mapping function from worker state → (icon, tooltip). |
 | Left-click opens the status popup vs a minimal pre-login menu | Mac-only (NSPopover) | Decide single behaviour for us: click → popup/menu. Simplest MVP: click opens the main window; later a popover. |
-| Keep running with the window closed (accessory app, no Dock icon) | Mac-only (`LSUIElement`/ActivationPolicy/false-terminate) | In eframe/winit: intercept the window-close event and **hide** the window instead of exiting; ensure `quit` only via an explicit menu action. Unlike the original, our app stays a normal window app — its Dock icon remains while it runs (no `LSUIElement`/accessory activation policy). |
+| Keep running with the window closed (accessory app, no Dock icon) | Mac-only (`LSUIElement`/ActivationPolicy/false-terminate) | In eframe/winit: intercept the window-close event and **hide** the window instead of exiting; ensure `quit` only via an explicit menu action. Our app switches its activation policy dynamically like the original — `Accessory` (no Dock icon) while the window is hidden, `Regular` again when it is shown — and a login-item start is silent (no window, no Dock icon, tray only). Only `LSUIElement` is not set in our bundle; the policy is switched at runtime. |
 | Login item via `osascript System Events` | **Mac-only** (legacy) | Prefer modern `SMAppService.mainApp.register()` (macOS 13+) via `objc2`; fall back to the `osascript` approach only if needed. No launchd plist of our own is required for this. |
 | Crash-recovery LaunchAgent (`KeepAlive`) | **Mac-only** | **Out of scope for the MVP** — the original's restart agent is a resilience nicety; skip unless we want crash-relaunch. |
 | Native toasts on quota / update / name-conflict / mass-delete | Mac API is deprecated `NSUserNotification`; modern path is `UNUserNotificationCenter` | Use the modern `UserNotifications` framework via `objc2`/`objc2-user-notifications` (request authorization, then `UNMutableNotificationContent`), which needs our bundle id and a signed/bundled app to prompt. A lighter alternative is `osascript -e 'display notification …'`, but it lacks action buttons. |
 | **Upload finished / upload error notification** | portable trigger, Mac-only delivery | The original has **none**; this is a gap we can *add*: on `done` show a success toast, on `error` a failure toast (our own strings). Keep it behind a single app-level "notifications" setting. |
 | User toggle for notifications | portable | Persist a `notifications_enabled` flag in our `config.toml`; gate every toast (the original's `ShowNotifications` existed but was effectively unwired — we should wire ours properly). |
 | Badge on the tray icon for unread/errors | portable decision, Mac-only rendering | Optional; can render a numeric badge onto the tray image from our error/unread count. |
-| Dock badge / Dock icon | **Mac-only**, and the original has none | Skip; unlike the original, our app is a normal window app whose Dock icon stays while it runs (no `LSUIElement`/accessory mode). |
+| Dock badge / Dock icon | **Mac-only**, and the original has none | Skip; our app's Dock icon follows the window (dynamic like the original: `Accessory` while hidden, `Regular` while shown) — no permanent icon, no badge. |
 
 **Portable vs Mac-only summary:** the *decision logic* (which event fires a notification, the
 visibility preference, the state→icon mapping, hide-on-close) is portable; the *delivery* APIs
 (tray item, native notifications, login item, accessory activation policy) are all macOS-only
 and must sit behind `cfg(target_os = "macos")` with portable stubs elsewhere.
 
-> **Note (our app, 2026-10-17):** the **accessory activation policy** item does **not** apply to
-> us — Prime Photos is a normal windowed app and deliberately sets **no** accessory policy: its
-> Dock icon stays for as long as it runs (a conscious deviation from the original's `LSUIElement`
-> agent model; see `docs/features/tray.md`). So there is nothing here to gate; the paragraph
-> above still describes the **original's** APIs, unchanged.
+> **Note (our app, 2026-10-18 — supersedes the 2026-10-17 note):** the **accessory activation
+> policy** item now **does** apply to us, dynamically: Prime Photos switches to `Accessory` (no
+> Dock icon) while the window is hidden and back to `Regular` when it is shown, and a login-item
+> start is silent (no window, no Dock icon, tray only) — original parity
+> (`SPEC_OS_INTEGRATION.md` §3.4/§3.5; see `docs/features/tray.md`). Only `LSUIElement` stays
+> unset in our bundle (the policy is switched at runtime). The paragraph above still describes the
+> **original's** APIs, unchanged.
 
 ---
 

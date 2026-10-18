@@ -19,6 +19,9 @@ sleep.
   - `Some(false)` = veto, never enable; a hand-made entry is not fought.
   - `Some(true)` ⇒ a missing login item is repaired.
 - The OS state remains the operative truth; `Config` stores only the intent.
+- A start **as a login item** is **silent** (macOS): the app comes up with **no
+  window and no Dock icon**, tray only; a **manual** start shows the window
+  (user decision 2026-10-18, original parity — see [tray.md](tray.md)).
 - The original also enables autostart during onboarding
   (`../original/SPEC_OS_INTEGRATION.md` §3.6).
 
