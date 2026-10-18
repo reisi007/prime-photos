@@ -156,6 +156,17 @@ fn autostart_intent_to_record(enabled: bool) -> Option<bool> {
     Some(enabled)
 }
 
+/// Whether the app should start **without a window** — silent, tray only.
+///
+/// `true` only for a login-item (autostart) start **with** a tray. A login-item
+/// start without a tray must not go silent: the app would then run with no
+/// window *and* no menu-bar icon, i.e. unreachable. Every other combination
+/// starts visible, so a manual start (Finder/Dock/Spotlight/`open`/shell) always
+/// shows the window. Pure and OS-free, so the start decision is unit-testable.
+fn should_start_hidden(launched_as_log_in_item: bool, has_tray: bool) -> bool {
+    launched_as_log_in_item && has_tray
+}
+
 /// Payload of the background account fetch: the display name plus, when it
 /// could be obtained, the avatar JPEG bytes.
 pub(crate) struct AvatarResult {
@@ -267,11 +278,14 @@ pub(crate) struct PrimePhotoApp {
     /// Set when the user really wants to quit (tray "Beenden" / ⌘Q), so the
     /// close-to-tray intercept below lets the close through.
     pub(crate) quitting: bool,
-    /// We hid the main window ourselves (close-to-tray sent
-    /// `ViewportCommand::Visible(false)`) and have not shown it again since.
-    /// egui offers no way to *query* window visibility, so this mirror is what
-    /// lets the tray-drop path know whether it has to show the window again
-    /// (otherwise the app would keep running with no window and no tray).
+    /// The main window is hidden on purpose and has not been shown again since:
+    /// set by close-to-tray (`ViewportCommand::Visible(false)`) and by a silent
+    /// login-item start (the window starts hidden). egui offers no way to
+    /// *query* window visibility, so this mirror is what lets the tray-drop path
+    /// know whether it has to show the window again (otherwise the app would
+    /// keep running with no window and no tray). The macOS Dock icon follows
+    /// this flag: hidden ⇒ `Accessory`, shown ⇒ `Regular` (see
+    /// `src/app_activation.rs`).
     pub(crate) window_hidden: bool,
     /// The last `tray::build` attempt failed (the OS has no tray backend —
     /// logged as an error in `src/tray.rs`). Blocks the per-frame reconcile
@@ -488,7 +502,7 @@ impl PrimePhotoApp {
             ),
             _ => (None, false),
         };
-        let app = Self {
+        let mut app = Self {
             rt,
             config,
             config_error,
@@ -547,6 +561,38 @@ impl PrimePhotoApp {
             Ok(None) => {}
             Err(e) => log::warn!("Refresh-Token konnte nicht geladen werden: {e}"),
         }
+        // Start decision (user decision 2026-10-18): a login-item (autostart)
+        // start stays silent — no window, no Dock icon, tray only — while a
+        // manual start (Finder/Dock/Spotlight/`open`/shell) shows the window.
+        // `has_pending_session()` is only an **approximation** for "the tray
+        // will be built": the tray is created lazily in `update` and `tray::build`
+        // can fail (no tray backend). In that unlikely case the app is still
+        // reachable via Finder / `open -a` / a second start (see
+        // `src/single_instance.rs`), and `should_start_hidden` never goes silent
+        // without a session, so it can never end up with no window *and* no
+        // menu-bar icon on a manual start.
+        let hidden = should_start_hidden(
+            app_activation::launched_as_log_in_item(),
+            app.has_pending_session(),
+        );
+        app.window_hidden = hidden;
+        if hidden {
+            // No Dock icon may appear on the silent path.
+            app_activation::become_accessory();
+            // Hold the window hidden: `.with_visible(false)` in `main.rs` only
+            // avoids the first-frame flash — eframe shows the window itself
+            // (unconditionally) after the first frame, so the hidden state must
+            // be (re)asserted with this command.
+            cc.egui_ctx
+                .send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        } else {
+            // The window is created invisible (`main.rs`): `Regular` first,
+            // then show + focus it — no flash on the manual path.
+            app_activation::become_regular();
+            cc.egui_ctx
+                .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         app
     }
 
@@ -584,13 +630,16 @@ impl PrimePhotoApp {
     }
 
     /// Show and focus the main window — the one path every "bring the app back"
-    /// trigger uses: the tray's "Fenster anzeigen", an app activation (Dock
-    /// click / relaunch, see `src/app_activation.rs`), a second launch (see
-    /// `src/single_instance.rs`) and the expired-session fallback.
+    /// trigger uses: the tray's "Fenster anzeigen", an app activation (a
+    /// relaunch from Finder/Spotlight/`open`, see `src/app_activation.rs`), a
+    /// second launch (see `src/single_instance.rs`) and the expired-session
+    /// fallback. There is no Dock icon to click while the window is hidden
+    /// (`Accessory`), so the Dock is not among these triggers.
     fn show_main_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
-        // Undo the `step_back` from close-to-tray (unhide if needed) and make
-        // the app active again, so the restored window also comes to the front.
+        // Restore the Dock icon / app menu (`Regular` first) and undo a previous
+        // `step_back` hide (unhide if needed), then make the app active again so
+        // the restored window also comes to the front.
         app_activation::come_forward();
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -1016,8 +1065,9 @@ impl eframe::App for PrimePhotoApp {
         }
 
         // App activation (macOS `NSApplicationDidBecomeActiveNotification`):
-        // the user relaunched the app from Finder/Spotlight/`open` or clicked
-        // its Dock icon. The observer only flagged + woke us (see
+        // the user relaunched the app from Finder/Spotlight/`open` (while the
+        // window is hidden the app is `Accessory`, so there is no Dock icon to
+        // click). The observer only flagged + woke us (see
         // `src/app_activation.rs`); `false` on every other platform.
         if app_activation::take_become_active_request() {
             self.show_main_window(ctx);
@@ -1124,10 +1174,11 @@ impl eframe::App for PrimePhotoApp {
             // Step the app back out of the foreground (macOS): a Dock click on
             // an already-frontmost app activates nothing, so without this the
             // way back would be dead until the user focused another app first
-            // (see `src/app_activation.rs`). The Dock icon stays: closing only
-            // hides the window, the app keeps running in the background. Back
-            // via the tray, or via an app activation / second launch, which both
-            // restore the window through `show_main_window`.
+            // (see `src/app_activation.rs`). The Dock icon (and the app menu)
+            // disappear with the window — `step_back` drops to `Accessory`; the
+            // app keeps running in the background. Back via the tray, or via an
+            // app activation / second launch, which both restore the window
+            // through `show_main_window`.
             app_activation::step_back();
         }
 
@@ -1550,6 +1601,19 @@ mod tests {
         // silently degrades into the `Some(false)` veto.
         assert_eq!(autostart_intent_to_record(true), Some(true));
         assert_eq!(autostart_intent_to_record(false), Some(false));
+    }
+
+    #[test]
+    fn should_start_hidden_only_for_a_login_item_start_with_a_tray() {
+        // Silent (window hidden, no Dock icon) **only** for a login-item start
+        // that has a tray to come back through.
+        assert!(should_start_hidden(true, true));
+        // A login-item start without a tray must show the window: no window
+        // *and* no menu-bar icon would be unreachable.
+        assert!(!should_start_hidden(true, false));
+        // A manual start always shows the window — with or without a tray.
+        assert!(!should_start_hidden(false, true));
+        assert!(!should_start_hidden(false, false));
     }
 
     #[test]

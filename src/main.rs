@@ -61,6 +61,13 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
             .with_min_inner_size([760.0, 520.0])
+            // The window starts invisible — this only avoids the first-frame
+            // flash. It does **not** keep the window hidden: eframe shows it
+            // itself (unconditionally) after the first frame, so the start
+            // decision in `PrimePhotoApp::new` (silent login-item start vs.
+            // manual start) holds the hidden state with an explicit
+            // `ViewportCommand::Visible(false)`.
+            .with_visible(false)
             .with_icon(window_icon()),
         ..Default::default()
     };

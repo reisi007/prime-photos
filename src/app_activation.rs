@@ -25,13 +25,25 @@
 //! `PrimePhotoApp::update` drains the flag via [`take_become_active_request`]
 //! and then shows and focuses the window.
 //!
-//! **The Dock icon stays** (user decision 2026-10-17): the app is a normal
-//! windowed app whose Dock icon — and app menu bar — remains for as long as the
-//! app runs. Closing the window only hides it (the app keeps running in the
-//! background), and the icon stays; it disappears only when the app is really
-//! quit (normal macOS behaviour). An app activation — a Dock click, a relaunch
-//! from Finder/Spotlight/`open`, or switching back to it — brings the hidden
-//! window back and focuses it, which is what this module is for.
+//! **The Dock icon follows the window** (user decision 2026-10-18, original
+//! behaviour — `SPEC_OS_INTEGRATION.md` §3.4): while a window is open the app is
+//! `Regular` (Dock icon + app menu); once the window is hidden (close-to-tray)
+//! it becomes `Accessory` (no Dock icon, no app menu), exactly like the
+//! original's dynamic `WindowManager` policy. [`step_back`] drops to
+//! `Accessory`, [`come_forward`] restores `Regular` **first** (otherwise the
+//! following `activate` would not take effect). An app activation — a Dock
+//! click, a relaunch from Finder/Spotlight/`open`, or switching back to it —
+//! brings the hidden window back and focuses it, which is what this module is
+//! for.
+//!
+//! **Silent login-item start** (user decision 2026-10-18, original behaviour —
+//! `SPEC_OS_INTEGRATION.md` §3.5): [`launched_as_log_in_item`] reads the Apple
+//! event that is current at launch. An `OpenApplication` (`oapp`) event whose
+//! `prdt` property-data parameter carries `lgit` means the app was started as a
+//! login item (autostart), so it starts hidden with no Dock icon (tray only).
+//! `None` (no current event) falls back to a normal start — never an invisible,
+//! unreachable app. Only the event is **read**; no handler is registered (that
+//! would replace AppKit's own handler).
 //!
 //! **Why closing steps the app back (`step_back` / `come_forward`).** A Dock
 //! click on the app that is *already* the frontmost one activates nothing:
@@ -42,9 +54,9 @@
 //! `NSApplication::hide` when the window is closed: AppKit hides the app **and
 //! activates the next app**, so our app is no longer frontmost and the next
 //! Dock click activates it again — the notification fires and the window comes
-//! back. The activation policy is deliberately **not** touched, so the Dock icon
-//! stays (see above). [`come_forward`] is the counterpart on the way back:
-//! unhide (if hidden) and activate.
+//! back. It then also drops to `Accessory`, so the Dock icon disappears with the
+//! window. [`come_forward`] is the counterpart on the way back: `Regular` first,
+//! then unhide (if hidden) and activate.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
@@ -60,9 +72,24 @@ use objc2::runtime::NSObject;
 #[cfg(target_os = "macos")]
 use objc2::{MainThreadMarker, MainThreadOnly};
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSApplication, NSApplicationDidBecomeActiveNotification};
+use objc2_app_kit::{
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDidBecomeActiveNotification,
+};
 #[cfg(target_os = "macos")]
-use objc2_foundation::{NSNotification, NSNotificationCenter};
+use objc2_foundation::{NSAppleEventManager, NSNotification, NSNotificationCenter};
+
+// Four-char-code aliases matching the argument types of the Apple-event API
+// (`AEEventID` / `AEKeyword` / `OSType`). The `objc2-core-services` names are not
+// nameable from here (private re-export / `pub(crate)`), so they are spelled out
+// as the same `u32` four-char code. The `kAE*` constants below are not in any of
+// our crates either, so they are written out as literals with their character
+// form.
+#[cfg(target_os = "macos")]
+type AEEventID = u32;
+#[cfg(target_os = "macos")]
+type AEKeyword = u32;
+#[cfg(target_os = "macos")]
+type OSType = u32;
 
 /// Set by the activation observer; consumed once per frame by
 /// `PrimePhotoApp::update` through [`take_become_active_request`].
@@ -172,32 +199,116 @@ pub fn take_become_active_request() -> bool {
     BECOME_ACTIVE_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
+/// macOS: whether the app was started **as a login item** (autostart) rather
+/// than by the user.
+///
+/// Reads the Apple event that is current at launch: an `OpenApplication` event
+/// (`kAEOpenApplication` = `'oapp'`) whose `prdt` property-data parameter
+/// carries `kAELaunchedAsLogInItem` (`'lgit'`). That is exactly how the original
+/// classifies `AppStartupFlags.AutoStart` (`SPEC_OS_INTEGRATION.md` §3.5). The
+/// Apple-event manager is only **read** — no handler is registered (that would
+/// replace AppKit's own). `None` (no current event) ⇒ `false`, i.e. "treat it
+/// like a manual start and show the window": never an invisible, unreachable
+/// app. Main-thread-bound like the other functions; returns `false` without a
+/// [`MainThreadMarker`].
+#[cfg(target_os = "macos")]
+pub fn launched_as_log_in_item() -> bool {
+    // Four-char codes, each with its character form:
+    // `kAEOpenApplication` = 'oapp' — the "open application" event Launch
+    // Services sends when the app is launched; `keyAEPropData` = 'prdt' — its
+    // property-data parameter; `kAELaunchedAsLogInItem` = 'lgit' — the value
+    // `prdt` carries when the launch came from a login item (autostart).
+    const K_AE_OPEN_APPLICATION: AEEventID = 0x6F61_7070; // 'oapp'
+    const KEY_AE_PROP_DATA: AEKeyword = 0x7072_6474; // 'prdt'
+    const K_AE_LAUNCHED_AS_LOG_IN_ITEM: OSType = 0x6C67_6974; // 'lgit'
+
+    let Some(_mtm) = MainThreadMarker::new() else {
+        return false;
+    };
+    let manager = NSAppleEventManager::sharedAppleEventManager();
+    let event = manager.currentAppleEvent();
+    let log_in = event.as_ref().is_some_and(|ev| {
+        ev.eventID() == K_AE_OPEN_APPLICATION
+            && ev
+                .paramDescriptorForKeyword(KEY_AE_PROP_DATA)
+                .is_some_and(|prop| prop.enumCodeValue() == K_AE_LAUNCHED_AS_LOG_IN_ITEM)
+    });
+    // Permanent diagnostic (live test): distinguishes "no Apple event at all"
+    // from "an event that is not a login-item launch", so a live run proves the
+    // event was actually read (not merely the `None` fallback).
+    log::info!(
+        "Apple-Event beim Start: vorhanden={}, als Login-Item gestartet={log_in}",
+        event.is_some()
+    );
+    log_in
+}
+
+/// macOS: switch to `Accessory` — no Dock icon and no app menu (the window is
+/// hidden / not open). Main-thread-bound like the other functions; a refusal by
+/// AppKit is logged.
+#[cfg(target_os = "macos")]
+pub fn become_accessory() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if !NSApplication::sharedApplication(mtm)
+        .setActivationPolicy(NSApplicationActivationPolicy::Accessory)
+    {
+        log::warn!("Aktivierungs-Policy Accessory konnte nicht gesetzt werden");
+    }
+}
+
+/// macOS: switch back to `Regular` — the Dock icon and the app menu return with
+/// the window. Main-thread-bound like the other functions; a refusal by AppKit
+/// is logged.
+#[cfg(target_os = "macos")]
+pub fn become_regular() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if !NSApplication::sharedApplication(mtm)
+        .setActivationPolicy(NSApplicationActivationPolicy::Regular)
+    {
+        log::warn!("Aktivierungs-Policy Regular konnte nicht gesetzt werden");
+    }
+}
+
 /// macOS: step the app out of the foreground right before the window is hidden.
 ///
 /// `NSApplication::hide` hides the app **and activates the next app**, so our
 /// app is no longer frontmost. That restores the precondition for the observer
 /// above: a Dock click only activates a non-frontmost app (see the module docs),
 /// and the activation then fires `NSApplicationDidBecomeActiveNotification` and
-/// brings the window back. The activation policy is deliberately left alone —
-/// the Dock icon stays. Main-thread-bound: returns early without a
+/// brings the window back. It then drops to `Accessory`, so the Dock icon (and
+/// the app menu) disappear with the window — the original's dynamic policy
+/// (`SPEC_OS_INTEGRATION.md` §3.4). Main-thread-bound: returns early without a
 /// [`MainThreadMarker`] (AppKit may only be messaged from the main thread).
 #[cfg(target_os = "macos")]
 pub fn step_back() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
-    NSApplication::sharedApplication(mtm).hide(None);
+    let app = NSApplication::sharedApplication(mtm);
+    app.hide(None);
+    if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
+        log::warn!("Aktivierungs-Policy Accessory konnte nicht gesetzt werden");
+    }
 }
 
-/// macOS: the counterpart to [`step_back`] — undo a previous hide (if any) and
-/// then activate the app, so the restored window also comes to the front. Main-
-/// thread-bound like [`step_back`].
+/// macOS: the counterpart to [`step_back`] — restore `Regular` first, then undo
+/// a previous hide (if any) and activate the app, so the restored window also
+/// comes to the front. `Regular` **first** is load-bearing: without the Dock
+/// icon/policy back, the following `activate` does not take effect. Main-thread-
+/// bound like [`step_back`].
 #[cfg(target_os = "macos")]
 pub fn come_forward() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
     let app = NSApplication::sharedApplication(mtm);
+    if !app.setActivationPolicy(NSApplicationActivationPolicy::Regular) {
+        log::warn!("Aktivierungs-Policy Regular konnte nicht gesetzt werden");
+    }
     if app.isHidden() {
         app.unhide(None);
     }
@@ -211,6 +322,20 @@ pub fn step_back() {}
 /// Non-macOS: there is no AppKit app to bring forward.
 #[cfg(not(target_os = "macos"))]
 pub fn come_forward() {}
+
+/// Non-macOS: there is no Apple event to detect a login-item start.
+#[cfg(not(target_os = "macos"))]
+pub fn launched_as_log_in_item() -> bool {
+    false
+}
+
+/// Non-macOS: there is no AppKit activation policy to switch.
+#[cfg(not(target_os = "macos"))]
+pub fn become_accessory() {}
+
+/// Non-macOS: there is no AppKit activation policy to switch.
+#[cfg(not(target_os = "macos"))]
+pub fn become_regular() {}
 
 /// Non-macOS: there is no activation observer to install.
 #[cfg(not(target_os = "macos"))]
