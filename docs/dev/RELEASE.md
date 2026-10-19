@@ -353,6 +353,33 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   laufen getestet; die Live-Abnahme der **Laufwerk-Rückkehr** aus einem älteren Befund steht noch
   aus (eigener Ledger-Punkt).
 
+**Durch den vierten echten Lauf belegt (2026-10-19):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.3` (Tag-Objekt `dafed2d…`) auf Commit `bb8b54c`;
+  GitHub-Release `v0.1.3`, veröffentlicht 2026-10-19T09:02:52Z, **nicht** Draft, **nicht** Pre-Release.
+- **Runs:** Push-CI `39225782646` und Release-Workflow `39226119742` (`release.yml`, ausgelöst durch
+  den Tag-Push); Linux (7m03s), Windows (8m06s) und `Publish GitHub Release` (11s) — alle grün.
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.319.483 | `fbefabd6ae3243372557e7a967c4e1430b66b9bc38411c5d5a894938efce160b` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.441.494 | `98250242b6b43c14aac0cbd047ab84182456274b2d0afa2dbe966feb62542117` |
+  | `Prime-Photos-windows-x64.zip` | 8.587.250 | `a80bf168a0d6c364ffa3c7a131feafd5ad05cb445ec218adc2e508ed6b0f8ea0` |
+
+  `v0.1.3` trägt drei Assets. Das macOS-DMG wurde **manuell** angehängt (§4); sein SHA-256-Digest
+  stimmt mit der lokalen Datei überein.
+- **macOS-Bundle (lokal aus dem Release-Commit gebaut, §4):** `VERSION=0.1.3`, `BUILD=3`, ad-hoc
+  signiert, Volname `Prime Photos`; `CFBundleShortVersionString = 0.1.3`, `CFBundleVersion = 3`,
+  `CFBundleIdentifier = de.reisinger.prime-photos`; Commit-Stempel `bb8b54c`. `codesign --verify`
+  auf Bundle und `hdiutil verify` auf DMG: **gültig**. Das Bundle wurde in `/Applications` installiert.
+- **Windows unsigniert:** Authenticode-Schritte wurden mangels Secrets übersprungen (§3).
+- **Release-Notes:** `generate_release_notes: true` erzeugte
+  `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.2...v0.1.3`.
+- **Inhalt dieses Releases:** stiller Login-Item-Start ohne Fenster oder Dock-Icon. Die erste
+  `NSApplicationDidBecomeActiveNotification` wird beim stillen Start als Launch-Aktivierung behandelt,
+  nicht als Fenster-öffnen-Anfrage. Der Nutzer bestätigte das Verhalten nach echtem Ab-/Anmelden.
+
 **Weiterhin offen / nicht verifiziert:**
 
 - Windows-Authenticode-Signatur (§3) nicht ausgeführt; `signtool`-Verfügbarkeit auf dem Runner nicht
