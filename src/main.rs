@@ -57,6 +57,10 @@ fn main() -> eframe::Result<()> {
 
     notify::init();
 
+    // Observe AppKit's first launch notification before eframe runs its launch
+    // path, without taking over the application delegate or Apple-event handler.
+    app_activation::install_launch_diagnostic();
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])

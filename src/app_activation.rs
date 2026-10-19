@@ -76,6 +76,7 @@ use objc2::{MainThreadMarker, MainThreadOnly};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDidBecomeActiveNotification,
+    NSApplicationDidFinishLaunchingNotification,
 };
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSAppleEventManager, NSNotification, NSNotificationCenter};
@@ -153,7 +154,74 @@ impl ActivationObserver {
 #[cfg(target_os = "macos")]
 thread_local! {
     static OBSERVER: OnceCell<Retained<ActivationObserver>> = const { OnceCell::new() };
+    static LAUNCH_DIAGNOSTIC_OBSERVER: OnceCell<Retained<LaunchDiagnosticObserver>> = const { OnceCell::new() };
 }
+
+#[cfg(target_os = "macos")]
+objc2::define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    struct LaunchDiagnosticObserver;
+
+    impl LaunchDiagnosticObserver {
+        #[unsafe(method(didFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            const OAPP: AEEventID = 0x6F61_7070;
+            const PRDT: AEKeyword = 0x7072_6474;
+            const LGIT: OSType = 0x6C67_6974;
+
+            let manager = NSAppleEventManager::sharedAppleEventManager();
+            let event = manager.currentAppleEvent();
+            let event_id = event.as_ref().map(|event| event.eventID());
+            let property = event
+                .as_ref()
+                .and_then(|event| event.paramDescriptorForKeyword(PRDT));
+            let enum_code = property.as_ref().map(|descriptor| descriptor.enumCodeValue());
+            log::warn!(
+                "Login-Item-Startdiagnose: currentAppleEvent={}, eventID={}, prdt={}, prdt.enumCode={}, oapp={}, lgit={}",
+                event.is_some(),
+                event_id.map_or_else(|| "none".to_owned(), |value| format!("0x{value:08x}")),
+                property.is_some(),
+                enum_code.map_or_else(|| "none".to_owned(), |value| format!("0x{value:08x}")),
+                event_id == Some(OAPP),
+                enum_code == Some(LGIT),
+            );
+        }
+    }
+);
+
+#[cfg(target_os = "macos")]
+impl LaunchDiagnosticObserver {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        unsafe { objc2::msg_send![super(this), init] }
+    }
+}
+
+/// Register the read-only launch-event diagnostic before eframe starts AppKit.
+#[cfg(target_os = "macos")]
+pub fn install_launch_diagnostic() {
+    static INSTALL_ONCE: Once = Once::new();
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    INSTALL_ONCE.call_once(|| {
+        let observer = LaunchDiagnosticObserver::new(mtm);
+        let center = NSNotificationCenter::defaultCenter();
+        unsafe {
+            center.addObserver_selector_name_object(
+                &observer,
+                objc2::sel!(didFinishLaunching:),
+                Some(NSApplicationDidFinishLaunchingNotification),
+                None,
+            );
+        }
+        let _ = LAUNCH_DIAGNOSTIC_OBSERVER.with(|slot| slot.set(observer));
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn install_launch_diagnostic() {}
 
 /// Install the activation observer once. `ctx` is remembered so the observer
 /// can wake the UI; passing it here (rather than a second setter) keeps the
