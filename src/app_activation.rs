@@ -39,13 +39,11 @@
 //! the tray, a relaunch, and a second start.)
 //!
 //! **Silent login-item start** (user decision 2026-10-18, original behaviour —
-//! `SPEC_OS_INTEGRATION.md` §3.5): [`launched_as_log_in_item`] reads the Apple
-//! event that is current at launch. An `OpenApplication` (`oapp`) event whose
-//! `prdt` property-data parameter carries `lgit` means the app was started as a
-//! login item (autostart), so it starts hidden with no Dock icon (tray only).
-//! `None` (no current event) falls back to a normal start — never an invisible,
-//! unreachable app. Only the event is **read**; no handler is registered (that
-//! would replace AppKit's own handler).
+//! `SPEC_OS_INTEGRATION.md` §3.5): the retained launch-notification observer
+//! reads `currentAppleEvent` while `NSApplicationDidFinishLaunchingNotification`
+//! is delivered and caches whether `oapp` carries `prdt=lgit`. The app creator
+//! consumes only that cache; it does not re-query the transient current event.
+//! No Apple-event handler or application delegate is registered.
 //!
 //! **Why closing steps the app back (`step_back` / `come_forward`).**
 //! Reactivating an app that is *already* the frontmost one activates nothing:
@@ -98,6 +96,12 @@ type OSType = u32;
 /// `PrimePhotoApp::update` through [`take_become_active_request`].
 #[cfg(target_os = "macos")]
 static BECOME_ACTIVE_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Written by the main-thread launch observer before eframe's initial dispatch.
+#[cfg(target_os = "macos")]
+static LAUNCH_NOTIFICATION_SEEN: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static LAUNCHED_AS_LOGIN_ITEM: AtomicBool = AtomicBool::new(false);
 
 /// The egui context to wake when the app is activated. Stored at [`install`]
 /// time; the AppKit callback only flags + repaints, never touches the UI
@@ -177,8 +181,12 @@ objc2::define_class!(
                 .as_ref()
                 .and_then(|event| event.paramDescriptorForKeyword(PRDT));
             let enum_code = property.as_ref().map(|descriptor| descriptor.enumCodeValue());
+            let login_item = event_id == Some(OAPP) && enum_code == Some(LGIT);
+            LAUNCHED_AS_LOGIN_ITEM.store(login_item, Ordering::Relaxed);
+            LAUNCH_NOTIFICATION_SEEN.store(true, Ordering::Release);
             log::warn!(
-                "Login-Item-Startdiagnose: currentAppleEvent={}, eventID={}, prdt={}, prdt.enumCode={}, oapp={}, lgit={}",
+                "Login-Item-Startdiagnose: launch_notification_seen=true, cached_login_item={}, currentAppleEvent={}, eventID={}, prdt={}, prdt.enumCode={}, oapp={}, lgit={}",
+                login_item,
                 event.is_some(),
                 event_id.map_or_else(|| "none".to_owned(), |value| format!("0x{value:08x}")),
                 property.is_some(),
@@ -198,7 +206,7 @@ impl LaunchDiagnosticObserver {
     }
 }
 
-/// Register the read-only launch-event diagnostic before eframe starts AppKit.
+/// Register the retained launch-event observer before eframe starts AppKit.
 #[cfg(target_os = "macos")]
 pub fn install_launch_diagnostic() {
     static INSTALL_ONCE: Once = Once::new();
@@ -272,45 +280,15 @@ pub fn take_become_active_request() -> bool {
 /// macOS: whether the app was started **as a login item** (autostart) rather
 /// than by the user.
 ///
-/// Reads the Apple event that is current at launch: an `OpenApplication` event
-/// (`kAEOpenApplication` = `'oapp'`) whose `prdt` property-data parameter
-/// carries `kAELaunchedAsLogInItem` (`'lgit'`). That is exactly how the original
-/// classifies `AppStartupFlags.AutoStart` (`SPEC_OS_INTEGRATION.md` §3.5). The
-/// Apple-event manager is only **read** — no handler is registered (that would
-/// replace AppKit's own). `None` (no current event) ⇒ `false`, i.e. "treat it
-/// like a manual start and show the window": never an invisible, unreachable
-/// app. Main-thread-bound like the other functions; returns `false` without a
-/// [`MainThreadMarker`].
+/// Returns the launch classification captured in the early AppKit notification.
+/// If that notification was not observed, the initialized-false cache safely
+/// falls back to a visible/manual start.
 #[cfg(target_os = "macos")]
 pub fn launched_as_log_in_item() -> bool {
-    // Four-char codes, each with its character form:
-    // `kAEOpenApplication` = 'oapp' — the "open application" event Launch
-    // Services sends when the app is launched; `keyAEPropData` = 'prdt' — its
-    // property-data parameter; `kAELaunchedAsLogInItem` = 'lgit' — the value
-    // `prdt` carries when the launch came from a login item (autostart).
-    const K_AE_OPEN_APPLICATION: AEEventID = 0x6F61_7070; // 'oapp'
-    const KEY_AE_PROP_DATA: AEKeyword = 0x7072_6474; // 'prdt'
-    const K_AE_LAUNCHED_AS_LOG_IN_ITEM: OSType = 0x6C67_6974; // 'lgit'
-
-    let Some(_mtm) = MainThreadMarker::new() else {
-        return false;
-    };
-    let manager = NSAppleEventManager::sharedAppleEventManager();
-    let event = manager.currentAppleEvent();
-    let log_in = event.as_ref().is_some_and(|ev| {
-        ev.eventID() == K_AE_OPEN_APPLICATION
-            && ev
-                .paramDescriptorForKeyword(KEY_AE_PROP_DATA)
-                .is_some_and(|prop| prop.enumCodeValue() == K_AE_LAUNCHED_AS_LOG_IN_ITEM)
-    });
-    // Permanent diagnostic (live test): distinguishes "no Apple event at all"
-    // from "an event that is not a login-item launch", so a live run proves the
-    // event was actually read (not merely the `None` fallback).
-    log::info!(
-        "Apple-Event beim Start: vorhanden={}, als Login-Item gestartet={log_in}",
-        event.is_some()
-    );
-    log_in
+    let seen = LAUNCH_NOTIFICATION_SEEN.load(Ordering::Acquire);
+    let login_item = LAUNCHED_AS_LOGIN_ITEM.load(Ordering::Relaxed);
+    log::warn!("Login-Item-Cache: launch_notification_seen={seen}, cached_login_item={login_item}");
+    login_item
 }
 
 /// macOS: switch to `Accessory` — no Dock icon and no app menu (the window is

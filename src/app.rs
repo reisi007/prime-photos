@@ -571,9 +571,11 @@ impl PrimePhotoApp {
         // `src/single_instance.rs`), and `should_start_hidden` never goes silent
         // without a session, so it can never end up with no window *and* no
         // menu-bar icon on a manual start.
-        let hidden = should_start_hidden(
-            app_activation::launched_as_log_in_item(),
-            app.has_pending_session(),
+        let login_item = app_activation::launched_as_log_in_item();
+        let has_tray = app.has_pending_session();
+        let hidden = should_start_hidden(login_item, has_tray);
+        log::warn!(
+            "Login-Item-Startentscheidung: cached_login_item={login_item}, has_pending_session={has_tray}, hidden={hidden}"
         );
         app.window_hidden = hidden;
         if hidden {

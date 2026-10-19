@@ -52,8 +52,9 @@ closing the window quits the app.
   started **as a login item** (autostart) it runs **without a window and without
   a Dock icon** — tray only; a **manual** start (Finder, Dock, Spotlight,
   `open -a`, shell) shows the window as before. The login-item start is
-  recognised the same way the original does it: the current Apple event
-  `kAEOpenApplication` (`oapp`) whose `prdt` property-data is
+  recognised the same way the original does it: a retained observer reads the
+  current Apple event during `NSApplicationDidFinishLaunchingNotification`,
+  caching whether `kAEOpenApplication` (`oapp`) has `prdt` property-data
   `kAELaunchedAsLogInItem` (`lgit`) (`../original/SPEC_OS_INTEGRATION.md` §3.5).
   The start decision is the pure, unit-tested
   `should_start_hidden(launched_as_log_in_item, has_tray)` — silent only for a
@@ -179,8 +180,9 @@ closing the window quits the app.
   `NSApplicationDelegate` und panict, wenn man ihn ersetzt („tried to get a delegate that was not
   the one Winit has registered"); die winit-Doku, die anderes behauptet, ist für 0.30 veraltet.
   Deshalb **kein** Delegate — und **kein** eigener Apple-Event-Handler: der Login-Start wird nur
-  **gelesen** (`NSAppleEventManager::currentAppleEvent` in `src/app_activation.rs`,
-  `launched_as_log_in_item`), ein registrierter Handler würde AppKits eigenen ersetzen. Das
+  **gelesen** (`NSAppleEventManager::currentAppleEvent` im
+  `NSApplicationDidFinishLaunchingNotification`-Callback in `src/app_activation.rs`); der
+  App-Creator konsumiert den Cache. Ein registrierter Handler würde AppKits eigenen ersetzen. Das
   Fenster startet mit `.with_visible(false)` (`src/main.rs`) — das **hält es aber nicht
   versteckt**: eframe schaltet es nach dem ersten Frame selbst (bedingungslos) sichtbar, deshalb
   hält der stille Pfad den versteckten Zustand mit einem expliziten
