@@ -60,17 +60,11 @@ plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
 Umgesetzt und verifiziert (`fb5e133`, Nachzügler `326e332`/`1b34354`): Als Login-Item gestartet läuft die
 App **still** (kein Fenster, kein Dock-Icon, nur Tray); ein manueller Start zeigt das Fenster. Das
 Dock-Icon folgt der Fenstersichtbarkeit (`Accessory` versteckt / `Regular` sichtbar) — damit ist es
-**Original-Parität** statt Abweichung (die Recon-Gap-Zeile nennt jetzt „parity"). Am Release-Build live
-belegt: das Apple-Event wird gelesen (`vorhanden=true, als Login-Item gestartet=false`), X ⇒ `Accessory`,
-`open -a` holt das Fenster zurück, ein zweiter Start beendet sich (genau 1 Instanz); das Login-Item ist
-registriert (`sfltool dumpbtm`). Offen:
+**Original-Parität** statt Abweichung. Der Nutzer bestätigte nach echtem Ab-/Anmelden, dass das
+Login-Item ohne Fenster startet; der erste Aktivierungsimpuls wird beim stillen Start ignoriert.
 
-- [ ] **Live-Abnahme des Autostart-Falls** (User, „erst nach einer Pause"): Beim nächsten Login muss die
-  App ohne Fenster und ohne Dock-Icon hochkommen (nur Menüleisten-Icon); „Fenster anzeigen" holt sie
-  sichtbar, Schließen nimmt das Dock-Icon wieder weg.
-- [ ] **Release 0.1.3 — erst nach dieser Abnahme** (User-Entscheidung 2026-10-18): Version-Bump
-  (`Cargo.toml`/`Cargo.lock`, `packaging/make-app.sh`, `packaging/Info.plist`, `RELEASE.md` §4), Tag,
-  Release-Workflow, macOS-DMG aus dem Tag, `RELEASE.md` §9.
+- [ ] **Release 0.1.3:** Tag, Release-Workflow, macOS-DMG aus dem Tag und anschließende Ergänzung von
+  `RELEASE.md` §9 um die tatsächlichen Tag-/Run-/Asset-Daten.
 
 ## Offen nach dem Release v0.1.0 (2026-10-17)
 

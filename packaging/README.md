@@ -43,8 +43,8 @@ ignorierten `target/`.
 | Variable | Wirkung | Standard |
 |---|---|---|
 | `SKIP_BUILD=1` | überspringt `cargo build --release` (nutzt das vorhandene Binary) | aus |
-| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.2` |
-| `BUILD=n` | `CFBundleVersion` | `2` |
+| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.3` |
+| `BUILD=n` | `CFBundleVersion` | `3` |
 | `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt ad-hoc | `-` (ad-hoc) |
 | `DIST_DIR=<dir>` | Ausgabeordner des Bundles | `target/dist` |
 

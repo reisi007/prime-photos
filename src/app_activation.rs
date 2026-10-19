@@ -128,6 +128,7 @@ objc2::define_class!(
         /// wakes the render loop (mirrors `src/tray.rs`'s event queue).
         #[unsafe(method(didBecomeActive:))]
         fn did_become_active(&self, _notification: &NSNotification) {
+            log::debug!("App-Aktivierungsdiagnose: NSApplicationDidBecomeActiveNotification empfangen");
             BECOME_ACTIVE_REQUESTED.store(true, Ordering::Relaxed);
             if let Some(ctx) = UI_CTX.get() {
                 ctx.request_repaint();
@@ -184,7 +185,7 @@ objc2::define_class!(
             let login_item = event_id == Some(OAPP) && enum_code == Some(LGIT);
             LAUNCHED_AS_LOGIN_ITEM.store(login_item, Ordering::Relaxed);
             LAUNCH_NOTIFICATION_SEEN.store(true, Ordering::Release);
-            log::warn!(
+            log::debug!(
                 "Login-Item-Startdiagnose: launch_notification_seen=true, cached_login_item={}, currentAppleEvent={}, eventID={}, prdt={}, prdt.enumCode={}, oapp={}, lgit={}",
                 login_item,
                 event.is_some(),
@@ -287,7 +288,7 @@ pub fn take_become_active_request() -> bool {
 pub fn launched_as_log_in_item() -> bool {
     let seen = LAUNCH_NOTIFICATION_SEEN.load(Ordering::Acquire);
     let login_item = LAUNCHED_AS_LOGIN_ITEM.load(Ordering::Relaxed);
-    log::warn!("Login-Item-Cache: launch_notification_seen={seen}, cached_login_item={login_item}");
+    log::debug!("Login-Item-Cache: launch_notification_seen={seen}, cached_login_item={login_item}");
     login_item
 }
 

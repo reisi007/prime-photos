@@ -125,7 +125,7 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (Default `VERSION=0.1.2`, `BUILD=2`, ad-hoc signiert):
+2. **Bundle bauen** (Default `VERSION=0.1.3`, `BUILD=3`, ad-hoc signiert):
 
    ```sh
    ./packaging/make-app.sh
@@ -341,8 +341,10 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
 - **Release-Notes:** `generate_release_notes: true` erzeugte die Commit-Liste
   `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.1...v0.1.2`.
 - **Inhalt dieses Releases:** das neue **Hintergrund-Verhalten** — das X versteckt nur das Fenster,
-  die App läuft weiter, das **Dock-Icon bleibt**; zurück kommt man per Dock-Klick, App-Neustart oder
-  Tray-Eintrag, und es läuft **immer nur eine Instanz** (macOS `LSMultipleInstancesProhibited` plus
+  die App läuft weiter; **zum damaligen Stand blieb das Dock-Icon** beim versteckten Fenster sichtbar
+  (durch den 0.1.3-Fix inzwischen überholt: das Dock-Icon folgt der Fenstersichtbarkeit, und beim
+  stillen Login-Item-Start wird die erste AppKit-Aktivierung ignoriert); zurück kommt man per
+  App-Neustart oder Tray-Eintrag, und es läuft **immer nur eine Instanz** (macOS `LSMultipleInstancesProhibited` plus
   Socket-Wächter). Dazu die README-Aktualisierung (jetzt versionsfrei, Regel in `AGENTS.md`) und die
   macOS-Asset-Policy (nur DMG).
 - **Live abgenommen:** der User hat das Hintergrund-Verhalten am 0.1.2-Build am 2026-10-17 manuell

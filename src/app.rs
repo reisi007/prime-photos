@@ -287,6 +287,10 @@ pub(crate) struct PrimePhotoApp {
     /// this flag: hidden ⇒ `Accessory`, shown ⇒ `Regular` (see
     /// `src/app_activation.rs`).
     pub(crate) window_hidden: bool,
+    /// The first AppKit activation can be part of a silent Login-Item launch,
+    /// not a request from the user to reopen the window. Consume that one
+    /// notification without showing the window; later activations still do.
+    pub(crate) ignore_initial_login_activation: bool,
     /// The last `tray::build` attempt failed (the OS has no tray backend —
     /// logged as an error in `src/tray.rs`). Blocks the per-frame reconcile
     /// from retrying the build until the next sign-in; see the reconcile in
@@ -530,6 +534,7 @@ impl PrimePhotoApp {
             tray: None,
             quitting: false,
             window_hidden: false,
+            ignore_initial_login_activation: false,
             tray_build_failed: false,
             tray_paused: false,
             tray_icon_state: None,
@@ -574,10 +579,11 @@ impl PrimePhotoApp {
         let login_item = app_activation::launched_as_log_in_item();
         let has_tray = app.has_pending_session();
         let hidden = should_start_hidden(login_item, has_tray);
-        log::warn!(
+        log::debug!(
             "Login-Item-Startentscheidung: cached_login_item={login_item}, has_pending_session={has_tray}, hidden={hidden}"
         );
         app.window_hidden = hidden;
+        app.ignore_initial_login_activation = hidden;
         if hidden {
             // No Dock icon may appear on the silent path.
             app_activation::become_accessory();
@@ -1072,7 +1078,19 @@ impl eframe::App for PrimePhotoApp {
         // click). The observer only flagged + woke us (see
         // `src/app_activation.rs`); `false` on every other platform.
         if app_activation::take_become_active_request() {
-            self.show_main_window(ctx);
+            if self.ignore_initial_login_activation {
+                self.ignore_initial_login_activation = false;
+                log::debug!(
+                    "App-Aktivierungsdiagnose: erste Login-Item-Startaktivierung ignoriert, window_hidden={}",
+                    self.window_hidden
+                );
+            } else {
+                log::debug!(
+                    "App-Aktivierungsdiagnose: Aktivierungsanfrage verarbeitet, window_hidden={}",
+                    self.window_hidden
+                );
+                self.show_main_window(ctx);
+            }
         }
 
         // A second launch asked this instance to show its window and exited

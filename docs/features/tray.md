@@ -60,6 +60,10 @@ closing the window quits the app.
   `should_start_hidden(launched_as_log_in_item, has_tray)` — silent only for a
   login-item start **with** a possible tray; without one the window stays
   visible, so the app can never end up with no window *and* no menu-bar icon.
+  On a silent start, the first `NSApplicationDidBecomeActiveNotification` is
+  treated as launch-time activation, not a user request to show the window;
+  later activations still bring it back. This was confirmed after a real
+  sign-out/sign-in: the login item starts without a window.
 - **Ways back — always the same path, and immediately:** the tray's "Fenster
   anzeigen", an app **relaunch** (Finder/Spotlight/`open -a` activate the already
   running instance) or a **second start** (the single-instance guard) all end in
