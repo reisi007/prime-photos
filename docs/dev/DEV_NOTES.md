@@ -90,7 +90,7 @@ fehlt `NSHighResolutionCapable`, die Darstellung erscheint pixelig. Das gebaute
 | Gate | Stand |
 |---|---|
 | Warnungen | **Baseline 0**, maschiniell erzwungen über `[lints.rust] warnings = "deny"` in `Cargo.toml` — jede Warnung ist ein harter Fehler, nichts wird mit `#[allow]` zugedeckt |
-| `cargo fmt --check` | **kein Gate** — das Repo ist nicht fmt-clean, ein fmt-Diff ist kein Regressionssignal |
+| `cargo fmt --check` | **kein Gate**, solange das Repo nicht fmt-clean ist — ein fmt-Diff ist dann kein Regressionssignal. **Nach** der einmaligen Formatierung des Altbestands gilt er als Gate. Die Handlungsanweisung steht in `AGENTS.md` („Gates"). |
 
 **Warum die Warnungs-Baseline 0 ist (User-Entscheidung):** die Warnungen wurden **nicht** pauschal
 mit `#[allow(...)]` stumm gestellt — das beseitigt das Rauschen, versteckt aber genau die toten
@@ -178,3 +178,11 @@ Nummern sind **Momentaufnahmen** und driften mit jedem Umbau (z. B.
 beim Lesen eines solchen Verweises die **Symbolstelle** nachschlagen
 (Codegraph/`grep -n`) statt der Zahl zu vertrauen; wer so eine Datei anfasst, korrigiert
 die Verweise, die er verifiziert hat. Bestehende Abschnitte werden nicht umnummeriert.
+
+## 13. README bleibt versionsfrei (User-Entscheidung 2026-10-17)
+
+Die `README.md` nennt **keine** Release-Anzahl und **keine** Versionsnummern; Releases werden dort
+nur über den Link auf die Release-Seite sichtbar (dort steht jeweils das Neueste). **Zweck:** So
+veraltet die README bei keinem Release — die Versionspflege beschränkt sich auf `Cargo.toml`,
+`packaging/` und `docs/dev/RELEASE.md`. Die handlungsleitende Regel steht in `AGENTS.md`
+(„README versionsfrei halten").

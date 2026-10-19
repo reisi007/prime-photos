@@ -80,7 +80,7 @@ Exact paths per platform: [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §6.
 - [`docs/dev/I18N.md`](docs/dev/I18N.md) — the internationalization layer.
 - [`docs/dev/DEV_NOTES.md`](docs/dev/DEV_NOTES.md) — codebase pitfalls (developer knowledge).
 - [`docs/dev/THIRD_PARTY.md`](docs/dev/THIRD_PARTY.md) — third-party component attribution.
-- [`AGENTS.md`](AGENTS.md) — durable project decisions (agent/developer-oriented, not an end-user guide).
+- [`AGENTS.md`](AGENTS.md) — durable agent rules (agent/developer-oriented, not an end-user guide).
 
 ## License
 

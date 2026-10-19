@@ -2,7 +2,7 @@
 
 ## Zweck und Ablage
 
-- **Diese Datei enthält ausschließlich dauerhafte, handlungsleitende Regeln** für Agenten: Invarianten, Grenzen, verbindliche Arbeitsabläufe und Gates. Keine Projektbeschreibung, allgemeine Doku-Navigation, Feature-Spezifikationen, Statusberichte oder offenen TODOs.
+- **Nur Regeln, keine Entscheidungen:** Diese Datei enthält ausschließlich Regeln — Anweisungen, die für jede Arbeit in diesem Repo gelten; keine Projektbeschreibung, Doku-Navigation oder Feature-Spezifikation. Dauerhafte Entscheidungen, Begründungen, Messwerte und Historie gehören nicht hierher, sondern in `docs/features/` bzw. die Projekt-Doku; offene Punkte nach `AGENTS.todo.md`; Erledigtes in die Git-Historie.
 - `AGENTS.todo.md` enthält ausschließlich offene Arbeit. Verifizierte erledigte TODOs werden gelöscht, nicht abgehakt.
 - Änderungen an plattformabhängigem Code müssen macOS (Apple Silicon), Windows und Linux berücksichtigen. Build und Tests werden in diesem Projekt nur auf macOS ausgeführt; keine Verifikation für andere Plattformen behaupten.
 
@@ -11,7 +11,7 @@
 - **Branding:** Projekt, Repo und App heißen **„Prime Photos"**; nichts darf wie eine offizielle Amazon-App aussehen (keine Amazon-Logos/-Identität im eigenen Fenster). Funktional Notwendiges (echte Hosts/URLs, `x-amzn-*`-Header, „Bei Amazon anmelden") bleibt erlaubt.
 - **Marktplatzabhängige URLs** ausschließlich in `src/urls.rs` definieren; keine TLD-Literale anderswo. Jede neue Route erhält dort eine Util-Funktion und Tests für `de` sowie mindestens einen Nicht-DE-Marktplatz.
 - **Assets:** Änderungen müssen die Pipeline `assets/*.svg` → `build.rs` (resvg) → `OUT_DIR` (Iconset-Raster via `packaging/make-app.sh`) → `include_bytes!` erhalten.
-- **README versionsfrei halten** (User 2026-10-17): keine Release-Anzahl oder Versionsnummer in `README.md`; auf den Release-Seiten-Link verweisen.
+- **README versionsfrei halten:** keine Release-Anzahl oder Versionsnummer in `README.md`; Releases dort nur über den Link auf die Release-Seite sichtbar machen.
 - Subagenten dürfen nichts außerhalb des Auftrags einführen. Unklarheiten zurückmelden, statt sie eigenmächtig zu entscheiden.
 
 ## Arbeitsweise
@@ -25,4 +25,4 @@
 ## Gates
 
 - **Jede Warnung ist ein Fehler** (`[lints.rust] warnings = "deny"`); keine neuen `#[allow]`/`#[expect]`.
-- `cargo fmt --check` ist **kein** Gate — die einmalige Formatierung des Altbestands steht als erster Punkt im Ledger; danach gilt er als Gate.
+- `cargo fmt --check` ist **kein** Gate, solange das Repo nicht fmt-clean ist; nach der einmaligen Formatierung des Altbestands gilt er als Gate (Begründung: `docs/dev/DEV_NOTES.md` §8).
