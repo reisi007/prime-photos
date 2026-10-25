@@ -135,6 +135,12 @@ Ausdrücklich **ohne** Starttermin:
   (`src/app.rs`) ist die Identität, ihr Test damit tautologisch — die **Verdrahtung** in
   `set_autostart` sichert er nicht ab (nur mittelbar über `dead_code`, falls jemand die Funktion
   entfernt). Ein echter Guard bräuchte eine injizierbare Registrierung.
+- **Fortschritts-/Store-Reste (Verifier 2026-10-25, Einordnung b/c, nicht blockierend):**
+  (b) `finalize_upload` speichert `self.store`, wenn der `store_dirty`-Marker erst **nach** seiner
+  Abfrage gesetzt wird — enges Fenster, vorbestehend, der Markerpfad verkleinert es nur;
+  (c) ein `folders.toml` mit **doppelten Pfaden** (Legacy oder von Hand verändert) macht die
+  Planpfad-Abbildung mehrdeutig; `plan_index_for` wählt dann deterministisch den kleinsten Index.
+  Beides beim nächsten Anfassen der Finalisierung bzw. beim Laden des Stores mitziehen.
 - **DMG-Schritt bleibt unskriptet, ist aber dokumentiert (2026-10-17):** `packaging/make-app.sh` baut nur
   die `.app`; der Rest (Zip, DMG mit Volname `Prime Photos`, Installation nach `/Applications`) steht als
   copy-paste-fähiger Ablauf in `docs/dev/RELEASE.md` §4 und wurde beim 0.1.1-Release genau so gegangen.
