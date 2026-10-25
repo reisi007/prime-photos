@@ -25,4 +25,5 @@
 ## Gates
 
 - **Jede Warnung ist ein Fehler** (`[lints.rust] warnings = "deny"`); keine neuen `#[allow]`/`#[expect]`.
+- **Ratchet-Gates sind Pflicht:** `ratchet check` muss lokal und in CI grün sein. `ratchet.config.jsonc`, `ratchet.baseline.json` und `scripts/ratchet-count.sh` gehören zusammen und werden nur gemeinsam geändert; die Baseline bewegt ausschließlich `ratchet baseline update` (nur in Richtung) bzw. `ratchet baseline raise` mit Begründung — nie per Hand. Ein neuer Zähler braucht eine Entscheidung, keinen beiläufigen Zusatz.
 - `cargo fmt --check` ist **kein** Gate, solange das Repo nicht fmt-clean ist; nach der einmaligen Formatierung des Altbestands gilt er als Gate (Begründung: `docs/dev/DEV_NOTES.md` §8).
