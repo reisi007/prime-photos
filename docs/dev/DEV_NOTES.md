@@ -186,3 +186,17 @@ nur über den Link auf die Release-Seite sichtbar (dort steht jeweils das Neuest
 veraltet die README bei keinem Release — die Versionspflege beschränkt sich auf `Cargo.toml`,
 `packaging/` und `docs/dev/RELEASE.md`. Die handlungsleitende Regel steht in `AGENTS.md`
 („README versionsfrei halten").
+
+## 14. Ratchet-Gates (2026-10-25)
+
+`ratchet.config.jsonc` definiert zwei Ceiling-Gates: gepflegte Rust-Dateien über 500 physischen
+Zeilen (Startwert **11**) und `allow(`/`expect(`-Attributvorkommen innerhalb von Attributgruppen
+unter `src/` (Startwert **2**), einschließlich verschachtelter und zur Compile-Zeit inaktiver
+`cfg_attr`-Suppressionen. Gezählt werden Vorkommen, nicht Zeilen; Methodenaufrufe außerhalb von
+Attributgruppen zählen nicht.
+Die Konfiguration und maschinengeschriebene Baseline liegen im Repo-Root; die Zähler stehen in
+`scripts/ratchet-count.sh`.
+
+Die Baseline bewegt nur `ratchet baseline update` (nur in Richtung) bzw. `ratchet baseline raise`
+**mit Grund** — nie per Hand. Lokal prüfen: `ratchet count` zeigt die aktuellen Werte,
+`ratchet check` vergleicht sie mit der Baseline.

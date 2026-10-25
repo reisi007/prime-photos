@@ -1,0 +1,31 @@
+[
+  {
+    // Schnelle Gates: beide Zähler laufen ohne Build.
+    "name": "prime-photos",
+    "tiers": { "fast": { "floor": 2 } },
+    "rules": {
+      "oversized-rust-file": {
+        "class": "oversized source unit",
+        "unit": "maintained Rust files above 500 physical lines",
+        "direction": "ceiling",
+        "tier": "fast",
+        "description": "Zählt gepflegte *.rs-Dateien außerhalb der Verzeichnisse target/ und .git/ direkt im Repo-Root; deren gesamter Inhalt wird ausgeschlossen, gleichnamige verschachtelte Verzeichnisse an anderer Stelle zählen mit. Pro Datei gilt awk 'END { print NR }': physische Zeilen ohne Phantomzeile durch ein abschließendes Newline; gezählt werden nur Dateien mit mehr als 500 Zeilen.",
+        "incident": "Am 2026-10-25 lagen 11 gepflegte Rust-Dateien über 500 Zeilen; die größte war src/backup.rs mit 3551 Zeilen. Dafür gab es kein Gate. Die Zahl darf nur sinken.",
+        "count": {
+          "command": ["bash", "scripts/ratchet-count.sh", "oversized-rust-files", "500"]
+        }
+      },
+      "allow-attributes": {
+        "class": "lint suppression",
+        "unit": "attribute occurrences",
+        "direction": "ceiling",
+        "tier": "fast",
+        "description": "Kommentare und String-Literale werden übersprungen; gezählt werden Vorkommen der Attributnamen `allow` und `expect` (Leerraum vor `(` ist erlaubt) innerhalb von Attributgruppen unter `src/`, einschließlich verschachtelter `cfg_attr`-Suppressionen und unabhängig von Zeilenumbrüchen. Methodenaufrufe außerhalb von Attributgruppen zählen nicht; attributartige Token in Makro-Token-Trees können mitzählen. Auch zur Compile-Zeit inaktive `cfg_attr`-Suppressionen werden konservativ gezählt.",
+        "incident": "Die Repo-Regel in AGENTS.md verbietet neue #[allow]/#[expect], stand aber ohne Gate da. Stand 2026-10-25 gibt es zwei #[allow(dead_code)]-Attribute: src/config.rs:180 und src/folders.rs:36.",
+        "count": {
+          "command": ["bash", "scripts/ratchet-count.sh", "allow-attributes"]
+        }
+      }
+    }
+  }
+]

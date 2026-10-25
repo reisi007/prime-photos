@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Linux build & test
@@ -20,6 +23,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Prüft die konfigurierten Qualitätsgrenzen ohne Build-Schritt.
+      - name: Ratchet quality gates
+        uses: all-the-rest/ratchet-cli@545fa601355b728e9a082e9ae82e866427d91c58
+        with:
+          mode: validate
+          version: v0.5.1
 
       # System-Abhängigkeiten (docs/dev/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
       # tray-icon (libayatana-appindicator3), native-tls (System-OpenSSL),

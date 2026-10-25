@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "rules": {
+    "allow-attributes": {
+      "value": 2,
+      "reason": "initial baseline 2026-10-25: 11 Rust files above 500 lines, 2 #[allow] attributes — both ceilings may only decrease"
+    },
+    "oversized-rust-file": {
+      "value": 11,
+      "reason": "initial baseline 2026-10-25: 11 Rust files above 500 lines, 2 #[allow] attributes — both ceilings may only decrease"
+    }
+  }
+}
