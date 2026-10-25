@@ -135,6 +135,10 @@ Ausdrücklich **ohne** Starttermin:
   (`src/app.rs`) ist die Identität, ihr Test damit tautologisch — die **Verdrahtung** in
   `set_autostart` sichert er nicht ab (nur mittelbar über `dead_code`, falls jemand die Funktion
   entfernt). Ein echter Guard bräuchte eine injizierbare Registrierung.
+- **Dependabot medium: `glib` 0.18.5 (2026-10-25):** Unsoundness in den `Iterator`-/
+  `DoubleEndedIterator`-Impls von `glib::VariantStrIter`; gepatcht erst in **glib 0.20**. `glib` kommt
+  transitiv über `gtk` 0.18 (Linux-Pfad von `wry`/`tray-icon`), macOS/Windows sind nicht betroffen.
+  Beim nächsten Anheben von `eframe`/`wry` mitziehen und prüfen, ob der gtk-rs-0.20-Stack dann passt.
 - **Fortschritts-/Store-Reste (Verifier 2026-10-25, Einordnung b/c, nicht blockierend):**
   (b) `finalize_upload` speichert `self.store`, wenn der `store_dirty`-Marker erst **nach** seiner
   Abfrage gesetzt wird — enges Fenster, vorbestehend, der Markerpfad verkleinert es nur;
