@@ -25,6 +25,12 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 
+	<!-- Agent-App: Das Dock-Icon wird bei geöffnetem Fenster über die
+	     Laufzeit-Policy Regular/Accessory geschaltet (Original-Parität,
+	     docs/original/SPEC_OS_INTEGRATION.md §3.4). -->
+	<key>LSUIElement</key>
+	<true/>
+
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 

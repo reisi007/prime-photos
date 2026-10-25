@@ -106,8 +106,10 @@ macOS-specific APIs.
   Klick ist dort **kein** Weg zurück mehr, solange das Fenster versteckt ist — ohne Fenster ist die
   App `Accessory` und hat kein Dock-Icon) — immer über denselben `show_main_window`-Pfad (Fenster
   zeigen + fokussieren, `src/app_activation.rs`/`src/app.rs`). Auf macOS **folgt das Dock-Icon dem
-  Fenster** (sichtbar ⇒ Dock-Icon + Menü, versteckt ⇒ `Accessory` ohne Icon; ein Login-Start läuft
-  still nur im Tray — User-Entscheidung 2026-10-18, Original-Parität, löst die
+  Fenster** (sichtbar ⇒ Dock-Icon + Menü, versteckt ⇒ `Accessory` ohne Icon; `LSUIElement = true`
+  steht im Bundle, beim Schließen wird policy-only auf `Accessory` gewechselt und die App mit
+  `deactivate()` deaktiviert — ohne `NSApplication::hide`; ein Login-Start läuft still nur im Tray
+  — User-Entscheidung 2026-10-18/2026-10-25, Original-Parität, löst die
   2026-10-17-Entscheidung ab). Der
   **Einzelinstanz-Schutz** greift plattformabhängig: auf
   macOS lehnt Launch Services den zweiten Start über `LSMultipleInstancesProhibited` ab, sonst

@@ -45,9 +45,8 @@ closing the window quits the app.
   to `Regular` when the window is shown again. This is **original parity**: the
   original runs a dynamic Dock icon the same way (`Regular` while a window is
   open, `Accessory` when none is — `../original/SPEC_OS_INTEGRATION.md` §3.4).
-  The only deliberate deviation left is that our bundle does **not** set
-  `LSUIElement` — the policy is switched at runtime instead (the original sets
-  it in its `Info.plist`).
+  The bundle now sets `LSUIElement = true`, also matching the original; the
+  runtime policy supplies the Dock icon while a window is open.
 - **Silent login-item start (macOS, user decision 2026-10-18):** when the app is
   started **as a login item** (autostart) it runs **without a window and without
   a Dock icon** — tray only; a **manual** start (Finder, Dock, Spotlight,
@@ -70,17 +69,13 @@ closing the window quits the app.
   the same `show_main_window` path: show + focus the window. A **Dock click** is
   no longer among them while the window is hidden: the hidden app is `Accessory`,
   so there is no Dock icon to click. The activation arrives through an observer
-  of `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`). So
-  that the Dock click still works **while the window is visible** without
-  focusing another app first, closing first **steps the app back into the
-  background** (`NSApplication::hide`): the app gives up the foreground position
-  (AppKit activates the next app), because a Dock click on the app that is
-  *already* the frontmost one activates nothing — AppKit posts no
-  `didBecomeActive` and the way back would look dead. Closing then also drops to
-  `Accessory`, so the Dock icon disappears with the window. The counterpart on
-  the way back is `Regular` **first**, then `unhide` (if hidden) + `activate` in
-  `show_main_window` — the policy must be `Regular` before `activate`, or the
-  activation does not take effect.
+  of `NSApplicationDidBecomeActiveNotification` (`src/app_activation.rs`). On
+  close the app switches to `Accessory` and calls `deactivate()` so a later
+  activation reaches the observer. `NSApplication::hide` is deliberately **not**
+  called: the hidden state kept the Dock tile visible despite the correctly set
+  `Accessory` policy (live finding, 2026-10-25). The return path sets `Regular`
+  **first**, then calls `unhide` (if hidden, including by ⌘H) and `activate` in
+  `show_main_window` — the policy must be `Regular` before `activate`.
 - **Only one instance:** a second start does **not** open a second window — it
   asks the running instance to show its window and exits. On macOS the bundle's
   `LSMultipleInstancesProhibited` (`packaging/Info.plist`) already makes Launch
@@ -92,6 +87,14 @@ closing the window quits the app.
   `prime-photos:ok`).
 
 ## Decisions
+
+- **Dock-Kachel bleibt trotz Accessory hängen (User-Entscheidung 2026-10-25):**
+  Original-Parität — `LSUIElement` im Bundle + Policy-only ohne `hide`. Der
+  Live-Befund zeigte: `Accessory` war korrekt gesetzt, aber der vorherige
+  `NSApplication::hide`-Zustand ließ die Dock-Kachel sichtbar. Das Bundle setzt
+  daher `LSUIElement = true`; beim Schließen wechselt die App zur
+  `Accessory`-Policy und ruft `deactivate()` auf. Beim Zurückweg bleibt
+  `unhide` als Schutz für den Fall erhalten, dass ⌘H die App versteckt hat.
 
 - **Assets: Tray-Icons + Logo (User 2026-10-14) — implementiert** (Befund
   2025-10-15: `build.rs` rastert die SVGs bereits, `src/tray.rs` bettet sie
@@ -164,9 +167,12 @@ closing the window quits the app.
   Launch Services den zweiten Start schon über `LSMultipleInstancesProhibited` ab; für Startwege
   daran vorbei (zweiter Aufruf aus der Shell, Linux/Windows) wacht `src/single_instance.rs`
   (Unix-Socket `instance.sock` bzw. TCP-Loopback, gleicher Handshake).
+  Die damalige `NSApplication::hide`-Begründung ist durch die Entscheidung vom 2026-10-25 überholt
+  (Policy-only ohne `hide`; siehe „Decisions“).
 
 - **Stiller Login-Start + Dock-Icon folgt dem Fenster (User-Entscheidung 2026-10-18) — gültig;
-  löst die Entscheidung vom 2026-10-17 ab.** Neu: (1) ein Start **als Login-Item** (Autostart)
+  löst die Entscheidung vom 2026-10-17 ab und wurde am 2026-10-25 für das Bundle-Verhalten
+  präzisiert.** Neu: (1) ein Start **als Login-Item** (Autostart)
   läuft **ohne Fenster und ohne Dock-Icon**, nur mit Tray; ein **manueller** Start (Finder, Dock,
   Spotlight, `open -a`, Shell) zeigt das Fenster wie bisher; (2) das **Dock-Icon folgt dem
   Fenster**: versteckt ⇒ `Accessory` (kein Dock-Icon, kein App-Menü), sichtbar ⇒ `Regular`
@@ -174,9 +180,9 @@ closing the window quits the app.
   ein dynamisches Dock-Icon (`Regular` bei offenem, `Accessory` bei keinem Fenster,
   `../original/SPEC_OS_INTEGRATION.md` §3.4) und erkennt den Login-Start am Apple Event
   `kAEOpenApplication` mit `keyAEPropData == keyAELaunchedAsLogInItem` (`'lgit'`, §3.5); unsere
-  Umsetzung macht beides genauso. **Einzige bewusste Abweichung bleibt:** `LSUIElement` in der
-  Bundle-Plist ist **nicht** gesetzt — die Policy wird zur Laufzeit geschaltet (das Original setzt
-  `LSUIElement = true`). Die **Einzelinstanz** bleibt unverändert Original-Parität
+  Umsetzung macht beides genauso. Das Bundle setzt `LSUIElement = true` wie das Original; die
+  Policy wird zur Laufzeit zwischen `Regular` und `Accessory` geschaltet. Die
+  **Einzelinstanz** bleibt unverändert Original-Parität
   (`LSMultipleInstancesProhibited` + Socket-Wächter, s. o.); der Ein-Instanz-Schutz ist
   **unverändert**.
 

@@ -25,18 +25,24 @@
 //! `PrimePhotoApp::update` drains the flag via [`take_become_active_request`]
 //! and then shows and focuses the window.
 //!
-//! **The Dock icon follows the window** (user decision 2026-10-18, original
-//! behaviour — `SPEC_OS_INTEGRATION.md` §3.4): while a window is open the app is
-//! `Regular` (Dock icon + app menu); once the window is hidden (close-to-tray)
-//! it becomes `Accessory` (no Dock icon, no app menu), exactly like the
-//! original's dynamic `WindowManager` policy. [`step_back`] drops to
-//! `Accessory`, [`come_forward`] restores `Regular` **first** (otherwise the
-//! following `activate` would not take effect). A relaunch from
-//! Finder/Spotlight/`open` activates the running app, which brings the hidden
-//! window back and focuses it — that is what this module is for. (While a
-//! window is open the app is `Regular`, so a Dock click also activates it; in
-//! the hidden `Accessory` state there is no Dock icon, and the return paths are
-//! the tray, a relaunch, and a second start.)
+//! **The Dock icon follows the window** (original parity, user decision
+//! 2026-10-25 — `SPEC_OS_INTEGRATION.md` §3.4): the bundle sets `LSUIElement`
+//! and the runtime policy changes between `Regular` (open window, Dock icon +
+//! app menu) and `Accessory` (closed-to-tray, no Dock icon or app menu). The
+//! previous `NSApplication::hide` call is removed: a live test on 2026-10-25
+//! showed that the hidden state kept the Dock tile around even after the policy
+//! had correctly changed to `Accessory`. [`step_back`] now changes the policy
+//! and calls `deactivate()` to give up activation, so a later activation via
+//! `open -a` or Finder can post `NSApplicationDidBecomeActiveNotification` and
+//! bring the window back; without deactivation that observer-based return path
+//! would be dead. The tray's "Fenster anzeigen" entry calls `show_main_window`
+//! directly instead. [`come_forward`]
+//! restores `Regular` **first** and still unhides a hidden app before activating
+//! it (the unhide also protects the ⌘H case). The observer mechanism itself is
+//! unchanged. While the window is open the app is `Regular`, so a Dock click
+//! activates it; while closed-to-tray there is no Dock icon, and the return
+//! paths are the tray (a direct `show_main_window` call), a relaunch (through
+//! the activation observer), and a second start.
 //!
 //! **Silent login-item start** (user decision 2026-10-18, original behaviour —
 //! `SPEC_OS_INTEGRATION.md` §3.5): the retained launch-notification observer
@@ -49,14 +55,14 @@
 //! Reactivating an app that is *already* the frontmost one activates nothing:
 //! AppKit posts no `NSApplicationDidBecomeActiveNotification`, so the observer
 //! above would never fire and the way back would look dead until the user
-//! focused some other app first. Hiding the window alone leaves the app in
-//! exactly that frontmost-but-inactive state. [`step_back`] therefore calls
-//! `NSApplication::hide` when the window is closed: AppKit hides the app **and
-//! activates the next app**, so our app is no longer frontmost and a later
-//! activation (a relaunch from Finder/Spotlight/`open`) fires the notification
-//! and brings the window back. It then also drops to `Accessory`, so the Dock
-//! icon disappears with the window. [`come_forward`] is the counterpart on the
-//! way back: `Regular` first, then unhide (if hidden) and activate.
+//! focused some other app first. [`step_back`] therefore switches to `Accessory`
+//! and calls `deactivate()` to give up activation, without setting the hidden
+//! state: a live finding on 2026-10-25 showed that `hide` kept the Dock tile
+//! visible despite the `Accessory` policy. A later relaunch from Finder,
+//! Spotlight, or `open -a` can then post the notification and bring the window
+//! back; the tray entry calls `show_main_window` directly. [`come_forward`] is
+//! the counterpart: restore `Regular` first, then unhide (if hidden, e.g. by
+//! ⌘H) and activate.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
@@ -329,32 +335,30 @@ pub fn become_regular() {
 
 /// macOS: step the app out of the foreground right before the window is hidden.
 ///
-/// `NSApplication::hide` hides the app **and activates the next app**, so our
-/// app is no longer frontmost. That restores the precondition for the observer
-/// above: an app is only activated when it is not already frontmost (see the
-/// module docs), and the activation then fires
-/// `NSApplicationDidBecomeActiveNotification` and brings the window back. It
-/// then drops to `Accessory`, so the Dock icon (and the app menu) disappear with
-/// the window — the original's dynamic policy (`SPEC_OS_INTEGRATION.md` §3.4).
-/// Main-thread-bound: returns early without a [`MainThreadMarker`] (AppKit may
-/// only be messaged from the main thread).
+/// The original uses the dynamic activation policy (`SPEC_OS_INTEGRATION.md`
+/// §3.4): switch to `Accessory` without hiding the app, then deactivate it so a
+/// later activation can notify the observer and bring the window back. Hiding
+/// first kept the Dock tile alive after the policy change (live finding,
+/// 2026-10-25). A `false` return from `setActivationPolicy` is only logged, not
+/// treated as an error. Main-thread-bound: returns early without a
+/// [`MainThreadMarker`] (AppKit may only be messaged from the main thread).
 #[cfg(target_os = "macos")]
 pub fn step_back() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
     };
     let app = NSApplication::sharedApplication(mtm);
-    app.hide(None);
     if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
         log::debug!("setActivationPolicy(Accessory) meldete false");
     }
+    app.deactivate();
 }
 
 /// macOS: the counterpart to [`step_back`] — restore `Regular` first, then undo
-/// a previous hide (if any) and activate the app, so the restored window also
-/// comes to the front. `Regular` **first** is load-bearing: without the Dock
-/// icon/policy back, the following `activate` does not take effect. Main-thread-
-/// bound like [`step_back`].
+/// a hide (if any, e.g. from ⌘H) and activate the app, so the restored window
+/// also comes to the front. `Regular` **first** is load-bearing: without the
+/// Dock icon/policy back, the following `activate` does not take effect.
+/// Main-thread-bound like [`step_back`].
 #[cfg(target_os = "macos")]
 pub fn come_forward() {
     let Some(mtm) = MainThreadMarker::new() else {

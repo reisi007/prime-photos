@@ -645,9 +645,9 @@ impl PrimePhotoApp {
     /// (`Accessory`), so the Dock is not among these triggers.
     fn show_main_window(&mut self, ctx: &egui::Context) {
         self.window_hidden = false;
-        // Restore the Dock icon / app menu (`Regular` first) and undo a previous
-        // `step_back` hide (unhide if needed), then make the app active again so
-        // the restored window also comes to the front.
+        // Restore the Dock icon / app menu (`Regular` first); unhide only as a
+        // safeguard for an independently hidden state (e.g. ⌘H), then activate
+        // the app so the restored window also comes to the front.
         app_activation::come_forward();
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
@@ -1192,13 +1192,12 @@ impl eframe::App for PrimePhotoApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             self.window_hidden = true;
             // Step the app back out of the foreground (macOS): reactivating an
-            // already-frontmost app activates nothing, so without this the
-            // way back would be dead until the user focused another app first
-            // (see `src/app_activation.rs`). The Dock icon (and the app menu)
-            // disappear with the window — `step_back` drops to `Accessory`; the
-            // app keeps running in the background. Back via the tray, or via an
-            // app activation / second launch, which both restore the window
-            // through `show_main_window`.
+            // already-frontmost app posts no activation notification, so
+            // `step_back` changes to `Accessory` and deactivates without hiding
+            // the app (see `src/app_activation.rs`). The Dock icon and app menu
+            // disappear; the app keeps running. The tray calls
+            // `show_main_window` directly; an app activation or second launch
+            // also restores the window through that path.
             app_activation::step_back();
         }
 
