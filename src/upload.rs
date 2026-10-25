@@ -4,7 +4,7 @@ use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
 use crate::prime_photos::{PrimePhotos, ReplaceBasis};
 use crate::theme;
-use eframe::egui::Color32;
+use eframe::egui::{self, Color32};
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -68,6 +68,10 @@ pub(crate) fn calculate_pct(size: u64, bytes_sent: u64) -> u64 {
 #[derive(Default)]
 pub(crate) struct UploadShared {
     pub(crate) active: bool,
+    /// The persisted store was updated outside the UI; the UI must reload its copy.
+    pub(crate) store_dirty: bool,
+    /// UI context used to wake an on-demand UI after a background store update.
+    pub(crate) ctx: Option<egui::Context>,
     pub(crate) total: usize,
     pub(crate) done: usize,
     pub(crate) failed: usize,
@@ -83,6 +87,10 @@ pub(crate) struct UploadShared {
     pub(crate) current: String,
     pub(crate) log: Vec<String>,
     pub(crate) folder_total: HashMap<usize, usize>,
+    /// Plan-time index → folder path, so finalizers still find the right row
+    /// if the persisted store's indices shift during the run. `ONE_TIME_IDX`
+    /// is synthetic and has no path.
+    pub(crate) folder_paths: HashMap<usize, PathBuf>,
     pub(crate) folder_done: HashMap<usize, usize>,
     pub(crate) folder_failed: HashMap<usize, usize>,
     /// Run outcome breakdown (user decision 2026-10-14): the single `done`
@@ -163,6 +171,16 @@ pub(crate) struct UploadShared {
 }
 
 impl UploadShared {
+    /// Consume the marker that a background path persisted a new store state.
+    pub(crate) fn take_store_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.store_dirty)
+    }
+
+    /// Consume the marker only after a successful reload, and only while idle.
+    pub(crate) fn consume_store_dirty_after_reload(&mut self, loaded: bool) -> bool {
+        loaded && !self.active && self.take_store_dirty()
+    }
+
     /// Append to the (bounded) run log. Old lines are dropped oldest-first, the
     /// panel stays a scrolling tail.
     pub(crate) fn log(&mut self, s: impl Into<String>) {
@@ -180,6 +198,11 @@ impl UploadShared {
     pub(crate) fn touch_queue(&mut self) {
         self.rev = self.rev.wrapping_add(1);
     }
+}
+
+/// A persisted store reload is safe only once no upload run is active.
+pub(crate) fn should_reload_store(active: bool, dirty: bool) -> bool {
+    !active && dirty
 }
 
 /// The folder card's status word (Variant A, user decision 2026-10-16): our six
@@ -318,8 +341,25 @@ pub(crate) fn eta_suffix(shared: &UploadShared) -> String {
     }
 }
 
-/// Status text for the progress bar, e.g. `"42% · noch 7 Dateien · ca. 1:20"`.
+/// Summary for the active upload shown in the collapsible log header.
+/// An active scan with no transfer candidates uses the same wording as the
+/// main progress area and its start log, without an irrelevant ETA.
+pub(crate) fn active_log_summary(
+    shared: &UploadShared,
+    with_candidates: impl FnOnce() -> String,
+) -> String {
+    if shared.total == 0 {
+        return tr("Alles aktuell").to_string();
+    }
+    with_candidates()
+}
+
+/// Status text for a live run, e.g. `"42% · noch 7 Dateien · ca. 1:20"`, or
+/// `"Alles aktuell"` when it has no transfer candidates.
 pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
+    if shared.active && shared.total == 0 {
+        return tr("Alles aktuell").to_string();
+    }
     let (done, total) = (shared.done, shared.total);
     let pct = if total > 0 {
         (done as f32 / total as f32 * 100.0).clamp(0.0, 100.0)
@@ -1190,6 +1230,43 @@ mod tests {
     // already uses. Every branch and every substituted counter is pinned.
 
     #[test]
+    fn take_store_dirty_returns_true_only_once() {
+        let mut shared = UploadShared {
+            store_dirty: true,
+            ..UploadShared::default()
+        };
+
+        assert!(shared.take_store_dirty());
+        assert!(!shared.take_store_dirty());
+        assert!(!shared.store_dirty);
+    }
+
+    #[test]
+    fn should_reload_store_only_when_idle_and_dirty() {
+        for (active, dirty, expected) in [
+            (false, false, false),
+            (false, true, true),
+            (true, false, false),
+            (true, true, false),
+        ] {
+            assert_eq!(should_reload_store(active, dirty), expected);
+        }
+    }
+
+    #[test]
+    fn failed_store_reload_keeps_dirty_marker() {
+        let mut shared = UploadShared {
+            store_dirty: true,
+            ..UploadShared::default()
+        };
+        let dirty = shared.store_dirty;
+
+        assert!(should_reload_store(shared.active, dirty));
+        assert!(!shared.consume_store_dirty_after_reload(false));
+        assert!(shared.store_dirty);
+    }
+
+    #[test]
     fn outcome_is_empty_when_nothing_happened() {
         // All-zero: the caller omits the line entirely (idle / untouched target).
         assert_eq!(outcome_text(0, 0, 0, 0), "");
@@ -1230,6 +1307,76 @@ mod tests {
         assert!(!text.contains("0"), "zero category leaked: {text}");
         assert!(text.contains(tr1("{} neu hochgeladen", 1).as_str()));
         assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
+    }
+
+    #[test]
+    fn active_empty_run_reports_all_current_without_progress_or_eta() {
+        let shared = UploadShared {
+            active: true,
+            done: 0,
+            total: 0,
+            ..UploadShared::default()
+        };
+
+        let text = upload_progress_text(&shared);
+
+        assert_eq!(text, tr("Alles aktuell"));
+        assert!(!text.contains("0 von 0"));
+        assert!(!text.contains("0%"));
+        assert!(!text.contains(tr("Schätzung läuft …")));
+    }
+
+    #[test]
+    fn active_empty_log_summary_reports_all_current_without_progress_or_eta() {
+        let shared = UploadShared {
+            active: true,
+            done: 0,
+            total: 0,
+            ..UploadShared::default()
+        };
+
+        let text = active_log_summary(&shared, || {
+            tr3(
+                "Upload läuft: {} · {} · {}",
+                format!("{}/{}", shared.done, shared.total),
+                &shared.current,
+                eta_suffix(&shared),
+            )
+        });
+
+        assert_eq!(text, tr("Alles aktuell"));
+        assert!(!text.contains("0/0"));
+        assert!(!text.contains(tr("Schätzung läuft …")));
+    }
+
+    #[test]
+    fn active_log_summary_keeps_progress_text_when_candidates_remain() {
+        let shared = UploadShared {
+            active: true,
+            done: 2,
+            total: 5,
+            current: "photo.jpg".to_string(),
+            ..UploadShared::default()
+        };
+
+        let summary = active_log_summary(&shared, || {
+            tr3(
+                "Upload läuft: {} · {} · {}",
+                format!("{}/{}", shared.done, shared.total),
+                &shared.current,
+                eta_suffix(&shared),
+            )
+        });
+
+        assert_eq!(
+            summary,
+            tr3(
+                "Upload läuft: {} · {} · {}",
+                "2/5",
+                "photo.jpg",
+                eta_suffix(&shared),
+            )
+        );
     }
 
     #[test]
@@ -1442,4 +1589,3 @@ mod tests {
         );
     }
 }
-

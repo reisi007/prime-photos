@@ -1,7 +1,7 @@
 use crate::app::{FolderPickerTarget, Page, ONE_TIME_IDX, PrimePhotoApp};
 use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::config::Config;
-use crate::dedup::DedupIndex;
+use crate::dedup::{DedupIndex, Origin};
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
 use crate::i18n::{tr, tr1, tr2, tr3};
 use crate::icons;
@@ -50,17 +50,113 @@ struct Row {
     last_updated: String,
 }
 
-/// Sum over **every** target — `(done, total)` — the single source of the
-/// footer's aggregate progress (user decision 2026-10-14: one display over all
-/// backup targets, the one-time row included). Pure: no lock, no UI, no
-/// filesystem, and therefore cheap to test. A target that knows no total
-/// (`total == 0`) contributes nothing and can never skew the sum; the caller
-/// guards the division by zero.
+/// Sum over **every** target — `(done, total)` — for the idle aggregate display
+/// (user decision 2026-10-14: one display over all backup targets, the one-time
+/// row included). During a run the aggregate instead uses run-level counters.
+/// Pure: no lock, no UI, no filesystem, and therefore cheap to test. A target
+/// that knows no total (`total == 0`) contributes nothing and can never skew
+/// the sum; the caller guards the division by zero.
 fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
     rows.iter()
         .fold((0usize, 0usize), |(done, total), r| {
             (done + r.done, total + r.total)
         })
+}
+
+/// Live progress is scoped to the current run; the library-wide row sum is for
+/// the idle display only.
+fn displayed_progress(
+    running: bool,
+    run_done: usize,
+    run_total: usize,
+    rows: &[Row],
+) -> (usize, usize) {
+    if running {
+        (run_done, run_total)
+    } else {
+        aggregate_progress(rows)
+    }
+}
+
+/// Live completion is scoped to the current run. The shared map outlives a run,
+/// and its positional folder keys can become stale when store rows shift; idle
+/// rows must always use their persisted completion count.
+fn row_done(in_run: bool, folder_done_entry: Option<usize>, persisted_done: usize) -> usize {
+    if in_run {
+        folder_done_entry.unwrap_or(0)
+    } else {
+        persisted_done
+    }
+}
+
+/// Use live plan totals only while that row belongs to the active run. The
+/// shared map outlives a run, and its positional folder keys can become stale
+/// when the store's rows shift; idle rows must use their persisted totals.
+fn row_total(
+    in_run: bool,
+    folder_total_entry: Option<usize>,
+    persisted_total: usize,
+) -> usize {
+    if in_run {
+        folder_total_entry.unwrap_or(0)
+    } else {
+        persisted_total
+    }
+}
+
+/// Resolve a plan-time folder index to its current store row through the folder
+/// path captured when the plan was published. Store indices can shift if a
+/// folder is removed while the run is active; the one-time target is synthetic
+/// and never resolves to a persisted row.
+fn row_index_for(
+    store: &FolderStore,
+    paths: &HashMap<usize, PathBuf>,
+    idx: usize,
+) -> Option<usize> {
+    if idx == ONE_TIME_IDX {
+        return None;
+    }
+    let path = paths.get(&idx)?;
+    store.folders.iter().position(|folder| folder.path == *path)
+}
+
+/// Resolve a current store row path to its plan-time index. Folder paths are
+/// unique within a run; if a malformed/legacy state violates that invariant,
+/// choose the lowest matching plan index so the result remains deterministic.
+/// The one-time target is synthetic and never maps to a persisted folder row.
+fn plan_index_for(paths: &HashMap<usize, PathBuf>, path: &Path) -> Option<usize> {
+    paths
+        .iter()
+        .filter_map(|(&idx, folder_path)| {
+            (idx != ONE_TIME_IDX && folder_path == path).then_some(idx)
+        })
+        .min()
+}
+
+/// Apply a run's folder counters to the current store rows, resolving each
+/// plan-time index by the path captured for that run.
+fn apply_folder_progress(
+    store: &mut FolderStore,
+    paths: &HashMap<usize, PathBuf>,
+    folder_total: &HashMap<usize, usize>,
+    folder_done: &HashMap<usize, usize>,
+    folder_failed: &HashMap<usize, usize>,
+    now: &str,
+) {
+    for (&plan_idx, &total) in folder_total {
+        let Some(row_idx) = row_index_for(store, paths, plan_idx) else {
+            continue;
+        };
+        let folder = &mut store.folders[row_idx];
+        folder.total_files = total;
+        folder.uploaded_files = folder_done.get(&plan_idx).copied().unwrap_or(0);
+        folder.last_updated = now.to_owned();
+        folder.status = if folder_failed.get(&plan_idx).copied().unwrap_or(0) > 0 {
+            FolderStatus::Error
+        } else {
+            FolderStatus::Done
+        };
+    }
 }
 
 /// Clamp a target's completed count to its total for display (Welle 5.11): an
@@ -150,9 +246,9 @@ fn lift_returned_sources(
 /// decision 2026-10-16). Only the parent's *name* ("Sport (Pictures)"), not
 /// its full path: the label must fit the 120 px column, the full path stays in
 /// the row's tooltip (`folder_tip` at the call site). The ambiguity is
-/// computed once per frame over the whole store, so the rule is stable while
-/// the queue is open. The name is shown NFC-normalised, like every other
-/// displayed path in the app.
+/// computed once per frame over the active run's captured paths, so removed
+/// store rows do not change their queue labels. The name is shown
+/// NFC-normalised, like every other displayed path in the app.
 fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> String {
     let name = crate::text::nfc(name);
     if !ambiguous.contains(&name) {
@@ -165,14 +261,44 @@ fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> S
     }
 }
 
-/// The set of folder names the store carries more than once — the input of
-/// [`queue_folder_label`]. Cheap (the store holds a handful of folders) and
-/// built once per frame, not per queue row. Names are NFC-normalised so the
-/// set matches the displayed form.
-fn ambiguous_folder_names(folders: &[folders::BackupFolder]) -> HashSet<String> {
+/// Resolve a queue plan index using the path captured when that plan started.
+/// The store may have shifted or removed the row since then. The returned pair
+/// is the display label and full-path tooltip; synthetic/missing targets have
+/// no resolved display and keep their caller's neutral fallback.
+fn queue_folder_display(
+    paths: &HashMap<usize, PathBuf>,
+    idx: usize,
+    ambiguous: &HashSet<String>,
+) -> Option<(String, String)> {
+    if idx == ONE_TIME_IDX {
+        return None;
+    }
+    let path = paths.get(&idx)?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    Some((
+        queue_folder_label(&name, path, ambiguous),
+        path.display().to_string(),
+    ))
+}
+
+/// The set of folder names represented by the active plan paths more than
+/// once — the input of [`queue_folder_label`]. Cheap (the run holds a handful
+/// of folders) and built once per frame, not per queue row. Names are
+/// NFC-normalised so the set matches the displayed form.
+fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<String> {
     let mut counts: HashMap<String, usize> = HashMap::new();
-    for f in folders {
-        *counts.entry(crate::text::nfc(&f.name)).or_insert(0) += 1;
+    for (&idx, path) in paths {
+        if idx == ONE_TIME_IDX {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        *counts.entry(crate::text::nfc(&name)).or_insert(0) += 1;
     }
     counts
         .into_iter()
@@ -287,6 +413,14 @@ enum QueueRow {
 struct UploadPlan {
     /// `(row, folder index, path)`; `row` is this entry's position in `queue`.
     items: Vec<(usize, usize, PathBuf)>,
+    /// Number of supported files considered before the local dedup filter.
+    files_seen: usize,
+    /// Files omitted by the local stat match, split by their recorded origin.
+    unchanged: usize,
+    content_skip: usize,
+    /// Per-folder counterparts of the two skip counters above.
+    folder_unchanged: HashMap<usize, usize>,
+    folder_content_skip: HashMap<usize, usize>,
     /// Known total size of the run and the number of files it was measured
     /// from. Drives the byte-based ETA (`UploadShared::bytes_total`); a file
     /// whose size cannot be read simply contributes nothing.
@@ -301,6 +435,11 @@ impl UploadPlan {
     fn empty() -> Self {
         UploadPlan {
             items: Vec::new(),
+            files_seen: 0,
+            unchanged: 0,
+            content_skip: 0,
+            folder_unchanged: HashMap::new(),
+            folder_content_skip: HashMap::new(),
             bytes_total: 0,
             sized_total: 0,
             queue: Vec::new(),
@@ -314,8 +453,12 @@ impl UploadPlan {
     /// panics: an unreadable file contributes nothing (`0`) and the ETA then
     /// falls back to the file-count rate.
     fn note_size(&mut self, path: &Path) -> u64 {
-        if let Ok(meta) = std::fs::metadata(path) {
-            let len = meta.len();
+        self.note_size_value(std::fs::metadata(path).ok().map(|meta| meta.len()))
+    }
+
+    /// Count a size already obtained by the folder scan, avoiding a second stat.
+    fn note_size_value(&mut self, size: Option<u64>) -> u64 {
+        if let Some(len) = size {
             self.bytes_total += len;
             self.sized_total += 1;
             len
@@ -325,7 +468,8 @@ impl UploadPlan {
     }
 
     fn build(store: &FolderStore, indices: &[usize]) -> Option<Self> {
-        // A manual run takes every supported file: no folder has a watermark.
+        // A manual run scans every supported file without a watermark, then
+        // queues only files that do not match the local stat/dedup index.
         let wanted: Vec<(usize, Option<i64>)> = indices.iter().map(|&i| (i, None)).collect();
         Self::build_since(store, &wanted)
     }
@@ -333,20 +477,71 @@ impl UploadPlan {
     /// Build a plan from a **watermark** selection: `wanted` pairs a store index
     /// with the watermark its files must beat (`None` = take everything).
     ///
-    /// Same walk, same order and same counters as [`UploadPlan::build`], so a
-    /// manual run is exactly `build` with every watermark `None`. Used by the
-    /// cold-start safety net (user decision 2026-10-14): an unchanged folder
-    /// never even reaches a plan.
+    /// Same file order as [`UploadPlan::build`], so a manual run is exactly
+    /// `build` with every watermark `None`. That manual scan stats every
+    /// supported file once and uses the local index to keep unchanged files out
+    /// of the queue. Used by the cold-start safety net (user decision 2026-10-14)
+    /// as well.
     fn build_since(store: &FolderStore, wanted: &[(usize, Option<i64>)]) -> Option<Self> {
+        let index = DedupIndex::open();
+        Self::build_since_with_stat_matches(store, wanted, |path, size, mtime| {
+            index.stat_matches(path, size, mtime)
+        })
+    }
+
+    /// Injectable stat lookup keeps the plan filter testable without touching
+    /// the user's persistent dedup database.
+    fn build_since_with_stat_matches(
+        store: &FolderStore,
+        wanted: &[(usize, Option<i64>)],
+        mut stat_matches: impl FnMut(&Path, u64, i64) -> Option<Origin>,
+    ) -> Option<Self> {
         let mut plan = Self::empty();
         for &(i, watermark) in wanted {
             let Some(f) = store.folders.get(i) else {
                 continue;
             };
-            let imgs = folders::scan_new_since(&f.path, watermark);
-            plan.per_folder.insert(i, imgs.len());
             plan.folder_opts.insert(i, (f.dedup, f.conflict_resolution));
+            plan.per_folder.entry(i).or_insert(0);
+            // A manual scan has no watermark, so use the metadata-free image
+            // walk and read each file's metadata only once below. The cold-start
+            // path keeps its watermark selector, which excludes older files
+            // before they reach the plan.
+            let imgs = match watermark {
+                Some(watermark) => folders::scan_new_since(&f.path, Some(watermark)),
+                None => folders::scan_images(&f.path),
+            };
             for p in imgs {
+                let meta = std::fs::metadata(&p).ok();
+                let mtime = meta
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs() as i64);
+                if watermark.is_some_and(|watermark| {
+                    !mtime.is_some_and(|mtime| mtime > watermark)
+                }) {
+                    continue;
+                }
+                plan.files_seen += 1;
+                let size = meta.as_ref().map(|m| m.len());
+                let size_for_index = size.unwrap_or(0);
+                let mtime_for_index = mtime.unwrap_or(0);
+                if f.dedup
+                    && let Some(origin) = stat_matches(&p, size_for_index, mtime_for_index)
+                {
+                    match origin {
+                        Origin::Uploaded => {
+                            plan.unchanged += 1;
+                            *plan.folder_unchanged.entry(i).or_insert(0) += 1;
+                        }
+                        Origin::ContentSkip => {
+                            plan.content_skip += 1;
+                            *plan.folder_content_skip.entry(i).or_insert(0) += 1;
+                        }
+                    }
+                    continue;
+                }
                 // Same order as `items`: the row is this entry's position in
                 // the queue, the folder is the backup-folder index `i`.
                 let row = plan.items.len();
@@ -354,7 +549,7 @@ impl UploadPlan {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                let size = plan.note_size(&p);
+                let size = plan.note_size_value(size);
                 plan.queue.push(QueueEntry {
                     folder: i,
                     name,
@@ -364,9 +559,10 @@ impl UploadPlan {
                     bytes_sent: 0,
                 });
                 plan.items.push((row, i, p));
+                *plan.per_folder.entry(i).or_insert(0) += 1;
             }
         }
-        if plan.items.is_empty() {
+        if plan.files_seen == 0 {
             None
         } else {
             Some(plan)
@@ -384,6 +580,7 @@ impl UploadPlan {
         files: Vec<PathBuf>,
     ) -> Self {
         let mut plan = Self::empty();
+        plan.files_seen = files.len();
         plan.per_folder.insert(idx, files.len());
         plan.folder_opts.insert(idx, (dedup, conflict));
         for p in files {
@@ -417,6 +614,7 @@ impl UploadPlan {
             let Some(f) = store.folders.get(*i) else {
                 continue;
             };
+            plan.files_seen += 1;
             *plan.per_folder.entry(*i).or_insert(0) += 1;
             plan.folder_opts.insert(*i, (f.dedup, f.conflict_resolution));
             let row = plan.items.len();
@@ -442,9 +640,18 @@ impl UploadPlan {
         }
     }
 
-    /// Number of files this run would upload (before per-file dedup skips).
+    /// Number of files this run still needs to process after local stat skips.
     fn count(&self) -> usize {
         self.items.len()
+    }
+
+    /// Start message for a scan that found files but no upload candidates.
+    fn start_message(&self) -> String {
+        if self.files_seen > 0 && self.items.is_empty() {
+            tr("Alles aktuell").to_string()
+        } else {
+            tr1("{} Datei(en) werden hochgeladen …", self.count())
+        }
     }
 }
 
@@ -455,7 +662,12 @@ impl UploadPlan {
 ///
 /// Takes the live queue out of `plan`; the caller keeps `items`/`folder_opts`
 /// for the worker spawn.
-fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: String) {
+fn publish_state(
+    plan: &mut UploadPlan,
+    shared: &Arc<Mutex<UploadShared>>,
+    msg: String,
+    folder_paths: HashMap<usize, PathBuf>,
+) {
     let mut s = shared.lock().unwrap();
     s.active = true;
     s.started = Some(Instant::now());
@@ -464,20 +676,23 @@ fn publish_state(plan: &mut UploadPlan, shared: &Arc<Mutex<UploadShared>>, msg: 
     s.current.clear();
     s.log.clear();
     s.folder_total = plan.per_folder.clone();
+    s.folder_paths = folder_paths;
     s.folder_done.clear();
     s.folder_failed.clear();
-    // The outcome breakdown is per run too (user decision 2026-10-14): the
-    // footer line and every folder row start from zero, so no previous run's
-    // numbers can survive into this one.
+    // The outcome breakdown is per run too (user decision 2026-10-14): local
+    // stat skips are seeded from the plan, while worker outcomes start at zero;
+    // no previous run's numbers can survive into this one.
     s.uploaded_new = 0;
-    s.conflict_skipped = 0;
-    s.unchanged_skipped = 0;
+    s.conflict_skipped = plan.content_skip;
+    s.unchanged_skipped = plan.unchanged;
     s.folder_new.clear();
-    s.folder_conflict.clear();
-    s.folder_unchanged.clear();
+    s.folder_conflict = plan.folder_content_skip.clone();
+    s.folder_unchanged = plan.folder_unchanged.clone();
     s.uploaded_ids.clear();
     s.total = plan.items.len();
     s.queue = std::mem::take(&mut plan.queue);
+    // Publish paths before bumping the revision: the UI cache may rebuild as
+    // soon as this lock is released, and needs labels for this queue identity.
     // A brand-new queue identity: bump the revision so the UI cache cannot keep
     // showing the previous run's entries (`queue_cache_rev` would otherwise
     // still match).
@@ -535,8 +750,18 @@ fn publish_plan(
     shared: &Arc<Mutex<UploadShared>>,
     msg: String,
 ) {
-    publish_state(plan, shared, msg);
+    let folder_paths = plan_folder_paths(plan, store);
+    publish_state(plan, shared, msg, folder_paths);
     publish_folder_status(plan, store);
+}
+
+/// Capture the plan-time index → path association for a published folder plan.
+fn plan_folder_paths(plan: &UploadPlan, store: &FolderStore) -> HashMap<usize, PathBuf> {
+    plan
+        .per_folder
+        .keys()
+        .filter_map(|&i| store.folders.get(i).map(|folder| (i, folder.path.clone())))
+        .collect()
 }
 
 /// Deepest directory that contains every dropped path, or `None` when they sit
@@ -588,12 +813,13 @@ fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
     if shared.lock().unwrap().cancelled {
         return;
     }
-    let (folder_total, folder_done, folder_failed) = {
+    let (folder_total, folder_done, folder_failed, folder_paths) = {
         let s = shared.lock().unwrap();
         (
             s.folder_total.clone(),
             s.folder_done.clone(),
             s.folder_failed.clone(),
+            s.folder_paths.clone(),
         )
     };
     let mut store = match load_store_logged() {
@@ -601,28 +827,27 @@ fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
         None => return,
     };
     let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
-    for (i, f) in store.folders.iter_mut().enumerate() {
-        // `folder_total` — the run's plan — is the trigger, not `folder_done`:
-        // it holds every folder the run took part in, **including** one whose
-        // scan found nothing to upload (user decision 2026-10-16). Such a
-        // folder never gets a `folder_done` entry, so a `folder_done` trigger
-        // would leave it without a total and without a state forever — the row
-        // would keep claiming nothing was ever done. A folder absent from
-        // `folder_total` was never part of the run and stays untouched; that is
-        // also what keeps a **never-scanned** folder (equally `total == 0`)
-        // from showing a completed state.
-        if let Some(&total) = folder_total.get(&i) {
-            f.total_files = total;
-            f.uploaded_files = folder_done.get(&i).copied().unwrap_or(0);
-            f.last_updated = now.clone();
-            f.status = if folder_failed.get(&i).copied().unwrap_or(0) > 0 {
-                FolderStatus::Error
-            } else {
-                FolderStatus::Done
+    apply_folder_progress(
+        &mut store,
+        &folder_paths,
+        &folder_total,
+        &folder_done,
+        &folder_failed,
+        &now,
+    );
+    match store.save() {
+        Ok(()) => {
+            let ctx = {
+                let mut state = shared.lock().unwrap();
+                state.store_dirty = true;
+                state.ctx.clone()
             };
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
         }
+        Err(err) => log::error!("Sicherungsziele konnten nicht gespeichert werden: {err}"),
     }
-    let _ = store.save();
 }
 
 /// One enabled backup folder the start-time watermark pass decided to scan.
@@ -662,8 +887,9 @@ fn can_start(cfg: &Config, paused: &watch::Sender<bool>, shared: &Arc<Mutex<Uplo
 /// accept work (`active && !sealed && !cancelled && item_queue.is_some()`); the
 /// worker that ends the run sets `sealed` under the same lock, so the two can
 /// never race an item into a queue nobody drains. A folder that is **already**
-/// part of this run (`folder_total` holds its index) is refused too, so a
-/// re-triggered folder cannot queue its rows twice.
+/// part of this run (its index is in `folder_total` or its path is in
+/// `folder_paths`) is refused too, so a re-triggered folder cannot queue its
+/// rows twice or make the index-to-path map ambiguous.
 fn inject_into_live_run(
     mut plan: UploadPlan,
     store: &mut FolderStore,
@@ -679,6 +905,16 @@ fn inject_into_live_run(
         // `folder_total`/`total` would read "x von 2x". The caller parks the
         // folder on this refusal, like on any other.
         let already_here = per_folder.keys().any(|i| s.folder_total.contains_key(i));
+        let path_already_here = per_folder.keys().any(|&i| {
+            store
+                .folders
+                .get(i)
+                .is_some_and(|folder| s.folder_paths.values().any(|path| path == &folder.path))
+        });
+        if path_already_here && s.active && !s.sealed && !s.cancelled && s.item_queue.is_some() {
+            s.log(tr("Der Ordner wird in diesem Lauf bereits verarbeitet."));
+            return Some(plan);
+        }
         if already_here || !(s.active && !s.sealed && !s.cancelled && s.item_queue.is_some()) {
             return Some(plan);
         }
@@ -696,6 +932,17 @@ fn inject_into_live_run(
         s.total += n;
         for (&i, &count) in &per_folder {
             *s.folder_total.entry(i).or_insert(0) += count;
+            if let Some(folder) = store.folders.get(i) {
+                s.folder_paths.entry(i).or_insert_with(|| folder.path.clone());
+            }
+        }
+        s.unchanged_skipped += plan.unchanged;
+        s.conflict_skipped += plan.content_skip;
+        for (&i, &count) in &plan.folder_unchanged {
+            *s.folder_unchanged.entry(i).or_insert(0) += count;
+        }
+        for (&i, &count) in &plan.folder_content_skip {
+            *s.folder_conflict.entry(i).or_insert(0) += count;
         }
         // Byte-ETA: nur weiterführen, wenn beide Seiten vollständig bekannt sind —
         // sonst auf den Datei-Zähler-Fallback zurückfallen (wie `publish_state`).
@@ -706,7 +953,11 @@ fn inject_into_live_run(
         };
         s.folder_opts.extend(std::mem::take(&mut plan.folder_opts));
         s.touch_queue();
-        s.log(tr1("{} Datei(en) zusätzlich aufgenommen.", n));
+        s.log(if plan.files_seen > 0 && n == 0 {
+            tr("Alles aktuell").to_string()
+        } else {
+            tr1("{} Datei(en) zusätzlich aufgenommen.", n)
+        });
     }
     // Der Ordner-Zähler gehört auch auf die persistierten Ziele (wie
     // `publish_folder_status` es für einen normalen Plan tut).
@@ -802,14 +1053,13 @@ fn overlay_session_cookies(cfg: &mut Config, session: &Arc<Mutex<Session>>) {
     cfg.cookie_x_amz_access_token = cookies.cookie_x_amz_access_token;
 }
 
-/// Load the persisted store for the detached supervisor, reporting a damaged
-/// one on the log facade and yielding `None`.
+/// Load the persisted store, reporting a damaged one on the log facade and
+/// yielding `None`.
 ///
-/// `FolderStore::load` already sets a damaged file aside; the supervisor must
-/// not keep running against the resulting empty default store, so every caller
-/// treats `None` as "no store this pass" (user decision 2026-10-16). The
-/// technical detail stays in the log, never in the UI.
-fn load_store_logged() -> Option<FolderStore> {
+/// `FolderStore::load` already sets a damaged file aside; callers must not use
+/// the resulting empty default store as if it were valid. The technical detail
+/// stays in the log, never in the UI.
+pub(crate) fn load_store_logged() -> Option<FolderStore> {
     match FolderStore::load() {
         Ok(store) => Some(store),
         Err(e) => {
@@ -913,7 +1163,7 @@ async fn background_sync_pass(
     let Some(plan) = UploadPlan::build_since(&store, &wanted) else {
         return;
     };
-    let count = plan.count();
+    let msg = plan.start_message();
     start_background_run(
         plan,
         &mut store,
@@ -923,7 +1173,7 @@ async fn background_sync_pass(
         concurrency,
         limit_kbps,
         album,
-        format!("Hintergrund-Sync: {count} Datei(en) werden hochgeladen …"),
+        format!("Hintergrund-Sync: {msg}"),
         scans,
     );
 }
@@ -1035,7 +1285,7 @@ fn handle_files(
     let Some(plan) = UploadPlan::build_from_events(store, &batch) else {
         return;
     };
-    let count = plan.count();
+    let msg = plan.start_message();
     start_background_run(
         plan,
         store,
@@ -1045,7 +1295,7 @@ fn handle_files(
         concurrency,
         limit_kbps,
         album.to_string(),
-        tr1("{} Datei(en) werden hochgeladen …", count),
+        msg,
         // An event run never advances a folder watermark: the watermark is the
         // *start-time* safety net. The files it did upload sit in the MD5 index
         // and are skipped cheaply by the stat check, while a run that failed is
@@ -1189,7 +1439,7 @@ fn handle_scan_requests(
             .log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
         return;
     };
-    let count = plan.count();
+    let msg = plan.start_message();
     start_background_run(
         plan,
         store,
@@ -1199,7 +1449,7 @@ fn handle_scan_requests(
         concurrency,
         limit_kbps,
         album.to_string(),
-        tr1("{} Datei(en) werden hochgeladen …", count),
+        msg,
         // Like the event path: a run triggered by a user request advances no
         // folder watermark (the watermark is the *start-time* safety net).
         Vec::new(),
@@ -1690,12 +1940,12 @@ impl PrimePhotoApp {
         } else {
             0
         };
-        let count = plan.count();
+        let msg = plan.start_message();
         publish_plan(
             &mut plan,
             &mut self.store,
             &self.upload,
-            tr1("{} Datei(en) werden hochgeladen …", count),
+            msg,
         );
         if self.slow_mode {
             self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
@@ -1862,6 +2112,7 @@ impl PrimePhotoApp {
             &mut plan,
             &self.upload,
             tr1("{} Datei(en) werden hochgeladen …", count),
+            HashMap::new(),
         );
         if self.slow_mode {
             self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
@@ -2043,12 +2294,32 @@ impl PrimePhotoApp {
         if self.upload.lock().unwrap().cancelled {
             return;
         }
-        let (folder_done, folder_failed, folder_total) = {
+        // A detached background finalizer can persist the newer folder state
+        // after the frame's reload check (which may have observed the run as
+        // active). Rebase this UI finalization on that store before applying
+        // counters, and never hold the shared upload lock across disk I/O.
+        let reload_store = self.upload.lock().unwrap().store_dirty;
+        let mut store_reload_succeeded = false;
+        let mut can_save_store = true;
+        if reload_store {
+            if let Some(store) = load_store_logged() {
+                self.store = store;
+                self.upload.lock().unwrap().take_store_dirty();
+                store_reload_succeeded = true;
+            } else {
+                // Keep the dirty marker for the next frame's reload attempt and
+                // do not overwrite the newer persisted store with this stale
+                // in-memory copy.
+                can_save_store = false;
+            }
+        }
+        let (folder_done, folder_failed, folder_total, folder_paths) = {
             let s = self.upload.lock().unwrap();
             (
                 s.folder_done.clone(),
                 s.folder_failed.clone(),
                 s.folder_total.clone(),
+                s.folder_paths.clone(),
             )
         };
         // Whether the run that just finished was the one-time run, plus its
@@ -2065,33 +2336,17 @@ impl PrimePhotoApp {
             )
         };
         let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
-        for (i, f) in self.store.folders.iter_mut().enumerate() {
-            // `folder_total` — the run's plan — is the trigger, not
-            // `folder_done` (user decision 2026-10-16): it holds every folder
-            // the run took part in, **including** one whose scan found nothing
-            // to upload — a folder with no pending file never gets a
-            // `folder_done` entry, so the old trigger left it unsettled and the
-            // row kept showing an empty state. Such a folder is now recorded as
-            // `Done` ("gescannt + nichts zu tun ⇒ abgeschlossen"). The trap
-            // this must not fall into: a **never-scanned** folder also has
-            // `total == 0`, but it is absent from `folder_total` (only plan
-            // folders are), so it is untouched and keeps claiming nothing.
-            if let Some(&total) = folder_total.get(&i) {
-                // The run's own file count goes with it: `uploaded_files` alone
-                // was written back, which left `total_files` from an earlier scan
-                // or run and made the row read "480 von 150". Only targets that
-                // really took part in the run are touched.
-                f.total_files = total;
-                f.uploaded_files = folder_done.get(&i).copied().unwrap_or(0);
-                f.last_updated = now.clone();
-                f.status = if folder_failed.get(&i).copied().unwrap_or(0) > 0 {
-                    FolderStatus::Error
-                } else {
-                    FolderStatus::Done
-                };
-            }
+        if can_save_store {
+            apply_folder_progress(
+                &mut self.store,
+                &folder_paths,
+                &folder_total,
+                &folder_done,
+                &folder_failed,
+                &now,
+            );
+            let _ = self.store.save();
         }
-        let _ = self.store.save();
         // The transient one-time target is settled the same way, but from the
         // synthetic `ONE_TIME_IDX` counters and onto `self.one_time` — nothing
         // is written back to the store here. `folder_total` is the trigger
@@ -2118,6 +2373,11 @@ impl PrimePhotoApp {
         // resumes. Only the SQLite rows go; the row itself stays for display.
         if was_one_time && run_failed == 0 && run_done + run_failed >= run_total {
             DedupIndex::open().clear_one_time_queue();
+        }
+        // Safety net for the successful reload path; normally this is a no-op
+        // because the marker was consumed immediately after that reload.
+        if store_reload_succeeded {
+            let _ = self.upload.lock().unwrap().take_store_dirty();
         }
     }
 
@@ -2175,11 +2435,22 @@ impl PrimePhotoApp {
                 .iter()
                 .enumerate()
                 .map(|(i, f)| {
-                    let total = s.folder_total.get(&i).copied().unwrap_or(f.total_files);
-                    let done = s.folder_done.get(&i).copied().unwrap_or(f.uploaded_files);
+                    let plan_idx = plan_index_for(&s.folder_paths, &f.path);
+                    let in_run = s.active
+                        && plan_idx.is_some_and(|plan_idx| s.folder_total.contains_key(&plan_idx));
+                    let total = row_total(
+                        in_run,
+                        plan_idx.and_then(|plan_idx| s.folder_total.get(&plan_idx).copied()),
+                        f.total_files,
+                    );
+                    let done = row_done(
+                        in_run,
+                        plan_idx.and_then(|plan_idx| s.folder_done.get(&plan_idx).copied()),
+                        f.uploaded_files,
+                    );
                     // Cap the completed count (Welle 5.11): a legacy folder whose
                     // `total_files < uploaded_files` must not read above 100 % in
-                    // the row's progress text; the same value feeds the aggregate.
+                    // the row's progress text or the idle aggregate.
                     let done = capped_done(done, total);
                     // Live status (Welle 3.3): while the run counts this target in
                     // `folder_total` it is *uploading*, regardless of the (stale)
@@ -2188,7 +2459,7 @@ impl PrimePhotoApp {
                     // run writes its result into a fresh `FolderStore::load()`
                     // (`finalize_background_store`), never into `self.store`, so
                     // without this the row kept showing the previous outcome.
-                    let status = if s.active && s.folder_total.contains_key(&i) {
+                    let status = if in_run {
                         FolderStatus::Uploading
                     } else if f.enabled {
                         // The missing-source state is a *live* condition (user
@@ -2210,10 +2481,18 @@ impl PrimePhotoApp {
                         status,
                         total,
                         done,
-                        new: s.folder_new.get(&i).copied().unwrap_or(0),
-                        existing: s.folder_conflict.get(&i).copied().unwrap_or(0),
-                        unchanged: s.folder_unchanged.get(&i).copied().unwrap_or(0),
-                        failed: s.folder_failed.get(&i).copied().unwrap_or(0),
+                        new: plan_idx
+                            .and_then(|plan_idx| s.folder_new.get(&plan_idx).copied())
+                            .unwrap_or(0),
+                        existing: plan_idx
+                            .and_then(|plan_idx| s.folder_conflict.get(&plan_idx).copied())
+                            .unwrap_or(0),
+                        unchanged: plan_idx
+                            .and_then(|plan_idx| s.folder_unchanged.get(&plan_idx).copied())
+                            .unwrap_or(0),
+                        failed: plan_idx
+                            .and_then(|plan_idx| s.folder_failed.get(&plan_idx).copied())
+                            .unwrap_or(0),
                         last_updated: f.last_updated.clone(),
                     }
                 })
@@ -2223,20 +2502,21 @@ impl PrimePhotoApp {
             // (kebab/refresh) and no pause toggle (nothing to configure,
             // nothing to stop).
             if let Some(one) = self.one_time.as_ref() {
-                let total = s
-                    .folder_total
-                    .get(&ONE_TIME_IDX)
-                    .copied()
-                    .unwrap_or(one.total_files);
-                let done = s
-                    .folder_done
-                    .get(&ONE_TIME_IDX)
-                    .copied()
-                    .unwrap_or(one.uploaded_files);
+                let in_run = s.active && s.folder_total.contains_key(&ONE_TIME_IDX);
+                let total = row_total(
+                    in_run,
+                    s.folder_total.get(&ONE_TIME_IDX).copied(),
+                    one.total_files,
+                );
+                let done = row_done(
+                    in_run,
+                    s.folder_done.get(&ONE_TIME_IDX).copied(),
+                    one.uploaded_files,
+                );
                 // Same cap as the persisted rows (Welle 5.11).
                 let done = capped_done(done, total);
                 // Same live-status rule as the persisted folders (Welle 3.3).
-                let status = if s.active && s.folder_total.contains_key(&ONE_TIME_IDX) {
+                let status = if in_run {
                     FolderStatus::Uploading
                 } else {
                     one.status
@@ -2266,11 +2546,14 @@ impl PrimePhotoApp {
         // cached and only rebuilt when the run's *file states* changed
         // (`UploadShared::rev`): a 5 000-file run otherwise cloned every file
         // name on every frame, for nothing — only the counters move.
-        // Names the store carries more than once: those queue rows and group
-        // headers show "Name (Pfad)" so same-named folders stay
+        // Names the active run carries more than once: those queue rows and
+        // group headers show "Name (Pfad)" so same-named folders stay
         // distinguishable (user decision 2026-10-16).
-        let ambiguous = ambiguous_folder_names(&self.store.folders);
-        let rev = self.upload.lock().unwrap().rev;
+        let (rev, folder_paths) = {
+            let s = self.upload.lock().unwrap();
+            (s.rev, s.folder_paths.clone())
+        };
+        let ambiguous = ambiguous_folder_names_for_paths(&folder_paths);
         if self.queue_cache_rev != rev || self.queue_cache.1.is_empty() {
             let groups: Vec<(String, Vec<(String, FileState)>)> = {
                 let s = self.upload.lock().unwrap();
@@ -2283,10 +2566,8 @@ impl PrimePhotoApp {
                         // so its queue group is labelled directly.
                         tr("Einmalige Sicherung").to_string()
                     } else {
-                        self.store
-                            .folders
-                            .get(e.folder)
-                            .map(|f| queue_folder_label(&f.name, &f.path, &ambiguous))
+                        queue_folder_display(&folder_paths, e.folder, &ambiguous)
+                            .map(|(label, _)| label)
                             .unwrap_or_default()
                     };
                     let idx = match slot.get(&e.folder).copied() {
@@ -2513,22 +2794,13 @@ impl PrimePhotoApp {
                                 let full = e.path.display().to_string();
                                 // The row's backup folder — the same label the
                                 // group header carries (disambiguated when the
-                                // store holds the name twice).
-                                let folder_label = if e.folder == ONE_TIME_IDX {
-                                    tr("Einmalige Sicherung").to_string()
+                                // active run holds the name twice).
+                                let (folder_label, folder_tip) = if e.folder == ONE_TIME_IDX {
+                                    (tr("Einmalige Sicherung").to_string(), String::new())
                                 } else {
-                                    self.store
-                                        .folders
-                                        .get(e.folder)
-                                        .map(|f| queue_folder_label(&f.name, &f.path, &ambiguous))
+                                    queue_folder_display(&folder_paths, e.folder, &ambiguous)
                                         .unwrap_or_default()
                                 };
-                                let folder_tip = self
-                                    .store
-                                    .folders
-                                    .get(e.folder)
-                                    .map(|f| f.path.display().to_string())
-                                    .unwrap_or_default();
                                 // Allocated at exactly `QUEUE_ROW_H` so the row
                                 // advances by `QUEUE_ROW_H + item_spacing.y`,
                                 // matching the group rows and `show_rows` (see
@@ -2584,13 +2856,12 @@ impl PrimePhotoApp {
                 });
         }
 
-        // Aggregate progress: **one** display over all targets, now directly
-        // under the queue (Welle 3.1) instead of in the footer. It stays visible
-        // while idle and is still drawn while a run is live even if its last
-        // target was just removed (the run continues). The byte/ETA detail only
-        // exists for a live run; the outcome counters are already the aggregate
+        // Aggregate progress: **one** display under the queue. While a run is
+        // live it shows only the run counters (including when its last target
+        // row was removed); while idle it sums all target rows. The byte/ETA
+        // detail only exists for a live run; outcome counters remain aggregated
         // over every target (kept for the footer line below).
-        let (running, progress_text, outcome) = {
+        let (running, progress_text, outcome, run_done, run_total) = {
             let s = self.upload.lock().unwrap();
             let outcome = outcome_text(
                 s.uploaded_new,
@@ -2599,13 +2870,25 @@ impl PrimePhotoApp {
                 s.failed,
             );
             if s.active {
-                (true, upload_progress_text(&s), outcome)
+                (
+                    true,
+                    upload_progress_text(&s),
+                    outcome,
+                    s.done,
+                    s.total,
+                )
             } else {
-                (false, String::new(), outcome)
+                (false, String::new(), outcome, 0, 0)
             }
         };
-        let (sum_done, sum_total) = aggregate_progress(&rows);
-        if running || sum_total > 0 {
+        let (sum_done, sum_total) = displayed_progress(running, run_done, run_total, &rows);
+        if running && sum_total == 0 {
+            // An all-current scan is active only while its no-op run is being
+            // finalized. Show the same completion wording as the idle state,
+            // without a meaningless 0/0 bar or spinner.
+            ui.add_space(6.0);
+            ui.label(progress_text);
+        } else if running || sum_total > 0 {
             ui.add_space(6.0);
             let frac = if sum_total > 0 {
                 (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
@@ -2627,8 +2910,8 @@ impl PrimePhotoApp {
                     ui.spinner();
                 }
                 let text = if running {
-                    // File counts over every target, plus the run's byte/ETA
-                    // detail from `upload_progress_text` (kept verbatim).
+                    // The run's file counts plus its byte/ETA detail from
+                    // `upload_progress_text` (kept verbatim).
                     tr3(
                         "Gesamt: {} von {} Dateien · {}",
                         sum_done,
@@ -2889,6 +3172,135 @@ mod tests {
     }
 
     #[test]
+    fn row_index_for_resolves_paths_and_skips_removed_and_one_time_targets() {
+        let store = FolderStore {
+            folders: vec![
+                folders::BackupFolder::new(PathBuf::from("/photos/a")),
+                folders::BackupFolder::new(PathBuf::from("/photos/b")),
+            ],
+        };
+        let paths = HashMap::from([
+            (7, PathBuf::from("/photos/b")),
+            (3, PathBuf::from("/photos/a")),
+            (9, PathBuf::from("/photos/removed")),
+            (ONE_TIME_IDX, PathBuf::from("/photos/a")),
+        ]);
+
+        assert_eq!(row_index_for(&store, &paths, 7), Some(1));
+        assert_eq!(row_index_for(&store, &paths, 3), Some(0));
+        assert_eq!(row_index_for(&store, &paths, 9), None);
+        assert_eq!(row_index_for(&store, &paths, ONE_TIME_IDX), None);
+    }
+
+    #[test]
+    fn plan_index_for_resolves_path_and_returns_none_for_unknown_or_empty() {
+        let paths = HashMap::from([
+            (7, PathBuf::from("/photos/b")),
+            (3, PathBuf::from("/photos/a")),
+            (ONE_TIME_IDX, PathBuf::from("/photos/one-time")),
+        ]);
+
+        assert_eq!(plan_index_for(&paths, Path::new("/photos/b")), Some(7));
+        assert_eq!(plan_index_for(&paths, Path::new("/photos/a")), Some(3));
+        assert_eq!(plan_index_for(&paths, Path::new("/photos/missing")), None);
+        assert_eq!(plan_index_for(&HashMap::new(), Path::new("/photos/a")), None);
+        assert_eq!(plan_index_for(&paths, Path::new("/photos/one-time")), None);
+    }
+
+    #[test]
+    fn plan_index_for_duplicate_paths_chooses_the_lowest_index_deterministically() {
+        let path = Path::new("/photos/a");
+        let paths = HashMap::from([
+            (9, path.to_path_buf()),
+            (2, path.to_path_buf()),
+            (ONE_TIME_IDX, path.to_path_buf()),
+        ]);
+
+        for _ in 0..5 {
+            assert_eq!(plan_index_for(&paths, path), Some(2));
+        }
+    }
+
+    #[test]
+    fn live_row_after_store_removal_uses_its_plan_counters() {
+        // A was plan index 0 and has since been removed; B is now the first
+        // store row but remains plan index 1 for this active run.
+        let paths = HashMap::from([
+            (0, PathBuf::from("/photos/removed")),
+            (1, PathBuf::from("/photos/b")),
+        ]);
+        let folder_total = HashMap::from([(0, 100), (1, 20)]);
+        let folder_done = HashMap::from([(0, 90), (1, 7)]);
+        let store_path = Path::new("/photos/b");
+
+        let plan_idx = plan_index_for(&paths, store_path);
+        let in_run = plan_idx.is_some_and(|idx| folder_total.contains_key(&idx));
+        let total = row_total(
+            in_run,
+            plan_idx.and_then(|idx| folder_total.get(&idx).copied()),
+            999,
+        );
+        let done = row_done(
+            in_run,
+            plan_idx.and_then(|idx| folder_done.get(&idx).copied()),
+            888,
+        );
+
+        assert_eq!(plan_idx, Some(1));
+        assert_eq!((done, total), (7, 20));
+    }
+
+    #[test]
+    fn finalization_uses_plan_path_after_store_rows_shift() {
+        let planned_store = FolderStore {
+            folders: vec![
+                folders::BackupFolder::new(PathBuf::from("/photos/a")),
+                folders::BackupFolder::new(PathBuf::from("/photos/b")),
+            ],
+        };
+        let mut plan = UploadPlan::empty();
+        plan.per_folder.insert(0, 3);
+        let paths = plan_folder_paths(&plan, &planned_store);
+
+        let mut store = FolderStore {
+            folders: vec![
+                folders::BackupFolder {
+                    total_files: 10,
+                    uploaded_files: 8,
+                    ..folders::BackupFolder::new(PathBuf::from("/photos/b"))
+                },
+                folders::BackupFolder {
+                    total_files: 20,
+                    uploaded_files: 17,
+                    ..folders::BackupFolder::new(PathBuf::from("/photos/a"))
+                },
+            ],
+        };
+        // The plan saw A at index 0; after a store edit, B now occupies 0 and
+        // A has moved to row 1. Finalization must follow A's captured path.
+        let folder_total = plan.per_folder;
+        let folder_done = HashMap::from([(0, 2)]);
+        let folder_failed = HashMap::new();
+
+        apply_folder_progress(
+            &mut store,
+            &paths,
+            &folder_total,
+            &folder_done,
+            &folder_failed,
+            "now",
+        );
+
+        assert_eq!(store.folders[0].total_files, 10);
+        assert_eq!(store.folders[0].uploaded_files, 8);
+        assert_eq!(store.folders[0].status, FolderStatus::Idle);
+        assert_eq!(store.folders[1].total_files, 3);
+        assert_eq!(store.folders[1].uploaded_files, 2);
+        assert_eq!(store.folders[1].last_updated, "now");
+        assert_eq!(store.folders[1].status, FolderStatus::Done);
+    }
+
+    #[test]
     fn aggregate_is_zero_without_rows() {
         assert_eq!(aggregate_progress(&[]), (0, 0));
     }
@@ -2896,9 +3308,54 @@ mod tests {
     #[test]
     fn aggregate_sums_folders_and_the_one_time_row() {
         // Two persisted folders plus the transient one-time row
-        // (`ONE_TIME_IDX`): the footer sums over all three.
+        // (`ONE_TIME_IDX`): the idle aggregate sums over all three.
         let rows = vec![row(0, 100, 40), row(1, 20, 20), row(ONE_TIME_IDX, 5, 1)];
         assert_eq!(aggregate_progress(&rows), (61, 125));
+    }
+
+    #[test]
+    fn active_aggregate_uses_run_counts_and_idle_aggregate_sums_rows() {
+        let rows = vec![row(0, 11_510, 11_510), row(1, 80, 40)];
+        assert_eq!(displayed_progress(true, 3, 50, &rows), (3, 50));
+        assert_eq!(displayed_progress(false, 0, 0, &rows), (11_550, 11_590));
+    }
+
+    #[test]
+    fn live_row_with_no_done_entry_starts_at_zero_not_persisted_count() {
+        let total = 50;
+        let done = capped_done(row_done(true, None, 11_510), total);
+        let frac = (done as f32 / total as f32).clamp(0.0, 1.0);
+
+        assert_eq!(done, 0);
+        assert_eq!(total, 50);
+        assert_eq!(frac, 0.0);
+        assert_eq!(row_done(true, Some(7), 11_510), 7);
+        assert_eq!(row_done(false, None, 11_510), 11_510);
+    }
+
+    #[test]
+    fn idle_row_done_ignores_a_stale_run_entry() {
+        let done = row_done(false, Some(50), 3);
+
+        assert_eq!(done, 3);
+        assert_eq!(capped_done(done, 12), 3);
+    }
+
+    #[test]
+    fn idle_finalized_row_still_shows_complete() {
+        let total = 12;
+        let done = capped_done(row_done(false, Some(2), total), total);
+
+        assert_eq!(folder_progress_text(FolderStatus::Done, done, total), tr("Vollständig"));
+    }
+
+    #[test]
+    fn idle_row_total_ignores_a_stale_run_entry() {
+        // The shared run map can retain an entry for a folder index that now
+        // belongs to another row. Idle totals must come from the store instead.
+        assert_eq!(row_total(false, Some(50), 12), 12);
+        assert_eq!(row_total(true, Some(50), 12), 50);
+        assert_eq!(row_total(true, None, 12), 0);
     }
 
     #[test]
@@ -3003,6 +3460,136 @@ mod tests {
     }
 
     #[test]
+    fn queue_label_resolves_plan_path_after_store_rows_shift() {
+        let store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from("/photos/b"))],
+        };
+        // Plan index 0 was A. The current store's row 0 is now B, but the queue
+        // must keep naming the captured plan path rather than that shifted row.
+        let paths = HashMap::from([(0, PathBuf::from("/photos/a"))]);
+        let ambiguous = ambiguous_folder_names_for_paths(&paths);
+
+        let (label, tooltip) = queue_folder_display(&paths, 0, &ambiguous)
+            .expect("the plan index has a captured folder path");
+
+        assert_eq!(store.folders[0].path, PathBuf::from("/photos/b"));
+        assert_eq!(label, "a");
+        assert_eq!(tooltip, "/photos/a");
+    }
+
+    #[test]
+    fn publish_state_sets_folder_paths_before_queue_revision() {
+        let store = store_with("/src/published-folder", FolderStatus::Idle);
+        let mut plan = literal_plan(&[(0, "/src/published-folder/photo.jpg")]);
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        shared.lock().unwrap().rev = 12;
+        let folder_paths = plan_folder_paths(&plan, &store);
+
+        publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
+
+        let (rev, display) = {
+            let state = shared.lock().unwrap();
+            let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
+            (
+                state.rev,
+                queue_folder_display(&state.folder_paths, 0, &ambiguous),
+            )
+        };
+        assert_eq!(rev, 13);
+        assert_eq!(
+            display,
+            Some((
+                "published-folder".to_string(),
+                "/src/published-folder".to_string(),
+            )),
+            "the published revision already carries the plan's queue label"
+        );
+    }
+
+    #[test]
+    fn publish_state_folder_label_is_visible_in_every_published_revision() {
+        // Fresh states repeat the same empty -> published transition. 2,000
+        // iterations give the polling reader many chances to land in a split
+        // bump/unlock/path-write window, while keeping each iteration in-memory
+        // and synchronized rather than relying on sleeps or timing thresholds.
+        const ITERATIONS: usize = 2_000;
+        const INITIAL_REV: u64 = 12;
+        const PUBLISHED_REV: u64 = INITIAL_REV + 1;
+
+        let store = store_with("/src/published-folder", FolderStatus::Idle);
+        let expected_display = Some((
+            "published-folder".to_string(),
+            "/src/published-folder".to_string(),
+        ));
+        let (state_tx, state_rx) =
+            std::sync::mpsc::sync_channel::<Arc<Mutex<UploadShared>>>(0);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (snapshot_tx, snapshot_rx) = std::sync::mpsc::channel();
+
+        let reader = std::thread::spawn(move || {
+            while let Ok(shared) = state_rx.recv() {
+                let initial_rev = {
+                    let state = shared.lock().unwrap();
+                    let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
+                    let snapshot = (
+                        state.rev,
+                        queue_folder_display(&state.folder_paths, 0, &ambiguous),
+                    );
+                    ready_tx.send(snapshot).unwrap();
+                    state.rev
+                };
+
+                // Keep taking the same lock the UI uses until this publication's
+                // first revision is visible. Read rev and its label in that one
+                // critical section so an intervening second-lock path write is
+                // observable as either None or the stale prior label.
+                loop {
+                    let (rev, label) = {
+                        let state = shared.lock().unwrap();
+                        let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
+                        (
+                            state.rev,
+                            queue_folder_display(&state.folder_paths, 0, &ambiguous),
+                        )
+                    };
+                    if rev >= initial_rev + 1 {
+                        snapshot_tx.send((rev, label)).unwrap();
+                        break;
+                    }
+                }
+            }
+        });
+
+        for _ in 0..ITERATIONS {
+            let shared = Arc::new(Mutex::new(UploadShared::default()));
+            shared.lock().unwrap().rev = INITIAL_REV;
+            state_tx.send(shared.clone()).unwrap();
+
+            let initial = ready_rx.recv().unwrap();
+            assert_eq!(initial.0, INITIAL_REV);
+            assert_eq!(initial.1, None);
+
+            // Let the reader return to its tight lock/read loop before the
+            // publication; no elapsed-time assumption is used by the assertion.
+            std::thread::yield_now();
+            let mut plan = literal_plan(&[(0, "/src/published-folder/photo.jpg")]);
+            let folder_paths = plan_folder_paths(&plan, &store);
+            publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
+
+            let (rev, label) = snapshot_rx.recv().unwrap();
+            assert_eq!(rev, PUBLISHED_REV);
+            assert_eq!(
+                label,
+                expected_display,
+                "revision {rev} must never be observed without its plan-index label"
+            );
+        }
+
+        drop(state_tx);
+        reader.join().unwrap();
+    }
+
+    #[test]
     fn source_status_flags_missing_and_lifts_when_back() {
         use FolderStatus::{Done, Error, Idle, NotFound, Paused, Scanning, Uploading};
         // A missing source flags the target as not found, from any state.
@@ -3042,6 +3629,173 @@ mod tests {
         folder.status = status;
         store.folders.push(folder);
         store
+    }
+
+    fn scratch_scan_folder(name: &str) -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize =
+            std::sync::atomic::AtomicUsize::new(0);
+        std::env::temp_dir().join(format!(
+            "prime-photos-scan-{}-{name}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn manual_plan_queues_only_files_without_a_matching_local_stat() {
+        let root = scratch_scan_folder("dedup-filter");
+        std::fs::create_dir_all(&root).unwrap();
+        let unchanged_paths = [root.join("unchanged-a.jpg"), root.join("unchanged-b.jpg")];
+        let new_path = root.join("new.jpg");
+        for path in unchanged_paths.iter().chain([&new_path]) {
+            std::fs::write(path, b"photo bytes").unwrap();
+        }
+
+        // This lookup represents the two rows in the local stat index while
+        // keeping the test isolated from the user's persistent database.
+        let recorded: HashMap<PathBuf, (u64, i64)> = unchanged_paths
+            .iter()
+            .map(|path| {
+                let meta = std::fs::metadata(path).unwrap();
+                let mtime = meta
+                    .modified()
+                    .unwrap()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                (path.clone(), (meta.len(), mtime))
+            })
+            .collect();
+        let root_string = root.to_string_lossy().into_owned();
+        let mut store = store_with(&root_string, FolderStatus::Idle);
+        store.folders[0].dedup = true;
+
+        let mut plan = UploadPlan::build_since_with_stat_matches(
+            &store,
+            &[(0, None)],
+            |path, size, mtime| {
+                recorded
+                    .get(path)
+                    .filter(|&&(recorded_size, recorded_mtime)| {
+                        (recorded_size, recorded_mtime) == (size, mtime)
+                    })
+                    .map(|_| Origin::Uploaded)
+            },
+        )
+        .expect("the scan found supported files");
+
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.files_seen, 3);
+        assert_eq!(plan.unchanged, 2);
+        assert_eq!(plan.content_skip, 0);
+        assert_eq!(plan.folder_unchanged.get(&0), Some(&2));
+        assert_eq!(plan.per_folder.get(&0), Some(&1));
+        assert_eq!(plan.queue.len(), 1);
+        assert_eq!(plan.queue[0].name, "new.jpg");
+        assert_eq!(plan.bytes_total, std::fs::metadata(&new_path).unwrap().len());
+
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let folder_paths = plan_folder_paths(&plan, &store);
+        publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
+        let state = shared.lock().unwrap();
+        assert_eq!(state.total, 1);
+        assert_eq!(state.queue.len(), 1);
+        assert_eq!(state.unchanged_skipped, 2);
+        assert_eq!(state.folder_unchanged.get(&0), Some(&2));
+        assert_eq!(state.bytes_total, std::fs::metadata(&new_path).unwrap().len());
+        assert_eq!(state.bytes_done, 0, "pre-scan skips do not add skip bytes");
+
+        let all_current = UploadPlan::build_since_with_stat_matches(
+            &store,
+            &[(0, None)],
+            |path, _, _| {
+                Some(if path == unchanged_paths.first().unwrap() {
+                    Origin::ContentSkip
+                } else {
+                    Origin::Uploaded
+                })
+            },
+        )
+        .expect("an all-current scan is still a participating plan");
+        assert_eq!(all_current.files_seen, 3);
+        assert!(all_current.items.is_empty());
+        assert!(all_current.queue.is_empty());
+        assert_eq!(all_current.unchanged, 2);
+        assert_eq!(all_current.content_skip, 1);
+        assert_eq!(all_current.start_message(), tr("Alles aktuell"));
+
+        let all_current_shared = Arc::new(Mutex::new(UploadShared::default()));
+        let mut all_current = all_current;
+        let folder_paths = plan_folder_paths(&all_current, &store);
+        publish_state(
+            &mut all_current,
+            &all_current_shared,
+            tr("Alles aktuell").to_string(),
+            folder_paths,
+        );
+        let state = all_current_shared.lock().unwrap();
+        assert_eq!(state.total, 0);
+        assert!(state.queue.is_empty());
+        assert_eq!(state.unchanged_skipped, 2);
+        assert_eq!(state.conflict_skipped, 1);
+        assert_eq!(state.folder_unchanged.get(&0), Some(&2));
+        assert_eq!(state.folder_conflict.get(&0), Some(&1));
+        drop(state);
+
+        let empty_root = scratch_scan_folder("empty");
+        std::fs::create_dir_all(&empty_root).unwrap();
+        let empty_root_string = empty_root.to_string_lossy().into_owned();
+        let empty_store = store_with(&empty_root_string, FolderStatus::Idle);
+        assert!(
+            UploadPlan::build_since_with_stat_matches(&empty_store, &[(0, None)], |_, _, _| None)
+                .is_none(),
+            "an empty scan is distinct from a scan whose files are all current"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(empty_root).unwrap();
+    }
+
+    #[test]
+    fn manual_plan_filters_with_real_in_memory_dedup_index() {
+        let root = scratch_scan_folder("real-dedup-index");
+        std::fs::create_dir_all(&root).unwrap();
+        let unchanged_paths = [root.join("unchanged-a.jpg"), root.join("unchanged-b.jpg")];
+        let new_path = root.join("new.jpg");
+        for path in unchanged_paths.iter().chain([&new_path]) {
+            std::fs::write(path, b"photo bytes").unwrap();
+        }
+
+        let idx = DedupIndex::in_memory();
+        for path in &unchanged_paths {
+            let meta = std::fs::metadata(path).unwrap();
+            let mtime = meta
+                .modified()
+                .unwrap()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64;
+            idx.record_upload(path, "test-md5", meta.len(), mtime, None);
+        }
+
+        let root_string = root.to_string_lossy().into_owned();
+        let mut store = store_with(&root_string, FolderStatus::Idle);
+        store.folders[0].dedup = true;
+        let plan = UploadPlan::build_since_with_stat_matches(
+            &store,
+            &[(0, None)],
+            |path, size, mtime| idx.stat_matches(path, size, mtime),
+        )
+        .expect("the scan found supported files");
+
+        assert_eq!(plan.files_seen, 3);
+        assert_eq!(plan.items.len(), 1);
+        assert_eq!(plan.queue.len(), 1);
+        assert_eq!(plan.queue[0].name, "new.jpg");
+        assert_eq!(plan.unchanged, 2);
+        assert_eq!(plan.folder_unchanged.get(&0), Some(&2));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -3370,6 +4124,7 @@ mod tests {
     fn literal_plan(files: &[(usize, &str)]) -> UploadPlan {
         let mut plan = UploadPlan::empty();
         for &(idx, name) in files {
+            plan.files_seen += 1;
             let row = plan.items.len();
             let path = PathBuf::from(name);
             plan.queue.push(QueueEntry {
@@ -3419,6 +4174,7 @@ mod tests {
             }];
             s.total = 1;
             s.folder_total.insert(0, 1);
+            s.folder_paths.insert(0, PathBuf::from("/src/folder-a"));
             s.bytes_total = 100;
         }
         let mut store = FolderStore::default();
@@ -3442,6 +4198,8 @@ mod tests {
         assert_eq!(s.total, 3);
         assert_eq!(s.folder_total.get(&0).copied(), Some(1));
         assert_eq!(s.folder_total.get(&1).copied(), Some(2));
+        assert_eq!(s.folder_paths.get(&0), Some(&PathBuf::from("/src/folder-a")));
+        assert_eq!(s.folder_paths.get(&1), Some(&PathBuf::from("/src/folder-b")));
         assert_eq!(s.bytes_total, 150, "100 + 50: both sides fully known");
         {
             let q = s.item_queue.as_ref().unwrap().lock().unwrap();
@@ -3456,6 +4214,45 @@ mod tests {
         assert_eq!(
             store.folders[1].total_files, 2,
             "the folder counter is persisted"
+        );
+    }
+
+    #[test]
+    fn injected_folder_path_is_available_under_the_bumped_queue_revision() {
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        {
+            let mut state = shared.lock().unwrap();
+            state.active = true;
+            state.item_queue = Some(queue);
+            state.rev = 4;
+        }
+        let mut store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from(
+                "/src/injected-folder",
+            ))],
+        };
+        let plan = literal_plan(&[(0, "/src/injected-folder/photo.jpg")]);
+
+        let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(refused.is_none(), "the live run should accept this folder");
+
+        let (rev, display) = {
+            let state = shared.lock().unwrap();
+            let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
+            (
+                state.rev,
+                queue_folder_display(&state.folder_paths, 0, &ambiguous),
+            )
+        };
+        assert_eq!(rev, 5);
+        assert_eq!(
+            display,
+            Some((
+                "injected-folder".to_string(),
+                "/src/injected-folder".to_string(),
+            )),
+            "the injected path is present when the new revision is visible"
         );
     }
 
@@ -3490,6 +4287,43 @@ mod tests {
         assert_eq!(s.total, 1, "total must not double");
         assert_eq!(s.folder_total.get(&0).copied(), Some(1));
         assert!(s.item_queue.as_ref().unwrap().lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn injection_is_refused_when_a_running_path_has_a_new_plan_index() {
+        // A was plan index 0. It was removed and re-added at store index 1 while
+        // B now occupies index 0; the same path must not enter the run twice.
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        {
+            let mut s = shared.lock().unwrap();
+            s.active = true;
+            s.sealed = false;
+            s.cancelled = false;
+            s.item_queue = Some(queue.clone());
+            s.total = 3;
+            s.folder_total.insert(0, 3);
+            s.folder_paths.insert(0, PathBuf::from("/src/folder-a"));
+        }
+        let mut store = FolderStore {
+            folders: vec![
+                folders::BackupFolder::new(PathBuf::from("/src/folder-b")),
+                folders::BackupFolder::new(PathBuf::from("/src/folder-a")),
+            ],
+        };
+
+        let plan = literal_plan(&[(1, "/src/folder-a/again.jpg")]);
+        let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
+        assert!(refused.is_some(), "a path already in the run must be refused");
+
+        let s = shared.lock().unwrap();
+        assert_eq!(s.total, 3, "the run total must not grow");
+        assert_eq!(s.folder_total, HashMap::from([(0, 3)]));
+        assert_eq!(s.folder_paths, HashMap::from([(0, PathBuf::from("/src/folder-a"))]));
+        assert!(s.item_queue.as_ref().unwrap().lock().unwrap().is_empty());
+        assert!(s.log.iter().any(|line| line.contains("bereits verarbeitet")));
+        drop(s);
+        assert_eq!(store.folders[1].total_files, 0);
     }
 
     #[test]

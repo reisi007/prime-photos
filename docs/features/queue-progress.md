@@ -1,8 +1,9 @@
 # Upload queue and progress
 
 All backup targets selected in one run share a single upload queue with a
-configurable concurrency. Progress is aggregated across all uploads; each
-target row reports its own outcome.
+configurable concurrency. While a run is active, aggregate progress covers only
+that run; while idle, it sums all targets. Each target row reports its own
+outcome.
 
 ## How it works
 
@@ -17,10 +18,19 @@ target row reports its own outcome.
   → Upload), which forces `concurrency = 1` for the current run; reset at
   app restart. Automatic throttling based on network/SSID/name is
   **deferred** (platform APIs, Post-MVP).
-- **Progress/ETA:** the queue displays aggregated progress across all
-  uploads (sum of all backup targets incl. one-time row), with per-target
-  breakdown in each row. The upload worker reports bytes uploaded and
-  elapsed time; ETA is computed from the current rate.
+- **Progress/ETA:** for scan-planned runs (manual and background scans via
+  `build_since`), the run-level total, aggregate bar/fraction, queue rows and ETA
+  cover only files that remain candidates after the local stat/dedup check. A
+  manual scan still checks every supported file, but a stat match is counted in
+  the result breakdown instead of becoming a queue row. Explicit file lists are
+  different: drag & drop (`from_files`) and watcher events (`build_from_events`)
+  enter the queue and run total without this pre-filter; a stat skip in the
+  worker is then settled and counted as done. Per-target counts reflect the
+  corresponding run plan; non-participating rows may retain persisted counts but
+  do not affect the live aggregate. The aggregate count and bar use the run
+  counters (`done`/`total`), not a sum of target rows. While idle, the aggregate
+  sums every target row, including the one-time row. ETA uses the run's known
+  bytes and current transfer rate.
 - **Result breakdown:** "done" alone would hide the difference between a
   real upload and a skip. Results are split into **newly uploaded / already
   in the account / unchanged / errors**. The breakdown lives in memory for
@@ -34,7 +44,9 @@ target row reports its own outcome.
   target, it shows "läuft"; the **persistent** outcome counts only after
   `finalize`. The live checks depend on **`folder_total` AND `s.active`**
   (two places in `src/backup.rs`); without `s.active` the display flips to
-  "Fehler" in the frame between run end and `finalize`.
+  "Fehler" in the frame between run end and `finalize`. If a short background
+  run starts and finishes between UI frames, the UI reloads the persisted store
+  on the next idle frame and never reloads it during a run.
 - **Aggregate progress bar:** the blue aggregate bar ("Alles aktuell") must
   never exceed 100 %. Fix: remember the line width **before** the
   `ui.horizontal`, give the bar an explicit `desired_width` (without spinner
@@ -57,12 +69,27 @@ target row reports its own outcome.
   small = **path · progress · last updated**. Each element appears **once**
   (previously duplicated percentage), path always visible. Six
   `FolderStatus` values with word and color (Paused → AMBER).
-- **"Nothing to upload" ⇒ finished state:** a folder that participated in a
-  run but had nothing to do is finalized via `folder_total` (Done, 0/0);
-  never-scanned folders remain **untouched**. At 100 % the wording is
-  **"Vollständig"** (original wording), not "100 % hochgeladen".
+- **Empty folder versus all-current scan:** a plan with no supported photos or
+  videos anywhere starts no run; for a single-folder scan the user sees
+  **"Keine Fotos oder Videos in diesem Ordner gefunden."** In a multi-folder
+  plan, an empty folder is finalized as **"nichts zu tun"** (Done, 0/0) if
+  another selected folder has supported files. A scan that finds supported
+  files but whose files are all unchanged also starts a run with zero
+  candidates, shows **"Alles aktuell"**, and is finalized via `folder_total`
+  (Done, 0/0). Never-scanned folders remain **untouched**. At 100 % the wording
+  is **"Vollständig"** (original wording), not "100 % hochgeladen".
 
 ## Decisions
+
+- **Nur echte Upload-Kandidaten zählen (User-Entscheidung 2026-10-25):** der
+  manuelle Lauf bleibt eine Voll-Prüfung aller unterstützten Dateien, damit
+  geänderte Dateien trotz unveränderter Ordner-Wasserzeichen gefunden werden.
+  Der Scan liest dafür nur Metadaten und fragt den lokalen Dedup-Index ab —
+  ohne Netzwerk und ohne Hashing. Dateien mit passendem Stat-Eintrag werden
+  als „unverändert" bzw. „bereits im Konto" im Ergebnis gezählt, aber nicht
+  in Queue, Lauf-Total oder ETA aufgenommen. Sind alle Dateien aktuell, bleibt
+  die Queue leer und der teilnehmende Ordner wird als abgeschlossen (0/0)
+  finalisiert.
 
 - **Upload-Queue & Concurrency (User-Entscheidung 2026-10-13):**
   - **Globaler Pool bleibt** (status quo): alle in einem Lauf ausgewählten
@@ -157,10 +184,10 @@ target row reports its own outcome.
     während der Upload noch lief.
 
 - **Gesamt-Fortschritt über alle Uploads** (Wunsch 2026-10-14): genau
-  **eine** aggregierte Anzeige über alle Uploads (Summe aller Backup-Ziele
-  inkl. One-Time-Zeile), nicht nur über den gerade laufenden Lauf. Manuelle
-  Läufe starten weiterhin pro Ordner; die Anzeige summiert trotzdem über
-  alle.
+  **eine** aggregierte Anzeige. Während ein Lauf aktiv ist, zeigt sie dessen
+  Lauf-Zähler; im Ruhezustand summiert sie alle Backup-Ziele inkl. One-Time-
+  Zeile. So bleiben nicht beteiligte Ziele sichtbar, ohne den Fortschritt des
+  laufenden Plans zu verfälschen. Manuelle Läufe starten weiterhin pro Ordner.
 
 - **Fortschrittsbalken nie > 100 % (Welle 5.15).** Der blaue Aggregat-Balken
   („Alles aktuell") lief während eines Laufs sichtbar über den rechten Rand
@@ -185,10 +212,16 @@ target row reports its own outcome.
   nicht, entfernen").
 
 - **„Nichts hochzuladen" ⇒ abgeschlossener Zustand (F3, Welle 5.8,
-  `c6003ff`).** Ein Ordner, der am Lauf teilnahm, aber nichts zu tun hatte,
-  wird über `folder_total` **finalisiert** (Done, 0/0); nie gescannte Ordner
-  bleiben **unberührt**. Bei 100 % lautet der Wortlaut **„Vollständig"**
-  (Original-Wortlaut), nicht „100% hochgeladen".
+  `c6003ff`).** Nur ein vollständig leerer Plan (keine unterstützten Fotos
+  oder Videos in irgendeinem ausgewählten Ordner) startet keinen Lauf. Ist ein
+  einzelner Ordner leer, zeigt der Scan „Keine Fotos oder Videos in diesem
+  Ordner gefunden."; in einem gemischten Mehrordner-Lauf wird der leere
+  teilnehmende Ordner dagegen als „nichts zu tun" mit Done (0/0)
+  **finalisiert**. Ein Scan mit unterstützten Dateien, die alle unverändert
+  sind, startet ebenfalls einen Lauf mit 0 Kandidaten, meldet „Alles aktuell"
+  und wird über `folder_total` als Done (0/0) **finalisiert**. Nie gescannte
+  Ordner bleiben **unberührt**. Bei 100 % lautet der Wortlaut
+  **„Vollständig"** (Original-Wortlaut), nicht „100% hochgeladen".
 
 - **Responsive Höhen (F8/F11, Welle 5.8).** `page_heights` als **eine**
   Quelle; die **Ordnerliste inhaltbewusst** (so viele Karten, wie passen), die

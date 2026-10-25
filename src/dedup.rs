@@ -128,6 +128,11 @@ impl DedupIndex {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn in_memory() -> Self {
+        Self::from_conn(Connection::open_in_memory().unwrap())
+    }
+
     fn from_conn(conn: Connection) -> Self {
         let ok = conn.execute_batch(UPLOADS_DDL).is_ok()
             && conn.execute_batch(AUX_TABLES_DDL).is_ok();

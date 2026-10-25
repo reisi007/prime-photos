@@ -1028,6 +1028,33 @@ impl PrimePhotoApp {
 
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        {
+            let mut shared = self.upload.lock().unwrap();
+            if shared.ctx.is_none() {
+                shared.ctx = Some(ctx.clone());
+            }
+        }
+
+        let reload_store = {
+            let shared = self.upload.lock().unwrap();
+            // Keep the marker pending while a run is active so its finished
+            // store state is reloaded on the next idle frame. Peek here:
+            // a failed load must not consume the marker.
+            crate::upload::should_reload_store(shared.active, shared.store_dirty)
+        };
+        if reload_store {
+            let loaded = if let Some(store) = crate::backup::load_store_logged() {
+                self.store = store;
+                true
+            } else {
+                false
+            };
+            self.upload
+                .lock()
+                .unwrap()
+                .consume_store_dirty_after_reload(loaded);
+        }
+
         // Drag & drop input ("Einmalige Sicherung"). `hovered_files` is
         // non-empty while a drag hovers over the window; `dropped_files` is
         // consumed by reading it, so a drop is handled exactly once. eframe
@@ -1258,12 +1285,14 @@ impl eframe::App for PrimePhotoApp {
             .show(ctx, |ui| {
                 let s = self.upload.lock().unwrap();
                 let summary = if s.active {
-                    tr3(
-                        "Upload läuft: {} · {} · {}",
-                        format!("{}/{}", s.done, s.total),
-                        &s.current,
-                        eta_suffix(&s),
-                    )
+                    crate::upload::active_log_summary(&s, || {
+                        tr3(
+                            "Upload läuft: {} · {} · {}",
+                            format!("{}/{}", s.done, s.total),
+                            &s.current,
+                            eta_suffix(&s),
+                        )
+                    })
                 } else if s.total > 0 {
                     tr1(
                         "Letzter Upload: {} erfolgreich",

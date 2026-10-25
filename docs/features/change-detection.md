@@ -114,6 +114,13 @@ last run.
     Kopien, die die mtime erhalten (`rsync --times`, Finder-Import), erhöhen
     `max mtime` nicht. Wer das braucht, startet manuell — der
     Wasserzeichen-Treffer ist der schnelle Pfad, keine Garantie.
+    Der manuelle Lauf prüft weiterhin **alle unterstützten Dateien** lokal
+    (Metadaten; bei aktivierter Dedup-Option zusätzlich
+    `DedupIndex::stat_matches`), damit er auch solche Änderungen findet. Ein
+    passender Stat-Eintrag wird jedoch nur als „unverändert" bzw. „bereits im
+    Konto" gezählt und nicht eingeplant; nur verbleibende Upload-Kandidaten
+    bilden Queue, Lauf-Total und ETA. Der Scan selbst benötigt weder Netzwerk
+    noch Hashing.
   - **Drag & Drop ist ein einmaliger Upload** (User-Klarstellung 2026-10-14):
     kein Watch, kein Wasserzeichen, keine dauerhafte Sicherung — nur die
     temporäre Queue bis zum Abschluss (siehe [one-time-upload.md](one-time-upload.md)).
