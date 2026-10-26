@@ -183,10 +183,6 @@ Ausdrücklich **ohne** Starttermin:
   **4,28:1** statt 4,5:1; der Kartenrahmen `BORDER` (`src/theme.rs:11`) liegt bei **1,32:1** (flache
   Optik, in der Praxis sichtbar). Nur auf ausdrückliche Vorgabe ändern — ein AMBER-Wechsel färbt
   Statuswörter sichtbar um.
-- **§9-Eintrag v0.1.1 ist zwei Belegteile schlanker als der v0.1.0-Eintrag (Verifier-Hinweis 2026-10-17):**
-  der Release-**Titel** (`v0.1.1`) und der Satz „sha256 nach dem Upload identisch mit der lokalen Datei"
-  fehlen (beides zutreffend: die macOS-Digests stimmen mit `shasum -a 256` überein) — bei der nächsten
-  Berührung von `docs/dev/RELEASE.md` mitziehen.
 - **Ungetrackte Junk-Datei im Repo-Wurzelverzeichnis:** `.!10517!AGENTS.todo.md` (279 B, abgebrochener
   Schreibvorgang von `AGENTS.todo.md` am 2026-10-17 14:48) — bewusst **nicht** angefasst; löschen nur
   nach User-OK.
@@ -210,16 +206,22 @@ Queue-Paginierung, Fehlerfenster (`readdtoqueue`/`retryall`), Pause **pro Ordner
 
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
-Nichts davon ist umgesetzt; alle Punkte brauchen eine Vorgabe.
+Nichts davon ist umgesetzt — **außer** dem Signatur-Default aus Punkt 3 (`d360174`); die übrigen
+Punkte brauchen eine Vorgabe.
 
 1. **Hintergrund-Sync-Rest:** (a) ob nach einem Event-Lauf ein Cooldown gelten soll (mehrere Drops
    kurz hintereinander) und (b) ob ein Lauf nur bei bestehendem WLAN/nicht-kostenpflichtigem Netz
    starten soll — beides Plattform-APIs, noch nicht festgelegt (das Original kennt **nur** die
    Bandbreiten-Drosselung, siehe `docs/features/scope.md`).
 2. **Pro-Ziel-Limit / netzwerkgesteuerte Drosselung** (bereits als Post-MVP markiert).
-3. **macOS-Signatur:** die selbstsignierte Identität „Prime Photos Local Signer" ist importiert und
-   getrustt (damit der Keychain-Dialog nur **einmal** erscheint). Offen bleibt, ob **Benachrichtigungen**
-   im signierten Bundle erscheinen und ob `--options runtime` für ad-hoc nötig ist (Signaturlage:
+3. **macOS-Signatur:** Die Identität „Prime Photos Local Signer" ist seit `d360174` der Default von
+   `packaging/make-app.sh` (ad-hoc nur als Rückfall). **Korrigierte Annahme (2026-10-26):** die
+   Erwartung „der Keychain-Dialog erscheint damit nur einmal" stimmt **nicht** — beim ersten Start des
+   0.1.4-Bundles erschien das `SecurityAgent`-Fenster erneut und verschwand nach wenigen Sekunden von
+   selbst, die App meldete sich danach normal an (Beleg: `docs/dev/RELEASE.md` §9, fünfter Lauf). Die
+   ACL-Frage ist damit **offen**: erst ein Klick auf „Immer erlauben" setzt sie dauerhaft, und es ist
+   unklar, ob der Dialog danach ausbleibt. Ebenfalls offen: ob **Benachrichtigungen** im signierten
+   Bundle erscheinen und ob `--options runtime` für ad-hoc nötig ist (Signaturlage:
    `docs/features/platform.md`).
 4. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung;
    Original-Referenz: `docs/original/UI_FLOWS.md`, `SPEC_ONE_TIME_UPLOAD.md`).

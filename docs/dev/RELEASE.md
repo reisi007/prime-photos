@@ -25,7 +25,9 @@ lokal über `packaging/make-app.sh` und wird bei Bedarf manuell an ein Release g
 ### Build-Gates (User-Entscheidung 2026-10-13)
 
 - **Push/PR gegen `main`:** nur **Linux** — `cargo build` + `cargo test` als Pflicht-Gate; die
-  anderen OS werden dort **nicht** gebaut.
+  anderen OS werden dort **nicht** gebaut. Zusätzlich läuft davor der Schritt
+  `Ratchet quality gates` (`ratchet-cli`, Modus `validate`, eingeführt mit `d3896f2`) — **nur** in
+  `ci.yml`; `release.yml` hat keinen Ratchet-Schritt (§9, fünfter Lauf).
 - **Release:** **Git-Tag `v*`** → CI-Matrix-Build **Windows + Linux**; alle Beine müssen grün
   sein (`needs:`), sonst kein Release → GitHub Release mit den Artefakten.
 - **macOS wird NICHT im CI gebaut** (User-Entscheidung 2026-10-13: „nur lokal macOS bauen ist
@@ -99,10 +101,12 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
   einem selbst gebauten Update nicht mehr, und macOS fragt beim Start nach dem Passwort für den
   Schlüsselbund „Anmeldung" (am 2026-10-26 live beobachtet). Eine Zertifikats-Identität hält das
   Designated Requirement (Identifier + Zertifikat) über Rebuilds stabil; dass der Dialog damit
-  dauerhaft ausbleibt, ist die **erwartete** Wirkung und noch nicht über mehrere Builds
-  abgenommen. Auf Rechnern ohne diese Identität (andere Rechner, Rechner ohne den
-  Schlüsselbund-Eintrag) bleibt es beim bisherigen ad-hoc-Verhalten, und für **fremde Macs** ändert
-  sich nichts — Gatekeeper blockt weiterhin (§6).
+  dauerhaft ausbleibt, ist die **erwartete** Wirkung. Abgenommen ist sie noch nicht: beim Start des
+  0.1.4-Bundles mit dieser Identität erschien der `SecurityAgent`-Dialog erneut und verschwand nach
+  wenigen Sekunden von selbst, die App meldete sich danach normal an (§9, fünfter Lauf). Auf
+  Rechnern ohne diese Identität (andere Rechner, Rechner ohne den Schlüsselbund-Eintrag) bleibt es
+  beim bisherigen ad-hoc-Verhalten, und für **fremde Macs** ändert sich nichts — Gatekeeper blockt
+  weiterhin (§6).
 - **App-Icon:** das Dock-/Taskbar-Icon wird **im Build** erzeugt, nichts ist eingecheckt —
   `build.rs` rastert `assets/logo.svg` (die SVG-Quelle) in die zehn iconset-Größen nach
   `target/pp-appicon.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
@@ -313,6 +317,7 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   (`linux-x64.tar.gz`, `macos-arm64.dmg`, `windows-x64.zip`); `v0.1.0` war ohnehin DMG-only.
 
   Zip und DMG wurden **manuell** ans Release gehängt (§4) — der Workflow baut nur Windows/Linux.
+  Der `sha256` des DMG war nach dem Upload identisch mit der lokalen Datei (`shasum -a 256`).
 - **macOS-Bundle (lokal aus dem Tag gebaut, §4):** `./packaging/make-app.sh` mit `VERSION=0.1.1`,
   `BUILD=2`, ad-hoc signiert, Volname `Prime Photos`; `CFBundleShortVersionString = 0.1.1`,
   `CFBundleVersion = 2`, `CFBundleIdentifier = de.reisinger.prime-photos`; der Commit-Stempel im
@@ -321,6 +326,7 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   (§3) — dieselbe Lage wie bei v0.1.0.
 - **Release-Notes:** `generate_release_notes: true` erzeugte diesmal eine echte Commit-Liste —
   `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.0...v0.1.1`.
+  Titel des Releases: `v0.1.1`.
 - **Noch nicht live abgenommen:** die beiden 0.1.1-Verhaltensänderungen — Ordner *während* eines
   Laufs hinzufügen; Laufwerk abziehen/anklemmen → Vollscan + Wiederanlauf — sind noch nicht an
   einem echten Laufwerk bestätigt (im Ledger als offener Punkt geführt).
@@ -405,6 +411,56 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   `actions/checkout@v4`, `actions/upload-artifact@v4`, `actions/download-artifact@v4` (werden auf
   Node.js 24 gezwungen); außerdem der Hinweis, dass `ubuntu-latest` ab 2026-10-19 auf Ubuntu 26
   migriert. Die Anhebung ist eine eigene, spätere Welle.
+
+**Durch den fünften echten Lauf belegt (2026-10-26):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.4` (Tag-Objekt `e0146a7…`) auf Commit `34b0f05`;
+  GitHub-Release `v0.1.4`, veröffentlicht 2026-10-26T06:53:04Z, **nicht** Draft, **nicht**
+  Pre-Release. Titel des Releases: `v0.1.4`.
+- **Runs:** Push-CI `40281685970` (`ci.yml`, Linux build & test) grün; Release-Workflow `40281848886`
+  (`release.yml`, ausgelöst durch den Tag-Push) — Jobs `Build linux-x64` (5m27s),
+  `Build windows-x64` (5m42s), `Publish GitHub Release` (12s), alle grün.
+- **Ratchet-Gate in der CI:** der Push-CI-Lauf enthält den Schritt `Ratchet quality gates`
+  (`ratchet-cli`, Modus `validate`) als grünen Schritt; der Release-Workflow `release.yml` hat diesen
+  Schritt weiterhin **nicht**.
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.332.746 | `343ae18da13bd2e6e4173f76282b4f631561af3349ede9a3a9afde4f728233fd` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.563.611 | `21439fc923800cadb12ac4d19cff83b2d9087bc9d1390e426c206e9bcc8ee667` |
+  | `Prime-Photos-windows-x64.zip` | 8.600.210 | `0ad58f4b6458ed03e27125f254ce91655b7ebb5e4471595e97189613514ca072` |
+
+  `v0.1.4` trägt drei Assets. Das DMG wurde **manuell** ans Release gehängt (§4); sein über die
+  GitHub-API gemeldeter `sha256`-Digest ist identisch mit dem der lokalen Datei
+  (`shasum -a 256`).
+- **macOS-Bundle (lokal gebaut, §4):** `VERSION=0.1.4`, `BUILD=4`, erstmals mit dem neuen
+  Signatur-Default — Identität `Prime Photos Local Signer` statt ad-hoc (`d360174`); Commit-Stempel
+  `34b0f05` dank `touch build.rs`; `CFBundleShortVersionString = 0.1.4`, `CFBundleVersion = 4`,
+  `CFBundleIdentifier = de.reisinger.prime-photos`, `LSUIElement = true`; `codesign --verify --strict`
+  gültig; `hdiutil verify` auf dem DMG: **VALID**. Volname `Prime Photos`; Installation nach
+  `/Applications` mit `ditto`.
+- **Live abgenommen (Dock-Icon, am 0.1.4-Build, zwei volle Zyklen):** Beobachtung am **laufenden**
+  Build — aus den Artefakten nicht reproduzierbar (die belegen Endzustand, Commit-Stempel und
+  Signatur, nicht das Laufzeitverhalten). Fenster mit dem roten X schließen ⇒ `lsappinfo` wechselt
+  auf `type="UIElement"`, die **Dock-Kachel verschwindet innerhalb von 1–2 s**, die App läuft weiter;
+  erneutes Öffnen (`open`) ⇒ `type="Foreground"`, Dock-Kachel und Fenster sind zurück. Geprüft über
+  `lsappinfo info -app de.reisinger.prime-photos` und die Dock-Kachel-Liste per System Events.
+- **Signatur-Default (§4), Wirkung noch nicht abgenommen:** erwartet war, dass der
+  Schlüsselbund-Dialog nach einem selbst gebauten Update ausbleibt, weil das Designated Requirement
+  über Rebuilds stabil ist. Beim Start des 0.1.4-Bundles erschien das `SecurityAgent`-Fenster
+  („Prime Photos möchte deine vertraulichen Informationen verwenden …") erneut und verschwand nach
+  wenigen Sekunden von selbst; die App meldete sich danach normal an. Der Default bleibt die richtige
+  Wahl (stabiles Designated Requirement statt cdhash pro Build) — belegt ist die Wirkung damit
+  weiterhin nicht, dieselbe Einordnung wie in §4 und `packaging/README.md`.
+- **Windows unsigniert:** Authenticode-Schritte mangels Secrets übersprungen (§3).
+- **Release-Notes:** `generate_release_notes: true` erzeugte
+  `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.3...v0.1.4`.
+- **Inhalt dieses Releases:** Fortschritt/ETA zählen nur noch den **aktuellen** Upload (Skips
+  erscheinen nur in der Ergebniszeile, Plan-Zeit-Filter); das Dock-Icon folgt der Fenstersichtbarkeit
+  (verschwindet beim Schließen, kommt beim Öffnen zurück); Ratchet-Qualitätsgates in der CI; dazu der
+  Signatur-Default für **lokale** Bundles (ad-hoc nur noch als Rückfall). Das Wurzel-README bleibt
+  versionsfrei.
 
 ---
 
