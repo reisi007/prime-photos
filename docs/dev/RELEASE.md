@@ -100,9 +100,9 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
   Schlüsselbund „Anmeldung" (am 2026-10-26 live beobachtet). Eine Zertifikats-Identität hält das
   Designated Requirement (Identifier + Zertifikat) über Rebuilds stabil; dass der Dialog damit
   dauerhaft ausbleibt, ist die **erwartete** Wirkung und noch nicht über mehrere Builds
-  abgenommen. Auf Rechnern ohne diese Identität (frischer Klon, andere Rechner) bleibt es
-  beim bisherigen ad-hoc-Verhalten, und für **fremde Macs** ändert sich nichts — Gatekeeper blockt
-  weiterhin (§6).
+  abgenommen. Auf Rechnern ohne diese Identität (andere Rechner, Rechner ohne den
+  Schlüsselbund-Eintrag) bleibt es beim bisherigen ad-hoc-Verhalten, und für **fremde Macs** ändert
+  sich nichts — Gatekeeper blockt weiterhin (§6).
 - **App-Icon:** das Dock-/Taskbar-Icon wird **im Build** erzeugt, nichts ist eingecheckt —
   `build.rs` rastert `assets/logo.svg` (die SVG-Quelle) in die zehn iconset-Größen nach
   `target/pp-appicon.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
@@ -138,7 +138,7 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (Default `VERSION=0.1.3`, `BUILD=3`, mit der lokalen Identität
+2. **Bundle bauen** (Default `VERSION=0.1.4`, `BUILD=4`, mit der lokalen Identität
    `Prime Photos Local Signer` signiert; ad-hoc nur als Rückfall):
 
    ```sh

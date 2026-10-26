@@ -27,7 +27,7 @@ Voraussetzungen: Rust-Toolchain und die Xcode Command Line Tools (C-Compiler fü
 
 Das erzeugt `target/dist/Prime Photos.app` und signiert sie mit der lokalen Codesigning-Identität
 `Prime Photos Local Signer`, sofern die im Schlüsselbund liegt und `CODESIGN_IDENTITY` nicht gesetzt
-ist; ist `CODESIGN_IDENTITY` nicht leer (z. B. `-`), gewinnt dieser Wert. Starten:
+oder leer ist; ist `CODESIGN_IDENTITY` nicht leer (z. B. `-`), gewinnt dieser Wert. Starten:
 
 ```sh
 open "target/dist/Prime Photos.app"
@@ -45,8 +45,8 @@ ignorierten `target/`.
 | Variable | Wirkung | Standard |
 |---|---|---|
 | `SKIP_BUILD=1` | überspringt `cargo build --release` (nutzt das vorhandene Binary) | aus |
-| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.3` |
-| `BUILD=n` | `CFBundleVersion` | `3` |
+| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.4` |
+| `BUILD=n` | `CFBundleVersion` | `4` |
 | `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt des Standards (gewinnt immer) | lokale Identität `Prime Photos Local Signer`, sonst `-` (ad-hoc) |
 | `DIST_DIR=<dir>` | Ausgabeordner des Bundles | `target/dist` |
 

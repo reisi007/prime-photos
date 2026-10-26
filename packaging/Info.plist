@@ -4,8 +4,8 @@
   Vorlage für das macOS-App-Bundle (PORT-6).
 
   Platzhalter, die `make-app.sh` beim Schreiben der echten Contents/Info.plist ersetzt:
-    __VERSION__  -> CFBundleShortVersionString  (Standard: 0.1.2, env VERSION)
-    __BUILD__    -> CFBundleVersion             (Standard: 2,     env BUILD)
+    __VERSION__  -> CFBundleShortVersionString  (Standard: 0.1.4, env VERSION)
+    __BUILD__    -> CFBundleVersion             (Standard: 4,     env BUILD)
 
   Dies ist eine Vorlage, kein fertiges Bundle-Info.plist. Sie wird von
   `make-app.sh` per sed in das Bundle kopiert und dort mit `plutil -lint` geprüft.
