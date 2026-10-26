@@ -429,7 +429,6 @@ const EN: &[(&str, &str)] = &[
     ("Anmeldung abgelaufen, {} wird erneut versucht.", "Sign-in expired, retrying {}."),
     ("Auth-Token wurde erneuert.", "Auth token renewed."),
     ("Auth-Token-Erneuerung fehlgeschlagen: {}", "Auth token renewal failed: {}"),
-    ("{} offen", "{} open"),
     ("Angehalten ({}%)", "Paused ({}%)"),
     ("FEHLER {}: {}", "ERROR {}: {}"),
     ("Fehlgeschlagen", "Failed"),

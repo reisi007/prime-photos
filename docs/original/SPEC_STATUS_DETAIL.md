@@ -142,9 +142,10 @@ tables), so it is **not** a dead key. → **belegt**
      → **belegt**
 - **Grouping.** There is **no grouping** in either backup details table: the item list is flat.
   The *activity window* is the only place with a two-section grouping ("In Bearbeitung" /
-  "Warten"), and that grouping is by status bucket, not by folder. Our port's per-folder grouping
-  in the queue panel is therefore **not** a port of anything in the original — it is an original
-  design decision. → **belegt** (absence of grouping in the backup tables) / *inferred* (our own)
+  "Warten"), and that grouping is by status bucket, not by folder. Our port's queue panel is
+  also a **single flat list**, ordered globally by file status (user decision 2026-10-26); the
+  earlier per-folder grouping was our own design decision, **not** a port of anything in the
+  original. → **belegt** (absence of grouping in the backup tables) / *inferred* (our own)
 - **Pagination.** 1000 items per page, `SelectedPage` / `TotalPages` derived from the filtered
   count. → **belegt**
 - **Empty state.** A special row view renders `TransferItemFilter.<x>.EnumToLocalizeEmptyDisplayItemName(Backup)`
@@ -619,16 +620,16 @@ row menu, pause toggle), `src/upload.rs` (`UploadShared`, `FileState`, `status_t
 
 | Capability | Original | Our app | File reference |
 |---|---|---|---|
-| Details/status table columns | Name + Letzte Aktualisierung + Status (+ Größe in the legacy layout), fixed min widths, resizable | **none** — the queue is a flat list of *colour + state label + file name* with no header row at all | `src/backup.rs` (queue panel, `FileState` mapping at the `(txt, col)` match) |
-| Per-file size column | `…_statuswindow_sizecolumntitle`, hidden for folder rows | **none** per file; the run has byte totals (`bytes_total`/`bytes_done`) but no per-row display | `src/upload.rs` (`UploadShared::bytes_*`) |
+| Details/status table columns | Name + Letzte Aktualisierung + Status (+ Größe in the legacy layout), fixed min widths, resizable | **fixed four-column header** — Ordner · Name · Größe · Status, virtualised list via `ScrollArea::show_rows` (no pagination) | `src/backup.rs` (queue panel: column header + `show_rows`) |
+| Per-file size column | `…_statuswindow_sizecolumntitle`, hidden for folder rows | **Größe column per row** — `crate::text::format_size(e.size)` | `src/backup.rs` (queue file row) |
 | Per-file last-modified | column + tooltip from `record.StatusChanged` | **none** — only the folder-level `last_updated` timestamp string | `src/folders.rs` (`BackupFolder::last_updated`), rendered in `src/backup.rs` |
 | Relative time (`datetimeago_*`) | 12-branch "Vor {n} …" renderer, absolute date beyond a week | **none** — absolute `HH:MM` from `chrono::Local` | `src/backup.rs` (`chrono::Local::now().format("…%H:%M")` in `finalize_upload` / `finalize_background_store`) |
-| Row tooltip (path + size + age) | composed from three strings | **none** — no per-row tooltip | — |
-| Sorting | status precedence then `SortDate`, plus click-to-sort by name in the legacy table | **none** — insertion order | `src/backup.rs` (`for e in &s.queue`) |
+| Row tooltip (path + size + age) | composed from three strings | **partial** — full file path on the name (always); full folder path on the Ordner cell only when one is resolvable (never for the one-time target or an unresolvable folder index); a `x von y` byte detail on the Status cell only while the row is `Uploading` with a known size (`size > 0`); no age | `src/backup.rs` (queue file row, `on_hover_text`) |
+| Sorting | status precedence then `SortDate`, plus click-to-sort by name in the legacy table | **status buckets** — In Bearbeitung → Fehlgeschlagen → Warten → Abgeschlossen → Übersprungen, insertion order within a bucket (user decision 2026-10-26; **not** the original key: no `SortDate`, no click-to-sort) | `src/backup.rs` (`queue_layout`) |
 | Filtering | 7-item menu (6 + Skipped) or a 6-value view-model filter, client-side under a lock | **none** | — |
 | Empty-state text per filter | separate upload/download key families | **none** | — |
 | Pagination | 1000 items/page | **none** — and needed: the queue panel caps rendering at **300 rows** (`if shown >= 300 break`) | `src/backup.rs` (queue panel) |
-| Drill-down / breadcrumb | nested vs flat mode persisted in customer settings; folder rows navigate | **none** — the queue is always flat, though it *is* grouped by folder (our own idea, not a port) | `src/backup.rs` (groups by `e.folder`) |
+| Drill-down / breadcrumb | nested vs flat mode persisted in customer settings; folder rows navigate | **none** — the queue is always a single flat, status-sorted list with no folder groups (the Ordner column is per row only) | `src/backup.rs` (`queue_layout`) |
 | Auto-upload toggle in details | toggle + subtitle in the details header | **n/a** — `config.background_sync` covers it | `src/settings.rs`, `src/config.rs` |
 | Details footer "Wiederholen" | enabled only when `FailedCount > 0`, publishes `RetryErroredUploadsIntent` | **partial** — a "Wiederholen" row-menu item exists but always restarts a scan-based run; there is no per-schedule/folder *failed-record* set to retry from | `src/backup.rs` (`FolderAction::Retry` → `start_folder_upload`) |
 | Error window | own 600 × 400 window, one per schedule, headerless name-only table, per-row CTA + dismiss, "Alle erneut versuchen" + "Schließen" | **none** — the only error surface is the per-file red state in the queue panel plus a log line | `src/backup.rs` (queue panel), `src/upload.rs` (`FileState::Failed`) |

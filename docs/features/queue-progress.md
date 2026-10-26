@@ -61,9 +61,13 @@ outcome.
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea
   gets its own `id_salt` (`"queue"`, `"folders"`).
-- **Folders in the queue:** folder **column** per row **and** in the group
-  header; with **two folders of the same name** name **+ path**
-  (disambiguation computed once per frame), full path in the tooltip.
+- **Queue order (user decision 2026-10-26):** the queue is **global and
+  flat**, sorted by file status — In Bearbeitung → Fehlgeschlagen → Warten →
+  Abgeschlossen → Übersprungen — and stable in insertion order within a status
+  bucket. There are **no folder group headers**.
+- **Folders in the queue:** folder **column** per row; with **two folders of
+  the same name** name **+ parent name** (disambiguation computed once per
+  frame), full path in the tooltip.
 - **Folder card Variant A:** row 1 = name left, **status word** right
   (colored, per `BackupStatusAlertLevel`) + the three row symbols; row 2
   small = **path · progress · last updated**. Each element appears **once**
@@ -106,6 +110,20 @@ outcome.
     erzwingt; bei App-Neustart zurückgesetzt. Automatische Drosselung anhand
     des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs,
     Post-MVP).
+
+- **Statussortierung der Warteschlange (User-Entscheidung 2026-10-26):** die
+  Live-Warteschlange wird **global und flach** nach Dateistatus sortiert statt
+  nach Backup-Ordner gruppiert; die Gruppenkopf-Zeilen („x offen") entfallen
+  vollständig. Reihenfolge: In Bearbeitung → Fehlgeschlagen → Warten →
+  Abgeschlossen → Übersprungen, innerhalb eines Status in Einfügereihenfolge
+  (stabil, keine weitere Priorisierung). Die **Ordner-Spalte bleibt** (inkl.
+  Gleichnamigkeits-Disambiguierung und Tooltip), ebenso die Spalte
+  „Warteschlange (N)". Die Reihenfolge ist **unsere eigene Festlegung**; die
+  Originalsortierung (§3.3: Processing/Errored/andere/Completed **plus
+  `SortDate`**, ohne stabile Einfügereihenfolge) dient höchstens als loser
+  Anhalt (Processing zuerst, Errored danach) und wird **nicht** übernommen.
+  Das Original gruppiert seine Status-Tabellen nicht — die frühere
+  Ordner-Gruppierung war eine eigene Idee, die hier entfällt.
 
 - **Queue-Paginierung (Abweichung vom Original, Stand 2026-10-17):** unsere
   Warteschlange kappt das Rendering bei **300 Zeilen** — das Original
@@ -238,9 +256,10 @@ outcome.
   **jede** ScrollArea ein eigenes `id_salt` (`"queue"`, `"folders"`).
 
 - **Ordner in der Warteschlange (F13, Welle 5.8).** Ordner-**Spalte** je
-  Zeile **und** im Gruppenkopf; bei **zwei Ordnern mit gleichem Namen** Name
-  **+ Pfad** (Mehrdeutigkeit einmal pro Frame berechnet), voller Pfad im
-  Tooltip. Ersetzt den früheren Wunsch „Ordnerpfad im Zeilennamen".
+  Zeile; bei **zwei Ordnern mit gleichem Namen** Name **+ Pfad**
+  (Mehrdeutigkeit einmal pro Frame berechnet), voller Pfad im Tooltip. Ersetzt
+  den früheren Wunsch „Ordnerpfad im Zeilennamen". Der damalige Gruppenkopf
+  entfällt seit der flachen Statussortierung (2026-10-26).
 
 - **Ordner-Karte Variant A (F14, Welle 5.8).** Zeile 1 = Name links,
   **Statuswort** rechts (farbig, je `BackupStatusAlertLevel`) + die drei

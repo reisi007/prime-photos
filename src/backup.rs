@@ -239,7 +239,7 @@ fn lift_returned_sources(
     (returned, changed)
 }
 
-/// Label of a backup folder in the queue (rows and group headers): the folder
+/// Label of a backup folder in the queue's per-row folder column: the folder
 /// name, plus the **parent folder's name** in parentheses when **more than
 /// one** backup folder carries that name (`ambiguous`) — two folders both
 /// named "Sport" would otherwise be indistinguishable in the queue (user
@@ -389,18 +389,31 @@ fn page_heights(free: f32, cards: usize) -> (f32, f32) {
     (queue_h, list_h)
 }
 
-/// One line of the live queue table: a backup-folder group header or a file row.
-/// Both are drawn at the same fixed height, so `ScrollArea::show_rows` can still
-/// virtualise the list (docs/original/SPEC_UPLOAD_PROGRESS.md §7.8) — it needs a uniform
-/// row *height*, not flat data.
-enum QueueRow {
-    /// A backup-folder group header: the folder label plus the number of its
-    /// files that are still open (`Waiting`/`Uploading`).
-    Header { label: String, open: usize },
-    /// A file row. `queue_idx` points into `UploadShared::queue`, so the live
-    /// name/size/state/path are read from there instead of being cloned per
-    /// frame.
-    File { queue_idx: usize },
+/// Status bucket of the live queue's flat ordering: **our own** order, decided
+/// by the user on 2026-10-26 — "In Bearbeitung" → "Fehlgeschlagen" → "Warten"
+/// → "Abgeschlossen" → "Übersprungen". The original status table is at most a
+/// loose reference (Processing first, Errored second; see
+/// docs/original/SPEC_STATUS_DETAIL.md §3.3); it additionally sorts by
+/// `SortDate` and does not preserve insertion order, so its key is
+/// deliberately **not** copied.
+fn status_rank(state: FileState) -> u8 {
+    match state {
+        FileState::Uploading => 0,
+        FileState::Failed => 1,
+        FileState::Waiting => 2,
+        FileState::Done => 3,
+        FileState::Skipped => 4,
+    }
+}
+
+/// Flat, global queue layout: queue indices sorted by status bucket, insertion
+/// order (the queue index) inside a bucket. Folder membership deliberately does
+/// not matter — no group headers, no folder grouping (user decision
+/// 2026-10-26). Pure, so the ordering is testable without a `Ui`.
+fn queue_layout(queue: &[QueueEntry]) -> Vec<usize> {
+    let mut layout: Vec<usize> = (0..queue.len()).collect();
+    layout.sort_by_key(|&i| (status_rank(queue[i].state), i));
+    layout
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +619,7 @@ impl UploadPlan {
     /// Build a plan from an explicit **per-folder** file list (the watcher
     /// path): every file keeps its own backup-folder index, so the run looks
     /// exactly like a manual folder run to `run_upload` — same counters, same
-    /// `folder_opts`, same queue grouping — while only the files the OS actually
+    /// `folder_opts`, same queue layout — while only the files the OS actually
     /// named are uploaded. No folder is walked.
     fn build_from_events(store: &FolderStore, files: &[(usize, PathBuf)]) -> Option<Self> {
         let mut plan = Self::empty();
@@ -691,12 +704,6 @@ fn publish_state(
     s.uploaded_ids.clear();
     s.total = plan.items.len();
     s.queue = std::mem::take(&mut plan.queue);
-    // Publish paths before bumping the revision: the UI cache may rebuild as
-    // soon as this lock is released, and needs labels for this queue identity.
-    // A brand-new queue identity: bump the revision so the UI cache cannot keep
-    // showing the previous run's entries (`queue_cache_rev` would otherwise
-    // still match).
-    s.touch_queue();
     // Byte-based ETA counters: the known run size up front, everything settled /
     // transferred back to zero so the first rate sample is clean. The byte ETA
     // is only meaningful when *every* file's size is known (`sized_total`),
@@ -952,7 +959,6 @@ fn inject_into_live_run(
             0
         };
         s.folder_opts.extend(std::mem::take(&mut plan.folder_opts));
-        s.touch_queue();
         s.log(if plan.files_seen > 0 && n == 0 {
             tr("Alles aktuell").to_string()
         } else {
@@ -2541,111 +2547,24 @@ impl PrimePhotoApp {
 
         let mut actions: Vec<FolderAction> = Vec::new();
 
-        // Live per-file queue, grouped by backup folder
-        // (docs/original/SPEC_UPLOAD_PROGRESS.md §4.1/§4.3). The grouped structure is
-        // cached and only rebuilt when the run's *file states* changed
-        // (`UploadShared::rev`): a 5 000-file run otherwise cloned every file
-        // name on every frame, for nothing — only the counters move.
-        // Names the active run carries more than once: those queue rows and
-        // group headers show "Name (Pfad)" so same-named folders stay
-        // distinguishable (user decision 2026-10-16).
-        let (rev, folder_paths) = {
+        // Live per-file queue as one flat, virtualised table (Welle 3.1,
+        // docs/original/SPEC_UPLOAD_PROGRESS.md §7.3/§7.8): permanent main-area
+        // content with fixed columns. The rows are sorted globally by file
+        // status — no folder grouping and no group headers (user decision
+        // 2026-10-26, see [`status_rank`]). The layout only carries queue
+        // indices, so no file name is cloned per frame. The Ordner column keeps
+        // the run's captured plan paths; same-named folders are disambiguated
+        // with "Name (parent)" (user decision 2026-10-16).
+        let (folder_paths, remaining, layout) = {
             let s = self.upload.lock().unwrap();
-            (s.rev, s.folder_paths.clone())
+            let remaining = s
+                .queue
+                .iter()
+                .filter(|e| matches!(e.state, FileState::Waiting | FileState::Uploading))
+                .count();
+            (s.folder_paths.clone(), remaining, queue_layout(&s.queue))
         };
         let ambiguous = ambiguous_folder_names_for_paths(&folder_paths);
-        if self.queue_cache_rev != rev || self.queue_cache.1.is_empty() {
-            let groups: Vec<(String, Vec<(String, FileState)>)> = {
-                let s = self.upload.lock().unwrap();
-                let mut groups: Vec<(String, Vec<(String, FileState)>)> = Vec::new();
-                // Folder index -> position in `groups` (keeps first-seen order).
-                let mut slot: HashMap<usize, usize> = HashMap::new();
-                for e in &s.queue {
-                    let folder = if e.folder == ONE_TIME_IDX {
-                        // The transient one-time target is not in `store.folders`,
-                        // so its queue group is labelled directly.
-                        tr("Einmalige Sicherung").to_string()
-                    } else {
-                        queue_folder_display(&folder_paths, e.folder, &ambiguous)
-                            .map(|(label, _)| label)
-                            .unwrap_or_default()
-                    };
-                    let idx = match slot.get(&e.folder).copied() {
-                        Some(i) => i,
-                        None => {
-                            groups.push((folder, Vec::new()));
-                            slot.insert(e.folder, groups.len() - 1);
-                            groups.len() - 1
-                        }
-                    };
-                    groups[idx].1.push((crate::text::nfc(&e.name), e.state));
-                }
-                groups
-            };
-            self.queue_cache = (rev, groups);
-            self.queue_cache_rev = rev;
-        }
-        // Live per-file queue as a virtualised table (Welle 3.1,
-        // docs/original/SPEC_UPLOAD_PROGRESS.md §7.3/§7.8): the queue is permanent
-        // main-area content with fixed columns, no longer collapsed away. The
-        // rows stay grouped by backup folder — a background run puts **every**
-        // enabled folder into one queue (src/backup.rs, run planning), so without
-        // the group headers the files of several targets would be
-        // indistinguishable. `ScrollArea::show_rows` only needs a uniform row
-        // height, so the list is a flat `Vec<QueueRow>` of group headers and file
-        // rows that share that height.
-        let remaining: usize = self
-            .queue_cache
-            .1
-            .iter()
-            .map(|(_, files)| {
-                files
-                    .iter()
-                    .filter(|(_, st)| matches!(st, FileState::Waiting | FileState::Uploading))
-                    .count()
-            })
-            .sum();
-        // Flatten the grouped cache and the live queue into one row list. The
-        // cache and this grouping both walk `UploadShared::queue` in first-seen
-        // folder order, so group `g` takes its label and per-file states from the
-        // cache while the file rows carry only a queue index — no file name is
-        // cloned per frame. `QueueEntry.folder` is the grouping key again.
-        let layout: Vec<QueueRow> = {
-            let s = self.upload.lock().unwrap();
-            // Folder index -> its queue positions, in first-seen order.
-            let mut order: Vec<usize> = Vec::new();
-            let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
-            for (i, e) in s.queue.iter().enumerate() {
-                if !groups.contains_key(&e.folder) {
-                    order.push(e.folder);
-                }
-                groups.entry(e.folder).or_default().push(i);
-            }
-            let mut layout: Vec<QueueRow> = Vec::with_capacity(s.queue.len() + order.len());
-            for (g, folder) in order.iter().enumerate() {
-                let (label, open) = self
-                    .queue_cache
-                    .1
-                    .get(g)
-                    .map(|(label, files)| {
-                        let open = files
-                            .iter()
-                            .filter(|(_, st)| {
-                                matches!(st, FileState::Waiting | FileState::Uploading)
-                            })
-                            .count();
-                        (label.clone(), open)
-                    })
-                    .unwrap_or_default();
-                // A group whose label could not be resolved (a stale folder
-                // index) is drawn without its header, exactly as before.
-                if !label.is_empty() {
-                    layout.push(QueueRow::Header { label, open });
-                }
-                layout.extend(groups[folder].iter().map(|&i| QueueRow::File { queue_idx: i }));
-            }
-            layout
-        };
 
         ui.add_space(12.0);
         ui.label(RichText::new(tr1("Warteschlange ({})", remaining)).strong().size(14.0));
@@ -2729,129 +2648,85 @@ impl PrimePhotoApp {
                 .show_rows(ui, QUEUE_ROW_H, layout.len(), |ui, range| {
                     // Lock the shared state once per frame for the visible slice.
                     let s = self.upload.lock().unwrap();
-                    for i in range {
-                        match &layout[i] {
-                            QueueRow::Header { label, open } => {
-                                // Group line, muted and without a status column
-                                // (§7.8). Both row kinds are allocated at exactly
-                                // `QUEUE_ROW_H`, so each advances by
-                                // `QUEUE_ROW_H + item_spacing.y` — the same height
-                                // `show_rows` derives. A plain `ui.horizontal`
-                                // here would instead expand to the theme's
-                                // `interact_size.y` (26 px), making this row
-                                // taller than the file rows and desynchronising
-                                // the virtualised scroll positions.
-                                let row_w = ui.available_width();
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(row_w, QUEUE_ROW_H),
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| {
-                                        // The group's folder spans the Ordner and
-                                        // Name columns — the group *is* the
-                                        // folder, so the file column stays empty.
-                                        ui.add_sized(
-                                            [QUEUE_FOLDER_W + name_w, QUEUE_ROW_H],
-                                            egui::Label::new(
-                                                RichText::new(label.as_str()).strong().size(12.0),
-                                            )
-                                            .truncate(),
-                                        );
-                                        ui.label(theme::muted(tr1("{} offen", open)).size(11.0));
-                                    },
-                                );
-                            }
-                            QueueRow::File { queue_idx } => {
-                                let Some(e) = s.queue.get(*queue_idx) else {
-                                    continue;
-                                };
-                                // Befund 11c: an `Uploading` row additionally shows
-                                // the real per-file percentage once bytes have gone
-                                // out, so progress is visible per file and not only
-                                // as the coarse state. The whole visible string is
-                                // one i18n key — never assembled from two parts.
-                                let (txt, col): (String, egui::Color32) = match e.state {
-                                    FileState::Waiting => (tr("Warten").to_string(), theme::MUTED),
-                                    FileState::Uploading => {
-                                        let pct = calculate_pct(e.size, e.bytes_sent);
-                                        if pct > 0 {
-                                            (tr1("In Bearbeitung · {}%", pct), theme::TEAL)
-                                        } else {
-                                            (tr("In Bearbeitung").to_string(), theme::TEAL)
-                                        }
-                                    }
-                                    FileState::Done => {
-                                        (tr("Abgeschlossen").to_string(), theme::GREEN)
-                                    }
-                                    FileState::Failed => {
-                                        (tr("Fehlgeschlagen").to_string(), theme::RED)
-                                    }
-                                    FileState::Skipped => {
-                                        (tr("Übersprungen").to_string(), theme::MUTED)
-                                    }
-                                };
-                                // A long name is truncated in the cell; the full
-                                // path shows on hover (§7.3).
-                                let full = e.path.display().to_string();
-                                // The row's backup folder — the same label the
-                                // group header carries (disambiguated when the
-                                // active run holds the name twice).
-                                let (folder_label, folder_tip) = if e.folder == ONE_TIME_IDX {
-                                    (tr("Einmalige Sicherung").to_string(), String::new())
+                    for &queue_idx in &layout[range] {
+                        let Some(e) = s.queue.get(queue_idx) else {
+                            continue;
+                        };
+                        // Befund 11c: an `Uploading` row additionally shows
+                        // the real per-file percentage once bytes have gone
+                        // out, so progress is visible per file and not only
+                        // as the coarse state. The whole visible string is
+                        // one i18n key — never assembled from two parts.
+                        let (txt, col): (String, egui::Color32) = match e.state {
+                            FileState::Waiting => (tr("Warten").to_string(), theme::MUTED),
+                            FileState::Uploading => {
+                                let pct = calculate_pct(e.size, e.bytes_sent);
+                                if pct > 0 {
+                                    (tr1("In Bearbeitung · {}%", pct), theme::TEAL)
                                 } else {
-                                    queue_folder_display(&folder_paths, e.folder, &ambiguous)
-                                        .unwrap_or_default()
-                                };
-                                // Allocated at exactly `QUEUE_ROW_H` so the row
-                                // advances by `QUEUE_ROW_H + item_spacing.y`,
-                                // matching the group rows and `show_rows` (see
-                                // the header arm above).
-                                let row_w = ui.available_width();
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(row_w, QUEUE_ROW_H),
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| {
-                                        ui.add_sized(
-                                            [QUEUE_FOLDER_W, QUEUE_ROW_H],
-                                            egui::Label::new(
-                                                RichText::new(folder_label).size(12.0),
-                                            )
-                                            .truncate(),
-                                        )
-                                        .on_hover_text(folder_tip);
-                                        ui.add_sized(
-                                            [name_w, QUEUE_ROW_H],
-                                            egui::Label::new(
-                                                RichText::new(crate::text::nfc(&e.name)).size(12.0),
-                                            )
-                                            .truncate(),
-                                        )
-                                        .on_hover_text(full);
-                                        ui.add_sized(
-                                            [QUEUE_SIZE_W, QUEUE_ROW_H],
-                                            egui::Label::new(
-                                                RichText::new(crate::text::format_size(e.size))
-                                                    .size(12.0),
-                                            ),
-                                        );
-                                        let status = ui.add_sized(
-                                            [QUEUE_STATUS_W, QUEUE_ROW_H],
-                                            egui::Label::new(
-                                                RichText::new(txt).color(col).size(12.0),
-                                            ),
-                                        );
-                                        // Optional byte detail while a transfer is
-                                        // live (Befund 11c).
-                                        if e.state == FileState::Uploading && e.size > 0 {
-                                            status.on_hover_text(tr2(
-                                                "{} von {}",
-                                                crate::text::format_size(e.bytes_sent),
-                                                crate::text::format_size(e.size),
-                                            ));
-                                        }
-                                    },
-                                );
+                                    (tr("In Bearbeitung").to_string(), theme::TEAL)
+                                }
                             }
-                        }
+                            FileState::Done => (tr("Abgeschlossen").to_string(), theme::GREEN),
+                            FileState::Failed => (tr("Fehlgeschlagen").to_string(), theme::RED),
+                            FileState::Skipped => (tr("Übersprungen").to_string(), theme::MUTED),
+                        };
+                        // A long name is truncated in the cell; the full
+                        // path shows on hover (§7.3).
+                        let full = e.path.display().to_string();
+                        // The row's backup folder (disambiguated when the
+                        // active run holds the name twice).
+                        let (folder_label, folder_tip) = if e.folder == ONE_TIME_IDX {
+                            (tr("Einmalige Sicherung").to_string(), String::new())
+                        } else {
+                            queue_folder_display(&folder_paths, e.folder, &ambiguous)
+                                .unwrap_or_default()
+                        };
+                        // Allocated at exactly `QUEUE_ROW_H` so the row
+                        // advances by `QUEUE_ROW_H + item_spacing.y`,
+                        // matching what `show_rows` derives.
+                        let row_w = ui.available_width();
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(row_w, QUEUE_ROW_H),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add_sized(
+                                    [QUEUE_FOLDER_W, QUEUE_ROW_H],
+                                    egui::Label::new(RichText::new(folder_label).size(12.0))
+                                        .truncate(),
+                                )
+                                .on_hover_text(folder_tip);
+                                ui.add_sized(
+                                    [name_w, QUEUE_ROW_H],
+                                    egui::Label::new(
+                                        RichText::new(crate::text::nfc(&e.name)).size(12.0),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(full);
+                                ui.add_sized(
+                                    [QUEUE_SIZE_W, QUEUE_ROW_H],
+                                    egui::Label::new(
+                                        RichText::new(crate::text::format_size(e.size)).size(12.0),
+                                    ),
+                                );
+                                let status = ui.add_sized(
+                                    [QUEUE_STATUS_W, QUEUE_ROW_H],
+                                    egui::Label::new(
+                                        RichText::new(txt).color(col).size(12.0),
+                                    ),
+                                );
+                                // Optional byte detail while a transfer is
+                                // live (Befund 11c).
+                                if e.state == FileState::Uploading && e.size > 0 {
+                                    status.on_hover_text(tr2(
+                                        "{} von {}",
+                                        crate::text::format_size(e.bytes_sent),
+                                        crate::text::format_size(e.size),
+                                    ));
+                                }
+                            },
+                        );
                     }
                 });
         }
@@ -3460,6 +3335,73 @@ mod tests {
     }
 
     #[test]
+    fn status_rank_matches_the_decided_queue_order() {
+        // User decision 2026-10-26: In Bearbeitung → Fehlgeschlagen → Warten →
+        // Abgeschlossen → Übersprungen.
+        let order = [
+            FileState::Uploading,
+            FileState::Failed,
+            FileState::Waiting,
+            FileState::Done,
+            FileState::Skipped,
+        ];
+        for (rank, state) in order.into_iter().enumerate() {
+            assert_eq!(status_rank(state), rank as u8);
+        }
+    }
+
+    /// One queue entry with the fields the layout reads filled in.
+    fn queue_entry(folder: usize, name: &str, state: FileState) -> QueueEntry {
+        QueueEntry {
+            folder,
+            name: name.to_string(),
+            state,
+            size: 0,
+            path: PathBuf::new(),
+            bytes_sent: 0,
+        }
+    }
+
+    #[test]
+    fn queue_layout_is_global_and_stable_within_a_status_bucket() {
+        // Two folders, deliberately interleaved: the layout must ignore folder
+        // membership and bucket globally by status, keeping insertion order
+        // inside a bucket (user decision 2026-10-26).
+        let queue = vec![
+            queue_entry(0, "a-waiting", FileState::Waiting),
+            queue_entry(1, "b-done", FileState::Done),
+            queue_entry(0, "a-uploading", FileState::Uploading),
+            queue_entry(1, "b-waiting", FileState::Waiting),
+            queue_entry(0, "a-failed", FileState::Failed),
+            queue_entry(1, "b-skipped", FileState::Skipped),
+            queue_entry(0, "a-done", FileState::Done),
+            queue_entry(1, "b-failed", FileState::Failed),
+        ];
+
+        let layout = queue_layout(&queue);
+        let names: Vec<&str> = layout.iter().map(|&i| queue[i].name.as_str()).collect();
+
+        assert_eq!(
+            names,
+            [
+                "a-uploading",
+                "a-failed",
+                "b-failed",
+                "a-waiting",
+                "b-waiting",
+                "b-done",
+                "a-done",
+                "b-skipped",
+            ]
+        );
+    }
+
+    #[test]
+    fn queue_layout_of_an_empty_queue_is_empty() {
+        assert!(queue_layout(&[]).is_empty());
+    }
+
+    #[test]
     fn queue_label_resolves_plan_path_after_store_rows_shift() {
         let store = FolderStore {
             folders: vec![folders::BackupFolder::new(PathBuf::from("/photos/b"))],
@@ -3478,115 +3420,27 @@ mod tests {
     }
 
     #[test]
-    fn publish_state_sets_folder_paths_before_queue_revision() {
+    fn publish_state_publishes_folder_paths_for_the_queue() {
         let store = store_with("/src/published-folder", FolderStatus::Idle);
         let mut plan = literal_plan(&[(0, "/src/published-folder/photo.jpg")]);
         let shared = Arc::new(Mutex::new(UploadShared::default()));
-        shared.lock().unwrap().rev = 12;
         let folder_paths = plan_folder_paths(&plan, &store);
 
         publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
 
-        let (rev, display) = {
+        let display = {
             let state = shared.lock().unwrap();
             let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-            (
-                state.rev,
-                queue_folder_display(&state.folder_paths, 0, &ambiguous),
-            )
+            queue_folder_display(&state.folder_paths, 0, &ambiguous)
         };
-        assert_eq!(rev, 13);
         assert_eq!(
             display,
             Some((
                 "published-folder".to_string(),
                 "/src/published-folder".to_string(),
             )),
-            "the published revision already carries the plan's queue label"
+            "the published state already carries the plan's queue label"
         );
-    }
-
-    #[test]
-    fn publish_state_folder_label_is_visible_in_every_published_revision() {
-        // Fresh states repeat the same empty -> published transition. 2,000
-        // iterations give the polling reader many chances to land in a split
-        // bump/unlock/path-write window, while keeping each iteration in-memory
-        // and synchronized rather than relying on sleeps or timing thresholds.
-        const ITERATIONS: usize = 2_000;
-        const INITIAL_REV: u64 = 12;
-        const PUBLISHED_REV: u64 = INITIAL_REV + 1;
-
-        let store = store_with("/src/published-folder", FolderStatus::Idle);
-        let expected_display = Some((
-            "published-folder".to_string(),
-            "/src/published-folder".to_string(),
-        ));
-        let (state_tx, state_rx) =
-            std::sync::mpsc::sync_channel::<Arc<Mutex<UploadShared>>>(0);
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let (snapshot_tx, snapshot_rx) = std::sync::mpsc::channel();
-
-        let reader = std::thread::spawn(move || {
-            while let Ok(shared) = state_rx.recv() {
-                let initial_rev = {
-                    let state = shared.lock().unwrap();
-                    let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-                    let snapshot = (
-                        state.rev,
-                        queue_folder_display(&state.folder_paths, 0, &ambiguous),
-                    );
-                    ready_tx.send(snapshot).unwrap();
-                    state.rev
-                };
-
-                // Keep taking the same lock the UI uses until this publication's
-                // first revision is visible. Read rev and its label in that one
-                // critical section so an intervening second-lock path write is
-                // observable as either None or the stale prior label.
-                loop {
-                    let (rev, label) = {
-                        let state = shared.lock().unwrap();
-                        let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-                        (
-                            state.rev,
-                            queue_folder_display(&state.folder_paths, 0, &ambiguous),
-                        )
-                    };
-                    if rev >= initial_rev + 1 {
-                        snapshot_tx.send((rev, label)).unwrap();
-                        break;
-                    }
-                }
-            }
-        });
-
-        for _ in 0..ITERATIONS {
-            let shared = Arc::new(Mutex::new(UploadShared::default()));
-            shared.lock().unwrap().rev = INITIAL_REV;
-            state_tx.send(shared.clone()).unwrap();
-
-            let initial = ready_rx.recv().unwrap();
-            assert_eq!(initial.0, INITIAL_REV);
-            assert_eq!(initial.1, None);
-
-            // Let the reader return to its tight lock/read loop before the
-            // publication; no elapsed-time assumption is used by the assertion.
-            std::thread::yield_now();
-            let mut plan = literal_plan(&[(0, "/src/published-folder/photo.jpg")]);
-            let folder_paths = plan_folder_paths(&plan, &store);
-            publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
-
-            let (rev, label) = snapshot_rx.recv().unwrap();
-            assert_eq!(rev, PUBLISHED_REV);
-            assert_eq!(
-                label,
-                expected_display,
-                "revision {rev} must never be observed without its plan-index label"
-            );
-        }
-
-        drop(state_tx);
-        reader.join().unwrap();
     }
 
     #[test]
@@ -4218,14 +4072,13 @@ mod tests {
     }
 
     #[test]
-    fn injected_folder_path_is_available_under_the_bumped_queue_revision() {
+    fn injected_folder_path_is_available_to_the_queue() {
         let shared = Arc::new(Mutex::new(UploadShared::default()));
         let queue = Arc::new(Mutex::new(VecDeque::new()));
         {
             let mut state = shared.lock().unwrap();
             state.active = true;
             state.item_queue = Some(queue);
-            state.rev = 4;
         }
         let mut store = FolderStore {
             folders: vec![folders::BackupFolder::new(PathBuf::from(
@@ -4237,22 +4090,18 @@ mod tests {
         let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(refused.is_none(), "the live run should accept this folder");
 
-        let (rev, display) = {
+        let display = {
             let state = shared.lock().unwrap();
             let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-            (
-                state.rev,
-                queue_folder_display(&state.folder_paths, 0, &ambiguous),
-            )
+            queue_folder_display(&state.folder_paths, 0, &ambiguous)
         };
-        assert_eq!(rev, 5);
         assert_eq!(
             display,
             Some((
                 "injected-folder".to_string(),
                 "/src/injected-folder".to_string(),
             )),
-            "the injected path is present when the new revision is visible"
+            "the injected path is available to the queue"
         );
     }
 

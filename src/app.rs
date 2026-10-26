@@ -14,7 +14,7 @@ use crate::notify;
 use crate::single_instance;
 use crate::theme;
 use crate::tray;
-use crate::upload::{eta_suffix, FileState, UploadShared};
+use crate::upload::{eta_suffix, UploadShared};
 use eframe::egui::{self, Color32, RichText};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -316,12 +316,6 @@ pub(crate) struct PrimePhotoApp {
     /// A file drag is currently hovering over the window (drop overlay on,
     /// backup-page interactions off).
     pub(crate) dropping_files: bool,
-    /// Cached grouped queue snapshot for the Backup page: `(revision, groups)`.
-    /// Rebuilt only when `UploadShared::rev` changed — the queued file names
-    /// otherwise get re-cloned on every frame for no visible change.
-    pub(crate) queue_cache: (u64, Vec<(String, Vec<(String, FileState)>)>),
-    /// The `revision` the cache was built from (`u64::MAX` = never built).
-    pub(crate) queue_cache_rev: u64,
     /// Transient one-time (drag & drop) upload target: the row is never saved
     /// into `folders.toml`, lives only for the length of the run and then keeps
     /// its settled counters so the Backup page can show the finished row. Its
@@ -551,8 +545,6 @@ impl PrimePhotoApp {
             avatar_texture: None,
             avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
             folder_picker: Arc::new(Mutex::new(FolderPicker::default())),
-            queue_cache: (0, Vec::new()),
-            queue_cache_rev: u64::MAX,
         };
         // Session (S-C): only the **refresh token** is persisted, and it lives in
         // the OS keychain. Load it into the in-memory session; the refresh

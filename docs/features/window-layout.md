@@ -106,9 +106,12 @@ with fixed row heights, and measured chrome dimensions.
   **jede** ScrollArea ein eigenes `id_salt` (`"queue"`, `"folders"`).
 
 - **Ordner in der Warteschlange (F13, Welle 5.8).** Ordner-**Spalte** je
-  Zeile **und** im Gruppenkopf; bei **zwei Ordnern mit gleichem Namen** Name
-  **+ Pfad** (Mehrdeutigkeit einmal pro Frame berechnet), voller Pfad im
-  Tooltip. Ersetzt den früheren Wunsch „Ordnerpfad im Zeilennamen".
+  Zeile (der frühere Gruppenkopf entfällt seit der flachen Statussortierung,
+  2026-10-26); bei **zwei Ordnern mit gleichem Namen** Name **+ Name des
+  Elternordners** in Klammern (z. B. „Sport (Pictures)"; Mehrdeutigkeit einmal
+  pro Frame berechnet), voller Ordnerpfad im Tooltip, sofern einer vorliegt
+  (bei der Einmal-Sicherung nicht).
+  Ersetzt den früheren Wunsch „Ordnerpfad im Zeilennamen".
 
 - **Ordner-Karte Variant A (F14, Welle 5.8).** Zeile 1 = Name links,
   **Statuswort** rechts (farbig, je `BackupStatusAlertLevel`) + die drei

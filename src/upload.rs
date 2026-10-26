@@ -37,7 +37,8 @@ pub(crate) enum FileState {
 /// One entry of the live per-file queue rendered on the Backup page.
 pub(crate) struct QueueEntry {
     /// Backup-folder index this file belongs to (the tuple's folder element).
-    /// Used by the Backup page to group the queue per folder.
+    /// Used by the Backup page for the per-row folder column — the queue is
+    /// ordered globally by status, not grouped by folder.
     pub(crate) folder: usize,
     pub(crate) name: String,
     pub(crate) state: FileState,
@@ -130,10 +131,6 @@ pub(crate) struct UploadShared {
     /// `scans_in_flight` this is what makes an injection either land before the last
     /// worker exits or be refused — never to land in a dead queue.
     pub(crate) sealed: bool,
-    /// Revision of the run's *file states*. Bumped on every queue mutation, so
-    /// the UI cache can skip rebuilding its (potentially thousands of entries)
-    /// snapshot while only the counters moved.
-    pub(crate) rev: u64,
     /// Byte totals for the byte-based ETA: known size of the run, how much of it
     /// is settled (uploaded **or** dedup-skipped) and how much went over the wire.
     /// 0 while unknown — the ETA then falls back to the file-count rate.
@@ -188,15 +185,6 @@ impl UploadShared {
         if self.log.len() > 500 {
             self.log.drain(0..100);
         }
-    }
-
-    /// Mark the queue as changed (the UI cache rebuilds its snapshot).
-    /// Mark the queue as changed (the UI cache rebuilds its snapshot). Also
-    /// call it when the queue is *replaced* wholesale (`publish_state`): the
-    /// revision is the cache's only signal, and a new run must never inherit
-    /// the previous run's rendered entries.
-    pub(crate) fn touch_queue(&mut self) {
-        self.rev = self.rev.wrapping_add(1);
     }
 }
 
@@ -462,7 +450,6 @@ async fn resolve_conflict(
                 s.pending_conflict_idx = Some(idx);
                 s.pending_conflict_path = Some(file_path.to_path_buf());
                 s.conflict_answer = None;
-                s.touch_queue();
                 s.log(tr1("Dateiname-Konflikt: {}", file_name));
                 true
             } else {
@@ -484,7 +471,6 @@ async fn resolve_conflict(
                 s.pending_conflict = None;
                 s.pending_conflict_idx = None;
                 s.pending_conflict_path = None;
-                s.touch_queue();
                 return None;
             }
             if let Some(answer) = s.conflict_answer.take() {
@@ -494,14 +480,12 @@ async fn resolve_conflict(
                 if s.conflict_remember {
                     s.conflict_override = Some(answer);
                 }
-                s.touch_queue();
                 return Some(answer);
             }
             if Instant::now() >= deadline {
                 s.pending_conflict = None;
                 s.pending_conflict_idx = None;
                 s.pending_conflict_path = None;
-                s.touch_queue();
                 s.log(tr("Keine Antwort auf den Konflikt — wird übersprungen."));
                 return Some(ConflictResolution::Ignore);
             }
@@ -606,7 +590,6 @@ pub(crate) async fn upload_worker(
                 e.state = FileState::Uploading;
                 e.bytes_sent = 0;
             }
-            s.touch_queue();
         }
 
         let (dedup_on, conflict) = {
@@ -670,7 +653,6 @@ pub(crate) async fn upload_worker(
             // Settled for progress, but not transferred: it must not raise the
             // measured byte rate.
             s.bytes_done = s.bytes_done.saturating_add(size);
-            s.touch_queue();
             s.log(match origin {
                 Origin::ContentSkip => tr1(
                     "Bereits im Konto, nur umbenannt: {}",
@@ -696,7 +678,6 @@ pub(crate) async fn upload_worker(
                 if let Some(en) = s.queue.get_mut(row) {
                     en.state = FileState::Failed;
                 }
-                s.touch_queue();
                 s.log(tr2(
                     "FEHLER {}: {}",
                     crate::text::nfc(&path.display().to_string()),
@@ -743,7 +724,6 @@ pub(crate) async fn upload_worker(
             // Settled for progress, but not transferred: it must not raise the
             // measured byte rate.
             s.bytes_done = s.bytes_done.saturating_add(size);
-            s.touch_queue();
             s.log(match origin {
                 Origin::ContentSkip => tr1(
                     "Bereits im Konto, nur umbenannt: {}",
@@ -782,7 +762,6 @@ pub(crate) async fn upload_worker(
             // Settled for progress, but not transferred: it must not raise the
             // measured byte rate.
             s.bytes_done = s.bytes_done.saturating_add(size);
-            s.touch_queue();
             s.log(tr1(
                 "Bereits im Konto, nur umbenannt: {}",
                 crate::text::nfc(&path.display().to_string()),
@@ -840,7 +819,6 @@ pub(crate) async fn upload_worker(
                         if let Some(en) = s.queue.get_mut(row) {
                             en.bytes_sent = current_bytes.load(Ordering::Relaxed);
                         }
-                        s.touch_queue();
                     }
                     if file_done.load(Ordering::Relaxed) {
                         break;
@@ -940,7 +918,6 @@ pub(crate) async fn upload_worker(
             if let Some(en) = s.queue.get_mut(row) {
                 en.bytes_sent = size;
             }
-            s.touch_queue();
         }
         let mut requeued = false;
         match outcome {
@@ -970,7 +947,6 @@ pub(crate) async fn upload_worker(
                 // pessimistic by roughly the worker count.
                 let first = *s.net_started.get_or_insert_with(Instant::now);
                 s.upload_secs = first.elapsed().as_secs_f64();
-                s.touch_queue();
                 s.log(format!(
                     "OK    {}",
                     crate::text::nfc(&path.display().to_string())
@@ -992,7 +968,6 @@ pub(crate) async fn upload_worker(
                     if let Some(en) = s.queue.get_mut(row) {
                         en.state = FileState::Waiting;
                     }
-                    s.touch_queue();
                     s.log(tr1(
                         "Anmeldung abgelaufen, {} wird erneut versucht.",
                         crate::text::nfc(&path.display().to_string()),
@@ -1005,7 +980,6 @@ pub(crate) async fn upload_worker(
                     if let Some(en) = s.queue.get_mut(row) {
                         en.state = FileState::Failed;
                     }
-                    s.touch_queue();
                     s.log(tr2(
                         "FEHLER {}: {}",
                         crate::text::nfc(&path.display().to_string()),
@@ -1064,7 +1038,6 @@ pub(crate) async fn upload_worker(
                     en.state = FileState::Skipped;
                 }
                 s.bytes_done = s.bytes_done.saturating_add(size);
-                s.touch_queue();
                 if content_duplicate {
                     // Same cause and same wording as the local cross-path
                     // content dedup above.
@@ -1192,7 +1165,6 @@ pub(crate) async fn run_upload(
         {
             let mut s = shared.lock().unwrap();
             reset_in_flight(&mut s.queue);
-            s.touch_queue();
         }
         let open = total.saturating_sub(done + failed);
         shared.lock().unwrap().log(tr3(
