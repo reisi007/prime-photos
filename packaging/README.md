@@ -25,7 +25,9 @@ Voraussetzungen: Rust-Toolchain und die Xcode Command Line Tools (C-Compiler fü
 ./packaging/make-app.sh
 ```
 
-Das erzeugt `target/dist/Prime Photos.app` und signiert sie **ad-hoc** (`codesign --sign -`). Starten:
+Das erzeugt `target/dist/Prime Photos.app` und signiert sie mit der lokalen Codesigning-Identität
+`Prime Photos Local Signer`, sofern die im Schlüsselbund liegt und `CODESIGN_IDENTITY` nicht gesetzt
+ist; ist `CODESIGN_IDENTITY` nicht leer (z. B. `-`), gewinnt dieser Wert. Starten:
 
 ```sh
 open "target/dist/Prime Photos.app"
@@ -45,7 +47,7 @@ ignorierten `target/`.
 | `SKIP_BUILD=1` | überspringt `cargo build --release` (nutzt das vorhandene Binary) | aus |
 | `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.3` |
 | `BUILD=n` | `CFBundleVersion` | `3` |
-| `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt ad-hoc | `-` (ad-hoc) |
+| `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt des Standards (gewinnt immer) | lokale Identität `Prime Photos Local Signer`, sonst `-` (ad-hoc) |
 | `DIST_DIR=<dir>` | Ausgabeordner des Bundles | `target/dist` |
 
 Beispiel:
@@ -54,22 +56,38 @@ Beispiel:
 SKIP_BUILD=1 VERSION=0.2.0 BUILD=2 ./packaging/make-app.sh
 ```
 
-### Ad-hoc vs. selbstsignierte Identität
+### Signatur: lokale Identität vs. ad-hoc
 
-- **Ad-hoc** (Standard, `CODESIGN_IDENTITY=-`): keine Identität nötig, kein Schlüsselbund-Eintrag.
-  Reicht für den lokalen Test. Die Signatur ist *nicht* stabil über Rebuilds und nicht für eine
-  Verteilung/Notarisierung geeignet.
-- **Selbstsignierte Identität** (empfohlen, wenn die Signatur stabil bleiben soll — z. B. damit
-  der Bundle-Identifier und Berechtigungen dauerhaft an dieselbe App gebunden sind, was laut
-  `AGENTS.md` für Benachrichtigungen relevant ist): eine eigene Identität im Schlüsselbund
-  anlegen und ihren Namen dem Skript übergeben.
+- **Standard (lokale Identität, falls vorhanden):** liegt im Schlüsselbund eine Codesigning-Identität
+  mit dem exakten Namen `Prime Photos Local Signer`, nimmt das Skript sie automatisch. Grund: eine
+  Zertifikats-Identität hat ein über Rebuilds **stabiles** Designated Requirement (Identifier +
+  Zertifikat). Erwartete Folge: die Keychain-ACL des gespeicherten Refresh-Tokens bleibt bei selbst
+  gebauten Updates gültig, und der Schlüsselbund-Dialog beim Start entfällt — **belegt ist das
+  nicht**, siehe „Nicht verifiziert" am Ende dieser Datei.
+- **Ad-hoc (`CODESIGN_IDENTITY=-` oder keine Identität):** keine Identität nötig, kein
+  Schlüsselbund-Eintrag; greift auch, wenn `security` fehlt oder die Identität nicht gefunden wird.
+  Reicht für den lokalen Test, ist aber *nicht* stabil über Rebuilds: bei ad-hoc ist das Designated
+  Requirement der cdhash, der sich mit jedem Build ändert — die Keychain-ACL des Tokens passt danach
+  nicht mehr, und macOS fragt beim Start nach dem Passwort für den Schlüsselbund „Anmeldung".
+  Für eine Verteilung/Notarisierung ist ad-hoc ohnehin nicht geeignet.
+- **Andere Identität:** `CODESIGN_IDENTITY="<Name>"` gewinnt immer, auch gegen die automatische
+  Erkennung — der Name muss exakt dem Eintrag aus `security find-identity -v -p codesigning`
+  entsprechen.
+
+Die Reihenfolge ist damit: explizite Umgebungsvariable, sonst `Prime Photos Local Signer`, sonst
+ad-hoc; das Skript meldet die gewählte Identität in der Zeile `==> Signatur: …`.
+
+Scheitert `codesign` mit der gefundenen Identität (gesperrter Schlüssel, fehlende Freigabe), bricht
+das Skript ab; in diesem Fall bewusst `CODESIGN_IDENTITY=-` setzen (ad-hoc, ohne den
+Keychain-ACL-Vorteil).
 
 **Selbstsigniertes Zertifikat im Schlüsselbund anlegen (nur Beschreibung — dieses Repo legt
 kein Zertifikat an und fasst den Schlüsselbund nicht an):**
 
 1. *Schlüsselbundverwaltung* öffnen (Programme → Dienstprogramme → Schlüsselbundverwaltung).
 2. Menü *Schlüsselbundverwaltung* → *Zertifikatassistent* → *Zertifikat erstellen …*.
-3. **Name** z. B. `Prime Photos Codesign` frei wählen.
+3. **Name**: für die automatische Erkennung exakt `Prime Photos Local Signer`; jeder andere Name
+   geht auch, muss dann aber per `CODESIGN_IDENTITY` übergeben werden.
 4. **Identitätstyp**: *Code-Signierung* („Code Signing").
 5. **Zertifikatstyp**: *Selbstsigniertes Zertifikat* („Self Signed Root").
 6. Erstellen und ablegen im **Anmelde-Schlüsselbund (login)**. Den eigenen Schlüsselbund
@@ -81,7 +99,8 @@ Danach den **exakten Namen** der Identität ermitteln:
 security find-identity -v -p codesigning
 ```
 
-Der Name aus der Ausgabe (z. B. `Prime Photos Codesign`) wird übergeben:
+Der Name aus der Ausgabe wird übergeben — nur nötig, wenn er von `Prime Photos Local Signer`
+abweicht (im Beispiel die frei gewählte Identität `Prime Photos Codesign`):
 
 ```sh
 CODESIGN_IDENTITY="Prime Photos Codesign" ./packaging/make-app.sh
@@ -119,5 +138,10 @@ Archiv mitzugeben. **AppImage/Flatpak/.deb sind nicht Teil dieses Skripts** (out
   Der Icon-Schritt ist ebenso belegt: `iconutil -c icns target/pp-appicon.iconset` liefert eine
   gültige `.icns`, die sich über alle zehn Größen (16–1024 px) zurückwandeln lässt; das Bundle
   enthält `Contents/Resources/AppIcon.icns` und `CFBundleIconFile = AppIcon` im `Info.plist`.
-  **Nicht** verifiziert ist der Pfad mit einer selbstsignierten Identität (`CODESIGN_IDENTITY=<Name>`),
-  da hier bewusst kein Zertifikat angelegt wird.
+  Der Pfad mit einer selbstsignierten Identität (`CODESIGN_IDENTITY=<Name>`) wurde am 2026-10-26
+  für die lokale Identität `Prime Photos Local Signer` auf diesem Rechner mit `SKIP_BUILD=1`
+  geprüft: `codesign -dv --verbose=2` meldet `Authority=Prime Photos Local Signer`,
+  `codesign --verify --strict` läuft fehlerfrei durch. Mit einem **anderen** Namen ist der Pfad
+  nicht geprüft. **Nicht** belegt ist zudem, ob der Schlüsselbund-Dialog damit dauerhaft ausbleibt;
+  erwartet wird es, weil das Designated Requirement über Rebuilds gleich bleibt — über mehrere
+  aufeinanderfolgende Builds ist das noch nicht abgenommen.

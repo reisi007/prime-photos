@@ -9,7 +9,8 @@
 #   4. Contents/Info.plist aus packaging/Info.plist schreiben (__VERSION__/__BUILD__ ersetzt)
 #   5. Contents/Resources/AppIcon.icns aus target/pp-appicon.iconset bauen (iconutil);
 #      das iconset rastert build.rs aus assets/logo.svg, es ist nicht eingecheckt
-#   6. codesign --force --options runtime --sign "$CODESIGN_IDENTITY" (Standard: "-" = ad-hoc)
+#   6. codesign --force --options runtime --sign "$CODESIGN_IDENTITY"
+#      (Standard: lokale Identität "Prime Photos Local Signer", sonst "-" = ad-hoc)
 #      und anschließendes codesign --verify --verbose=2
 #   7. Pfad + Startkommando ausgeben
 #
@@ -17,11 +18,17 @@
 #   SKIP_BUILD=1                 überspringt `cargo build --release`
 #   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.1.3)
 #   BUILD=<n>                    CFBundleVersion             (Standard: 3)
-#   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; "-" = ad-hoc (Standard)
+#   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; Standard ist die lokale Identität
+#                                "Prime Photos Local Signer", sonst "-" = ad-hoc
 #   DIST_DIR=<dir>               Ausgabeordner des Bundles (Standard: target/dist)
 #
 # Das Ausgabeverzeichnis liegt per Standard unter dem ignorierten `target/`, damit kein
 # unversionierter Build-Müll im Repo entsteht.
+# Signatur: Bei ad-hoc-Signatur ist das Designated Requirement der cdhash und ändert sich mit
+# jedem Build; die Keychain-ACL des gespeicherten Refresh-Tokens passt danach nicht mehr und
+# macOS fragt beim Start nach dem Schlüsselbund-Passwort. Eine Zertifikats-Identität hält das
+# Designated Requirement (Identifier + Zertifikat) über Rebuilds stabil — deshalb ist die lokale
+# Identität der Standard, ad-hoc nur der Rückfall.
 # Idempotent: ein erneuter Lauf entfernt das Bundle und baut es sauber neu.
 # Hinweis: bindet keine neuen Abhängigkeiten und braucht kein Netz. Nur macOS.
 # Hinweis: CARGO_TARGET_DIR wird nicht berücksichtigt — das iconset legt build.rs in
@@ -38,7 +45,30 @@ BIN_NAME="prime-photos"
 
 VERSION="${VERSION:-0.1.3}"
 BUILD="${BUILD:-3}"
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+
+# Signatur-Identität ermitteln: (a) explizite Umgebungsvariable gewinnt, (b) sonst die lokale
+# Identität "Prime Photos Local Signer", (c) sonst ad-hoc ("-"). Kein `security | grep -q`:
+# SIGPIPE würde die Pipeline unter `set -o pipefail` scheitern lassen.
+LOCAL_SIGN_IDENTITY="Prime Photos Local Signer"
+if [[ -n "${CODESIGN_IDENTITY}" ]]; then
+	echo "==> Signatur: ${CODESIGN_IDENTITY} (aus der Umgebung)"
+elif command -v security >/dev/null 2>&1; then
+	identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+	case "${identities}" in
+	*\""${LOCAL_SIGN_IDENTITY}"\"*)
+		CODESIGN_IDENTITY="${LOCAL_SIGN_IDENTITY}"
+		echo "==> Signatur: ${CODESIGN_IDENTITY} (lokale Identität gefunden)"
+		;;
+	*)
+		CODESIGN_IDENTITY="-"
+		echo "==> Signatur: - (ad-hoc-Rückfall; '${LOCAL_SIGN_IDENTITY}' nicht gefunden)"
+		;;
+	esac
+else
+	CODESIGN_IDENTITY="-"
+	echo "==> Signatur: - (ad-hoc-Rückfall; 'security' nicht verfügbar)"
+fi
 
 BIN_SRC="target/release/${BIN_NAME}"
 DIST_DIR="${DIST_DIR:-target/dist}"

@@ -85,11 +85,24 @@ Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release 
 
 ```sh
 ./packaging/make-app.sh
-# Ergebnis: target/dist/Prime Photos.app   (arm64, ad-hoc signiert, CODESIGN_IDENTITY=-)
+# Ergebnis: target/dist/Prime Photos.app   (arm64, mit der lokalen Identität
+# "Prime Photos Local Signer" signiert; ad-hoc nur als Rückfall)
 ```
 
-- Das Skript baut `cargo build --release`, assembliert das Bundle und signiert **ad-hoc**
-  (`codesign --sign -`). Eine eigene Identität ist per `CODESIGN_IDENTITY="<Name>"` möglich.
+- Das Skript baut `cargo build --release`, assembliert das Bundle und signiert mit der lokalen
+  Codesigning-Identität `Prime Photos Local Signer`, wenn sie im Schlüsselbund liegt. **Ad-hoc**
+  (`codesign --sign -`) wird nur verwendet, wenn die Identität fehlt **und** `CODESIGN_IDENTITY`
+  nicht gesetzt oder leer ist. Jeder nicht-leere Wert in `CODESIGN_IDENTITY` gewinnt immer: ein
+  anderer Identitätsname ebenso wie `-` (erzwingt ad-hoc).
+- **Warum die Identität der Standard ist:** Bei ad-hoc ist das Designated Requirement der cdhash
+  und ändert sich mit jedem Build — die Keychain-ACL des gespeicherten Refresh-Tokens passt nach
+  einem selbst gebauten Update nicht mehr, und macOS fragt beim Start nach dem Passwort für den
+  Schlüsselbund „Anmeldung" (am 2026-10-26 live beobachtet). Eine Zertifikats-Identität hält das
+  Designated Requirement (Identifier + Zertifikat) über Rebuilds stabil; dass der Dialog damit
+  dauerhaft ausbleibt, ist die **erwartete** Wirkung und noch nicht über mehrere Builds
+  abgenommen. Auf Rechnern ohne diese Identität (frischer Klon, andere Rechner) bleibt es
+  beim bisherigen ad-hoc-Verhalten, und für **fremde Macs** ändert sich nichts — Gatekeeper blockt
+  weiterhin (§6).
 - **App-Icon:** das Dock-/Taskbar-Icon wird **im Build** erzeugt, nichts ist eingecheckt —
   `build.rs` rastert `assets/logo.svg` (die SVG-Quelle) in die zehn iconset-Größen nach
   `target/pp-appicon.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
@@ -125,7 +138,8 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (Default `VERSION=0.1.3`, `BUILD=3`, ad-hoc signiert):
+2. **Bundle bauen** (Default `VERSION=0.1.3`, `BUILD=3`, mit der lokalen Identität
+   `Prime Photos Local Signer` signiert; ad-hoc nur als Rückfall):
 
    ```sh
    ./packaging/make-app.sh
@@ -152,7 +166,7 @@ Dateien liegen in `target/dist/`.
    ```
 
    `ditto` statt `cp -R`, weil es Signatur und Bundle-Struktur erhält. Der Startweg bei
-   **unsignierten Downloads** ist §5; das hier lokal installierte Bundle betrifft das nicht.
+   **nicht notarisierten Downloads** ist §5; das hier lokal installierte Bundle betrifft das nicht.
 
 5. **Ans GitHub-Release hängen:** das DMG hochladen.
    Der **Asset-Name ist der Dateiname** — siehe der vorstehende Aufzählungspunkt.
@@ -163,11 +177,11 @@ Dateien liegen in `target/dist/`.
 
 ---
 
-## 5. Gatekeeper-Workaround (unsignierte macOS-Downloads)
+## 5. Gatekeeper-Workaround (nicht notarisierte macOS-Downloads)
 
-**Funktionsweise:** Das Bundle ist **unsigniert** und **nicht notarisiert**. Lädt man es aus dem
-Netz, setzt macOS die Quarantäne-Markierung, und **Gatekeeper blockt** den Start. Dann greift einer
-dieser Wege:
+**Funktionsweise:** Das Bundle ist **nicht notarisiert** und **nicht von einer Developer-ID
+signiert** (selbstsigniert bzw. ad-hoc). Lädt man es aus dem Netz, setzt macOS die
+Quarantäne-Markierung, und **Gatekeeper blockt** den Start. Dann greift einer dieser Wege:
 
 **a) Finder (empfohlen)**
 
@@ -426,6 +440,6 @@ die Datei mit `packaging/gen-third-party-licenses.sh`.
 ## 12. Referenzen
 
 - `BUILD.md` — System-Voraussetzungen macOS/Windows/Linux.
-- `packaging/README.md` — `make-app.sh`, `Info.plist`, ad-hoc vs. eigene Identität.
+- `packaging/README.md` — `make-app.sh`, `Info.plist`, Signatur (lokale Identität vs. ad-hoc).
 - `AGENTS.md` „CI/Release" — die getroffenen Entscheidungen.
 - `.github/workflows/ci.yml`, `.github/workflows/release.yml` — die Workflows selbst.

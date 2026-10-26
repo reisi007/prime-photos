@@ -357,7 +357,7 @@ Not re-quoted here (owned by other docs): the status-popup titles
 | Autostart / login item | preference via `osascript` System Events; auto-enabled at onboarding | **partial** — `auto-launch` crate in **`MacOSLaunchMode::SMAppService`** (no AppleScript; `SMAppService.mainApp.register()` → visible in the **Anmeldeobjekte**, System Settings → General → Login Items; requires macOS 13+ — below that the crate returns `Err(UnsupportedOS)` and the app stays on the existing "unsupported" path, persisting nothing); a **deliberate deviation** from the original's `osascript`/System Events (§3.6); settings checkbox "Nach dem Anmelden starten"; *inferred* not auto-enabled at first sign-in (no onboarding default found) | `Cargo.toml` (`auto-launch`), `src/app.rs` (`Autostart`, `build_autostart`), `src/settings.rs` |
 | Notifications | `NSUserNotification` + status item | `notify-rust` run-finished toast → cross-ref | `src/notify.rs`, `SPEC_NOTIFICATIONS.md` |
 | Apple Photos import | `NSPhotoLibraryUsageDescription` + entitlement | **out of scope** (MVP excludes the import) | — |
-| Bundle packaging | full `Info.plist` (URL, services, LSUIElement…) | template with identifier/version/category only; `make-app.sh` signs ad-hoc; **app icon copied and `CFBundleIconFile = AppIcon`** (observed) — `Contents/Resources/AppIcon.icns`, built from `assets/logo.svg` (`build.rs` → `target/pp-appicon.iconset` → `iconutil` in `make-app.sh`), **not checked in** | `packaging/Info.plist`, `packaging/make-app.sh` |
+| Bundle packaging | full `Info.plist` (URL, services, LSUIElement…) | template with identifier/version/category only; `make-app.sh` signs with the local self-signed identity `Prime Photos Local Signer` when present, otherwise ad-hoc; **app icon copied and `CFBundleIconFile = AppIcon`** (observed) — `Contents/Resources/AppIcon.icns`, built from `assets/logo.svg` (`build.rs` → `target/pp-appicon.iconset` → `iconutil` in `make-app.sh`), **not checked in** | `packaging/Info.plist`, `packaging/make-app.sh` |
 
 ---
 
@@ -404,7 +404,7 @@ Not re-quoted here (owned by other docs): the status-popup titles
 - `SPEC_BACKGROUND_SYNC.md` — scheduled cadence/pause that a service-created backup obeys.
 - `UI_FLOWS.md` §2 — the login window chrome (context for the app menu / Edit menu need),
   §13 — status-item click question (resolved in `SPEC_NOTIFICATIONS.md` §2.5).
-- `../dev/RELEASE.md` — our packaging/signing context (ad-hoc macOS signature).
+- `../dev/RELEASE.md` — our packaging/signing context (local self-signed macOS identity, ad-hoc only as fallback).
 - Our code: `src/tray.rs` (tray items "Fenster anzeigen" / pause / "Beenden"),
   `src/app_menu.rs` (macOS app + Edit menu), `src/app.rs` (`Autostart`, close-to-tray,
   tray event dispatch), `src/settings.rs` (autostart checkbox), `src/notify.rs`
