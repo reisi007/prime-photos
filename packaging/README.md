@@ -45,8 +45,8 @@ ignorierten `target/`.
 | Variable | Wirkung | Standard |
 |---|---|---|
 | `SKIP_BUILD=1` | überspringt `cargo build --release` (nutzt das vorhandene Binary) | aus |
-| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.4` |
-| `BUILD=n` | `CFBundleVersion` | `4` |
+| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.1.5` |
+| `BUILD=n` | `CFBundleVersion` | `5` |
 | `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt des Standards (gewinnt immer) | lokale Identität `Prime Photos Local Signer`, sonst `-` (ad-hoc) |
 | `DIST_DIR=<dir>` | Ausgabeordner des Bundles | `target/dist` |
 
