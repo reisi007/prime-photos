@@ -7,6 +7,10 @@ closing the window quits the app.
 ## How it works
 
 - Glyphs follow the state: idle, active, paused, done, error.
+- **Error means failures remaining after the retry pass:** "Mit Fehlern
+  abgeschlossen" is shown only when at least one file still failed after its
+  one extra file-level retry (see [upload.md](upload.md)). A file that succeeds
+  on the retry is a normal success and does not set the error glyph.
 - On macOS the glyph is a template image and follows the system appearance;
   elsewhere the icon is chosen by theme, falling back to the coloured logo
   when the theme is unknown.

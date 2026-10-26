@@ -431,6 +431,14 @@ const EN: &[(&str, &str)] = &[
     ("Auth-Token-Erneuerung fehlgeschlagen: {}", "Auth token renewal failed: {}"),
     ("Angehalten ({}%)", "Paused ({}%)"),
     ("FEHLER {}: {}", "ERROR {}: {}"),
+    (
+        "FEHLER {}: {} — wird erneut versucht.",
+        "ERROR {}: {} — will be retried.",
+    ),
+    (
+        "{} Datei(en) werden erneut versucht …",
+        "{} file(s) will be retried …",
+    ),
     ("Fehlgeschlagen", "Failed"),
     ("Fertig: {} erfolgreich, {} fehlgeschlagen.", "Done: {} succeeded, {} failed."),
     (

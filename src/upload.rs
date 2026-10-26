@@ -117,6 +117,13 @@ pub(crate) struct UploadShared {
     /// run exists; the run's own `Arc` so an injection from outside the run can
     /// append to the very same queue the workers drain.
     pub(crate) item_queue: Option<Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>>,
+    /// Files whose **first** file-level attempt failed (upload error or local
+    /// read error). Filled by the initial workers and drained by `run_upload`
+    /// before the run's one finite retry pass. Deliberately a separate list, not
+    /// another trip through `item_queue`: without an attempt guard a persistent
+    /// failure would requeue itself forever. Successes and resolved
+    /// conflicts/dedup skips never land here.
+    pub(crate) retry_items: Vec<(usize, usize, PathBuf)>,
     /// Live per-folder options of the current run. Was an immutable `Arc<HashMap>`
     /// handed to the workers at start; an injected folder must be able to add its
     /// own entry while the run already uploads.
@@ -399,6 +406,15 @@ pub(crate) fn outcome_text(
 /// (`scans_in_flight > 0`) to be folded in.
 const QUEUE_IDLE_POLL: Duration = Duration::from_millis(150);
 
+/// Which file-level attempt of the run a worker is performing. A run makes at
+/// most two: the initial pass over the queue, then one retry pass over exactly
+/// the files whose initial attempt failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AttemptStage {
+    Initial,
+    Retry,
+}
+
 /// Outcome of one file's upload attempt, after the conflict policy has been
 /// applied (`Ignore`/`Ask→Ignore` become `ConflictSkipped`, everything else is
 /// an upload or a real failure).
@@ -407,6 +423,53 @@ enum FileOutcome {
     /// A name conflict the policy resolved as "keep the existing file".
     ConflictSkipped,
     Failed(String),
+}
+
+/// The run's one-retry policy as a pure function: only a **first-pass failure**
+/// goes into the retry pass. A successful upload or a conflict/dedup skip is
+/// final immediately and must never be retried, and a failure of the retry
+/// attempt is final too. Keeping this decision pure makes the selection and the
+/// "final failure counted once" rule testable without the network.
+fn retry_after(outcome: &FileOutcome, stage: AttemptStage) -> bool {
+    matches!(outcome, FileOutcome::Failed(_)) && stage == AttemptStage::Initial
+}
+
+/// Settle one failed file-level attempt on the shared state: defer it to the
+/// run's retry pass (no counter change yet, row back to `Waiting`) or count the
+/// one final failure. Called from both failure paths — upload errors and local
+/// read errors — so the retry rule cannot drift between them.
+fn settle_failed_attempt(
+    s: &mut UploadShared,
+    stage: AttemptStage,
+    row: usize,
+    idx: usize,
+    path: &Path,
+    reason: &str,
+) {
+    let path_text = crate::text::nfc(&path.display().to_string());
+    let reason = crate::text::nfc(reason);
+    // A local read error is a file-level failure like an upload error, so it
+    // goes through the same policy.
+    let failure = FileOutcome::Failed(reason.clone());
+    if retry_after(&failure, stage) {
+        if let Some(en) = s.queue.get_mut(row) {
+            en.state = FileState::Waiting;
+            en.bytes_sent = 0;
+        }
+        s.retry_items.push((row, idx, path.to_path_buf()));
+        s.log(tr2(
+            "FEHLER {}: {} — wird erneut versucht.",
+            path_text,
+            reason,
+        ));
+    } else {
+        s.failed += 1;
+        *s.folder_failed.entry(idx).or_insert(0) += 1;
+        if let Some(en) = s.queue.get_mut(row) {
+            en.state = FileState::Failed;
+        }
+        s.log(tr2("FEHLER {}: {}", path_text, reason));
+    }
 }
 
 /// Ask the user about one name conflict (`Ask` policy) and return the decision.
@@ -518,12 +581,13 @@ fn seal_now(shared: &Arc<Mutex<UploadShared>>) -> bool {
     }
 }
 
-pub(crate) async fn upload_worker(
+async fn upload_worker(
     shared: Arc<Mutex<UploadShared>>,
     cfg: Config,
     mut pause_rx: watch::Receiver<bool>,
     limit_kbps: u32,
     dedup: Arc<Mutex<DedupIndex>>,
+    stage: AttemptStage,
 ) {
     let mut uploader = PrimePhotos::new(&cfg, false);
     // A 401 mid-run means the session cookies expired, not that the file is
@@ -673,16 +737,8 @@ pub(crate) async fn upload_worker(
             Ok(b) => b,
             Err(e) => {
                 let mut s = shared.lock().unwrap();
-                s.failed += 1;
-                *s.folder_failed.entry(idx).or_insert(0) += 1;
-                if let Some(en) = s.queue.get_mut(row) {
-                    en.state = FileState::Failed;
-                }
-                s.log(tr2(
-                    "FEHLER {}: {}",
-                    crate::text::nfc(&path.display().to_string()),
-                    crate::text::nfc(&e.to_string()),
-                ));
+                let reason = e.to_string();
+                settle_failed_attempt(&mut s, stage, row, idx, &path, &reason);
                 continue;
             }
         };
@@ -975,16 +1031,7 @@ pub(crate) async fn upload_worker(
                     requeued = true;
                 } else {
                     let mut s = shared.lock().unwrap();
-                    s.failed += 1;
-                    *s.folder_failed.entry(idx).or_insert(0) += 1;
-                    if let Some(en) = s.queue.get_mut(row) {
-                        en.state = FileState::Failed;
-                    }
-                    s.log(tr2(
-                        "FEHLER {}: {}",
-                        crate::text::nfc(&path.display().to_string()),
-                        crate::text::nfc(&e),
-                    ));
+                    settle_failed_attempt(&mut s, stage, row, idx, &path, &e);
                 }
             }
             FileOutcome::ConflictSkipped => {
@@ -1089,6 +1136,46 @@ pub(crate) async fn upload_worker(
     }
 }
 
+/// The retry pass's file list: exactly the initial pass's failures, or nothing
+/// at all for a cancelled/sign-out run. A cancelled run must not turn deferred
+/// files into final failures — they stay open for the next start like every
+/// other abandoned item (user decision 2026-10-16). Pure so the cancellation
+/// branch is unit-testable without a network or a real run.
+fn retry_pass_items(shared: &mut UploadShared) -> Vec<(usize, usize, PathBuf)> {
+    if shared.cancelled {
+        Vec::new()
+    } else {
+        std::mem::take(&mut shared.retry_items)
+    }
+}
+
+/// One bounded worker generation: spawn `workers` workers for `stage` and wait
+/// until every one has left. The retry pass uses the same function, so
+/// concurrency, pause handling and the throttle stay identical to the initial
+/// pass. The pass is finite by construction: only `run_upload` starts the retry
+/// generation, and only once.
+async fn run_worker_pass(
+    shared: &Arc<Mutex<UploadShared>>,
+    cfg: &Config,
+    paused: &watch::Sender<bool>,
+    limit_kbps: u32,
+    dedup: &Arc<Mutex<DedupIndex>>,
+    stage: AttemptStage,
+    workers: usize,
+) {
+    let mut set = JoinSet::new();
+    for _ in 0..workers {
+        let s = shared.clone();
+        let c = cfg.clone();
+        let p = paused.subscribe();
+        let d = dedup.clone();
+        set.spawn(async move {
+            upload_worker(s, c, p, limit_kbps, d, stage).await;
+        });
+    }
+    while set.join_next().await.is_some() {}
+}
+
 pub(crate) async fn run_upload(
     items: Vec<(usize, usize, PathBuf)>,
     cfg: Config,
@@ -1115,26 +1202,63 @@ pub(crate) async fn run_upload(
     // drain, the per-folder options and the scan-in-flight/sealed handshake — set
     // together, under one lock, before any worker starts, so an injection from
     // outside the run (`inject_into_live_run`) appends to the same queue the
-    // workers read and cannot land in a dead one.
+    // workers read and cannot land in a dead one. The retry list belongs to the
+    // run too: a previous run's deferred failures must never leak into this one.
     {
         let mut s = shared.lock().unwrap();
         s.item_queue = Some(queue.clone());
+        s.retry_items.clear();
         s.folder_opts = folder_opts;
         s.scans_in_flight = 0;
         s.sealed = false;
     }
 
-    let mut set = JoinSet::new();
-    for _ in 0..workers {
-        let s = shared.clone();
-        let c = cfg.clone();
-        let p = paused.subscribe();
-        let d = dedup.clone();
-        set.spawn(async move {
-            upload_worker(s, c, p, limit_kbps, d).await;
-        });
+    run_worker_pass(
+        &shared,
+        &cfg,
+        &paused,
+        limit_kbps,
+        &dedup,
+        AttemptStage::Initial,
+        workers,
+    )
+    .await;
+
+    // One finite second pass over exactly the files whose initial attempt
+    // failed (upload error or local read error). The run stays active, so the
+    // UI, counters, tray outcome and notification only settle afterwards. A
+    // cancelled/sign-out run gets no retry pass: its deferred files stay open
+    // and are picked up by the next start, like every other abandoned item —
+    // they must not turn into final failures. `sealed` stays set, so a folder
+    // scan cannot inject new first-attempt work into the retry generation.
+    let retry_items = {
+        let mut s = shared.lock().unwrap();
+        retry_pass_items(&mut s)
+    };
+    if !retry_items.is_empty() {
+        let n = retry_items.len();
+        {
+            let mut s = shared.lock().unwrap();
+            s.log(tr1("{} Datei(en) werden erneut versucht …", n));
+            s.sealed = true;
+            let queue = s
+                .item_queue
+                .get_or_insert_with(|| Arc::new(Mutex::new(VecDeque::new())))
+                .clone();
+            queue.lock().unwrap().extend(retry_items);
+        }
+        let retry_workers = concurrency.max(1).min(n);
+        run_worker_pass(
+            &shared,
+            &cfg,
+            &paused,
+            limit_kbps,
+            &dedup,
+            AttemptStage::Retry,
+            retry_workers,
+        )
+        .await;
     }
-    while set.join_next().await.is_some() {}
 
     let name = album.trim().to_string();
     if !name.is_empty() {
@@ -1156,6 +1280,7 @@ pub(crate) async fn run_upload(
         // worker already set `sealed`; clearing the queue handle closes the door
         // for good.
         s.item_queue = None;
+        s.retry_items.clear();
         s.folder_opts.clear();
         (s.done, s.failed, s.total, s.cancelled)
     };
@@ -1395,6 +1520,194 @@ mod tests {
         assert!(queue[2].state == FileState::Waiting);
         assert!(queue[1].state == FileState::Done);
         assert!(queue[3].state == FileState::Failed);
+    }
+
+    /// The run-level counter effects the retry tests assert on: exactly the
+    /// part of the worker's settlement the retry policy controls. A success or
+    /// resolved skip is one `done`; a failure is either deferred to the retry
+    /// pass (`retry`) or the one final `failed`.
+    #[derive(Default, Debug, PartialEq, Eq)]
+    struct SettledCounters {
+        retry: usize,
+        done: usize,
+        failed: usize,
+    }
+
+    impl SettledCounters {
+        fn settle(&mut self, outcome: &FileOutcome, stage: AttemptStage) {
+            if retry_after(outcome, stage) {
+                self.retry += 1;
+            } else if matches!(outcome, FileOutcome::Failed(_)) {
+                self.failed += 1;
+            } else {
+                self.done += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn retry_pass_turns_one_initial_failure_into_one_final_failure() {
+        // First attempt fails: held for the retry pass, no final error yet.
+        let mut counters = SettledCounters::default();
+        counters.settle(
+            &FileOutcome::Failed("first attempt".into()),
+            AttemptStage::Initial,
+        );
+        assert_eq!(
+            counters,
+            SettledCounters {
+                retry: 1,
+                done: 0,
+                failed: 0,
+            }
+        );
+
+        // The retry also fails: exactly one final error, never the first too.
+        counters.settle(
+            &FileOutcome::Failed("retry attempt".into()),
+            AttemptStage::Retry,
+        );
+        assert_eq!(
+            counters,
+            SettledCounters {
+                retry: 1,
+                done: 0,
+                failed: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn successful_retry_counts_one_done_and_no_failure() {
+        let mut counters = SettledCounters::default();
+        counters.settle(
+            &FileOutcome::Failed("first attempt".into()),
+            AttemptStage::Initial,
+        );
+        counters.settle(
+            &FileOutcome::Uploaded("node-id".into()),
+            AttemptStage::Retry,
+        );
+
+        assert_eq!(
+            counters,
+            SettledCounters {
+                retry: 1,
+                done: 1,
+                failed: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn conflict_and_dedup_successes_are_never_retried() {
+        // Both success kinds settle on the initial attempt. A 409 resolved as
+        // "keep the existing file" and an already-uploaded file are done, not
+        // failure candidates.
+        let mut counters = SettledCounters::default();
+        counters.settle(&FileOutcome::ConflictSkipped, AttemptStage::Initial);
+        counters.settle(
+            &FileOutcome::Uploaded("node-id".into()),
+            AttemptStage::Initial,
+        );
+        assert_eq!(
+            counters,
+            SettledCounters {
+                retry: 0,
+                done: 2,
+                failed: 0,
+            }
+        );
+
+        // Even a retry-stage success stays a success and never triggers another
+        // pass.
+        counters.settle(&FileOutcome::ConflictSkipped, AttemptStage::Retry);
+        assert_eq!(
+            counters,
+            SettledCounters {
+                retry: 0,
+                done: 3,
+                failed: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn cancelled_run_starts_no_retry_pass() {
+        // Sign-out during the initial pass: deferred files stay open (next
+        // start), and the cancelled finalization must not turn them into
+        // failures.
+        let mut shared = UploadShared {
+            cancelled: true,
+            retry_items: vec![(0, 1, PathBuf::from("/a.jpg"))],
+            ..UploadShared::default()
+        };
+
+        assert!(retry_pass_items(&mut shared).is_empty());
+    }
+
+    #[test]
+    fn retry_pass_takes_the_deferred_failures_once() {
+        let items = vec![
+            (0, 1, PathBuf::from("/a.jpg")),
+            (2, 3, PathBuf::from("/b.jpg")),
+        ];
+        let mut shared = UploadShared {
+            retry_items: items.clone(),
+            ..UploadShared::default()
+        };
+
+        assert_eq!(retry_pass_items(&mut shared), items);
+        assert!(
+            retry_pass_items(&mut shared).is_empty(),
+            "the retry list must be finite"
+        );
+    }
+
+    #[test]
+    fn failed_attempt_counts_once_and_only_after_the_retry() {
+        // Exercises the production settlement helper used by both failure paths
+        // (upload error and local read error): the first attempt only queues the
+        // file, the second increments the one final failure.
+        let mut shared = UploadShared {
+            queue: vec![QueueEntry {
+                folder: 0,
+                name: "a.jpg".into(),
+                state: FileState::Uploading,
+                size: 1,
+                path: PathBuf::from("/a.jpg"),
+                bytes_sent: 7,
+            }],
+            ..UploadShared::default()
+        };
+
+        settle_failed_attempt(
+            &mut shared,
+            AttemptStage::Initial,
+            0,
+            0,
+            Path::new("/a.jpg"),
+            "lokal nicht lesbar",
+        );
+        assert_eq!(shared.failed, 0, "the first failure must not be final");
+        assert_eq!(shared.folder_failed.get(&0), None);
+        assert_eq!(shared.retry_items.len(), 1);
+        assert!(shared.queue[0].state == FileState::Waiting);
+
+        // `run_upload` drains the list before the retry pass.
+        shared.retry_items.clear();
+        settle_failed_attempt(
+            &mut shared,
+            AttemptStage::Retry,
+            0,
+            0,
+            Path::new("/a.jpg"),
+            "lokal nicht lesbar",
+        );
+        assert_eq!(shared.failed, 1, "exactly one final failure");
+        assert_eq!(shared.folder_failed.get(&0), Some(&1));
+        assert!(shared.queue[0].state == FileState::Failed);
+        assert!(shared.retry_items.is_empty(), "no third attempt");
     }
 
     /// A shared state with a live (empty) worker queue — the shape the worker's

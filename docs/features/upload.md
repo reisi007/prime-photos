@@ -22,6 +22,13 @@ handles server responses including conflict detection.
 - Progress is aggregated across all targets, while each target row reports
   its own outcome. Results are split into **newly uploaded / already in the
   account / unchanged / errors**.
+- **One file-level retry pass:** after the initial pass, every file that failed
+  (upload error or local read/filesystem error) is attempted once more. The run
+  stays active until that pass finishes; the completion log/notification and
+  the tray outcome are published only afterwards, with the final counters. A
+  file counts as an error only if the second attempt also fails; a successful
+  retry is a normal success. Successful uploads, conflict skips and dedup skips
+  are never retried. Sign-out/cancellation skips the retry pass entirely.
 - The local MD5 index (see [duplicates-conflicts.md](duplicates-conflicts.md))
   is the primary defence; the server 409 is a safety net.
 - Desktop-client upload protocol (observed, not used):
@@ -35,6 +42,22 @@ handles server responses including conflict detection.
 - Reference implementation: `entourloop/amazon-photo-uploader` (MIT).
 
 ## Decisions
+
+- **Zweiter Dateiversuch nach dem ersten Durchlauf (User-Entscheidung
+  2026-10-26):** Nach dem initialen Upload-Durchlauf bekommt **jede** im ersten
+  Durchlauf fehlgeschlagene Datei genau **einen** weiteren Dateiversuch —
+  einschließlich lokaler Lese-/Dateisystemfehler. Erst wenn auch dieser zweite
+  Versuch scheitert, zählt die Datei als `failed` (Tray = Fehler); ein
+  erfolgreicher zweiter Versuch ist ein normaler Erfolg. Erfolgreiche Uploads,
+  Konflikt-Skips und Dedup-Skips werden **nicht** erneut versucht. Der Lauf
+  bleibt über den zweiten Durchlauf aktiv (`active`), Zähler/Log/Benachrichtigung
+  und Tray-Ergebnis werden erst danach einmalig finalisiert; `total` bleibt die
+  ursprüngliche Dateizahl, ein Fehler wird nie doppelt gezählt. Die bestehenden
+  transienten HTTP-Retries und die Auth-Token-Erneuerung im Upload selbst
+  bleiben unverändert. Bei Abmeldung/Abbruch entfällt der zweite Durchlauf: die
+  zurückgestellten Dateien bleiben offen (nächster Lauf) und werden nicht als
+  endgültige Fehler verbucht. Gilt für alle Läufe über `run_upload`
+  (Hintergrund/geplant und einmalig/manuell).
 
 - **Auth (upload engine):** browser cookies (session-id + x-acb/at-acb/ubid-acb)
   -> `content-<zone>.drive.amazonaws.com/v2/upload`.
