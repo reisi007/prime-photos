@@ -462,6 +462,34 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   Signatur-Default für **lokale** Bundles (ad-hoc nur noch als Rückfall). Das Wurzel-README bleibt
   versionsfrei.
 
+**Durch den sechsten echten Lauf belegt (2026-10-26):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.5` auf Commit `2e179fe` (`chore(release): prepare
+  v0.1.5`); GitHub-Release `v0.1.5`, veröffentlicht 2026-10-26T22:06:41Z, **nicht** Draft, **nicht**
+  Pre-Release — https://github.com/reisi007/prime-photos/releases/tag/v0.1.5
+- **Runs:** Push-CI `40405073604` (`ci.yml`: Ratchet-Gate + `cargo build`/`cargo test`) grün;
+  Release-Workflow `40408805334` (`release.yml`, ausgelöst durch den Tag-Push) — Jobs
+  `Build linux-x64` (5m21s), `Build windows-x64` (7m41s), `Publish GitHub Release` (13s), alle grün.
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.335.506 | `a3f9ce0a61c59fa5b0155e8413c491caea9adf474240c32ac6ab64fb9ae96ed3` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.564.117 | `b1a4edb50a53d72bcff3e5abbff352932f2ffa404bd03e363abb34f44c2d6739` |
+  | `Prime-Photos-windows-x64.zip` | 8.603.858 | `518729cf34a4a48821d52babb7af5ca3aef372ffb0f09407042cea11a3947c4b` |
+
+  `v0.1.5` trägt drei Assets. Der über die GitHub-API gemeldete `sha256`-Digest des DMG ist identisch
+  mit dem der lokalen Datei.
+- **macOS-Bundle (lokal gebaut, §4):** Version `0.1.5`/Build `5`, mit der Identität
+  `Prime Photos Local Signer` signiert; Commit-Stempel `2e179fe`; `codesign --verify` gültig,
+  `hdiutil verify` auf dem DMG: **VALID**. Das Bundle wurde in diesem Lauf **nicht** nach
+  `/Applications` installiert und **nicht** gestartet; an Amazon-Kontodaten wurde nichts geändert.
+- **Release-Notes:** vom Workflow erzeugt (`generate_release_notes: true`), Vergleichsbereich
+  `v0.1.4...v0.1.5`.
+- **Nicht abgenommen in diesem Lauf:** Windows/Linux werden weiterhin nur **kompiliert**, nicht
+  laufen getestet; eine Live-Abnahme eines echten Amazon-Uploads ist mit diesem Lauf **nicht**
+  belegt.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
