@@ -183,9 +183,6 @@ Ausdrücklich **ohne** Starttermin:
   **4,28:1** statt 4,5:1; der Kartenrahmen `BORDER` (`src/theme.rs:11`) liegt bei **1,32:1** (flache
   Optik, in der Praxis sichtbar). Nur auf ausdrückliche Vorgabe ändern — ein AMBER-Wechsel färbt
   Statuswörter sichtbar um.
-- **Ungetrackte Junk-Datei im Repo-Wurzelverzeichnis:** `.!10517!AGENTS.todo.md` (279 B, abgebrochener
-  Schreibvorgang von `AGENTS.todo.md` am 2026-10-17 14:48) — bewusst **nicht** angefasst; löschen nur
-  nach User-OK.
 - **Nicht** eingeplant (bewusst Out of Scope): die vollständige In/Out-Liste mit Beleg-Keys steht in
   `docs/original/SPEC_SCOPE_INVENTORY.md` und in `docs/features/scope.md`.
 
