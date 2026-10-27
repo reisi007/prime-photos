@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::dedup::{DedupIndex, Origin};
 use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
-use crate::prime_photos::{PrimePhotos, ReplaceBasis};
+use crate::prime_photos::PrimePhotos;
 use crate::theme;
 use eframe::egui::{self, Color32};
 use std::{
@@ -848,14 +848,6 @@ async fn upload_worker(
         // can tell a content duplicate ("bereits im Konto", nothing sent from
         // this path) from a name conflict ("vorhanden", different content).
         let mut conflict_cause: Option<String> = None;
-        // The account node this path is bound to in the local index, if any — the
-        // safe-replace rule's input (user decision 2026-10-16). Read once before
-        // the loop: the guard is dropped immediately and never held across an
-        // `await`.
-        let indexed_node_id = dedup.lock().unwrap().node_id_for(&path);
-        // Set when the user explicitly answers "Ersetzen" in the conflict dialog:
-        // that consent for *this* file bypasses the binding check.
-        let mut replace_confirmed = false;
         // Per-file byte progress (Befund 11c): the POST streams the file and
         // counts the bytes handed to the transport. A small polling task copies
         // that counter into the queue row every 100 ms, so the Backup page can
@@ -884,18 +876,12 @@ async fn upload_worker(
             }
         });
         let outcome = loop {
-            let basis = if replace_confirmed {
-                ReplaceBasis::Confirmed
-            } else {
-                ReplaceBasis::Automatic(indexed_node_id.as_deref())
-            };
             match uploader
                 .upload_picture(
                     &path,
                     Some(&bytes),
                     Some(&md5sum),
                     resolution,
-                    basis,
                     Some(current_bytes.clone()),
                 )
                 .await
@@ -906,18 +892,6 @@ async fn upload_worker(
                         break FileOutcome::Failed(e);
                     };
                     conflict_cause = crate::prime_photos::conflict_cause(&e).map(str::to_owned);
-                    // Name conflict under `Replace` that the index does not bind to
-                    // this path: a foreign file with the same name must not be
-                    // overwritten (user decision 2026-10-16) — rename once instead
-                    // of replacing. A content duplicate stays "bereits im Konto"
-                    // (the block below).
-                    let content_duplicate = conflict_cause
-                        .as_deref()
-                        .is_some_and(crate::prime_photos::is_content_duplicate_code);
-                    if resolution == ConflictResolution::Replace && !content_duplicate && !replace_confirmed {
-                        resolution = ConflictResolution::SaveAsNew;
-                        continue;
-                    }
                     if resolution != ConflictResolution::Ask {
                         // "Ignorieren": the file is already on the server.
                         existing_conflict_id = Some(existing.to_string());
@@ -952,11 +926,6 @@ async fn upload_worker(
                         existing_conflict_id = Some(existing.to_string());
                         break FileOutcome::ConflictSkipped;
                     }
-                    if answer == ConflictResolution::Replace {
-                        // The explicit "Ersetzen" is the user's consent for this
-                        // file: it bypasses the safe-replace binding check.
-                        replace_confirmed = true;
-                    }
                     // Re-upload the same file with the chosen policy.
                     resolution = answer;
                 }
@@ -978,10 +947,10 @@ async fn upload_worker(
         let mut requeued = false;
         match outcome {
             FileOutcome::Uploaded(id) => {
-                // Remember the upload so the next scan skips it, and bind the
-                // path to the node it landed on — that binding is what later
-                // allows an automatic `Replace` of *this* file (user decision
-                // 2026-10-16).
+                // Remember the upload so the next scan skips it, and retain the
+                // successful node id in the local index. Replace targets are
+                // selected from the server's 409 response, not gated by this
+                // persisted binding.
                 dedup
                     .lock()
                     .unwrap()

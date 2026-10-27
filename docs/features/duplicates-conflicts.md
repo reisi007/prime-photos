@@ -16,11 +16,15 @@ SQLite index is the primary defence; the server 409 is a safety net.
   policies: ask, ignore, save as a new file (server renames), or replace.
   "Ask" prompts per file with a "don't ask again for this folder" override
   and a 60-second timeout that falls back to ignoring.
-- The **safe replace rule**: the `PUT /v2/upload/<nodeId>` may overwrite the
-  node named by a 409 `NameAlreadyExists` **only** when the local index binds
-  exactly this path to exactly this node — then the same local file was
-  changed. If the name matches a **foreign** file from a different path, the
-  upload is **renamed** (`SaveAsNew`/wire `RENAME`), never deleted.
+- **Replace after a name conflict:** the server resolves the exact name +
+  parent and reports the existing target in `409 errorDetails.conflictNodeIds[0]`.
+  `Replace` sends `PUT /v2/upload/<nodeId>` only for the recognized name-conflict
+  codes `NameAlreadyExists` / `NAME_ALREADY_EXISTS` and a non-empty ID, whether
+  or not the local index binds it to the source path. Content-duplicate 409s
+  remain skips; unknown or missing error codes trigger neither PUT nor automatic
+  RENAME. This accepts the risk that a different same-name file can be replaced
+  in the shallow `Pictures/Web` target; `SaveAsNew` (`RENAME`) remains available
+  as an explicit policy.
 
 ## Decisions
 
@@ -107,29 +111,28 @@ SQLite index is the primary defence; the server 409 is a safety net.
   value is `saveasnew`/`replace`, **not** `save_as_new` — renaming the serde
   rule would break existing config files.
 
-- **Sichere Ersetz-Regel (User-Entscheidung 2026-10-16):** der
-  `PUT /v2/upload/<nodeId>` darf den vom 409 `NameAlreadyExists` benannten
-  Knoten **nur** überschreiben, wenn der **lokale Index genau diesen Pfad an
-  genau diese Node** bindet — dann wurde dieselbe lokale Datei geändert
-  (User-Wortlaut: „nie was oben ist löschen, außer es ist die gleiche Datei
-  physisch relativ zum gesicherted Pfad, dann überschreiben"). Trifft der Name
-  auf eine **fremde** Datei aus einem anderen Pfad, wird **umbenannt**
-  (`SaveAsNew`/Wire `RENAME`), nie gelöscht. Träger der Bindung ist die neue
-  Spalte **`node_id`** im Dedup-Index (Parität zum Original, dessen
-  `uploads`-Tabelle ebenfalls `node_id` führt): `record_upload` schreibt die
-  Node des Erfolgs, `COALESCE(excluded.node_id, node_id)` lässt eine bekannte
-  Bindung bestehen, `node_id_for(path)` ist die Abfrage für die Regel.
-  **Altdaten ohne Node-Id sind ungebunden** und werden beim ersten
-  Inhaltswechsel einmalig umbenannt — vom User ausdrücklich akzeptiert
-  (`../dev/DEV_NOTES.md`). Die Regel beschränkt **nur die automatische
-  Ordner-Politik**: eine **ausdrückliche** Antwort „Ersetzen" im Konflikt-Dialog
-  ist die Zustimmung für *diese* Datei und überschreibt sie (User-Entscheidung
-  2026-10-16). Ein **Inhaltsduplikat** bleibt auch dort „bereits im Konto" —
-  dieselben Bytes sind schon da, es gibt nichts zu überschreiben.
-  **Verworfen:** den Application Default nur deshalb auf `SaveAsNew`
-  zurückdrehen (die Sicherheit kommt aus der Bindung, nicht aus einem anderen
-  Default); bei fehlender Bindung **nichts** tun und den Server entscheiden
-  lassen.
+- **Replace folgt dem 409-Ziel (User-Entscheidung 2026-10-27, Original-Parität):**
+  der Server sucht den Namenskonflikt über **exakten Namen + Parent** und liefert
+  das gefundene Ziel in `errorDetails.conflictNodeIds[0]`. Die `Replace`-Policy
+  sendet dafür bei `NameAlreadyExists` bzw. `NAME_ALREADY_EXISTS` und einer
+  nicht-leeren ID `PUT /v2/upload/<nodeId>` — unabhängig davon, ob `uploads.node_id`
+  diese ID an den Quellpfad bindet. Dasselbe gilt, wenn im `Ask`-Dialog
+  ausdrücklich „Ersetzen" gewählt wird. Die lokale
+  `node_id`-Spalte bleibt als gespeicherte Upload-Node erhalten, ist aber kein
+  Replace-Gate. Ein erkannter Inhaltsduplikat-409 bleibt immer Skip („bereits im
+  Konto"), auch bei `Replace`.
+
+  **Bewusst akzeptierter Trade-off:** im flachen Ziel `Pictures/Web` kann so
+  eine fremde gleichnamige Datei ersetzt werden; sie muss nicht vom selben
+  Quellpfad stammen. `SaveAsNew` (`RENAME`) bleibt als explizite Policy
+  verfügbar. Fehlt im 409 eine nutzbare Node-ID oder ein bekannter Namenskonflikt-
+  Code, wird bei automatischem `Replace` nicht stillschweigend auf `RENAME`
+  zurückgefallen.
+
+  **Verworfen:** die frühere binding-gated Regel (nur bei passender lokaler
+  `node_id` per PUT, sonst RENAME) — sie wich vom Original-Verhalten ab und
+  verursachte bei fehlenden/abweichenden Indexbindungen wiederholte Kopien.
+  Quellenentscheidung: REA-statische Analyse von Amazon Photos 11.3.0,36.
 
 - **Drei Ebenen der Konflikt-Standardwahl (User-Entscheidung 2025-10-15,
   bestätigt 2026-10-16):**

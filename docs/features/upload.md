@@ -10,6 +10,10 @@ handles server responses including conflict detection.
   with raw body, cookie-based auth (`session-id`, `x-acb/at-acb/ubid-acb`).
 - Query parameters: `conflictResolution`, `fileSize`, `name`, `parentNodeId`.
   POST and PUT share the same query set.
+- For `Replace`, a name-conflict 409 supplies the target in
+  `conflictNodeIds[0]`; a non-empty ID is replaced with `PUT` regardless of the
+  local path-to-node binding. Content-duplicate 409s remain skips; see
+  [duplicates-conflicts.md](duplicates-conflicts.md).
 - **No `contentDate` is sent** — the server derives the capture date from the
   uploaded bytes (EXIF `DateTimeOriginal` + `SubSecTimeOriginal`), falling back
   to nothing. A `PUT /v2/upload/<nodeId>` without `contentDate` keeps the

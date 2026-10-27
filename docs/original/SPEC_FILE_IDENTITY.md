@@ -249,14 +249,14 @@ getrennte Zähler.
 | **Cross-path Dedup** | `GetNodeByMd5` über `cloud.db` | `DedupIndex::content_seen` über `ix_uploads_md5` | `src/dedup.rs:323`, `src/upload.rs:661` | **Umgesetzt** (2026-10-14) |
 | **Stat-Schnellpfad** | **nein** | ja (size+mtime) | `src/dedup.rs:355`, `src/upload.rs:541` | **Bewusste Erweiterung** |
 | **`origin`-Trennung** | **nein** | ja (`uploaded` / `content_skip`) | `src/dedup.rs:41`, `src/upload.rs:549` | **Bewusste Erweiterung** |
-| **`node_id`-Bindung** | `cloud.db` Knoten | `uploads.node_id` | `src/dedup.rs:462` | **Umgesetzt** (2026-10-16) |
+| **`node_id`-Bindung** | `cloud.db` Knoten | `uploads.node_id` | `src/dedup.rs:395` (`record_upload`), `src/dedup.rs:432-444` (persistierter Upsert) | **Umgesetzt** (2026-10-16) |
 | **NFC-Normalisierung** | **nein** (roh NFD auf macOS) | **ja** | `crate::text::nfc` (`src/urls.rs:344`) | **Bewusste Abweichung**, dokumentiert |
 | **PreUploadCheck** | ja, vor jedem Request | äquivalent: Stat→MD5→content_seen vor POST | `src/upload.rs:540-686` | Parität (implementiert als Worker-Schleife) |
 | **Knoten-Cache (`cloud.db`)** | ja | **nein** | — | **Bewusste Grenze** (AGENTS.md) |
 | **Name-Konflikt-Erkennung** | lokal vor Request | nur aus 409 | `src/upload.rs:766` | **Lücke** — pragmatisch akzeptiert |
 | **409-Ursache gesplitzt** | ja | ja (`conflict_cause`, `is_content_duplicate_code`) | `src/prime_photos.rs:449` | **Umgesetzt** (2026-10-15) |
-| **`Replace` via PUT** | ja (Überschreiben gesetzt plus Knoten-Id) | ja (`PUT /v2/upload/<nodeId>` mit POST-Query-Satz) | `src/urls.rs:374`, `src/prime_photos.rs:1302` | **Umgesetzt** (2026-10-15) |
-| **Sichere Ersetz-Regel** | **nicht belegt** | nur bei `node_id`-Bindung | `src/prime_photos.rs:494` (`should_replace_after_conflict`) | **Bewusste Erweiterung** |
+| **`Replace` via PUT** | ja (Überschreiben gesetzt plus Knoten-Id) | ja (`PUT /v2/upload/<nodeId>` mit POST-Query-Satz) | `src/urls.rs:374`, `src/prime_photos.rs:1274-1280` | **Umgesetzt** (2026-10-15) |
+| **Replace-Ziel nach 409** | Name+Parent-Lookup liefert das Ziel | `conflictNodeIds[0]` wird per PUT ersetzt, unabhängig von lokaler `node_id`-Bindung | `src/prime_photos.rs` (`should_replace_after_conflict`) | **Parität** (REA-statische Analyse Amazon Photos 11.3.0,36) |
 | **Apple-Photos-Heuristik** | ja | **nein** | — | Bewusst außen vor |
 | **Dedup-Default** | Onboarding an, Post-Off | `true` | `src/folders.rs` (`default_true`) | Parität (dokumentiert) |
 | **Konflikt-Default** | `None` („Jedes Mal nachfragen") | Application `Replace` | `src/folders.rs` | **Bewusste Abweichung** |
@@ -355,7 +355,7 @@ getrennte Zähler.
 - `src/dedup.rs:355` — `stat_matches`
 - `src/dedup.rs:284` — `should_skip`
 - `src/dedup.rs:323` — `content_seen`
-- `src/dedup.rs:462` — `node_id_for`
+- `src/dedup.rs` — `record_upload` persists the successful-upload `node_id`
 - `src/dedup.rs:41` — `Origin` enum
 - `src/upload.rs:541` — Stat-Skip im Worker
 - `src/upload.rs:603` — MD5-Berechnung
@@ -363,7 +363,7 @@ getrennte Zähler.
 - `src/upload.rs:661` — `content_seen` Aufruf
 - `src/upload.rs:747-972` — 409-Behandlung und Konflikt-Logik
 - `src/prime_photos.rs:449` — `is_content_duplicate_code`
-- `src/prime_photos.rs:494` — `should_replace_after_conflict`
+- `src/prime_photos.rs:463` — `should_replace_after_conflict`
 - `src/urls.rs:344` — NFC-Normalisierung in `upload_query`
 - `src/urls.rs:374` — `replace_upload_url`
 

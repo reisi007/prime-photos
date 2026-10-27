@@ -41,7 +41,6 @@ bereits **Out**), macOS-Signatur/Benachrichtigungen, Multi-Fenster-Zeile, Win/Li
 DMG-Skript, Token-Rotation, **Marge im `QUEUE_BELOW_H`/`page_heights`-Kommentar in `src/backup.rs`**,
 **Test-Isolations-Race:** `src/tray.rs` setzt global `set_lang(En)`, während `upload::tests` denselben
 globalen Zustand parallel liest — Verifier-Befund 2026-10-17, isoliert und single-thread grün)
-plus die zwei Live-Abnahmen (Rückfall-Regel, PUT-Bindung).
 
 ## Erster Punkt beim nächsten Mal
 
@@ -100,15 +99,6 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
    **verschobene/umbenannte** Datei (gleicher MD5, anderer Quellpfad) wird lokal übersprungen und bekommt
    **keinen** Knoten am neuen gespiegelten Pfad; ihr alter Knoten bleibt unter dem **alten** Pfad liegen.
    Doku: `docs/features/duplicates-conflicts.md` (Cross-path-Entscheidung) und `destination.md`.
-
-## Offene Punkte aus der Konflikt-/Duplikat-Kette (Welle 2)
-
-- [ ] **Live-Abnahme der Rückfall-Regel (2026-10-16).** Nur durch Tests gepinnt, nicht durch die
-  Leitung: ein `Replace`-Ziel, dessen Pfad der Index **nicht** an die vom 409 benannte Node bindet,
-  läuft als **`RENAME`** weiter. Zu belegen an einer **fremden** Datei gleichen Namens (sie muss danach
-  **unverändert** im Konto stehen — kein Datenverlust), sinnvoll in **einem** Lauf mit der
-  PUT-Abnahme: derselbe Namenskonflikt, einmal **mit** Bindung ⇒ PUT, einmal **ohne** ⇒ RENAME.
-  Regel/Details: `docs/features/duplicates-conflicts.md`.
 
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 
