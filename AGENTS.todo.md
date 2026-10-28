@@ -19,16 +19,15 @@ hier nur die Reihenfolge und die Spec-Lage (Recon-Abgleich am 2026-10-17).
 → Actions Node 20 → 24.
 
 **2. Spec vollständig vorhanden — umsetzbar ohne neue Recon**, in dieser Reihenfolge:
-1. Upload-Ziel-Spiegelung (`SPEC_UPLOAD_DESTINATION.md`; Live-Beleg fürs Ordner-Anlegen liegt vor)
-2. Größe-Spalte + relatives „Letzte Aktualisierung" (`SPEC_UPLOAD_PROGRESS.md` §7.2,
+1. Größe-Spalte + relatives „Letzte Aktualisierung" (`SPEC_UPLOAD_PROGRESS.md` §7.2,
    `SPEC_STATUS_DETAIL.md` §3.4; im Scope-Inventar als **In** geführt)
-3. Queue-Paginierung: 300er-Kappung raus, `ScrollArea::show_rows` (`SPEC_STATUS_DETAIL.md` §3,
+2. Queue-Paginierung: 300er-Kappung raus, `ScrollArea::show_rows` (`SPEC_STATUS_DETAIL.md` §3,
    `SPEC_UPLOAD_PROGRESS.md` §7)
-4. „Details anzeigen"-Panel (`UI_FLOWS.md` §4.7)
-5. Fehlerfenster `readdtoqueue`/`retryall` (`SPEC_STATUS_DETAIL.md` §3; Inventar #21 „teilweise In")
-6. Sortierung/Filter der Tabelle (Inventar #16, `SPEC_STATUS_DETAIL.md` §3.3)
-7. Pause **pro Ordner** (`SPEC_BACKGROUND_SYNC.md` §7: „Datensicherung anhalten" je Schedule)
-8. Tray-Status-Popup (Inventar #15, `SPEC_UPLOAD_PROGRESS.md`/`SPEC_NOTIFICATIONS.md`)
+3. „Details anzeigen"-Panel (`UI_FLOWS.md` §4.7)
+4. Fehlerfenster `readdtoqueue`/`retryall` (`SPEC_STATUS_DETAIL.md` §3; Inventar #21 „teilweise In")
+5. Sortierung/Filter der Tabelle (Inventar #16, `SPEC_STATUS_DETAIL.md` §3.3)
+6. Pause **pro Ordner** (`SPEC_BACKGROUND_SYNC.md` §7: „Datensicherung anhalten" je Schedule)
+7. Tray-Status-Popup (Inventar #15, `SPEC_UPLOAD_PROGRESS.md`/`SPEC_NOTIFICATIONS.md`)
 
 **3. Braucht erst eine Entscheidung oder neue Recon** (nicht einfach „nächste Welle"): Netz-/Kosten-Gate
 (im Original **nicht** belegt — „netzwerkgesteuerte Drosselung" wäre eine Neuerung), „Pro-Ziel-Limit"
@@ -87,18 +86,6 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
 - **Nicht getrackt, weil dokumentiert:** ob `LSMinimumSystemVersion 11.0` (Info.plist) vs. Autostart ab
   macOS 13 je relevant wird — bekannte Degradation in den „unsupported"-Pfad
   (`docs/features/autostart.md`; „not live-checked" in `docs/features/LIVE_ACCEPTANCE.md`).
-
-## Offen aus dem geschlossenen Test 2026-10-16
-
-1. [ ] **Upload-Ziel-Spiegelung wie das Original.** Zielfeld ist aus dem Dialog entfernt (Welle 5.7),
-   die App wählt das Ziel automatisch (`Pictures/Web`); Auftrag nach
-   `docs/original/SPEC_UPLOAD_DESTINATION.md`: Spiegelung `Backup/<Macname>/<Quellpfad>`, Segmente bei
-   Bedarf anlegen. Bestehende Uploads in `Pictures/Web` bleiben. Umsetzung ist **frei** — Live-Beleg
-   und Entscheidungslage: `docs/features/destination.md`.
-   **Beim Bauen beachten (User-Frage 2026-10-17):** der Content-Skip ist **kein** Move im Konto — eine
-   **verschobene/umbenannte** Datei (gleicher MD5, anderer Quellpfad) wird lokal übersprungen und bekommt
-   **keinen** Knoten am neuen gespiegelten Pfad; ihr alter Knoten bleibt unter dem **alten** Pfad liegen.
-   Doku: `docs/features/duplicates-conflicts.md` (Cross-path-Entscheidung) und `destination.md`.
 
 ## Offene Punkte (Bugs & Wünsche aus 2026-10-13)
 

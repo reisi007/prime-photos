@@ -22,9 +22,11 @@ SQLite index is the primary defence; the server 409 is a safety net.
   codes `NameAlreadyExists` / `NAME_ALREADY_EXISTS` and a non-empty ID, whether
   or not the local index binds it to the source path. Content-duplicate 409s
   remain skips; unknown or missing error codes trigger neither PUT nor automatic
-  RENAME. This accepts the risk that a different same-name file can be replaced
-  in the shallow `Pictures/Web` target; `SaveAsNew` (`RENAME`) remains available
-  as an explicit policy.
+  RENAME. Conflicts are scoped to the exact mirrored file-parent path under
+  `Backup/<MachineName>/...`; same-named files in different mirrored parent
+  paths do not conflict. `Replace` can still replace an existing node at that
+  exact target path. Existing `Pictures/Web` nodes are not migrated. Destination
+  details: `destination.md`.
 
 ## Decisions
 
@@ -122,12 +124,15 @@ SQLite index is the primary defence; the server 409 is a safety net.
   Replace-Gate. Ein erkannter Inhaltsduplikat-409 bleibt immer Skip („bereits im
   Konto"), auch bei `Replace`.
 
-  **Bewusst akzeptierter Trade-off:** im flachen Ziel `Pictures/Web` kann so
-  eine fremde gleichnamige Datei ersetzt werden; sie muss nicht vom selben
-  Quellpfad stammen. `SaveAsNew` (`RENAME`) bleibt als explizite Policy
-  verfügbar. Fehlt im 409 eine nutzbare Node-ID oder ein bekannter Namenskonflikt-
-  Code, wird bei automatischem `Replace` nicht stillschweigend auf `RENAME`
-  zurückgefallen.
+  **Bewusst akzeptierter Trade-off:** der Namenskonflikt bezieht sich auf den
+  exakten gespiegelten Datei-Elternpfad unter `Backup/<MachineName>/...`.
+  Gleichnamige Inhalte aus unterschiedlichen gespiegelten Elternpfaden
+  kollidieren daher nicht miteinander. `Replace` kann weiterhin einen
+  bestehenden Knoten am exakt gleichen Zielpfad ersetzen; `SaveAsNew` (`RENAME`)
+  bleibt als explizite Policy verfügbar. Bestandsknoten in `Pictures/Web` werden
+  nicht migriert; Details zum Zielpfad: `destination.md`. Fehlt im 409 eine
+  nutzbare Node-ID oder ein bekannter Namenskonflikt-Code, wird bei automatischem
+  `Replace` nicht stillschweigend auf `RENAME` zurückgefallen.
 
   **Verworfen:** die frühere binding-gated Regel (nur bei passender lokaler
   `node_id` per PUT, sonst RENAME) — sie wich vom Original-Verhalten ab und

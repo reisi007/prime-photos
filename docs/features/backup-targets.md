@@ -19,10 +19,10 @@ The dialog is shared between creating and editing a target.
   original), **per target** persisted. `is_supported_image` remains the
   effective filter — the field is parity + future.
 - **Zielfeld aus dem Dialog (F9, Welle 5.7):** "Ziel für Datensicherung:" with
-  "Ändern …" is **removed**; the destination is automatically determined
-  (today `Pictures/Web`). The **original mirroring**
-  (`Backup/<Macname>/<Quellpfad>`) is a **separate task** after
-  `../original/SPEC_UPLOAD_DESTINATION.md`.
+  "Ändern …" is **removed**. Configured backups and one-time drag-and-drop
+  uploads automatically mirror their local paths under
+  `Backup/<MachineName>/`; existing nodes in `Pictures/Web` are not migrated.
+  Full path and target-resolution semantics: `destination.md`.
 - Folder scans enforce `is_supported_image` (single source in `folders.rs`).
   There is **no file picker** in HEAD (only `FileDialog::pick_folder()`) and
   `supported_extensions()` is currently unwired.
@@ -96,9 +96,10 @@ The dialog is shared between creating and editing a target.
   Wirksam bleibt `is_supported_image` — das Feld ist Parität + Zukunft.
 
 - **Zielfeld aus dem Dialog (F9, Welle 5.7).** „Ziel für Datensicherung:" samt
-  „Ändern …" ist **entfernt**; das Ziel wird automatisch bestimmt (heute
-  `Pictures/Web`). Die **Original-Spiegelung** (`Backup/<Macname>/<Quellpfad>`)
-  ist ein **eigener Auftrag** nach `../original/SPEC_UPLOAD_DESTINATION.md`.
+  „Ändern …" ist **entfernt**; konfigurierte Sicherungen und einmalige
+  Drag-and-drop-Uploads erhalten automatisch ein gespiegeltes Ziel unter
+  `Backup/<MachineName>/`. Bestandsknoten in `Pictures/Web` werden nicht
+  migriert. Vollständige Pfad- und Auflösungssemantik: `destination.md`.
   **Verworfen:** das Feld behalten und bei `Pictures/Web` bleiben.
 
 - **Supported photos:** jpg, jpeg, png, heic, heif, tif, tiff, gif, webp, bmp

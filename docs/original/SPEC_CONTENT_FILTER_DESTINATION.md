@@ -372,12 +372,17 @@ zulässig."), `schedules_overlappingfolder_warningmessage`, `schedules_syncfolde
 
 ---
 
-## 6. Konsequenz für Prime Photos
+## 6. Konsequenz für Prime Photos — historische Momentaufnahme vor der Upload-Ziel-Spiegelung
 
-Lücken gegen unseren heutigen Stand (Quelle: `AGENTS.md`, `SPEC_CONFLICT_OPTIONS.md`
+Die folgende Tabelle **und die Arbeitsreihenfolge darunter** halten den damaligen Stand
+**vor der Implementierung der Upload-Ziel-Spiegelung** fest; sie beschreiben nicht den
+aktuellen Prime-Photos-Stand. Der aktuelle implementierte Stand der Zielpfade ist unter
+`../features/destination.md` dokumentiert.
+
+Lücken gegen unseren damaligen Stand (Quelle: `AGENTS.md`, `SPEC_CONFLICT_OPTIONS.md`
 §3/§4, `SPEC_FOLDERS.md` §2):
 
-| Thema | Original | Unser Stand | Lücke |
+| Thema | Original | Unser Stand (damals, vor Upload-Ziel-Spiegelung) | Lücke |
 |---|---|---|---|
 | **Inhaltsfilter** | Zwei Checkboxen „Fotos sichern"/„Videos sichern", wirksam bei Scan **und** Upload | **keiner** — 28 hartkodierte Bild-Endungen in `is_supported_image` (`src/folders.rs`), Videos gar nicht | **F2 komplett offen.** Mindestens: ein `dedup`-analoger Filterwert pro Ziel, zwei Checkboxen, Verdrahtung in `scan_images` **und** vor dem Request |
 | **Nicht-Medien** | wird **nie** gesichert (`Matches` gibt `false` zurück) | wird bei uns je nach Endung teils mitgesichert | bewusst klären: unser Standard-Set ist ohnehin bilder-only, aber die Regel sollte explizit sein, falls wir Videos ergänzen |
@@ -393,8 +398,9 @@ Lücken gegen unseren heutigen Stand (Quelle: `AGENTS.md`, `SPEC_CONFLICT_OPTION
 | **Inhalt schlägt Name** | `PreUploadCheck` vor jedem Request, Skip ohne Netz | identisch (lokaler MD5-Index + 409-Sicherheitsnetz) | **keine Lücke** |
 | **Dedupe-Toggle-Default** | Onboarding an / danach global `false` | `true` (bewusste Abweichung, `AGENTS.md`) | dokumentiert, kein Handlungsbedarf |
 
-**Reihenfolge der sinnvollen Arbeit:** F3 (Zielordner) ist die Voraussetzung für
-parity-nahes Backup und berührt `folders.rs`, `config` und einen Cloud-Picker;
+**Historische Reihenfolge der sinnvollen Arbeit (vor der Upload-Ziel-Spiegelung):**
+F3 (Zielordner) ist die Voraussetzung für parity-nahes Backup und berührt
+`folders.rs`, `config` und einen Cloud-Picker;
 F2 (Filter) folgt und braucht dieselbe Ziel-Struktur, weil der Filter je Ziel
 gespeichert wird. F1 erfordert **keine** Änderung — unsere Konflikt-Map ist korrekt;
 lediglich das Verhalten von `SaveAsNew` ohne Konflikt ist gegeneinander zu halten.
