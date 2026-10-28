@@ -10,8 +10,10 @@ The dialog is shared between creating and editing a target.
   duplicate switch, and a name-conflict policy.
 - Targets can be paused individually; the whole app can be paused globally.
 - The dialog is shared between creating and editing a target.
-- Fields whose backing service does not exist yet are shown **disabled** with
-  a "Noch nicht verfügbar" hint, keeping the full original layout.
+- Fields that remain visible despite their backing service not being implemented
+  yet (such as Videos or the interval, where shown) are **disabled** with a
+  "Noch nicht verfügbar" hint. The destination field is **removed**; the
+  destination is mirrored automatically (`destination.md`).
 - **Content filter (F2, Welle 5.7):** two checkboxes with original labels
   "Fotos sichern" (on, selectable) / "Videos sichern" (visible, **disabled**);
   "Alles" is not selectable in the original. New type `ContentFilter` in
