@@ -105,7 +105,6 @@ festhalten und `docs/original/` nur für belegtes Verhalten der Amazon-Original-
 - [ ] **P2 —** [#3 Unix-Einzelinstanzschutz bei verwaistem Socket race-sicher machen](https://github.com/reisi007/prime-photos/issues/3)
 - [ ] **P3 —** [#4 Marketplace-Auswahl nicht aus Auth-Cookie-Suffix überschreiben](https://github.com/reisi007/prime-photos/issues/4)
 - [ ] **P3 —** [#8 Native macOS-App-Menü gemäß gewählter Sprache lokalisieren](https://github.com/reisi007/prime-photos/issues/8)
-- [ ] **P3 —** [#2 Login- und Session-Refresh-Doku auf aktiven Auth-Flow abstimmen](https://github.com/reisi007/prime-photos/issues/2)
 
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
