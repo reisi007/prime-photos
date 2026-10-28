@@ -45,6 +45,11 @@ last run.
   merged list goes into **one** run. Implementation: `src/backup.rs`
   (`park_paths`, `pending`/`pending_seen`), commit `2eea96c`, verify round
   1 APPROVE.
+- **Transient `folders.toml` load failure (Soll-Vertrag, Issue #5):** keep all
+  parked watcher paths and scan requests intact. Skip work that needs the
+  unavailable store, then retry no earlier than the next `WATCH_POLL` tick
+  (30 s), even if another event wakes the supervisor; never immediately loop on
+  the failed read. This bounds retries without losing work.
 - **Folder added during a run is not dropped (Welle 5.31):** the detached
   supervisor reads the folder in **parallel** to the running upload
   (`UploadPlan::build_since` with watermark `None`, `handle_scan_requests` in

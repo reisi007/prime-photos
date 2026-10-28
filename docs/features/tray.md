@@ -88,7 +88,12 @@ closing the window quits the app.
   general) `src/single_instance.rs` keeps a guard: a `UnixListener` on
   `…/prime_photos/instance.sock` (unix) or a loopback `TcpListener` on a fixed
   port (Windows), same one-line handshake (`prime-photos:show` →
-  `prime-photos:ok`).
+  `prime-photos:ok`). **Unix stale-socket takeover (Soll-Vertrag, Issue #3):**
+  concurrent starters must still leave exactly one socket owner. A contender
+  that loses the takeover bind must not continue without the guard; it must
+  reach the winner or stop. The original's `LSMultipleInstancesProhibited`
+  (`../original/SPEC_OS_INTEGRATION.md` §3.1) is evidence for the original's
+  single-instance contract, not for this port's socket-race mechanics.
 
 ## Decisions
 

@@ -94,6 +94,19 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
   Icon-Maße; braucht die Design-Abmachung des Users. Stand/Feststellung:
   `docs/features/window-layout.md`.
 
+## Bugs aus dem Code-Audit
+
+GitHub Issues sind der kanonische Tracker. Einzeln abarbeiten; Soll-Verhalten in `docs/features/`
+festhalten und `docs/original/` nur für belegtes Verhalten der Amazon-Original-App ergänzen.
+
+- [ ] **P2 —** [#6 401-Recovery-Hinweis auf aktuellen Login-Flow umstellen](https://github.com/reisi007/prime-photos/issues/6)
+- [ ] **P2 —** [#7 Fehlgeschlagenes Auth-Cookie-Minting zeitnah erneut versuchen](https://github.com/reisi007/prime-photos/issues/7)
+- [ ] **P2 —** [#5 Backup-Watcher bei Store-I/O-Fehlern begrenzen](https://github.com/reisi007/prime-photos/issues/5)
+- [ ] **P2 —** [#3 Unix-Einzelinstanzschutz bei verwaistem Socket race-sicher machen](https://github.com/reisi007/prime-photos/issues/3)
+- [ ] **P3 —** [#4 Marketplace-Auswahl nicht aus Auth-Cookie-Suffix überschreiben](https://github.com/reisi007/prime-photos/issues/4)
+- [ ] **P3 —** [#8 Native macOS-App-Menü gemäß gewählter Sprache lokalisieren](https://github.com/reisi007/prime-photos/issues/8)
+- [ ] **P3 —** [#2 Login- und Session-Refresh-Doku auf aktiven Auth-Flow abstimmen](https://github.com/reisi007/prime-photos/issues/2)
+
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
 Ausdrücklich **ohne** Starttermin:

@@ -200,3 +200,10 @@ Die Konfiguration und maschinengeschriebene Baseline liegen im Repo-Root; die Z�
 Die Baseline bewegt nur `ratchet baseline update` (nur in Richtung) bzw. `ratchet baseline raise`
 **mit Grund** — nie per Hand. Lokal prüfen: `ratchet count` zeigt die aktuellen Werte,
 `ratchet check` vergleicht sie mit der Baseline.
+
+## 15. GitHub Issues als Bug-Tracker
+
+**User-Entscheidung (2026-10-29):** GitHub Issues ist der kanonische Bug-Tracker. Für
+GitHub-getrackte Bugs sind Beschreibung und Status im Issue maßgeblich; `AGENTS.todo.md` führt für
+diese Bugs nur Priorität und Issue-Link. Andere offene Ledger-Arbeit in `AGENTS.todo.md` bleibt
+davon unberührt.

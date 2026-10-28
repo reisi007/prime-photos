@@ -67,6 +67,13 @@ and could alter the sign-in page.
   greift damit auch ohne POSIX-Umgebung; der Override in den Einstellungen bleibt
   unverändert.
 
+- **Native macOS-Menüs (Soll-Vertrag, Issue #8):** App-Menü und Tray-Menü zeigen
+  die aktuelle UI-Sprache und aktualisieren ihre Labels direkt nach einem
+  Sprachwechsel. Das ist macOS-spezifisch; für Windows/Linux wird kein
+  entsprechendes natives Menüverhalten zugesagt. Aktuell wird das App-Menü nur
+  einmal installiert und beim Sprachwechsel nur das Tray aktualisiert; der
+  Refresh des App-Menüs bleibt umzusetzen.
+
 - **Dateinamen-Kodierung: NFC (User-Entscheidung 2026-10-14):** die
   Upload-Namens-Kodierung (NFC) betrifft auch den Anzeigetext — Details in
   [upload.md](upload.md).

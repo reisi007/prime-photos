@@ -1,9 +1,11 @@
 # Session refresh
 
 The access token is renewed in the background at **80 % of its remaining
-lifetime**, and the web cookies are re-minted at start-up and after every
-successful renewal. While offline, nothing is given up: a connection error
-does not consume an attempt, and the app simply tries again on the next tick.
+lifetime**. Upload cookies are minted at start-up and after a successful
+renewal. **Soll-Vertrag (Issue #7, not yet implemented):** a failed cookie mint
+is to be retried on the next worker tick, independently of the next
+access-token refresh appointment. While offline, nothing is given up: a
+connection error does not consume an access-token attempt.
 
 ## How it works
 
@@ -17,6 +19,10 @@ does not consume an attempt, and the app simply tries again on the next tick.
   (`session-id`, `x-acb*`, `at-acb*`, `ubid-acb*`) are re-minted from the
   refresh token via `POST https://api.amazon.com/auth/token` with
   `requested_token_type=auth_cookies` und fed into the in-memory cookie jar.
+- **Cookie minting is independent pending work (Soll-Vertrag, Issue #7):** if
+  minting fails, retry it on the next 3-second worker tick; do not wait for the
+  80%-of-lifetime access-token appointment. A cookie-mint failure must not move
+  that access-token schedule.
 - The upload engine stays cookie-based; the live cookie jar remains valid
   across token refreshes.
 - Offline does not count as a failure: a connection error
@@ -38,29 +44,31 @@ does not consume an attempt, and the app simply tries again on the next tick.
 - **Web-Cookies erneuern:** `POST https://api.amazon.com/auth/token?source_token=<refresh>&source_token_type=refresh_token&requested_token_type=auth_cookies&domain=.<tld>&app_name=…&app_version=…`
   — **beim Start und nach jeder erfolgreichen Auffrischung** aus dem
   Refresh-Token gemintet und in die bestehende Cookie-Kette (im Speicher)
-  eingespeist; die **Upload-Engine bleibt cookie-basiert**, die live belegte
-  Kette aus Welle 2 bleibt damit gültig.
+  eingespeist; die **Upload-Engine bleibt cookie-basiert**. Schlägt das Minting
+  fehl, wird es unabhängig vom 80-%-Termin beim nächsten Worker-Tick erneut
+  versucht; der Access-Token-Termin bleibt unverändert (Soll-Vertrag, Issue #7).
 
 - **S-C-Umsetzung:** der Auffrischungs-Worker läuft als **ein** langlebiger
   Task auf der bestehenden Tokio-Runtime (Muster wie `avatar_fetch`),
   Ergebnis über einen geteilten Slot, den die UI pro Frame pollt.
-  **Folge der Speicher-only-Regel:** der reine Cookie-Rückfall (Geräteweg
-  abgelehnt) gilt nur für die **laufende** Sitzung, nicht über einen Neustart
-  — der Geräteweg ist der persistente Pfad.
+  **Persistenz:** der Refresh-Token ist der persistente Session-Pfad; nach einem
+  Neustart werden Access-Token und Upload-Cookies daraus im Hintergrund erneuert.
+  Einen Browser-Cookie-Login als Rückfall gibt es nicht.
 
 - **`expires_in` kommt als JSON-String** (`"3600"`): der Parser akzeptiert
   String **und** Zahl (Register **und** Refresh).
 
-- **Desktop auth chain (observed):** `POST api.amazon.com/auth/token`
+- **Original desktop auth chain (observed; not this port's upload path):**
+  `POST api.amazon.com/auth/token`
   (`source_token_type=refresh_token` -> `access_token`) ->
   `GET drive.amazonaws.com/drive/v2/account/endpoint` ->
   `POST cdws.../drive/v1/account/source`.
 
-- **Flow note:** this is the **web** flow (cookie-based). The desktop client's
-  **device** flow (`amzn_photos_desktop_*` signin -> `/auth/register` ->
-  refresh token -> `/auth/token` ->
-  `upload-photos.amazon.de/v2/upload`) is documented in
-  `../protocol/openapi.yaml` but not used.
+- **Flow distinction (current):** sign-in uses the device flow/PKCE and its
+  stored refresh token. The upload engine remains cookie-based; its session
+  cookies are minted from that refresh token and are not harvested from the
+  login webview. Older notes describing browser-cookie sign-in as active are
+  superseded (see [login.md](login.md)).
 
 ## Original reference
 

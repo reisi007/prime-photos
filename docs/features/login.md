@@ -48,13 +48,11 @@ the app** in an embedded web view — same window, no external browser, no CDP.
 - **Auth (GUI):** Embedded WKWebView login, **in the same window as the app**
   (like the original). egui's window hosts a wry `WKWebView` child view; no
   extra window, no external browser, no CDP. Amazon's sign-in page is loaded
-  directly (`/ap/signin?…` with `assoc_handle=amzn_photos_web_<cc>`).
-  Cookie capture must **not** run inside egui's `update`: wry's
-  `WebView::cookies` is synchronous and spins the macOS run loop, which
-  re-enters winit's event handler and panics — so probes are dispatched to the
-  main queue and the result is picked up on the next frame. A
+  directly with the device-flow/PKCE parameters (`assoc_handle` and `pageId`
+  use the `amzn_photos_desktop_*` form; see below). A
   country/marketplace selector picks the TLD (default from system locale on
-  first run).
+  first run). The former browser-cookie probe was removed; it is not a sign-in
+  path.
 
 - **Auth (login chrome):** Deliberate deviation from the measured original
   (`../original/UI_FLOWS.md` §2.1). While Amazon's page is open, a slim
@@ -86,10 +84,13 @@ the app** in an embedded web view — same window, no external browser, no CDP.
      `openid.return_to=https://www.<domain>/ap/maplanding`,
      `openid.pape.max_auth_age=0`, `marketPlaceId`, `language`,
      `forceMobileLayout=true`.
-  2. **Erfolgserkennung:** nicht mehr „Cookies sind da", sondern
-     `openid.oa2.authorization_code` in einer `/ap/…`-Navigation (die
-     Navigation selbst wird verworfen — wie im Original). Die Marktplatz-Wahl
-     aus dem Cookie-Suffix (`x-acb<cc>`) entfällt damit als Nebenwirkung.
+   2. **Erfolgserkennung:** nicht mehr „Cookies sind da", sondern
+      `openid.oa2.authorization_code` in einer `/ap/…`-Navigation (die
+      Navigation selbst wird verworfen — wie im Original). **Soll-Vertrag
+      (Issue #4):** Die gewählte Marketplace-Kennung bleibt maßgeblich. Ein
+      Cookie-Suffix (`x-acb<cc>`) darf `config.country` nicht überschreiben;
+      es beschreibt nur das Cookie. Der aktuelle `apply_parsed`-Pfad schreibt
+      `parsed.country` noch zurück und muss diesem Vertrag folgen.
   3. **Einlösen:** `POST https://api.amazon.com/auth/register` mit
      `registration_data` (app_name/version, device_type/serial/model,
      os_version) und `auth_data` (`use_global_authentication=false`,
@@ -172,37 +173,39 @@ the app** in an embedded web view — same window, no external browser, no CDP.
   Hauptfenster anmeldet. Ersetzt durch die eingebettete Child-WebView im
   Hauptfenster.
 
-- **Verworfen: synchrone Cookie-Abfrage in `update`** (wry `WebView::cookies`):
-  Panic durch winit-Reentrancy (dreht die NSRunLoop) — Mechanik oben bei
-  „Auth (GUI)". Ersetzt durch `dispatch_async` auf der Main-Queue; später
-  **komplett entfernt**, weil sie aus einem Main-Queue-Block immer in den
-  Timeout lief (der Geräteweg ist der einzige Anmeldeweg).
+- **Historische Browser-Cookie-Probe, entfernt:** eine synchrone Abfrage in
+  `update` (wry `WebView::cookies`) führte zu winit-Reentrancy; die spätere
+  Main-Queue-Variante lief in den Timeout. Beide Varianten wurden entfernt,
+  weil der Geräteweg der einzige Anmeldeweg ist.
 
 - **Verworfen: mitmproxy live capture** als Teil der App — bleibt nur ein
-  **Debug-Werkzeug**; die App nutzt den eigenen Upload-Weg (zum Zeitpunkt der
-  Entscheidung den Cookie-Weg).
+  **Debug-Werkzeug**; die App nutzt ihren eigenen Upload-Weg. Der
+  cookie-basierte Upload ist vom Geräte-Login getrennt (siehe „Flow note").
 
-- **Verworfen: Device registration / OAuth from scratch** — war abgelöst durch
-  Browser-Cookie-Auth, **aufgehoben am 2026-10-15** (User-Entscheidung „so gut
-  es geht wie das Original"): genau dieser Weg ist jetzt das **Ziel**.
-  Verworfen bleibt daran nur der **CDP-Browser-Login** (externer Browser) und
-  die **Paste-Variante** als Hauptweg.
+- **Historisch überholt: „Device registration / OAuth from scratch" sei
+  verworfen.** Diese frühere Entscheidung wurde am 2026-10-15 aufgehoben;
+  aktiv ist der Geräte-Login mit PKCE. Verworfen bleiben der
+  **CDP-Browser-Login** (externer Browser) und die **Paste-Variante** als
+  Hauptweg.
 
-- **Verworfen: Standalone paste-only login** — abgelöst durch den
-  CDP-Browser-Login (Paste bleibt Rückfall).
+- **Historische Zwischenlösung, überholt:** Standalone paste-only login wurde
+  zeitweise durch CDP-Browser-Login ersetzt; beide Wege sind inzwischen
+  verworfen. Aktiver Anmeldeweg ist Geräteflow/PKCE.
 
-- **Verworfen: der reine Web-/Cookie-Weg als Ziel** — und mit der Live-Abnahme
-  auch als **Rückfall** (siehe oben „Kein Cookie-Rückfall mehr"). Der
-  **CDP-Browser-Login** und die **Paste-Variante** als Hauptweg bleiben
-  ebenfalls verworfen (siehe oben „Device registration / OAuth from scratch").
+- **Verworfen: Browser-Cookie-Login als Ziel oder Rückfall** (siehe oben
+  „Kein Cookie-Rückfall mehr"). Das betrifft nur die Anmeldung: die
+  Upload-Kette bleibt cookie-basiert und erhält ihre Cookies aus dem
+  Refresh-Token. Der **CDP-Browser-Login** und die **Paste-Variante** als
+  Hauptweg bleiben ebenfalls verworfen (siehe oben „Device registration / OAuth
+  from scratch").
   Ebenfalls verworfen: die Original-Login-**UI** (zwei Spalten,
   Willkommens-Panel, Fenster 880 × 530) zu übernehmen — unsere UI bleibt.
 
-- **Flow note:** this is the **web** flow (cookie-based). The desktop client's
-  **device** flow (`amzn_photos_desktop_*` signin -> `/auth/register` ->
-  refresh token -> `/auth/token` ->
-  `upload-photos.amazon.de/v2/upload`) is documented in
-  `../protocol/openapi.yaml` but not used.
+- **Flow note (current):** sign-in is the **device flow with PKCE** and stores
+  a refresh token. That token renews the access token and mints the cookies
+  required by the **cookie-based upload protocol**; cookie upload does not make
+  sign-in a browser-cookie flow. Earlier notes saying the device flow was not
+  used are superseded.
 
 - **Avatar-Thumbnail (Erkenntnis 2026-10-14): „per Raten/Probieren" ist
   verworfen.** `/drive/v1/nodes/{id}/content` (mit und ohne `tempLink=true`),

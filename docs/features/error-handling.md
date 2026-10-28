@@ -19,6 +19,23 @@ appear in the visible UI. They go to the log (`log::warn!`) instead.
   Finder, no visible feedback. The **only** allowed interaction with "empty"
   space is **drag & drop** of images.
 
+## 401 / expired session
+
+- **Soll-Vertrag (Issue #6):** use the stored **device-flow refresh token** for
+  session renewal ([session-refresh.md](session-refresh.md)); the background
+  worker renews access and mints the upload cookies from that token. The
+  refresh token is in the OS keychain; access tokens and cookies are
+  memory-only.
+- If the session cannot be renewed and is declared invalid, the app clears its
+  session and returns to sign-in. The user signs in again through the app's
+  device-flow/PKCE path ([login.md](login.md)); no app restart is required.
+- Do **not** recommend `config_update.py` or copying browser cookies as a
+  recovery procedure. Those manual-cookie instructions do not match the
+  current session model and are not a supported way to restore it; the existing
+  401 log copy that mentions the script is legacy guidance. This contract does
+  not promise that every individual upload `401` is synchronously repaired or
+  specify a retry count.
+
 ## Decisions
 
 - **Keine technischen Fehlermeldungen im Endnutzer-UI (User-Regel 2026-10-15):**
