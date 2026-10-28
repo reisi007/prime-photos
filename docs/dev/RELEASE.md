@@ -490,6 +490,39 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
   laufen getestet; eine Live-Abnahme eines echten Amazon-Uploads ist mit diesem Lauf **nicht**
   belegt.
 
+**Durch den siebten echten Lauf belegt (2026-10-28):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.6` auf Commit `0c35621` (`chore(release): prepare
+  v0.1.6`); GitHub-Release `v0.1.6`, veröffentlicht `2026-10-28T09:23:37Z`, **nicht** Draft,
+  **nicht** Pre-Release — https://github.com/reisi007/prime-photos/releases/tag/v0.1.6
+- **Runs:** Push-CI `40662445684` (`ci.yml`: Ratchet-Gate + `cargo build`/`cargo test`) grün;
+  Release-Workflow `40662710132` (`release.yml`, ausgelöst durch den Tag-Push) — Jobs
+  `Build linux-x64` (5m01s), `Build windows-x64` (8m48s), `Publish GitHub Release` (11s), alle grün.
+  Die Windows-Certificate-Prep- und Signaturschritte wurden mangels Secrets übersprungen (§3).
+- **Assets** (Name — Bytes — sha256):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.385.185 | `02231f8853dcfd509e1c7319ed6081a682f3c447b1d570d612ff9ba0092fc832` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.614.426 | `ba4773532e005b52c4fd6b87d3abec2e386bf4048d6de1267323f2525b196acd` |
+  | `Prime-Photos-windows-x64.zip` | 8.659.727 | `70de4f35844a3581544135c36dd984e1717c06b641d99bd12e0a4a6c26202c73` |
+
+  Das DMG wurde **lokal** erstellt und manuell ans Release gehängt (§4); sein lokaler SHA-256-Digest
+  stimmt mit dem von GitHub gemeldeten Asset-Digest überein.
+- **macOS-Bundle (lokal aus dem Release-Commit gebaut, §4):** `VERSION=0.1.6`, `BUILD=6`, mit
+  `Prime Photos Local Signer` signiert; About-Commit-Stempel `0c35621`. Das Bundle wurde nach
+  `/Applications/Prime Photos.app` installiert; `codesign --verify` war erfolgreich. Das lokal
+  erstellte DMG bestand `hdiutil verify` (**VALID**). `hdiutil` gab die bereits in §4 dokumentierte
+  Deprecation-Warnung aus; ein Ersatzwerkzeug wurde nicht verwendet. Das installierte Bundle wurde
+  **nicht gestartet**.
+- **Release-Notes:** vom Workflow erzeugt (`generate_release_notes: true`), Vergleichsbereich
+  `v0.1.5...v0.1.6`.
+- **Inhalt dieses Releases:** Upload-Ziele spiegeln den Quellpfad sowohl für konfigurierte als auch
+  für einmalige Uploads; dazu kommen Empty-/Dedup-Preflight und fail-closed Behandlung des
+  Upload-Ziels. Mit diesem Release-Build wurde **kein Live-Upload zu Amazon** durchgeführt.
+- **Verifikationsgrenze:** Windows und Linux wurden im Release-CI kompiliert; Laufzeittests oder
+  plattformübergreifende Verifikation sind damit nicht belegt.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
