@@ -622,6 +622,11 @@ pub struct PrimePhotos {
 }
 
 impl PrimePhotos {
+    const AUTH_ERROR_LOG_LINES: [&str; 2] = [
+        "Authentication failed: the request was rejected with HTTP 401 Unauthorized.",
+        "If this keeps happening, sign out of Prime Photos and sign in again in the app.",
+    ];
+
     pub fn new(conf: &Config, dry_run: bool) -> Self {
         // Configure client with connection pooling and optimized settings
         let client = Client::builder()
@@ -679,19 +684,13 @@ impl PrimePhotos {
         headers
     }
 
-    /// Check if the response is a 401 Unauthorized error and provide helpful message
-    /// Returns true if it was a 401 error (and prints the helpful message)
+    /// Check for a 401 Unauthorized response and log supported recovery guidance.
+    /// Returns true only for a 401 response.
     fn check_auth_error(status_code: u16) -> bool {
         if status_code == 401 {
-            error!("Authentication failed: Your session cookies have expired.");
-            error!("");
-            error!("Please update your cookies using the config_update.py script:");
-            error!("  1. Open Amazon Photos in your web browser and log in");
-            error!("  2. Open Developer Tools (F12)");
-            error!("  3. In the Console tab, run: document.cookie");
-            error!("  4. Copy the entire cookie string");
-            error!("  5. Run: python3 config_update.py 'session-id=...; x-acb...=...; ...'");
-            error!("");
+            for line in Self::AUTH_ERROR_LOG_LINES {
+                error!("{line}");
+            }
             return true;
         }
         false
@@ -1587,6 +1586,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_error_logs_supported_recovery_guidance_only_for_401() {
+        assert_eq!(
+            PrimePhotos::AUTH_ERROR_LOG_LINES,
+            [
+                "Authentication failed: the request was rejected with HTTP 401 Unauthorized.",
+                "If this keeps happening, sign out of Prime Photos and sign in again in the app.",
+            ]
+        );
+        assert!(PrimePhotos::check_auth_error(401));
+        assert!(!PrimePhotos::check_auth_error(403));
+        assert!(!PrimePhotos::check_auth_error(200));
+    }
 
     #[test]
     fn chunked_body_sends_every_byte_and_counts_it() {
