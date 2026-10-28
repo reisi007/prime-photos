@@ -1,12 +1,13 @@
 use crate::config::Config;
 use crate::dedup::{DedupIndex, Origin};
+use crate::destination::{machine_name, mirrored_path_components};
 use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
 use crate::prime_photos::PrimePhotos;
 use crate::theme;
 use eframe::egui::{self, Color32};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -14,7 +15,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::sync::watch;
+use tokio::sync::{Mutex as AsyncMutex, watch};
 use tokio::task::JoinSet;
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,9 @@ pub(crate) struct UploadShared {
     /// if the persisted store's indices shift during the run. `ONE_TIME_IDX`
     /// is synthetic and has no path.
     pub(crate) folder_paths: HashMap<usize, PathBuf>,
+    /// Configured source roots whose mirrored cloud folder must be resolved,
+    /// including empty backups and folders injected into a live run.
+    pub(crate) destination_roots: HashMap<usize, PathBuf>,
     pub(crate) folder_done: HashMap<usize, usize>,
     pub(crate) folder_failed: HashMap<usize, usize>,
     /// Run outcome breakdown (user decision 2026-10-14): the single `done`
@@ -584,6 +588,8 @@ fn seal_now(shared: &Arc<Mutex<UploadShared>>) -> bool {
 async fn upload_worker(
     shared: Arc<Mutex<UploadShared>>,
     cfg: Config,
+    destination_resolver: Arc<AsyncMutex<PrimePhotos>>,
+    machine_name: String,
     mut pause_rx: watch::Receiver<bool>,
     limit_kbps: u32,
     dedup: Arc<Mutex<DedupIndex>>,
@@ -633,6 +639,29 @@ async fn upload_worker(
                 .and_then(|q| q.lock().unwrap().pop_front())
         };
         let Some((row, idx, path)) = item else {
+            if let Some((root_idx, root_path)) = take_pending_destination_root(&shared) {
+                let result = mirrored_path_components(&root_path, &machine_name)
+                    .map_err(|error| format!("{}: {error}", root_path.display()));
+                let result = match result {
+                    Ok(components) => {
+                        destination_resolver
+                            .lock()
+                            .await
+                            .resolve_folder_path(&components)
+                            .await
+                    }
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = result {
+                    shared.lock().unwrap().log(tr1(
+                        "Upload-Ziel konnte nicht aufgelöst werden: {}",
+                        error,
+                    ));
+                    let mut s = shared.lock().unwrap();
+                    *s.folder_failed.entry(root_idx).or_insert(0) += 1;
+                }
+                continue;
+            }
             // Keine Arbeit *gerade jetzt*: den Lauf nur beenden, wenn kein Scan mehr
             // unterwegs ist **und** die Queue immer noch leer ist. `seal_now`
             // entscheidet und versiegelt unter derselben Sperre wie die Injektion,
@@ -664,6 +693,31 @@ async fn upload_worker(
                 .get(&idx)
                 .copied()
                 .unwrap_or((true, ConflictResolution::default()))
+        };
+
+        // Resolve the actual cloud parent before stat/dedupe checks. This also
+        // covers files injected into a live run after its initial preflight.
+        let parent_node_id = match path.parent() {
+            Some(parent) => match mirrored_path_components(parent, &machine_name) {
+                Ok(components) => {
+                    destination_resolver
+                        .lock()
+                        .await
+                        .resolve_folder_path(&components)
+                        .await
+                }
+                Err(error) => Err(error),
+            },
+            None => Err("Die Upload-Datei hat keinen lokalen Elternordner.".to_string()),
+        };
+        let parent_node_id = match parent_node_id {
+            Ok(parent_node_id) => parent_node_id,
+            Err(error) => {
+                let reason = tr1("Upload-Ziel konnte nicht aufgelöst werden: {}", error);
+                let mut s = shared.lock().unwrap();
+                settle_failed_attempt(&mut s, stage, row, idx, &path, &reason);
+                continue;
+            }
         };
 
         // Stat before reading (user decision 2026-10-14): the recorded
@@ -879,6 +933,7 @@ async fn upload_worker(
             match uploader
                 .upload_picture(
                     &path,
+                    &parent_node_id,
                     Some(&bytes),
                     Some(&md5sum),
                     resolution,
@@ -1105,6 +1160,16 @@ async fn upload_worker(
     }
 }
 
+fn take_pending_destination_root(
+    shared: &Arc<Mutex<UploadShared>>,
+) -> Option<(usize, PathBuf)> {
+    let mut s = shared.lock().unwrap();
+    let idx = *s.destination_roots.keys().min()?;
+    s.destination_roots
+        .remove(&idx)
+        .map(|path| (idx, path))
+}
+
 /// The retry pass's file list: exactly the initial pass's failures, or nothing
 /// at all for a cancelled/sign-out run. A cancelled run must not turn deferred
 /// files into final failures — they stay open for the next start like every
@@ -1129,6 +1194,8 @@ async fn run_worker_pass(
     paused: &watch::Sender<bool>,
     limit_kbps: u32,
     dedup: &Arc<Mutex<DedupIndex>>,
+    destination_resolver: &Arc<AsyncMutex<PrimePhotos>>,
+    machine_name: &str,
     stage: AttemptStage,
     workers: usize,
 ) {
@@ -1138,11 +1205,57 @@ async fn run_worker_pass(
         let c = cfg.clone();
         let p = paused.subscribe();
         let d = dedup.clone();
+        let resolver = destination_resolver.clone();
+        let machine_name = machine_name.to_string();
         set.spawn(async move {
-            upload_worker(s, c, p, limit_kbps, d, stage).await;
+            upload_worker(s, c, resolver, machine_name, p, limit_kbps, d, stage).await;
         });
     }
     while set.join_next().await.is_some() {}
+}
+
+/// Mark all queued files failed when a run-level destination could not be
+/// resolved. Sealing under the same lock used by injection prevents new work
+/// from slipping into a run that will never start its workers.
+///
+/// A configured root with **no** queued files (an empty backup or a fully
+/// deduplicated plan) would otherwise end the run without a single marker:
+/// `apply_folder_progress` derives the row status from `folder_failed` and
+/// would mark it `Done`. Every such root gets exactly one marker — roots whose
+/// drained files already counted a failure are left as they are, so no folder
+/// is counted twice. Runs without configured roots (the one-time drop) keep the
+/// purely item-based behaviour above.
+fn fail_destination_preflight(
+    shared: &Arc<Mutex<UploadShared>>,
+    queue: &Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>,
+    reason: &str,
+) {
+    let mut s = shared.lock().unwrap();
+    s.sealed = true;
+    let configured_roots: Vec<usize> = s.destination_roots.keys().copied().collect();
+    s.destination_roots.clear();
+    s.log(tr1("Upload-Ziel konnte nicht aufgelöst werden: {}", reason));
+    let pending: Vec<_> = queue.lock().unwrap().drain(..).collect();
+    for (row, idx, path) in pending {
+        s.failed += 1;
+        *s.folder_failed.entry(idx).or_insert(0) += 1;
+        if let Some(entry) = s.queue.get_mut(row) {
+            entry.state = FileState::Failed;
+        }
+        s.log(tr1(
+            "FEHLER {}: Upload wegen fehlendem Ziel abgebrochen.",
+            crate::text::nfc(&path.display().to_string()),
+        ));
+    }
+    // Run-level marker, not a file failure: `failed` stays untouched, exactly
+    // like the per-root failure a worker records when a late injection's
+    // destination cannot be resolved.
+    for idx in configured_roots {
+        let failures = s.folder_failed.entry(idx).or_insert(0);
+        if *failures == 0 {
+            *failures = 1;
+        }
+    }
 }
 
 pub(crate) async fn run_upload(
@@ -1154,8 +1267,10 @@ pub(crate) async fn run_upload(
     limit_kbps: u32,
     album: String,
     folder_opts: HashMap<usize, (bool, ConflictResolution)>,
+    destination_roots: HashMap<usize, PathBuf>,
 ) {
     let count = items.len();
+    let preflight_items = items.clone();
     let queue = Arc::new(Mutex::new(VecDeque::from(items)));
     let workers = concurrency.max(1).min(count.max(1));
 
@@ -1178,20 +1293,73 @@ pub(crate) async fn run_upload(
         s.item_queue = Some(queue.clone());
         s.retry_items.clear();
         s.folder_opts = folder_opts;
-        s.scans_in_flight = 0;
         s.sealed = false;
+        s.destination_roots = destination_roots.clone();
     }
 
-    run_worker_pass(
-        &shared,
-        &cfg,
-        &paused,
-        limit_kbps,
-        &dedup,
-        AttemptStage::Initial,
-        workers,
-    )
+    // Resolve selected backup roots even if the scan found no files. Resolve
+    // every initial file parent as well, before any worker (and therefore any
+    // file upload) starts. BTreeSet collapses duplicate destinations and keeps
+    // path creation deterministic; the shared resolver handles later injections.
+    let destination_preflight = async {
+        let machine_name = machine_name()?;
+        let mut local_targets: Vec<PathBuf> = destination_roots.values().cloned().collect();
+        for (_, _, path) in &preflight_items {
+            let parent = path
+                .parent()
+                .ok_or_else(|| "Die Upload-Datei hat keinen lokalen Elternordner.".to_string())?;
+            local_targets.push(parent.to_path_buf());
+        }
+        let mut cloud_paths = BTreeSet::new();
+        for path in local_targets {
+            let components = mirrored_path_components(&path, &machine_name).map_err(|error| {
+                format!("{}: {error}", path.display())
+            })?;
+            cloud_paths.insert(components);
+        }
+        let resolver = Arc::new(AsyncMutex::new(PrimePhotos::new(&cfg, false)));
+        for components in cloud_paths {
+            resolver
+                .lock()
+                .await
+                .resolve_folder_path(&components)
+                .await?;
+        }
+        {
+            let mut s = shared.lock().unwrap();
+            for idx in destination_roots.keys() {
+                s.destination_roots.remove(idx);
+            }
+        }
+        Ok::<_, String>((resolver, machine_name))
+    }
     .await;
+
+    let destination_preflight = match destination_preflight {
+        Ok((resolver, machine_name)) => Some((resolver, machine_name)),
+        Err(error) => {
+            fail_destination_preflight(&shared, &queue, &error);
+            // No worker starts after a path or cloud-target failure: never fall
+            // back to the former Pictures/Web node. Continue through the common
+            // run finalizer so the UI sees a completed failed run.
+            None
+        }
+    };
+
+    if let Some((destination_resolver, machine_name)) = &destination_preflight {
+        run_worker_pass(
+            &shared,
+            &cfg,
+            &paused,
+            limit_kbps,
+            &dedup,
+            destination_resolver,
+            machine_name,
+            AttemptStage::Initial,
+            workers,
+        )
+        .await;
+    }
 
     // One finite second pass over exactly the files whose initial attempt
     // failed (upload error or local read error). The run stays active, so the
@@ -1204,7 +1372,7 @@ pub(crate) async fn run_upload(
         let mut s = shared.lock().unwrap();
         retry_pass_items(&mut s)
     };
-    if !retry_items.is_empty() {
+    if !retry_items.is_empty() && destination_preflight.is_some() {
         let n = retry_items.len();
         {
             let mut s = shared.lock().unwrap();
@@ -1217,16 +1385,20 @@ pub(crate) async fn run_upload(
             queue.lock().unwrap().extend(retry_items);
         }
         let retry_workers = concurrency.max(1).min(n);
-        run_worker_pass(
-            &shared,
-            &cfg,
-            &paused,
-            limit_kbps,
-            &dedup,
-            AttemptStage::Retry,
-            retry_workers,
-        )
-        .await;
+        if let Some((destination_resolver, machine_name)) = &destination_preflight {
+            run_worker_pass(
+                &shared,
+                &cfg,
+                &paused,
+                limit_kbps,
+                &dedup,
+                destination_resolver,
+                machine_name,
+                AttemptStage::Retry,
+                retry_workers,
+            )
+            .await;
+        }
     }
 
     let name = album.trim().to_string();
@@ -1251,6 +1423,7 @@ pub(crate) async fn run_upload(
         s.item_queue = None;
         s.retry_items.clear();
         s.folder_opts.clear();
+        s.destination_roots.clear();
         (s.done, s.failed, s.total, s.cancelled)
     };
     if cancelled {
@@ -1677,6 +1850,114 @@ mod tests {
         assert_eq!(shared.folder_failed.get(&0), Some(&1));
         assert!(shared.queue[0].state == FileState::Failed);
         assert!(shared.retry_items.is_empty(), "no third attempt");
+    }
+
+    /// A root with no queued files (empty backup / fully deduplicated plan)
+    /// still failed as a whole: without its own `folder_failed` marker,
+    /// `apply_folder_progress` would report the row as `Done`.
+    #[test]
+    fn preflight_failure_marks_a_root_without_queued_files() {
+        let shared = Arc::new(Mutex::new(UploadShared {
+            destination_roots: HashMap::from([(2, PathBuf::from("/fotos/leer"))]),
+            folder_total: HashMap::from([(2, 0)]),
+            ..UploadShared::default()
+        }));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+
+        fail_destination_preflight(&shared, &queue, "kein Ziel");
+
+        let s = shared.lock().unwrap();
+        assert_eq!(
+            s.folder_failed.get(&2),
+            Some(&1),
+            "zero-item root must be marked failed (status Error, not Done)"
+        );
+        assert_eq!(s.failed, 0, "no file failed, so the global counter stays");
+        assert!(s.destination_roots.is_empty(), "roots are consumed");
+        assert!(s.sealed, "the run must not accept new work");
+    }
+
+    /// A root whose queued files were drained as failures already carries its
+    /// per-file count; it must not get an additional run-level marker.
+    #[test]
+    fn preflight_failure_does_not_double_count_a_root_with_drained_files() {
+        let shared = Arc::new(Mutex::new(UploadShared {
+            destination_roots: HashMap::from([
+                (0, PathBuf::from("/fotos/a")),
+                (1, PathBuf::from("/fotos/leer")),
+            ]),
+            folder_total: HashMap::from([(0, 2), (1, 0)]),
+            queue: vec![
+                QueueEntry {
+                    folder: 0,
+                    name: "a.jpg".into(),
+                    state: FileState::Waiting,
+                    size: 1,
+                    path: PathBuf::from("/fotos/a/a.jpg"),
+                    bytes_sent: 0,
+                },
+                QueueEntry {
+                    folder: 0,
+                    name: "b.jpg".into(),
+                    state: FileState::Waiting,
+                    size: 1,
+                    path: PathBuf::from("/fotos/a/b.jpg"),
+                    bytes_sent: 0,
+                },
+            ],
+            ..UploadShared::default()
+        }));
+        let queue = Arc::new(Mutex::new(VecDeque::from(vec![
+            (0, 0, PathBuf::from("/fotos/a/a.jpg")),
+            (1, 0, PathBuf::from("/fotos/a/b.jpg")),
+        ])));
+
+        fail_destination_preflight(&shared, &queue, "kein Ziel");
+
+        let s = shared.lock().unwrap();
+        assert_eq!(
+            s.folder_failed.get(&0),
+            Some(&2),
+            "the drained file failures stay the root's only count"
+        );
+        assert_eq!(
+            s.folder_failed.get(&1),
+            Some(&1),
+            "the empty sibling root gets one marker"
+        );
+        assert_eq!(s.failed, 2, "exactly the two drained files count globally");
+        assert!(s.queue.iter().all(|e| e.state == FileState::Failed));
+        assert!(queue.lock().unwrap().is_empty());
+    }
+
+    /// The one-time drop has no configured roots: only real file failures are
+    /// recorded, no extra marker appears.
+    #[test]
+    fn preflight_failure_without_roots_stays_item_based() {
+        let one_time = crate::app::ONE_TIME_IDX;
+        let shared = Arc::new(Mutex::new(UploadShared {
+            queue: vec![QueueEntry {
+                folder: one_time,
+                name: "a.jpg".into(),
+                state: FileState::Waiting,
+                size: 1,
+                path: PathBuf::from("/a.jpg"),
+                bytes_sent: 0,
+            }],
+            ..UploadShared::default()
+        }));
+        let queue = Arc::new(Mutex::new(VecDeque::from(vec![(
+            0,
+            one_time,
+            PathBuf::from("/a.jpg"),
+        )])));
+
+        fail_destination_preflight(&shared, &queue, "kein Ziel");
+
+        let s = shared.lock().unwrap();
+        assert_eq!(s.folder_failed.len(), 1, "no marker without a root");
+        assert_eq!(s.folder_failed.get(&one_time), Some(&1));
+        assert_eq!(s.failed, 1);
     }
 
     /// A shared state with a live (empty) worker queue — the shape the worker's

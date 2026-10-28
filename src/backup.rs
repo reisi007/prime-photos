@@ -461,6 +461,29 @@ impl UploadPlan {
         }
     }
 
+    /// A zero-file plan still carries every selected backup as a target so the
+    /// run can create its mirrored destination before reporting an empty scan.
+    fn empty_for_targets(store: &FolderStore, indices: &[usize]) -> Self {
+        let mut plan = Self::empty();
+        plan.add_targets(store, indices);
+        plan
+    }
+
+    /// Fold `indices` into the plan as run targets even when they contribute no
+    /// file: a folder with zero files still has a mirrored cloud destination
+    /// that the run's preflight must resolve/create. Touches neither the queue
+    /// nor the counters nor a watermark — a plan that already carries files
+    /// keeps them and only gains the empty folders' per-folder entries.
+    fn add_targets(&mut self, store: &FolderStore, indices: &[usize]) {
+        for &i in indices {
+            if let Some(folder) = store.folders.get(i) {
+                self.per_folder.entry(i).or_insert(0);
+                self.folder_opts
+                    .insert(i, (folder.dedup, folder.conflict_resolution));
+            }
+        }
+    }
+
     /// File size of one entry, counted once into the run's byte total and
     /// returned so the queue row can reuse it without a second `stat`. Never
     /// panics: an unreadable file contributes nothing (`0`) and the ETA then
@@ -941,6 +964,9 @@ fn inject_into_live_run(
             *s.folder_total.entry(i).or_insert(0) += count;
             if let Some(folder) = store.folders.get(i) {
                 s.folder_paths.entry(i).or_insert_with(|| folder.path.clone());
+                s.destination_roots
+                    .entry(i)
+                    .or_insert_with(|| folder.path.clone());
             }
         }
         s.unchanged_skipped += plan.unchanged;
@@ -992,6 +1018,18 @@ fn start_background_run(
     msg: String,
     scans: Vec<FolderScan>,
 ) {
+    let mut destination_roots = plan_folder_paths(&plan, store);
+    for scan in &scans {
+        plan.per_folder.entry(scan.idx).or_insert(0);
+        if let Some(folder) = store.folders.get(scan.idx) {
+            plan.folder_opts
+                .entry(scan.idx)
+                .or_insert((folder.dedup, folder.conflict_resolution));
+        }
+        destination_roots
+            .entry(scan.idx)
+            .or_insert_with(|| scan.path.clone());
+    }
     publish_plan(&mut plan, store, &shared, msg);
 
     // Spawned, not awaited: the supervisor must keep watching while the run
@@ -1007,6 +1045,7 @@ fn start_background_run(
             limit_kbps,
             album,
             plan.folder_opts,
+            destination_roots,
         )
         .await;
         finalize_background_store(&after);
@@ -1119,6 +1158,7 @@ async fn background_sync_pass(
     // Same SQLite, same connection style as the MD5 index (`src/dedup.rs`).
     let index = DedupIndex::open();
     let mut wanted: Vec<(usize, Option<i64>)> = Vec::new();
+    let mut target_only: Vec<usize> = Vec::new();
     let mut scans: Vec<FolderScan> = Vec::new();
     let mut store_changed = false;
     for i in indices {
@@ -1141,10 +1181,13 @@ async fn background_sync_pass(
             continue;
         }
         let watermark = index.folder_max_mtime(&f.path);
-        // A folder we cannot even stat (no access) answers `None`: it is left
-        // alone rather than treated as "unchanged", and scanning it would find
-        // nothing anyway.
+        // No stat-able file at any depth (an empty — or unreadable — folder):
+        // there is nothing to scan and no watermark to advance. The folder is
+        // kept as a **target only**, so the run's preflight still resolves and,
+        // if needed, creates its mirrored destination. Leaving it out here was
+        // why an empty backup never got its cloud folder on the start pass.
         let Some(current) = folders::max_mtime(&f.path) else {
+            target_only.push(i);
             continue;
         };
         // "Not greater" is unchanged — nothing to hash, nothing to record.
@@ -1163,12 +1206,16 @@ async fn background_sync_pass(
     if store_changed {
         let _ = store.save();
     }
-    if wanted.is_empty() {
+    if wanted.is_empty() && target_only.is_empty() {
         return;
     }
-    let Some(plan) = UploadPlan::build_since(&store, &wanted) else {
-        return;
-    };
+    // Every selected folder is a destination target: the scanned ones (also
+    // when their scan yields no supported image) and the empty ones, which only
+    // need their mirrored folder. No watermark is fabricated for those.
+    let mut target_indices: Vec<usize> = scans.iter().map(|scan| scan.idx).collect();
+    target_indices.extend(target_only);
+    let mut plan = UploadPlan::build_since(&store, &wanted).unwrap_or_else(UploadPlan::empty);
+    plan.add_targets(&store, &target_indices);
     let msg = plan.start_message();
     start_background_run(
         plan,
@@ -1407,10 +1454,12 @@ fn handle_scan_requests(
                     }
                 }
                 None => {
-                    shared
-                        .lock()
-                        .unwrap()
-                        .log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
+                    let plan = UploadPlan::empty_for_targets(store, &[i]);
+                    if inject_into_live_run(plan, store, shared).is_some() {
+                        if !pending_scans.contains(&p) {
+                            pending_scans.push(p);
+                        }
+                    }
                 }
             }
         }
@@ -1438,11 +1487,9 @@ fn handle_scan_requests(
         return;
     }
     let indices: Vec<usize> = present.iter().map(|(i, _)| *i).collect();
-    let Some(plan) = UploadPlan::build(store, &indices) else {
-        shared
-            .lock()
-            .unwrap()
-            .log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
+    let Some(plan) = UploadPlan::build(store, &indices)
+        .or_else(|| Some(UploadPlan::empty_for_targets(store, &indices)))
+    else {
         return;
     };
     let msg = plan.start_message();
@@ -1930,7 +1977,31 @@ impl PrimePhotoApp {
         if changed {
             let _ = self.store.save();
         }
-        let Some(mut plan) = UploadPlan::build(&self.store, &present) else {
+        let mut destination_roots: HashMap<usize, PathBuf> = present
+            .iter()
+            .filter_map(|&i| {
+                self.store
+                    .folders
+                    .get(i)
+                    .map(|folder| (i, folder.path.clone()))
+            })
+            .collect();
+        let Some(mut plan) = UploadPlan::build(&self.store, &present).or_else(|| {
+            if present.is_empty() {
+                return None;
+            }
+            let mut empty = UploadPlan::empty();
+            for &i in &present {
+                if let Some(folder) = self.store.folders.get(i) {
+                    empty.per_folder.insert(i, 0);
+                    empty.folder_opts.insert(
+                        i,
+                        (folder.dedup, folder.conflict_resolution),
+                    );
+                }
+            }
+            Some(empty)
+        }) else {
             if missing {
                 self.log(tr(
                     "Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).",
@@ -1940,6 +2011,19 @@ impl PrimePhotoApp {
             }
             return;
         };
+        // Include empty selected backups in the run's destination preflight,
+        // even when another selected folder has files.
+        for &i in &present {
+            if let Some(folder) = self.store.folders.get(i) {
+                plan.per_folder.entry(i).or_insert(0);
+                plan.folder_opts
+                    .entry(i)
+                    .or_insert((folder.dedup, folder.conflict_resolution));
+                destination_roots
+                    .entry(i)
+                    .or_insert_with(|| folder.path.clone());
+            }
+        }
         let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
         let limit = if self.config.limit_enabled {
             self.config.limit_kbps
@@ -1978,6 +2062,7 @@ impl PrimePhotoApp {
                 limit,
                 album,
                 plan.folder_opts,
+                destination_roots,
             )
             .await;
         });
@@ -2145,6 +2230,7 @@ impl PrimePhotoApp {
                 limit,
                 album,
                 plan.folder_opts,
+                HashMap::new(),
             )
             .await;
         });
@@ -3608,6 +3694,59 @@ mod tests {
 
         std::fs::remove_dir_all(root).unwrap();
         std::fs::remove_dir_all(empty_root).unwrap();
+    }
+
+    #[test]
+    fn empty_backup_reaches_the_plan_as_a_destination_target() {
+        // An enabled folder with no file at all answers `max_mtime() == None`.
+        // Such a folder has nothing to scan and no watermark, but the start pass
+        // must still carry it as a **target** so the run's preflight resolves —
+        // and if needed creates — its mirrored destination. This holds alone
+        // and alongside a changed folder in the same pass.
+        let root = scratch_scan_folder("empty-target");
+        let empty = root.join("empty");
+        let filled = root.join("filled");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::create_dir_all(&filled).unwrap();
+        std::fs::write(filled.join("photo.jpg"), b"photo bytes").unwrap();
+
+        let filled_string = filled.to_string_lossy().into_owned();
+        let mut store = store_with(&filled_string, FolderStatus::Idle);
+        store.folders.push(folders::BackupFolder::new(empty.clone()));
+        assert_eq!(
+            folders::max_mtime(&empty),
+            None,
+            "no file means no watermark to advance"
+        );
+
+        // Same pass, one changed folder: the file plan keeps its queue and only
+        // gains the empty folder's target entry.
+        let mut mixed =
+            UploadPlan::build_since_with_stat_matches(&store, &[(0, None)], |_, _, _| None)
+                .expect("the filled folder has a supported image");
+        mixed.add_targets(&store, &[1]);
+        assert_eq!(mixed.per_folder.get(&1), Some(&0));
+        assert_eq!(
+            mixed.folder_opts.get(&1),
+            Some(&(store.folders[1].dedup, store.folders[1].conflict_resolution))
+        );
+        assert_eq!(mixed.items.len(), 1, "a target queues no file of its own");
+        assert!(mixed.queue.iter().all(|row| row.folder == 0));
+        let destinations = plan_folder_paths(&mixed, &store);
+        assert_eq!(destinations.get(&0), Some(&filled));
+        assert_eq!(
+            destinations.get(&1),
+            Some(&empty),
+            "the empty folder's destination is part of the preflight"
+        );
+
+        // Empty-only pass: the plan has no files at all, but still the target.
+        let mut only_empty = UploadPlan::empty();
+        only_empty.add_targets(&store, &[1]);
+        assert!(only_empty.items.is_empty() && only_empty.queue.is_empty());
+        assert_eq!(plan_folder_paths(&only_empty, &store).get(&1), Some(&empty));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

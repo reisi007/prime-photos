@@ -1,19 +1,24 @@
 # Spec: Upload-Zielordner (Zielknoten) des Originals
 
 **Status:** Clean-Room-Recon (nur lesend) des offiziellen macOS-Amazon-Photos-Clients
-11.3.0 (`CFBundleShortVersionString`), `CommitId 1d7941b5`. Eigene Worte und Tabellen,
-keine verbatim Code-Auszüge, keine Personendaten. Deutsche UI-Strings werden wörtlich
-aus `Contents/Resources/de.lproj/Localizable.strings` zitiert, jeweils mit dem Key.
+11.3.0 (`CFBundleShortVersionString`), `CommitId 1d7941b5`. Die am 2026-10-28
+statisch untersuchte `Amazon Photos.dll` hat SHA-256
+`34a616e77bd54d6288845741b5928e68e7c92975428d16553199b04cd1bcedc0`. Eigene Worte
+und Tabellen, keine verbatim Code-Auszüge, keine Personendaten. Deutsche UI-Strings
+werden wörtlich aus `Contents/Resources/de.lproj/Localizable.strings` zitiert,
+jeweils mit dem Key.
 
 **Frage.** User-Wunsch 2026-10-16: „Upload Ort soll gleich sein wie bei der
 Originalen App." Diese Spec beantwortet: Was ist der Upload-Ort im Original, wie
 funktioniert er, und was fehlt bei uns?
 
 **Quellen (nur lesend).** `/Applications/Amazon Photos.app` — App-Bundle unverändert.
+Das Original wurde für diese statische Recon weder gestartet noch angemeldet.
 **Decompiler:** `ilspycmd` 11.1.0.9782 (ICSharpCode.Decompiler 11.1.0.9782) über
-Wrapper `~/.local/bin/ilspycmd` (setzt `DOTNET_ROOT` selbst). REA ist für diese
-Assembly unbrauchbar: `inspect_managed_artifact` liefert `metadata-not-admitted`
-(Budget 67 MB), `search_android_classes` ist der falsche Weg (jadx/APK).
+Wrapper `~/.local/bin/ilspycmd` (setzt `DOTNET_ROOT` selbst). REA
+`inspect_managed_members` war wegen des 64-MiB-Metadatenbudgets nicht verfügbar;
+es gibt aus dieser Recon keine Runtime-Beobachtung. Frühere Quellen und Live-Belege
+dieser Spec bleiben erhalten, wo sie ausdrücklich als solche ausgewiesen sind.
 Die Spec stützt sich auf den **Decompiler** (Typ/Methode) und auf die
 vorhandenen Specs (`SPEC_CONTENT_FILTER_DESTINATION.md` §3,
 `SPEC_FOLDERS.md`, `SPEC_UPLOAD.md`, `SPEC_DEDUP.md`,
@@ -21,9 +26,10 @@ vorhandenen Specs (`SPEC_CONTENT_FILTER_DESTINATION.md` §3,
 `UI_STATES.md`) sowie auf **unseren Code** (`src/prime_photos.rs`,
 `src/folders.rs`, `src/backup_config.rs`, `src/backup.rs`).
 
-**Markierung:** Jede Aussage ist als „**am Code geprüft**" (Typ/Methode) oder
-„**weiterhin aus alten Dumps**" (vorhandene Spec, nicht neu geprüft) markiert.
-Ungeprüftes steht unter „UNKNOWN".
+**Markierung:** „**am Code geprüft**" bezeichnet statische Typ-/Methodenbefunde,
+„**weiterhin aus alten Dumps**" eine vorhandene Spec, die hier nicht neu geprüft
+wurde. Live-Proben sind gesondert als solche markiert. Ungeprüftes steht unter
+„UNKNOWN".
 
 ---
 
@@ -54,7 +60,8 @@ UI (BackupConfigurationViewController)
         → SQLite schedules.destination_node_id
           → BackupScannerWorker: ScheduleRecord.LoadDestinationNode(backupPathMapper)
             → BackupPathMapper.GetOrCreateBackupDestination(...)
-              → parentNodeId im Upload-Request
+              → BackupStorageService.GetOrCreateLastAncestor(...)
+                → parentNodeId der jeweiligen Datei
 ```
 
 **am Code geprüft** (`BackupConfigurationViewModel.SetDestination`,
@@ -131,31 +138,31 @@ Ordner und seine Unterordner als flache Liste. Die Navigation ist **ebenenweise*
 
 **am Code geprüft** (`BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath`):
 
-1. Der Elternpfad wird gebildet (`PathEx.GetParentPathLong`)
-2. Eine Liste wird angelegt, die mit `"Backup"` und dem Maschinennamen
-   (`MachineName`) beginnt
-3. Wenn der Quellpfad dem Benutzerpfad entspricht oder **kein** Unterpfad des
-   Benutzerpfads ist (`PathEx.IsPathChildOf`):
-   - Die Laufwerksdetails des Quellpfads werden geholt (`GetDriveDetails`)
-   - Wenn das Volume-Label nicht leer ist, wird es der Liste angehängt
-4. `BuildCloudPathSegments` — baut die Eltern-Pfade rekursiv auf
+1. Für den Aufbau der vorgeschlagenen Segmente wird zunächst `parent(localPath)`
+   gebildet (`PathEx.GetParentPathLong`).
+2. Die Segmentliste beginnt mit `"Backup"` und dem Maschinennamen
+   (`_environment.MachineName`).
+3. Wenn `localPath == UserPath` **oder** `localPath` außerhalb von `UserPath` liegt,
+   werden `GetDriveDetails(localPath)` abgefragt; ein vorhandenes, nicht leeres
+   Volume-Label wird angehängt.
+4. `BuildCloudPathSegments` fügt rekursiv die Komponenten des Elternpfads bis zum
+   Dateisystem-Root bzw. `UserPath` hinzu.
 
-**`BuildCloudPathSegments` (am Code geprüft):**
+**Wichtig zur ausgewählten Quelle:** `localPath` selbst (und damit ihr letzter
+Ordnername) ist **nicht** in diesem Segmentarray. Der Walker gibt das ausgewählte
+Folder-Objekt anschließend selbst aus; `ManualUploadFileSystemObject` behandelt es
+als Folder unter dem Basisknoten. Im finalen Cloud-Baum ist der ausgewählte Ordner
+also trotzdem enthalten, gefolgt von seinen relativen Unterordnern.
 
-- Rekursiv: wenn `currentPath` nicht leer ist und weder Root noch Benutzerpfad:
-  - `BuildCloudPathSegments` wird zuerst mit dem Elternpfad aufgerufen
-  - dann wird der Dateiname des aktuellen Pfads der Liste angehängt
+Beispiel (Konstruktion, nicht ausgeführt): ausgewähltes `~/Pictures/Vacation` ⇒
+`Backup/<MachineName>/Pictures/Vacation` (auf dem Mac im UI mit dem entsprechenden
+Maschinennamen). Der `Pictures`- und `Vacation`-Ordner sind im endgültigen Zielbaum;
+`Vacation` stammt dabei aus dem ausgewählten Folder-Objekt, nicht aus dem
+Segmentarray.
 
-**Reihenfolge bestätigt:** `Backup` → `<Macname>` → [`VolumeLabel`] → Eltern-Pfade
-des Quellordners unterhalb des User-Homes (inklusive Quellordner-Name als letztes
-Segment).
-
-Beispiel (Konstruktion, nicht ausgeführt): Quelle `~/Bilder/Urlaub2026` ⇒
-`Amazon Photos > Backup > <Macname> > Bilder > Urlaub2026`.
-
-Der Vorschlag wird **automatisch** vorbelegt (`SetLocalPath`), sobald kein
-`DestinationNodeId` gesetzt ist — der User muss das Ziel also normalerweise nie
-anfassen.
+Wenn `DestinationNodeId` leer ist, berechnet `ScheduleRecord.LoadDestinationNode`
+die Segmente, lässt den Zielpfad auflösen/anlegen und speichert die resultierende
+NodeId. Das ist vom ausgewählten Quellordner im Walker zu unterscheiden.
 
 ### 3.2 Anlegen: `GetOrCreateBackupDestination`
 
@@ -167,7 +174,7 @@ anfassen.
 | Segment-Lookup | `GetNodeByNameAndParentIfExists` mit Segment, aktuellem Knoten und dem Kind-Typ `FOLDER` | **am Code geprüft** |
 | Wiederverwendung | Wenn ein Knoten gefunden wird: er wird wiederverwendet | **am Code geprüft** |
 | Anlegen | Wenn kein Knoten gefunden wurde: `CreateFolder` mit Segment und Knoten-Id des aktuellen Knotens, mit Netzwerk-Zwang und ohne Abbruch bei ignorierten Konflikten | **am Code geprüft** |
-| Sonderfall | Segment `"Amazon Drive"` ⇒ Wurzelknoten (`GetRootNode`) | **am Code geprüft** |
+| Sonderfall | Segment `"Amazon Drive"`: Root wird nur übersprungen, wenn der aktuelle Knoten bereits Root ist; andernfalls wird das Segment wie ein normales `FOLDER`-Kind gesucht bzw. angelegt | **am Code geprüft** |
 
 **Kernfrage beantwortet:** Ja, das Original legt Zielordner **an**, und zwar über
 `CreateFolder` (intern `POST /drive/v1/nodes` mit dem Kind `FOLDER`).
@@ -178,10 +185,30 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 **am Code geprüft** (`ScheduleRecord.LoadDestinationNode`):
 
 - Wenn `DestinationNodeId` leer ist: `GetSuggestedCloudPathSegmentsForLocalPath` mit dem
-  lokalen Pfad liefert Segmente, `GetOrCreateBackupDestination` legt sie an, und die
-  Knoten-Id wird in `DestinationNodeId` gespeichert
+  lokalen Pfad liefert Segmente, `GetOrCreateBackupDestination` legt fehlende Ordner
+  an bzw. verwendet vorhandene, und die resultierende Knoten-Id wird in
+  `DestinationNodeId` gespeichert
 - Das bestätigt: Der Vorschlag wird berechnet, die Knoten werden angelegt, die ID wird
   gespeichert.
+
+`BackupScannerWorker.ProcessScanRequest` ruft `LoadDestinationNode` nur auf, wenn
+`DestinationNodeId` leer ist. Eine bereits gespeicherte, aber gelöschte Ziel-ID wird
+als Ziel-Fehler behandelt und nicht automatisch anhand des lokalen Pfads neu
+gemappt.
+
+### 3.4 Einmalige Uploads im Original
+
+Einmalige Uploads sind im Original **nicht** pauschal derselbe Workflow wie
+konfigurierte Backups:
+
+- `EnumerationService.OneTimeMediaImport` verwendet für den einmaligen Media-Import
+  den festen Pfad `Pictures/Desktop/Media Import/<yyyy-MM-dd>`.
+- Generische einmalige Uploads erhalten eine explizite `DestinationNodeId`.
+
+Ein gemeinsamer Pfad-Mapper für Prime Photos' einmalige Drag-and-drop-Uploads ist
+daher eine ausdrücklich genehmigte Prime-Photos-Erweiterung, keine behauptete
+Original-Parität. Die Prime-Photos-Entscheidung steht in
+`../features/destination.md`.
 
 ---
 
@@ -192,8 +219,9 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 | Aspekt | Befund |
 |---|---|
 | Wire-Parameter | `parentNodeId` (Query-Parameter bei `POST` und `PUT`) |
-| Quelle | `ScheduleRecord.DestinationNodeId` → `UploadRecord.DestinationNodeId` |
-| Bedeutung | Der Zielordner als Cloud-Knoten; alle Dateien eines Backups landen direkt in diesem Ordner (keine Verschachtelung pro Datei) |
+| Basis | `ScheduleRecord.DestinationNodeId` bzw. der explizite Zielknoten ist der Basisknoten (`UploadRecord.DestinationNodeId`) |
+| Tatsächlicher Datei-Elternknoten | `BackupStorageService.GetOrCreateLastAncestor` verwendet `ManualUploadFileSystemObject.GetCloudParentPath` und legt nötige Elternordner relativ zu `UploadRootPath` an. Für verschachtelte Quellen wird der tatsächliche Elternknoten aus diesem relativen Pfad abgeleitet; Dateien landen daher **nicht** sämtlich direkt unter dem Basisknoten. |
+| Baumwirkung | Der Quellordner und seine relativen Unterordner werden als Cloud-Folder-Hierarchie angelegt; `parentNodeId` ist für die jeweilige Datei deren Cloud-Elternknoten. |
 
 ### 4.2 POST und PUT
 
@@ -208,7 +236,7 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 
 | Parameter | Original | Beleg |
 |---|---|---|
-| `parentNodeId` | `DestinationNodeId` (Cloud-Knoten) | **am Code geprüft** (`UploadRecord.DestinationNodeId`, `GetUploadRecord` übernimmt `destinationNodeId`) |
+| `parentNodeId` | Für eine Datei der von `BackupStorageService` ermittelte letzte Cloud-Elternknoten; `DestinationNodeId` ist der Basisknoten für die relative Pfadauflösung | **am Code geprüft** (`UploadRecord.DestinationNodeId`, `BackupStorageService.GetOrCreateLastAncestor`) |
 | `conflictResolution` | `NONE` (Backup) / `RENAME` (`SaveAsNew`) / `PUT` (`Replace`) | **am Code geprüft** (`CloudDriveConflictResolutionExtensions`: None→NONE, Rename→RENAME) |
 | `fileSize` | Byte-Länge | **weiterhin aus alten Dumps** (`UploadRequest`) |
 | `name` | Dateiname | **weiterhin aus alten Dumps** (`UploadRequest`) |
@@ -230,13 +258,13 @@ Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 
 | Fehler | Original | UI-Text | Was passiert mit den Dateien |
 |---|---|---|---|
-| Ziel fehlt / weg | `ScheduleError.DestinationNodeNotAvailable` | `clouddrive_desktop_scheduleerror_destinationmissing_header` = **„Stammfehler"** + `…_destinationmissing_text` = **„Ziel nicht verfügbar"** — **am Code geprüft** (`ScheduleErrorExtensions.Update`) | Der Lauf wird nicht gestartet; das Schedule trägt den Fehlercode |
+| Gespeicherte Ziel-ID gelöscht / Ziel nicht verfügbar | `ScheduleError.DestinationNodeNotAvailable` | `clouddrive_desktop_scheduleerror_destinationmissing_header` = **„Stammfehler"** + `…_destinationmissing_text` = **„Ziel nicht verfügbar"** — **am Code geprüft** (`ScheduleErrorExtensions.Update`) | Der Lauf wird nicht gestartet; das Schedule trägt den Fehlercode |
 | Ziel wurde gelöscht | `ScheduleError.DestinationNodeNotAvailable` (via `IsNodeDeleted`) | wieoben | wieoben |
 | Speichern fehlschlägt | `…_unabletosave_destinationmissing_title` = „Bitte wählen Sie einen anderen Zielort aus", `…_extra` = „Der ausgewählte Zielort existiert nicht mehr." | Dialog bleibt offen | Keine Persistenz, kein Upload |
 
 **am Code geprüft** (`BackupScannerWorker.ProcessScanRequest`):
-- Wenn `DestinationNodeId` leer ist → `ScheduleError.DestinationNodeNotAvailable`
-- Wenn `IsNodeDeleted` für `DestinationNodeId` zutrifft → `ScheduleError.DestinationNodeNotAvailable`
+- Wenn `DestinationNodeId` leer ist, wird `ScheduleRecord.LoadDestinationNode` zur Pfadauflösung aufgerufen; ein leerer Wert führt nicht unmittelbar zum Fehler.
+- Wenn die gespeicherte `DestinationNodeId` gelöscht ist (`IsNodeDeleted`), wird `ScheduleError.DestinationNodeNotAvailable` gesetzt; die ID wird nicht automatisch neu gemappt.
 
 **Was das Original dann mit den Dateien macht:** Es werden **keine** Dateien
 hochgeladen. Der Lauf bricht ab, das Schedule trägt den Fehlercode. Die Dateien
@@ -292,12 +320,12 @@ Teil des Cloud-Zielpfads.
 |---|---|---|---|
 | **Zielordner-Typ** | Cloud-Knoten (`destination_node_id`) | Keiner (hartkodiert Root/Pictures/Web) | **Komplett offen** |
 | **Ziel-Auswahl** | Cloud-Picker (`FolderPickerViewController`) | Deaktiviert mit „Noch nicht verfügbar" | **Komplett offen** |
-| **Vorschlag** | `Backup/<Macname>/<Pfad>` (automatisch) | Keiner | **Komplett offen** |
+| **Vorschlag** | `Backup/<MachineName>/...`; ausgewählter Quellordner kommt über den Walker in den finalen Baum | Keiner | **Komplett offen** |
 | **Anlegen** | `GetOrCreateBackupDestination` (Segment für Segment) | Keiner | **Komplett offen** |
 | **Persistenz** | SQLite `schedules.destination_node_id` | Keine | **Komplett offen** |
 | **Fehlerbehandlung** | `DestinationNodeNotAvailable`, „Ziel nicht verfügbar" | Keine | **Komplett offen** |
-| **parentNodeId** | `DestinationNodeId` | `web_dir_node.id` (fester Cloud-Pfad) | **Verschoben, nicht gleich** |
-| **Der Ordner im Zielpfad** | Ja, als letztes Segment | Nein | folgt aus `BackupPathMapper` |
+| **parentNodeId** | `ScheduleRecord.DestinationNodeId` ist der Basisknoten; `BackupStorageService.GetOrCreateLastAncestor` folgt `ManualUploadFileSystemObject.GetCloudParentPath`, legt nötige Elternordner relativ zu `UploadRootPath` an und verwendet den letzten Cloud-Ordner als Elternknoten der jeweiligen Datei | `web_dir_node.id` wird derzeit direkt als `parent_node_id` gesendet (fester Cloud-Pfad) | Basisknoten plus dateiweise Elternpfad-Auflösung fehlt; genehmigte Umsetzung siehe `../features/destination.md` |
+| **Der Ordner im Zielpfad** | Ja, im finalen Baum über das ausgewählte Folder-Objekt | Nein | folgt aus `BackupPathMapper` und Walker |
 | **Ziel-Pflicht** | Speichern gesperrt ohne Ziel | Keine (Ziel-Auswahl deaktiviert) | folgt aus `BackupPathMapper` |
 
 ---
@@ -312,7 +340,7 @@ Teil des Cloud-Zielpfads.
 | 2. Default | `GetSuggestedCloudPathSegmentsForLocalPath` baut `Backup/<Macname>/<Pfad>` | `BackupPathMapper` |
 | 3. Anlegen | `GetOrCreateBackupDestination` (Segment für Segment) | `BackupPathMapper` |
 | 4. Persistenz | `destination_node_id` in `BackupFolder` | `schedules.destination_node_id` |
-| 5. Upload | `parent_node_id` aus dem Zielknoten des Ordners | `UploadRecord.DestinationNodeId` |
+| 5. Upload | **Original:** `DestinationNodeId` ist der Basisknoten. `BackupStorageService.GetOrCreateLastAncestor` folgt `ManualUploadFileSystemObject.GetCloudParentPath`, legt nötige Elternordner relativ zu `UploadRootPath` an und setzt den letzten Cloud-Ordner als `parentNodeId` der jeweiligen Datei. Die genehmigte Prime-Photos-Umsetzung (normalisierte absolute Pfade, einschließlich einmaliger Uploads) ist separat in `../features/destination.md` beschrieben. | `BackupStorageService.GetOrCreateLastAncestor` |
 | 6. Fehler | `DestinationNodeNotAvailable`, „Ziel nicht verfügbar" | `ScheduleError` |
 
 ### 9.2 Was ein Cloud-Picker bräuchte
@@ -324,14 +352,20 @@ Teil des Cloud-Zielpfads.
 | 3. Ordner anlegen | `POST /drive/v1/nodes` mit dem Kind `FOLDER`, Name, Elternliste und Ressourcenversion `V2` | `../protocol/PROTOCOL.md` §2.12 |
 | 4. Neuer-Ordner-Dialog | Validierung: Sonderzeichen, 280 Zeichen, Namenskonflikt | `CreateCloudFolderViewController` |
 
-### 9.3 Was der Pfad-Mapper leisten muss
+### 9.3 Historische Originalbeobachtung: Was `BackupPathMapper` leistet
+
+Die folgende Tabelle beschreibt ausschließlich die Segmentform des originalen
+`BackupPathMapper`, einschließlich des optionalen `VolumeLabel`; sie ist keine
+Spezifikation der Prime-Photos-Umsetzung. Für die genehmigte Umsetzung mit
+normalisierten absoluten Pfaden und der Erweiterung auf einmalige Uploads siehe
+`../features/destination.md`.
 
 | Schritt | Beschreibung | Original-Referenz |
 |---|---|---|
-| 1. Segment-Bau | `Backup/<Macname>/<VolumeLabel>/<Pfad>` | `GetSuggestedCloudPathSegmentsForLocalPath` |
+| 1. Segment-Bau | `Backup/<MachineName>/[VolumeLabel]/<Elternpfad>`; der ausgewählte Folder selbst kommt über das Folder-Objekt in den finalen Baum | `GetSuggestedCloudPathSegmentsForLocalPath` + Walker |
 | 2. Segment-Lookup | `GetNodeByNameAndParentIfExists` mit Segment und aktuellem Knoten | `BackupPathMapper` |
 | 3. Segment-Anlegen | `CreateFolder` mit Segment und Knoten-Id, mit Netzwerk-Zwang | `CreateFolder` |
-| 4. Sonderfall | `"Amazon Drive"` ⇒ Root-Knoten | `BuildCloudPathSegments` |
+| 4. Sonderfall | `"Amazon Drive"` wird nur übersprungen, wenn der aktuelle Knoten bereits Root ist; sonst normales Folder-Lookup/Create | `GetOrCreateBackupDestination` |
 | 5. Rekursion | Start am Wurzelknoten | `GetOrCreateBackupDestination` |
 
 ### 9.4 Was davon Post-MVP wäre
@@ -343,38 +377,55 @@ Teil des Cloud-Zielpfads.
 | `CanChangeDestination`-Äquivalent | Erfordert UI-Änderung im Dialog |
 | `DestinationNodeNotAvailable`-Fehlerbehandlung | Erfordert Worker-Änderung |
 | **Nicht Post-MVP:** `destination_node_id` Feld in `BackupFolder` | **MVP** — Grundlage für alles andere |
-| **Nicht Post-MVP:** `parent_node_id` aus dem Zielknoten des Ordners | **MVP** — Upload-Ziel |
-| **Nicht Post-MVP:** Vorschlag `Backup/<Macname>/<Pfad>` | **MVP** — Default-Ziel |
+| **Nicht Post-MVP:** Original: `parent_node_id` je Datei ist der relativ zum `DestinationNodeId`-Basisknoten aufgelöste letzte Cloud-Elternordner — nicht der Basisknoten selbst | **MVP** — dateiweiser Elternknoten; genehmigte Prime-Photos-Umsetzung mit normalisierten absoluten Pfaden und One-time-Erweiterung siehe `../features/destination.md` |
+| Historischer Originalvorschlag `Backup/<Macname>/[VolumeLabel]/<Elternpfad>` | Nicht auf die Prime-Photos-Umsetzung übertragen; deren Pfadabbildung ist separat in `../features/destination.md` festgelegt |
 
 ### 9.5 Was ohne Live-Probe am Konto nicht belegbar ist
 
 | Thema | Warum unbelegt |
 |---|---|
-| Exakte Segmentliste für Laufwerke außerhalb des User-Homes | Konstruktion, nicht ausgeführt |
-| Ob der Cookie-Host `POST /drive/v1/nodes` unterstützt | Nicht live getestet — offene Frage für den Spiegelungs-Auftrag |
+| Konkrete Segmentwerte für ein bestimmtes externes Laufwerk | Die statische Logik (Volume-Label, falls vorhanden, plus Elternkomponenten) ist geprüft; konkrete Labels und resultierende Werte hängen vom lokalen Laufwerk ab und wurden nicht zur Laufzeit beobachtet |
 | Ob der Cloud-Picker „Pictures"/„Web" vorschlägt | Kontozustand, nicht Code |
-| Wire-Pfad `UploadRecord.DestinationNodeId` → HTTP `parentNodeId`-Query | Code-Teil bestätigt, HTTP-Mapping nicht verfolgt |
+| Exakte HTTP-Serialisierung des pro Datei ermittelten Elternknotens als `parentNodeId` | Statische Service-Kette und relative Ordnerauflösung sind geprüft; die vollständige HTTP-Serialisierung wurde in dieser Recon nicht erneut verfolgt |
 | Nutzort der Speicher-Meldung | Strings vorhanden, zeigender Code-Pfad nicht verfolgt |
+
+Die separate Live-Probe zur Ordner-Anlage ist **kein** offener Punkt: sie ist in
+§10 und `../features/destination.md` dokumentiert.
 
 ---
 
 ## 10. Konsequenz für uns
 
-**User-Entscheidung 2026-10-16:** Das Zielfeld fällt aus dem Dialog (die
-Ziel-Auswahl bleibt deaktiviert). Die **Spiegelung** (Anlegen der Cloud-Ordner
-nach dem Muster `Backup/<Macname>/<Pfad>`) wird ein **eigener Auftrag nach
-dieser Spec**.
+**Beobachtetes Originalverhalten:** Das Ziel ist ein Cloud-Knoten. Konfigurierte
+Backups leiten es über `BackupPathMapper` aus dem lokalen Quellpfad ab; der
+ausgewählte Ordner und verschachtelte Unterordner erscheinen im finalen Zielbaum.
+Einmalige Original-Uploads verwenden dagegen die in §3.4 beschriebenen separaten
+Zielregeln.
+
+**Prime-Photos-Entscheidungen (User, 2026-10-28):** Die Spiegelung wird für
+konfigurierte Sicherungsordner **und** einmalige Drag-and-drop-Uploads verwendet
+(bewusste Erweiterung gegenüber dem Original). Der gemeinsame Mapper arbeitet mit
+normalisierten absoluten Pfaden auf macOS, Windows und Linux; absolute
+Pfadkomponenten/Systempräfixe werden als Cloud-Ordnerhierarchie abgebildet. Bei
+fehlender oder fehlgeschlagener Zielauflösung wird der Upload abgebrochen, niemals
+still auf `Pictures/Web` zurückgefallen. Der Zielordner wird auch bei leeren
+konfigurierten Backups und dann angelegt, wenn alle Dateien wegen Dedupe
+übersprungen werden. Bestehende Uploads in `Pictures/Web` werden nicht automatisch
+migriert. Cross-path Content-Dedupe bleibt bestehen; ein Content-Skip verschiebt
+keinen Cloud-Knoten. Die portierten Entscheidungen sind in
+`../features/destination.md` dokumentiert.
 
 **Kernfrage beantwortet:** Ja, das Original legt Zielordner **an**, und zwar über
 `CreateFolder` (intern `POST /drive/v1/nodes` mit dem Kind `FOLDER`).
 Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
 **Beleg:** `BackupPathMapper.GetOrCreateBackupDestination` — **am Code geprüft**.
 
-**Was das für unseren Cookie-Host bedeutet:** Der Cookie-Host
-(`content-<zone>.drive.amazonaws.com`) unterstützt `POST /v2/upload` und
-`PUT /v2/upload/<nodeId>` (live belegt, `SPEC_UPLOAD.md` §2.4). Die
-Ordner-Anlage über `POST /drive/v1/nodes` ist **nicht live getestet** — das ist
-eine offene Frage, die im Spiegelungs-Auftrag geklärt werden muss.
+**Live-Beleg für unseren Cookie-Host (2026-10-16):** Neben den Upload-Endpunkten
+(`SPEC_UPLOAD.md` §2.4) wurde Ordner-Anlage mit `POST /drive/v1/nodes` und Cookies
+allein erfolgreich getestet: `kind: "FOLDER"` ergab **201**; der Probe-Ordner wurde
+anschließend gelöscht (**202**). Ein Access-Token war nicht nötig. Der Beleg bleibt
+als Live-Beobachtung getrennt von der statischen Original-Recon erhalten; siehe
+`../features/destination.md`.
 
 **Zusatzbefunde (2026-10-16, am Code geprüft):**
 - `CanChangeDestination` ist in **jedem** Aufruf `true` (Voll-Dump-Grep) —
@@ -390,7 +441,7 @@ eine offene Frage, die im Spiegelungs-Auftrag geklärt werden muss.
 
 ### 11.1 Wie diese Spec geprüft wurde
 
-**Datum:** 2026-10-16
+**Erste Recon:** 2026-10-16. **Statische Nachprüfung/Korrekturen:** 2026-10-28.
 
 **Decompiler:**
 ```bash
@@ -429,8 +480,9 @@ ilspycmd -o /tmp/pp-decomp "/Applications/Amazon Photos.app/Contents/MonoBundle/
 grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 ```
 
-**REA:** Nicht benutzt. `inspect_managed_artifact` liefert `metadata-not-admitted`
-(Budget 67 MB), `search_android_classes` ist der falsche Weg (jadx/APK).
+**REA:** `inspect_managed_members` war wegen des 64-MiB-Metadatenbudgets nicht
+verfügbar; es wurde keine Runtime-Beobachtung gewonnen. `search_android_classes`
+ist für diese .NET-Assembly der falsche Weg (jadx/APK).
 
 ### 11.2 Tabelle: Aussage → vorher (Dump) → jetzt (Code) → geändert? → Beleg
 
@@ -438,11 +490,11 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 |---|---|---|---|---|
 | Zielordner ist Cloud-Knoten | `ScheduledBackupItem.DestinationNodeId` | identisch | nein | `ScheduledBackupItem.DestinationNodeId` |
 | Persistenz in SQLite | `schedules.destination_node_id` | identisch | nein | `SPEC_FOLDERS.md` §3.1 |
-| Vorschlag: `Backup/<Macname>/<Pfad>` | `GetSuggestedCloudPathSegmentsForLocalPath` | identisch | nein | `BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath` |
-| Reihenfolge: Backup → Macname → VolumeLabel → Pfad | `BuildCloudPathSegments` | identisch | nein | `BackupPathMapper.BuildCloudPathSegments` |
+| Vorgeschlagene Segmente: `Backup/<MachineName>/[VolumeLabel]/<Elternpfad>` | `GetSuggestedCloudPathSegmentsForLocalPath` | ausgewählter Folder selbst nicht in Segmentliste, wird danach vom Walker ausgegeben | **präzisiert** | `BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath`, Walker |
+| Reihenfolge: Backup → MachineName → optional VolumeLabel → Elternkomponenten | `BuildCloudPathSegments` | identisch; ausgewählter Folder kommt separat hinzu | **präzisiert** | `BackupPathMapper.BuildCloudPathSegments`, Walker |
 | Anlegen: `GetOrCreateBackupDestination` | `CreateFolder` | identisch | nein | `BackupPathMapper.GetOrCreateBackupDestination` |
 | Wiederverwendung vorhandener Knoten | `GetNodeByNameAndParentIfExists` | identisch | nein | `BackupPathMapper.GetOrCreateBackupDestination` |
-| Sonderfall: `"Amazon Drive"` ⇒ Root | `BuildCloudPathSegments` | identisch | nein | `BackupPathMapper.GetOrCreateBackupDestination` |
+| Sonderfall: `"Amazon Drive"` nur am Root überspringen | `BuildCloudPathSegments` | identisch | nein | `BackupPathMapper.GetOrCreateBackupDestination` |
 | `LoadDestinationNode` setzt `DestinationNodeId` | `ScheduleRecord.LoadDestinationNode` | identisch | nein | `ScheduleRecord.LoadDestinationNode` |
 | Asymmetrie: `CanChangeDestination` nicht verkabelt | `WireEvents` | identisch | nein | `BackupConfigurationViewController.WireEvents` |
 | Picker: `FolderPickerViewController` | `CanCreateNewFolders` | identisch | nein | `FolderPickerViewController.CanCreateNewFolders` |
@@ -451,7 +503,7 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 | Fehler: `DestinationNodeNotAvailable` | `ScheduleError` | identisch | nein | `BackupScannerWorker.ProcessScanRequest` |
 | Fehler: `IsNodeDeleted` | `IsNodeDeleted` | identisch | nein | `BackupScannerWorker.ProcessScanRequest` |
 | Speicher-Meldung | `…_unabletosave_destinationmissing_title` | Strings in `Strings`-Klasse vorhanden; Nutzort nicht vollständig verfolgt | **ja** | **teilgeprüft** (`Strings`-Klasse; Save-Failure-Pfad nicht verfolgt) |
-| `parentNodeId` im Upload | `DestinationNodeId` | Code-Teil bestätigt; Wire-Pfad aus alten Dumps | **ja** | **teilgeprüft** (`GetUploadRecord` mit `destinationNodeId` → `UploadRecord.DestinationNodeId`; HTTP-Query-Mapping nicht verfolgt) |
+| `parentNodeId` im Upload | `DestinationNodeId` als Basisknoten; storage ermittelt Elternknoten je Datei aus relativem Pfad | Service-Kette geprüft; vollständige HTTP-Serialisierung nicht erneut verfolgt | **ja** | `UploadRecord.DestinationNodeId`, `BackupStorageService.GetOrCreateLastAncestor` |
 | Unser Upload-Ziel | Root → Pictures → Web | identisch | nein | `src/prime_photos.rs:818–846` |
 | Unser `parentNodeId` | `web_dir_node.id` | identisch | nein | `src/prime_photos.rs:952–955` |
 | Unser BackupFolder ohne `destination_node_id` | kein Feld | identisch | nein | `src/folders.rs:193–214` |
@@ -464,6 +516,9 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 |---|---|---|
 | `BackupPathMapper` | `ilspycmd -t` | `GetOrCreateBackupDestination`, `GetSuggestedCloudPathSegmentsForLocalPath`, `BuildCloudPathSegments` |
 | `ScheduleRecord` | `ilspycmd -t` | `LoadDestinationNode` |
+| `BackupScannerWorker` | `ilspycmd -t` | `ProcessScanRequest` ruft `LoadDestinationNode` nur bei leerer Ziel-ID; gelöschte IDs werden als Fehler behandelt |
+| `BackupStorageService` / `ManualUploadFileSystemObject` | statische Decompilation | `GetOrCreateLastAncestor`, `GetCloudParentPath`; Elternordner werden relativ zum Upload-Root angelegt |
+| One-time upload | statische Decompilation | `EnumerationService.OneTimeMediaImport` nutzt `Pictures/Desktop/Media Import/<yyyy-MM-dd>`; generische One-time-Uploads erhalten eine explizite Ziel-ID |
 | `ScheduledBackupItem` | `ilspycmd -t` | `DestinationNodeId` |
 | `BackupConfigurationViewModel` | `ilspycmd -t` | `CanChangeDestination`, `SetDestination`, `SetLocalPath`, `CloudPath` |
 | `BackupConfigurationViewController` | `ilspycmd -t` | `WireEvents`, `_selectDestinationFolderButton` |
@@ -491,11 +546,10 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 
 | Thema | Warum unbelegt |
 |---|---|
-| Live-Probe am Konto | Nicht durchgeführt (User-Auftrag: nur lesend) |
+| Laufzeitverhalten des Originals nach Start/Anmeldung | Für diese Recon nicht beobachtet; die hier ergänzten Befunde sind statisch |
 | Ob `CanChangeDestination` in einem anderen Dialog wirksam ist | Property ist überall an (Voll-Dump-Grep); ein abgeschalteter Kontext existiert nicht |
-| Ob der Cookie-Host `POST /drive/v1/nodes` (Ordner-Anlage) unterstützt | **Nicht live getestet** — offene Frage für den Spiegelungs-Auftrag |
 | Ob der Cloud-Picker „Pictures"/„Web" vorschlägt | Kontozustand, nicht Code — der Picker zeigt Root + Kinder |
-| Wire-Pfad `UploadRecord.DestinationNodeId` → HTTP `parentNodeId`-Query | `GetUploadRecord` bestätigt den Code-Teil; das HTTP-Query-Mapping liegt tiefer in der Pipeline und wurde nicht verfolgt |
+| Exakte HTTP-Serialisierung des je Datei ermittelten Elternknotens als `parentNodeId` | Service-Kette und relative Ordnerauflösung sind geprüft; die vollständige HTTP-Serialisierung wurde in dieser Recon nicht erneut verfolgt |
 | Nutzort der Speicher-Meldung (`unabletosave_destinationmissing_*`) | Strings in `Strings`-Klasse vorhanden; der zeigende Code-Pfad wurde nicht verfolgt |
 
 ---
@@ -513,8 +567,10 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 2. **`SPEC_CONTENT_FILTER_DESTINATION.md` §3.2 — Vorschlag bestätigt.**
    Die Spec sagt: „`BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath` baut:
    Segment `"Backup"`, Segment `<Maschinenname>`, VolumeLabel, Eltern-Pfade." Diese
-   Spec bestätigt das und ergänzt: „`BuildCloudPathSegments` (Segment `"Amazon Drive"`
-   ⇒ Root)." Kein Widerspruch, nur schärfere Belege.
+   Spec präzisiert, dass der ausgewählte Ordner selbst nicht im Segmentarray steht,
+   aber über das Folder-Objekt im finalen Baum erscheint. `"Amazon Drive"` wird nur
+   übersprungen, wenn der aktuelle Knoten bereits Root ist. Kein Widerspruch, nur
+   schärfere Belege.
 
 3. **`SPEC_UPLOAD.md` §2.1 — `parentNodeId` bestätigt.**
    Die Spec sagt: „`parentNodeId` = cached Web folder id (oder `NONE` in dry run)."
@@ -526,10 +582,10 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
 
 ## 13. Belege (Symbole, Keys, Dateien — keine Codekopien)
 
-* **Zielordner (Original, am Code geprüft):**
+* **Zielordner (Original, statisch am Code geprüft):**
   `BackupPathMapper.GetSuggestedCloudPathSegmentsForLocalPath`,
   `…GetOrCreateBackupDestination`, `…GetCloudPathSegmentsFromNodeId`,
-  `…BuildCloudPathSegments` (Segment `"Amazon Drive"` ⇒ Root),
+  `…BuildCloudPathSegments` (Segment `"Amazon Drive"` wird nur am Root übersprungen),
   `ScheduleRecord.LoadDestinationNode` / `…DestinationNodeId`,
   `ScheduledBackupItem.DestinationNodeId`,
   `ScheduledBackupItemExtensions.ToScheduleRecord`,
@@ -545,6 +601,9 @@ grep -n "CanChangeDestination" /tmp/pp-decomp/"Amazon Photos.decompiled.cs"
   `NodeService.GetRootBranch` / `…GetNodeBranch` / `…GetNodeByNameAndParentIfExists` /
   `…IsNodeDeleted`,
   `CloudDriveStorageService.CreateFolder`,
+  `BackupStorageService.GetOrCreateLastAncestor`,
+  `ManualUploadFileSystemObject.GetCloudParentPath`,
+  `EnumerationService.OneTimeMediaImport`,
   `CloudDriveConflictResolutionExtensions` (None→NONE, Rename→RENAME),
   `ScheduleError` (Enum), `ScheduleErrorExtensions.Update` / `…IsRetriable`,
   `BackupScannerWorker.ProcessScanRequest` / `…HandleMissingDestinationNode`

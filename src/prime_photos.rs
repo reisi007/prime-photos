@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::Read,
     path::{Path, PathBuf},
@@ -30,6 +31,17 @@ struct QueryNodeCreateNode {
     resource_version: String,
     #[serde(rename(serialize = "contentType"))]
     content_type: String,
+}
+
+#[derive(Debug, Serialize)]
+struct QueryNodeCreateFolder {
+    kind: String,
+    name: String,
+    parents: Vec<String>,
+    #[serde(rename(serialize = "clientProperties"))]
+    client_properties: serde_json::Map<String, serde_json::Value>,
+    #[serde(rename(serialize = "resourceVersion"))]
+    resource_version: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -602,7 +614,8 @@ pub(crate) fn looks_like_image(bytes: &[u8]) -> bool {
 #[derive(Debug)]
 pub struct PrimePhotos {
     conf: Config,
-    web_dir_node: Option<ResponseSearchData>,
+    root_node: Option<ResponseSearchData>,
+    folder_nodes: HashMap<(String, String), ResponseSearchData>,
     client: Client,
     dry_run: bool,
 }
@@ -620,7 +633,8 @@ impl PrimePhotos {
 
         Self {
             conf: conf.clone(),
-            web_dir_node: None,
+            root_node: None,
+            folder_nodes: HashMap::new(),
             client,
             dry_run: dry_run,
         }
@@ -863,34 +877,109 @@ impl PrimePhotos {
         Ok(nodes.data.first().unwrap().clone())
     }
 
-    async fn update_web_pictures_dir_node(&mut self) -> Result<ResponseSearchData, String> {
-        // Note: These operations must be sequential because each depends on the previous result
-        // The Pictures directory is needed to find its children (Web directory)
-        let root_node = self.find_root_node().await?;
-        let pictures_dir_searchdata = self
-            .find_children_nodes(
-                "kind:FOLDER+AND+status:(AVAILABLE*)+AND+name:\"Pictures\"",
-                &root_node.id,
-            )
+    /// Resolve every path component below the cloud-drive root. The instance is
+    /// shared behind an async mutex by upload workers, so lookup/create stays
+    /// sequential and a matching FOLDER is reused for every file in the run.
+    pub(crate) async fn resolve_folder_path(
+        &mut self,
+        components: &[String],
+    ) -> Result<String, String> {
+        if self.dry_run {
+            return Ok("NONE".to_string());
+        }
+        if self.root_node.is_none() {
+            self.root_node = Some(self.find_root_node().await?);
+        }
+        let mut parent = self
+            .root_node
+            .clone()
+            .ok_or_else(|| "Cloud-Root konnte nicht aufgelöst werden.".to_string())?;
+
+        for name in components {
+            let key = (parent.id.clone(), name.clone());
+            let child = if let Some(cached) = self.folder_nodes.get(&key) {
+                cached.clone()
+            } else {
+                let children = self
+                    .find_children_nodes("kind:FOLDER+AND+status:(AVAILABLE*)", &parent.id)
+                    .await
+                    .map_err(|error| error_chain(&error))?;
+                if let Some(existing) = children.data.into_iter().find(|node| {
+                    node.kind == "FOLDER" && node.status == "AVAILABLE" && node.name == *name
+                }) {
+                    existing
+                } else {
+                    self.create_folder(name, &parent.id).await?
+                }
+            };
+            if child.id.is_empty() {
+                return Err(format!("Der Cloud-Ordner '{name}' hat keine Node-ID."));
+            }
+            self.folder_nodes.insert(key, child.clone());
+            parent = child;
+        }
+        Ok(parent.id)
+    }
+
+    async fn create_folder(
+        &self,
+        name: &str,
+        parent_id: &str,
+    ) -> Result<ResponseSearchData, String> {
+        let url = Url::parse(&urls::nodes_url(&self.conf.country))
+            .expect("Can't parse the create folder URL");
+        let payload = QueryNodeCreateFolder {
+            kind: "FOLDER".to_string(),
+            name: name.to_string(),
+            parents: vec![parent_id.to_string()],
+            client_properties: serde_json::Map::new(),
+            resource_version: "V2".to_string(),
+        };
+        let response = self
+            .client
+            .post(url)
+            .headers(self.build_common_headers())
+            .json(&payload)
+            .send()
             .await
-            .map_err(|e| error_chain(&e))?;
-        let pictures_dir = pictures_dir_searchdata
-            .data
-            .first()
-            .ok_or_else(|| "Pictures folder not found".to_string())?;
-        let web_dir_node = self
-            .find_children_nodes(
-                "kind:FOLDER+AND+status:(AVAILABLE*)+AND+name:\"Web\"",
-                &pictures_dir.id,
+            .map_err(|error| error_chain(&error))?;
+        let status = response.status();
+        if status.is_success() {
+            let node = response
+                .json::<ResponseSearchData>()
+                .await
+                .map_err(|error| error_chain(&error))?;
+            if node.id.is_empty() || node.kind != "FOLDER" || node.name != name {
+                return Err(format!(
+                    "Die Cloud-API lieferte für '{name}' keinen passenden FOLDER-Knoten."
+                ));
+            }
+            return Ok(node);
+        }
+
+        let status_code = status.as_u16();
+        Self::check_auth_error(status_code);
+        let body = response.text().await.unwrap_or_default();
+        if status == reqwest::StatusCode::CONFLICT {
+            // Another client may have created the same folder after our lookup.
+            // Re-list this parent's FOLDER children and reuse the exact match.
+            let children = self
+                .find_children_nodes("kind:FOLDER+AND+status:(AVAILABLE*)", parent_id)
+                .await
+                .map_err(|error| error_chain(&error))?;
+            if let Some(existing) = children.data.into_iter().find(|node| {
+                node.kind == "FOLDER" && node.status == "AVAILABLE" && node.name == name
+            }) {
+                return Ok(existing);
+            }
+        }
+        Err(if body.trim().is_empty() {
+            format!("Cloud-Ordner '{name}' konnte nicht angelegt werden (HTTP {status_code}).")
+        } else {
+            format!(
+                "Cloud-Ordner '{name}' konnte nicht angelegt werden (HTTP {status_code}): {body}"
             )
-            .await
-            .map_err(|e| error_chain(&e))?
-            .data
-            .first()
-            .cloned()
-            .ok_or_else(|| "Web folder not found".to_string())?;
-        self.web_dir_node = Some(web_dir_node.clone());
-        Ok(web_dir_node)
+        })
     }
 
     async fn find_children_nodes(
@@ -975,15 +1064,12 @@ impl PrimePhotos {
     pub async fn upload_picture(
         &mut self,
         pic_path: &Path,
+        parent_node_id: &str,
         contents: Option<&[u8]>,
         md5sum: Option<&str>,
         conflict: ConflictResolution,
         progress_bytes: Option<Arc<AtomicU64>>,
     ) -> Result<String, String> {
-        if self.web_dir_node.is_none() && !self.dry_run {
-            self.update_web_pictures_dir_node().await?;
-        }
-
         // Read file contents if not provided
         let (contents_vec, md5sum_str, file_size) =
             if let (Some(data), Some(hash)) = (contents, md5sum) {
@@ -1008,11 +1094,6 @@ impl PrimePhotos {
         // below borrows the same buffer.
         let contents_vec = Arc::new(contents_vec);
 
-        let parent_node = match self.dry_run {
-            false => &self.web_dir_node.as_ref().unwrap().id,
-            true => "NONE",
-        };
-
         // A file name is always the last path component; fall back to a lossy
         // rendering instead of panicking on non-UTF-8 names.
         let file_name = pic_path
@@ -1024,7 +1105,7 @@ impl PrimePhotos {
             conflict.wire_value(),
             file_size,
             &file_name,
-            parent_node,
+            parent_node_id,
         ))
         .expect("Can't parse the upload URL");
 
@@ -1184,7 +1265,7 @@ impl PrimePhotos {
                                 conflict.wire_value(),
                                 file_size,
                                 &file_name,
-                                parent_node,
+                                parent_node_id,
                                 &headers,
                                 contents_vec.as_slice(),
                                 pic_path,
@@ -1577,6 +1658,56 @@ mod tests {
         ]));
         assert!(!looks_like_image(b"not an image"));
         assert!(!looks_like_image(&[]));
+    }
+
+    #[test]
+    fn create_folder_payload_has_the_documented_protocol_shape() {
+        // `docs/protocol/PROTOCOL.md` §2.12: `POST /drive/v1/nodes` takes
+        // exactly these keys, camelCase, with an **empty** `clientProperties`
+        // object. Offline: serialization only, no request.
+        let payload = QueryNodeCreateFolder {
+            kind: "FOLDER".to_string(),
+            name: "Backup".to_string(),
+            parents: vec!["PARENT1".to_string()],
+            client_properties: serde_json::Map::new(),
+            resource_version: "V2".to_string(),
+        };
+        let value = serde_json::to_value(&payload).expect("the folder payload serializes");
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "FOLDER",
+                "name": "Backup",
+                "parents": ["PARENT1"],
+                "clientProperties": {},
+                "resourceVersion": "V2",
+            }),
+            "exact key set and values, in protocol spelling"
+        );
+        let keys: std::collections::BTreeSet<&str> = value
+            .as_object()
+            .expect("payload is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from([
+                "kind",
+                "name",
+                "parents",
+                "clientProperties",
+                "resourceVersion",
+            ]),
+            "no extra or renamed keys"
+        );
+        assert!(
+            value["clientProperties"]
+                .as_object()
+                .is_some_and(|map| map.is_empty()),
+            "clientProperties must be an empty object, not null or omitted"
+        );
     }
 
     #[test]

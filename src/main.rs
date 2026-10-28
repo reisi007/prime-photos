@@ -6,6 +6,7 @@ mod auth;
 mod config;
 mod countries;
 mod dedup;
+mod destination;
 mod folders;
 mod i18n;
 mod icons;
