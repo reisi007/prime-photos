@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
+    future::Future,
     io::Read,
     path::{Path, PathBuf},
     pin::Pin,
@@ -961,15 +962,23 @@ impl PrimePhotos {
         Self::check_auth_error(status_code);
         let body = response.text().await.unwrap_or_default();
         if status == reqwest::StatusCode::CONFLICT {
-            // Another client may have created the same folder after our lookup.
-            // Re-list this parent's FOLDER children and reuse the exact match.
-            let children = self
-                .find_children_nodes("kind:FOLDER+AND+status:(AVAILABLE*)", parent_id)
-                .await
-                .map_err(|error| error_chain(&error))?;
-            if let Some(existing) = children.data.into_iter().find(|node| {
-                node.kind == "FOLDER" && node.status == "AVAILABLE" && node.name == name
-            }) {
+            // A paginated or stale child listing can miss the node created by
+            // the racing client, so resolve the server-provided id first and
+            // retain the old relisting as a fallback.
+            let existing = resolve_folder_create_conflict(
+                &body,
+                name,
+                parent_id,
+                |id| async move { self.get_node_by_id(&id).await },
+                || async {
+                    self.find_children_nodes("kind:FOLDER+AND+status:(AVAILABLE*)", parent_id)
+                        .await
+                        .map(|nodes| nodes.data)
+                        .map_err(|error| error_chain(&error))
+                },
+            )
+            .await?;
+            if let Some(existing) = existing {
                 return Ok(existing);
             }
         }
@@ -980,6 +989,31 @@ impl PrimePhotos {
                 "Cloud-Ordner '{name}' konnte nicht angelegt werden (HTTP {status_code}): {body}"
             )
         })
+    }
+
+    async fn get_node_by_id(&self, node_id: &str) -> Result<ResponseSearchData, String> {
+        let url = Url::parse(&urls::node_url(&self.conf.country, node_id))
+            .expect("Can't parse the node lookup URL");
+        let response = self
+            .client
+            .get(url)
+            .headers(self.build_common_headers())
+            .send()
+            .await
+            .map_err(|error| error_chain(&error))?;
+        if response.status().is_success() {
+            return response
+                .json::<ResponseSearchData>()
+                .await
+                .map_err(|error| error_chain(&error));
+        }
+        let status_code = response.status().as_u16();
+        Self::check_auth_error(status_code);
+        Err(response
+            .error_for_status()
+            .err()
+            .map(|error| error_chain(&error))
+            .unwrap_or_else(|| format!("Node lookup failed with HTTP {status_code}.")))
     }
 
     async fn find_children_nodes(
@@ -1513,6 +1547,43 @@ impl PrimePhotos {
     }
 }
 
+fn folder_conflict_node_id(body: &str) -> Option<String> {
+    let body: serde_json::Value = serde_json::from_str(body).ok()?;
+    let node_id = body.get("info")?.get("nodeId")?.as_str()?;
+    (!node_id.trim().is_empty()).then(|| node_id.to_string())
+}
+
+async fn resolve_folder_create_conflict<Load, LoadFuture, Relist, RelistFuture>(
+    body: &str,
+    name: &str,
+    parent_id: &str,
+    load_node: Load,
+    relist_children: Relist,
+) -> Result<Option<ResponseSearchData>, String>
+where
+    Load: FnOnce(String) -> LoadFuture,
+    LoadFuture: Future<Output = Result<ResponseSearchData, String>>,
+    Relist: FnOnce() -> RelistFuture,
+    RelistFuture: Future<Output = Result<Vec<ResponseSearchData>, String>>,
+{
+    if let Some(node_id) = folder_conflict_node_id(body) {
+        if let Ok(node) = load_node(node_id.clone()).await
+            && node.id == node_id
+            && node.kind == "FOLDER"
+            && node.status == "AVAILABLE"
+            && node.name == name
+            && node.parents.iter().any(|parent| parent == parent_id)
+        {
+            return Ok(Some(node));
+        }
+    }
+
+    let children = relist_children().await?;
+    Ok(children
+        .into_iter()
+        .find(|node| node.kind == "FOLDER" && node.status == "AVAILABLE" && node.name == name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1708,6 +1779,90 @@ mod tests {
                 .is_some_and(|map| map.is_empty()),
             "clientProperties must be an empty object, not null or omitted"
         );
+    }
+
+    fn conflict_test_folder(id: &str, name: &str, parent_id: &str) -> ResponseSearchData {
+        let mut node = ResponseSearchData::empty();
+        node.id = id.to_string();
+        node.kind = "FOLDER".to_string();
+        node.status = "AVAILABLE".to_string();
+        node.name = name.to_string();
+        node.parents = vec![parent_id.to_string()];
+        node
+    }
+
+    #[tokio::test]
+    async fn create_folder_409_loads_the_reported_node_id_before_relisting() {
+        let requested_ids = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let node = conflict_test_folder("NODE42", "Backup", "PARENT1");
+        let resolved = resolve_folder_create_conflict(
+            r#"{"code":"NAME_ALREADY_EXISTS","info":{"nodeId":"NODE42"}}"#,
+            "Backup",
+            "PARENT1",
+            {
+                let requested_ids = requested_ids.clone();
+                move |id| {
+                    let requested_ids = requested_ids.clone();
+                    let node = node.clone();
+                    async move {
+                        requested_ids.lock().unwrap().push(id);
+                        Ok(node)
+                    }
+                }
+            },
+            || async { Ok(Vec::new()) },
+        )
+        .await
+        .unwrap()
+        .expect("the 409 node lookup must resolve the concurrently created folder");
+
+        assert_eq!(resolved.id, "NODE42");
+        assert_eq!(*requested_ids.lock().unwrap(), ["NODE42"]);
+    }
+
+    #[tokio::test]
+    async fn create_folder_409_relists_when_id_lookup_fails_or_is_unusable() {
+        let listed = conflict_test_folder("NODE43", "Backup", "PARENT1");
+        let relisted = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let resolved = resolve_folder_create_conflict(
+            r#"{"code":"NAME_ALREADY_EXISTS","info":{"nodeId":"NODE42"}}"#,
+            "Backup",
+            "PARENT1",
+            |_| async { Err("node lookup unavailable".to_string()) },
+            {
+                let relisted = relisted.clone();
+                move || {
+                    let listed = listed.clone();
+                    async move {
+                        relisted.store(true, std::sync::atomic::Ordering::Relaxed);
+                        Ok(vec![listed])
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the existing relisting fallback must remain available");
+
+        assert_eq!(resolved.id, "NODE43");
+        assert!(relisted.load(std::sync::atomic::Ordering::Relaxed));
+
+        let wrong_id = conflict_test_folder("NODE99", "Backup", "PARENT1");
+        let listed = conflict_test_folder("NODE44", "Backup", "PARENT1");
+        let resolved = resolve_folder_create_conflict(
+            r#"{"code":"NAME_ALREADY_EXISTS","info":{"nodeId":"NODE42"}}"#,
+            "Backup",
+            "PARENT1",
+            |_| async { Ok(wrong_id) },
+            move || async move { Ok(vec![listed]) },
+        )
+        .await
+        .unwrap()
+        .expect("an unrelated node must not be reused in place of relisting");
+
+        assert_eq!(resolved.id, "NODE44");
+        assert_eq!(folder_conflict_node_id("not JSON"), None);
+        assert_eq!(folder_conflict_node_id(r#"{"info":{"nodeId":" "}}"#), None);
     }
 
     #[test]

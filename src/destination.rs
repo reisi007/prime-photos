@@ -16,15 +16,17 @@ fn normalized_components(path: &str, style: PathStyle) -> Result<Vec<String>, St
         return Err("Der lokale Pfad ist leer oder ungültig.".to_string());
     }
 
-    match style {
+    let components = match style {
         PathStyle::Posix => {
             if !path.starts_with('/') {
                 return Err("Der lokale Pfad ist nicht absolut.".to_string());
             }
-            Ok(normalize_tail(path, Vec::new(), 0))
+            normalize_tail(path, Vec::new(), 0)
         }
-        PathStyle::Windows => normalize_windows_components(path),
-    }
+        PathStyle::Windows => normalize_windows_components(path)?,
+    };
+    validate_segments(&components)?;
+    Ok(components)
 }
 
 fn normalize_windows_components(path: &str) -> Result<Vec<String>, String> {
@@ -61,7 +63,7 @@ fn normalize_windows_components(path: &str) -> Result<Vec<String>, String> {
     let bytes = path.as_bytes();
     if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
     {
-        let drive = format!("{}:", (bytes[0] as char).to_ascii_uppercase());
+        let drive = (bytes[0] as char).to_ascii_uppercase().to_string();
         return Ok(normalize_tail(&path[3..], vec![drive], 1));
     }
 
@@ -104,6 +106,20 @@ fn nfc(value: &str) -> String {
     value.nfc().collect()
 }
 
+fn validate_segments(components: &[String]) -> Result<(), String> {
+    if components.iter().any(|component| {
+        component.is_empty()
+            || component == "."
+            || component == ".."
+            || component.contains('/')
+            || component.contains('\\')
+            || component.chars().any(char::is_control)
+    }) {
+        return Err("Der lokale Pfad enthält ein ungültiges Zielordnersegment.".to_string());
+    }
+    Ok(())
+}
+
 fn native_style() -> PathStyle {
     if cfg!(windows) {
         PathStyle::Windows
@@ -140,6 +156,7 @@ fn mapped_components(
 
     let mut components = vec!["Backup".to_string(), machine_name];
     components.extend(normalized_components(path, style)?);
+    validate_segments(&components)?;
     Ok(components)
 }
 
@@ -220,13 +237,16 @@ mod tests {
     }
 
     #[test]
-    fn windows_drive_paths_keep_the_volume_prefix() {
+    fn windows_drive_paths_use_one_letter_segment() {
         assert_eq!(
             normalized_components("c:\\Users\\alex\\..\\Photos\\.", PathStyle::Windows)
                 .unwrap(),
-            ["C:", "Users", "Photos"]
+            ["C", "Users", "Photos"]
         );
-        assert_eq!(normalized_components("D:\\", PathStyle::Windows).unwrap(), ["D:"]);
+        assert_eq!(
+            normalized_components("D:\\", PathStyle::Windows).unwrap(),
+            ["D"]
+        );
     }
 
     #[test]
@@ -241,6 +261,27 @@ mod tests {
                 .unwrap(),
             ["UNC", "nas", "photos", "trip"]
         );
+    }
+
+    #[test]
+    fn windows_unc_server_and_share_traversal_fails_closed() {
+        for path in [
+            "\\\\.\\photos",
+            "\\\\..\\photos",
+            "\\\\nas\\.",
+            "\\\\nas\\..",
+        ] {
+            assert!(
+                normalized_components(path, PathStyle::Windows).is_err(),
+                "unsafe UNC path was accepted: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn posix_backslash_and_control_characters_fail_closed() {
+        assert!(normalized_components("/photos/bad\\name", PathStyle::Posix).is_err());
+        assert!(normalized_components("/photos/bad\u{7f}name", PathStyle::Posix).is_err());
     }
 
     #[test]

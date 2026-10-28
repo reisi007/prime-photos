@@ -1,9 +1,13 @@
 # Upload destination
 
-The destination determines where files land in the Amazon Photos account. The
-current implementation still uses the fixed path `Pictures/Web`; the approved
-Prime Photos path mirroring is documented here but is not implemented yet.
-Existing uploads in `Pictures/Web` are not automatically migrated.
+The destination determines where files land in the Amazon Photos account.
+Prime Photos implements local-path mirroring for configured backups and one-time
+drag-and-drop uploads. Existing uploads in `Pictures/Web` are not automatically
+migrated.
+
+**Implementation and verification status (2026-10-28):** Implemented. Targeted
+tests were run locally on macOS Apple Silicon; no Windows or Linux verification
+is claimed.
 
 ## How it works
 
@@ -18,21 +22,29 @@ uploads are a separate behavior: `EnumerationService.OneTimeMediaImport` uses
 an explicit `DestinationNodeId`. These are static code findings, not runtime
 observations. Details: `../original/SPEC_UPLOAD_DESTINATION.md` §§3–4.
 
-### Prime Photos target behavior (approved, not yet implemented)
+### Prime Photos behavior
 
-- Apply the same destination mapper to **configured backup folders and
-  one-time drag-and-drop uploads**. Applying it to one-time uploads is an
-  intentional extension, not original parity.
-- Build the mirror from **normalized absolute paths**, not paths relative to the
-  home directory. Support macOS, Windows, and Linux; normalize separators and
-  path components, and retain absolute path components and any system/volume
-  prefixes as cloud-folder hierarchy below `Backup/<MachineName>/`.
-- Reuse matching cloud folders and create missing ones. Keep the source-folder
-  hierarchy, so each file uploads under its corresponding mirrored parent,
-  rather than flattening every file under the mirror's base node.
-- Resolve/create the target even for an empty configured backup and when every
-  file is skipped by dedupe. If target resolution is missing or fails, abort the
-  upload; never silently fall back to `Pictures/Web`.
+- Apply the same mapper to **configured backup folders and one-time
+  drag-and-drop uploads**. Applying it to one-time uploads is an intentional
+  extension, not original parity.
+- Build the mirror from normalized **absolute** paths, without shortening the
+  home directory, below `Backup/<MachineName>/`. POSIX root `/` remains implicit,
+  with its absolute path components following it. Windows drive prefixes are one
+  segment (`C`); UNC paths keep `UNC/<server>/<share>` as components. All output
+  segments are checked for emptiness, dot traversal, separators, and control
+  characters; invalid paths fail closed.
+- Reuse matching cloud folders by parent and create missing ones. Include the
+  selected backup folder itself (even when empty). Each file uploads under the
+  mirror of its **actual local parent**, not flat under the selected root; for a
+  one-time file, only its parent hierarchy is mirrored and its basename remains
+  the uploaded file name.
+- Resolve/create targets before file uploads, including empty configured
+  backups, fully deduplicated runs, and files injected into an active run. On a
+  create-folder 409, load the node named by `info.nodeId`; retain child relisting
+  as a fallback if that lookup fails.
+- If target resolution is missing or fails, abort affected uploads; never
+  silently fall back to `Pictures/Web`. A file's failure is counted once across
+  destination-root handling and its retry.
 - Keep cross-path content dedupe. A content skip does not move or create a cloud
   node at the new mirrored path; a previously uploaded node remains at its old
   path if the local file is moved or renamed.
@@ -43,10 +55,9 @@ These are **Prime Photos product decisions**, distinct from observations of the
 original client:
 
 - **Zielfeld aus dem Dialog (F9, Welle 5.7):** „Ziel für Datensicherung:" samt
-  „Ändern …" ist entfernt; das Ziel wird automatisch bestimmt. Die bisherige
-  Implementierung nutzt `Pictures/Web`; die beschlossene Spiegelung ersetzt
-  dieses feste Ziel für neue Uploads. **Verworfen:** das Feld behalten und bei
-  `Pictures/Web` bleiben.
+  „Ändern …" ist entfernt; das Ziel wird automatisch bestimmt. Die
+  implementierte Spiegelung ersetzt das frühere feste Ziel `Pictures/Web` für
+  neue Uploads. **Verworfen:** das Feld behalten und bei `Pictures/Web` bleiben.
 - **Spiegelungsumfang (User, 2026-10-28):** konfigurierte Sicherungsordner und
   einmalige Drag-and-drop-Uploads verwenden denselben Mapper. Das ist für
   One-time eine bewusste Erweiterung gegenüber dem Original.
@@ -54,6 +65,9 @@ original client:
   Pfade auf macOS, Windows und Linux; keine Home-relative Darstellung. Absolute
   Komponenten und System-/Volume-Präfixe werden als Cloud-Ordnerhierarchie
   abgebildet.
+- **Windows-Laufwerk (User, 2026-10-28):** ein Laufwerk wie `C:\` wird als
+  genau ein einzelnes Cloud-Segment `C` dargestellt; es gibt keinen zusätzlichen
+  Präfix.
 - **Fehlerverhalten (User, 2026-10-28):** wenn das Ziel fehlt oder nicht
   aufgelöst werden kann, Upload abbrechen; kein stiller Fallback auf
   `Pictures/Web`.
@@ -73,7 +87,8 @@ original client:
 Am 2026-10-16 konnte der Cookie-Host Ordner anlegen: `POST /drive/v1/nodes` mit
 `kind: "FOLDER"` und Cookies allein ergab **201**. Der Probe-Ordner wurde
 anschließend gelöscht (**202**); ein Access-Token war nicht nötig. Das belegt die
-API-Fähigkeit, nicht die Implementierung der Spiegelung.
+API-Fähigkeit. Die aktuelle Implementierung nutzt diesen bestätigten Create-Flow
+und behandelt 409 über `info.nodeId` mit Relisting-Fallback.
 
 ## Original reference
 

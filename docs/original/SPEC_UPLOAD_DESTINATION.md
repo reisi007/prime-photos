@@ -8,6 +8,14 @@ und Tabellen, keine verbatim Code-Auszüge, keine Personendaten. Deutsche UI-Str
 werden wörtlich aus `Contents/Resources/de.lproj/Localizable.strings` zitiert,
 jeweils mit dem Key.
 
+**Implementierungsstatus Prime Photos (2026-10-28):** Die genehmigte
+Zielspiegelung ist inzwischen implementiert. Diese Spec bleibt eine historische
+Recon des Originals. Die Abschnitte §4.4, §7, §8, §9 und die „Unser Code"-Zeilen
+in §11.2 halten ausdrücklich den **Stand vor der Implementierung** fest und sind
+keine Beschreibung des aktuellen Prime-Photos-Codes. Das aktuelle Verhalten und
+die Segmentform stehen in `../features/destination.md`; für Windows wird ein
+Laufwerkpräfix wie `C:\` genau als Cloud-Segment `C` abgebildet.
+
 **Frage.** User-Wunsch 2026-10-16: „Upload Ort soll gleich sein wie bei der
 Originalen App." Diese Spec beantwortet: Was ist der Upload-Ort im Original, wie
 funktioniert er, und was fehlt bei uns?
@@ -242,7 +250,10 @@ Original-Parität. Die Prime-Photos-Entscheidung steht in
 | `name` | Dateiname | **weiterhin aus alten Dumps** (`UploadRequest`) |
 | `contentDate` | **nicht gesendet** (server-seitige Ableitung) | **weiterhin aus alten Dumps** (`SPEC_CAPTURE_DATE.md`) |
 
-### 4.4 Was WIR heute senden
+### 4.4 Vor-Implementierungs-Snapshot: Was WIR damals sendeten
+
+Die folgende Tabelle ist ein historischer Code-Snapshot vor der Umsetzung der
+Zielspiegelung, keine Aussage über den heutigen Upload-Code.
 
 | Parameter | Wir | Beleg |
 |---|---|---|
@@ -296,7 +307,11 @@ cross-path), `SPEC_DEDUP.md` §1–§2 (Dedup-Identität),
 
 ---
 
-## 7. Was WIR heute tun
+## 7. Vor-Implementierungs-Snapshot: Was WIR damals taten
+
+Die Tabelle und die Lückenbeschreibung halten den Prime-Photos-Stand vor der
+Umsetzung der Zielspiegelung fest. Sie sind ausdrücklich historisch; das heutige
+Verhalten ist in `../features/destination.md` dokumentiert.
 
 | Aspekt | Wir | Beleg |
 |---|---|---|
@@ -314,7 +329,11 @@ Teil des Cloud-Zielpfads.
 
 ---
 
-## 8. Lücke-Tabelle (Original vs. wir)
+## 8. Historische Lücken-Tabelle vor der Implementierung (Original vs. damaliger Stand)
+
+Alle Aussagen in dieser Tabelle zum „unseren Stand" und zur „Lücke" beziehen
+sich auf den dokumentierten Vor-Implementierungs-Snapshot, nicht auf den
+aktuellen Prime-Photos-Code.
 
 | Thema | Original | Unser Stand | Lücke |
 |---|---|---|---|
@@ -330,7 +349,11 @@ Teil des Cloud-Zielpfads.
 
 ---
 
-## 9. Umsetzungs-Skizze
+## 9. Historische Umsetzungs-Skizze (vor Implementierung)
+
+Diese Skizze dokumentiert den früheren Planungsstand. Sie ist keine Liste noch
+offener Implementierungsarbeit; der aktuelle Stand ist in
+`../features/destination.md` beschrieben.
 
 ### 9.1 Was ein `destination_node_id` je Ziel braucht
 
@@ -415,6 +438,15 @@ migriert. Cross-path Content-Dedupe bleibt bestehen; ein Content-Skip verschiebt
 keinen Cloud-Knoten. Die portierten Entscheidungen sind in
 `../features/destination.md` dokumentiert.
 
+**Implementierungsstand (2026-10-28):** Die Prime-Photos-Umsetzung bildet
+normalisierte absolute lokale Pfade ab. Windows-Laufwerkpräfixe werden als
+einzelnes Segment (`C`) ausgegeben; UNC-Server und -Freigabe bleiben Komponenten.
+Ordner werden nach Parent wiederverwendet oder angelegt. Bei HTTP 409 wird zuerst
+`info.nodeId` per GET geladen; bei fehlgeschlagenem ID-Lookup bleibt das bisherige
+Relisting erhalten. Gezielte Tests liefen lokal auf macOS Apple Silicon; für
+Windows und Linux wird keine Verifikation behauptet. Details und
+aktuelle Testabdeckung: `../features/destination.md`.
+
 **Kernfrage beantwortet:** Ja, das Original legt Zielordner **an**, und zwar über
 `CreateFolder` (intern `POST /drive/v1/nodes` mit dem Kind `FOLDER`).
 Vorhandene Knoten werden **wiederverwendet** (`GetNodeByNameAndParentIfExists`).
@@ -485,6 +517,9 @@ verfügbar; es wurde keine Runtime-Beobachtung gewonnen. `search_android_classes
 ist für diese .NET-Assembly der falsche Weg (jadx/APK).
 
 ### 11.2 Tabelle: Aussage → vorher (Dump) → jetzt (Code) → geändert? → Beleg
+
+Diese Tabelle ist eine Vergleichsaufnahme der Recon vor der Zielspiegelung.
+Einträge „Unser ..." sind historische Angaben und keine Current-code-Aussagen.
 
 | Aussage | vorher (Dump) | jetzt (Code) | geändert? | Beleg (Typ/Methode) |
 |---|---|---|---|---|

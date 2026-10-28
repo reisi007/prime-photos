@@ -208,10 +208,8 @@ pub(crate) fn portal_language(country: &str) -> &'static str {
     }
 }
 
-/// Minimal percent-encoder for the auth-cookies query. The unreserved set
-/// `A–Z a–z 0–9 - _ . ~` is kept verbatim (RFC 3986); everything else becomes
-/// `%XX` uppercase. A full encoder is not needed — only two known strings
-/// (app name/version) pass through here.
+/// Percent-encode a URL component. The unreserved set `A–Z a–z 0–9 - _ . ~`
+/// is kept verbatim (RFC 3986); everything else becomes `%XX` uppercase.
 fn percent_encode(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for byte in input.bytes() {
@@ -238,6 +236,15 @@ pub(crate) fn nodes_base_url(country: &str) -> String {
     format!(
         "https://www.amazon.{}/drive/v1/nodes/",
         marketplace_domain(country)
+    )
+}
+
+/// `GET drive/v1/nodes/{nodeId}` for resolving a create-folder conflict.
+pub(crate) fn node_url(country: &str, node_id: &str) -> String {
+    format!(
+        "https://www.amazon.{}/drive/v1/nodes/{}?resourceVersion=V2",
+        marketplace_domain(country),
+        percent_encode(node_id)
     )
 }
 
@@ -437,6 +444,18 @@ mod tests {
         assert_eq!(
             nodes_base_url("mx"),
             "https://www.amazon.com.mx/drive/v1/nodes/"
+        );
+    }
+
+    #[test]
+    fn node_url_uses_marketplace_host_and_encodes_the_id_segment() {
+        assert_eq!(
+            node_url("de", "NODE123"),
+            "https://www.amazon.de/drive/v1/nodes/NODE123?resourceVersion=V2"
+        );
+        assert_eq!(
+            node_url("jp", "NODE/123"),
+            "https://www.amazon.co.jp/drive/v1/nodes/NODE%2F123?resourceVersion=V2"
         );
     }
 
