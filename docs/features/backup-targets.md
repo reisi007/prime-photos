@@ -37,15 +37,18 @@ The dialog is shared between creating and editing a target.
 
 ## Decisions
 
-- **Backup configuration window (user decision 2026-10-13):** build the full
-  "Datensicherungseinstellungen" window now (destination, content filter,
-  interval, dedup, conflict handling, save/cancel), and **share the form
-  logic** with the create-backup flow (same dialog for create and edit)
-  instead of a separate row-menu. Fields whose backend does not exist yet
-  (destination, content filter, interval) are shown **disabled** with a
-  "Noch nicht verfügbar" hover (user decision 2026-10-13: "volle Anordnung,
-  Rest ausgegraut"); functional now: source folder (read-only when editing),
-  dedup, name-conflict policy.
+- **Historical UI plan — backup configuration window (user decision
+  2026-10-13; partly superseded):** the original plan was to build the full
+  "Datensicherungseinstellungen" window (destination, content filter, interval,
+  dedup, conflict handling, save/cancel) and **share the form logic** with the
+  create-backup flow (same dialog for create and edit) instead of a separate
+  row-menu. It proposed showing unavailable fields **disabled** ("volle
+  Anordnung, Rest ausgegraut"). The later F9 decision superseded that plan for
+  the destination: the destination field was removed, is not a disabled field,
+  and the destination is mirrored automatically (`destination.md`). In the
+  current form, "Videos sichern" and the upload-interval control are shown
+  disabled; "Fotos sichern" remains selectable. Functional: source folder
+  (read-only when editing), dedup, and name-conflict policy.
 
 - **Missing source ⇒ `NotFound`, not PAUSED (user decision 2026-10-17):** a
   target whose source folder is gone (external drive unplugged, folder renamed
