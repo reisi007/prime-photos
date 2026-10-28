@@ -142,7 +142,7 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (Default `VERSION=0.1.5`, `BUILD=5`, mit der lokalen Identität
+2. **Bundle bauen** (Default `VERSION=0.1.6`, `BUILD=6`, mit der lokalen Identität
    `Prime Photos Local Signer` signiert; ad-hoc nur als Rückfall):
 
    ```sh
