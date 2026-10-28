@@ -623,8 +623,8 @@ pub struct PrimePhotos {
 
 impl PrimePhotos {
     const AUTH_ERROR_LOG_LINES: [&str; 2] = [
-        "Authentication failed: the request was rejected with HTTP 401 Unauthorized.",
-        "If this keeps happening, sign out of Prime Photos and sign in again in the app.",
+        "Authentication failed (HTTP 401 Unauthorized). Prime Photos manages session renewal in the background.",
+        "If your session is invalidated or authentication failures persist, sign out of Prime Photos and sign in again in the app.",
     ];
 
     pub fn new(conf: &Config, dry_run: bool) -> Self {
@@ -1310,7 +1310,7 @@ impl PrimePhotos {
                 _ => {
                     // Check for authentication errors
                     if Self::check_auth_error(status_code) {
-                        return Err("Authentication failed: Session cookies expired".to_string());
+                        return Err("Upload authentication failed (HTTP 401 Unauthorized).".to_string());
                     }
                     let body = match response.text().await {
                         Ok(v) => v,
@@ -1411,7 +1411,7 @@ impl PrimePhotos {
             let status_code = response.status().as_u16();
             debug!("Replace upload failed on status code {}", status_code);
             if Self::check_auth_error(status_code) {
-                return Err("Authentication failed: Session cookies expired".to_string());
+                return Err("Replace upload authentication failed (HTTP 401 Unauthorized).".to_string());
             }
             let body = match response.text().await {
                 Ok(v) => v,
@@ -1592,8 +1592,8 @@ mod tests {
         assert_eq!(
             PrimePhotos::AUTH_ERROR_LOG_LINES,
             [
-                "Authentication failed: the request was rejected with HTTP 401 Unauthorized.",
-                "If this keeps happening, sign out of Prime Photos and sign in again in the app.",
+                "Authentication failed (HTTP 401 Unauthorized). Prime Photos manages session renewal in the background.",
+                "If your session is invalidated or authentication failures persist, sign out of Prime Photos and sign in again in the app.",
             ]
         );
         assert!(PrimePhotos::check_auth_error(401));
