@@ -626,6 +626,10 @@ impl PrimePhotos {
         "Authentication failed (HTTP 401 Unauthorized). Prime Photos manages session renewal in the background.",
         "If your session is invalidated or authentication failures persist, sign out of Prime Photos and sign in again in the app.",
     ];
+    const UPLOAD_AUTH_ERROR_MESSAGE: &str =
+        "Upload Authentication failed (HTTP 401 Unauthorized).";
+    const REPLACE_UPLOAD_AUTH_ERROR_MESSAGE: &str =
+        "Replace upload Authentication failed (HTTP 401 Unauthorized).";
 
     pub fn new(conf: &Config, dry_run: bool) -> Self {
         // Configure client with connection pooling and optimized settings
@@ -1310,7 +1314,7 @@ impl PrimePhotos {
                 _ => {
                     // Check for authentication errors
                     if Self::check_auth_error(status_code) {
-                        return Err("Upload authentication failed (HTTP 401 Unauthorized).".to_string());
+                        return Err(Self::UPLOAD_AUTH_ERROR_MESSAGE.to_string());
                     }
                     let body = match response.text().await {
                         Ok(v) => v,
@@ -1411,7 +1415,7 @@ impl PrimePhotos {
             let status_code = response.status().as_u16();
             debug!("Replace upload failed on status code {}", status_code);
             if Self::check_auth_error(status_code) {
-                return Err("Replace upload authentication failed (HTTP 401 Unauthorized).".to_string());
+                return Err(Self::REPLACE_UPLOAD_AUTH_ERROR_MESSAGE.to_string());
             }
             let body = match response.text().await {
                 Ok(v) => v,
@@ -1599,6 +1603,30 @@ mod tests {
         assert!(PrimePhotos::check_auth_error(401));
         assert!(!PrimePhotos::check_auth_error(403));
         assert!(!PrimePhotos::check_auth_error(200));
+    }
+
+    #[test]
+    fn upload_401_errors_match_worker_auth_marker_and_identify_operation() {
+        for (message, operation) in [
+            (PrimePhotos::UPLOAD_AUTH_ERROR_MESSAGE, "Upload"),
+            (
+                PrimePhotos::REPLACE_UPLOAD_AUTH_ERROR_MESSAGE,
+                "Replace upload",
+            ),
+        ] {
+            assert!(
+                message.contains("Authentication failed"),
+                "401 error does not match the upload worker auth marker: {message}"
+            );
+            assert!(
+                message.starts_with(operation),
+                "401 error does not identify {operation}: {message}"
+            );
+            assert!(
+                message.contains("HTTP 401 Unauthorized"),
+                "401 error does not identify its HTTP status: {message}"
+            );
+        }
     }
 
     #[test]
