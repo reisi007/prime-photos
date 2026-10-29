@@ -13,9 +13,9 @@
 //! handshake is a single line in each direction: the newcomer sends
 //! `prime-photos:show`, the running instance answers `prime-photos:ok` and
 //! shows its window. A Unix sidecar file lock serializes stale-socket recovery
-//! and remains held for the listener's lifetime. A foreign program on the
-//! Windows port is logged and tolerated — the app then runs **without** the
-//! guard rather than refusing to start.
+//! and remains held for the process lifetime, independently of the listener
+//! thread. A foreign program on the Windows port is logged and tolerated — the
+//! app then runs **without** the guard rather than refusing to start.
 //!
 //! The accept loop runs on its own thread and never touches the UI: it only
 //! sets an `AtomicBool` and wakes the render loop, exactly like `src/tray.rs`
@@ -51,6 +51,12 @@ static SHOW_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// UI directly. Missing context = the flag is still set, only the immediate
 /// repaint is skipped.
 static UI_CTX: OnceLock<eframe::egui::Context> = OnceLock::new();
+
+/// Unix ownership locks outlive the detached accept thread. If that thread
+/// exits or panics while the app remains alive, another process must still not
+/// take over the socket path.
+#[cfg(unix)]
+static UNIX_INSTANCE_LOCKS: OnceLock<std::sync::Mutex<Vec<std::fs::File>>> = OnceLock::new();
 
 /// Remember the render-loop context. `PrimePhotoApp::new` calls this next to
 /// `app_menu::install`; the `egui::Context` only exists once `eframe` has
@@ -129,7 +135,7 @@ pub fn acquire_at(path: &std::path::Path) -> bool {
         }
     };
 
-    if let Err(error) = spawn_accept_loop(listener, instance_lock) {
+    if let Err(error) = spawn_accept_loop(listener) {
         // The socket was bound but no thread can serve it. Fail closed and
         // remove the path if possible; the lock is released as this returns.
         let _ = std::fs::remove_file(path);
@@ -137,12 +143,15 @@ pub fn acquire_at(path: &std::path::Path) -> bool {
         return false;
     }
 
+    // Keep ownership in process-lifetime storage, not in the detached thread:
+    // even if accepting later fails (or the thread panics), contenders remain
+    // unable to remove or rebind this socket while this process is alive.
+    retain_unix_lock(instance_lock);
+
     true
 }
 
-/// Open and exclusively lock the sidecar file (`instance.sock.lock`). The
-/// descriptor is moved into the accept thread after a successful bind, keeping
-/// the OS-managed lock alive for the lifetime of this process.
+/// Open and exclusively lock the sidecar file (`instance.sock.lock`).
 #[cfg(unix)]
 fn acquire_unix_lock(path: &std::path::Path) -> Option<std::fs::File> {
     use std::fs::OpenOptions;
@@ -176,6 +185,18 @@ fn acquire_unix_lock(path: &std::path::Path) -> Option<std::fs::File> {
             None
         }
     }
+}
+
+/// Retain the acquired sidecar lock until process exit. Recover the mutex's
+/// inner value if another caller panicked while holding it; poisoning must not
+/// release the single-instance guard.
+#[cfg(unix)]
+fn retain_unix_lock(lock_file: std::fs::File) {
+    let locks = UNIX_INSTANCE_LOCKS.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    locks
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(lock_file);
 }
 
 /// Windows: same handshake over a fixed loopback port (std has no named
@@ -239,28 +260,22 @@ fn ask_existing_instance(path: &std::path::Path) -> bool {
     answer.trim_end() == SHOW_ANSWER.trim_end()
 }
 
-/// Accept connections for the rest of the process lifetime.
+/// Accept connections until a non-interrupted listener error occurs.
 #[cfg(unix)]
-fn spawn_accept_loop(
-    listener: std::os::unix::net::UnixListener,
-    instance_lock: std::fs::File,
-) -> std::io::Result<()> {
+fn spawn_accept_loop(listener: std::os::unix::net::UnixListener) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("prime-photos-instance".into())
         .spawn(move || {
-            // Keep the process-lifetime ownership lock even across transient
-            // accept errors. A failed listener remains fail-closed rather than
-            // allowing another process to take over while this app is alive.
-            let _instance_lock = instance_lock;
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
                         serve(&mut stream);
                     }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(error) => {
                         log::warn!("Prime Photos: Fehler beim Instanz-Listener: {error}");
-                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        return;
                     }
                 };
             }
@@ -339,15 +354,38 @@ fn spawn_tcp_accept_loop(listener: std::net::TcpListener) {
 #[cfg(test)]
 static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Make a fresh directory for each Unix test. The test's listener and process-
+/// lifetime sidecar lock intentionally remain alive until the test process
+/// exits, so neither path may be reused or unlinked during the test run.
+#[cfg(all(test, unix))]
+fn unique_unix_test_socket() -> std::path::PathBuf {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_PATH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    loop {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros()
+            % 1_000_000;
+        let sequence = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("pp-{}-{timestamp}-{sequence}", std::process::id()));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return dir.join("sock"),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => panic!("Temp-Verzeichnis anlegen: {error}"),
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 #[test]
 fn second_instance_defers_and_the_first_shows_its_window() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    let dir = std::env::temp_dir().join(format!("prime-photos-instance-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("Temp-Verzeichnis");
-    let path = dir.join("instance.sock");
+    let path = unique_unix_test_socket();
 
     assert!(acquire_at(&path), "der erste Start muss primär werden");
     assert!(!acquire_at(&path), "der zweite Start muss sich fügen");
@@ -356,11 +394,8 @@ fn second_instance_defers_and_the_first_shows_its_window() {
         "die laufende Instanz muss den Show-Wunsch sehen"
     );
 
-    let _ = std::fs::remove_file(&path);
-    let mut lock_path = path.as_os_str().to_os_string();
-    lock_path.push(".lock");
-    let _ = std::fs::remove_file(std::path::PathBuf::from(lock_path));
-    let _ = std::fs::remove_dir_all(&dir);
+    // Keep the socket and locked sidecar in this unique directory. The accept
+    // thread and ownership lock live until this test process exits.
 }
 
 #[cfg(all(test, unix))]
@@ -371,13 +406,7 @@ fn concurrent_stale_socket_takeover_has_exactly_one_owner() {
 
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    let dir = std::env::temp_dir().join(format!(
-        "prime-photos-stale-instance-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).expect("Temp-Verzeichnis");
-    let path = dir.join("instance.sock");
+    let path = unique_unix_test_socket();
 
     // Leave behind the filesystem entry from a listener that crashed.
     drop(UnixListener::bind(&path).expect("stale socket anlegen"));
@@ -417,11 +446,8 @@ fn concurrent_stale_socket_takeover_has_exactly_one_owner() {
         "der Gewinner muss mindestens eine Show-Anfrage erhalten"
     );
 
-    let _ = std::fs::remove_file(&path);
-    let mut lock_path = path.as_os_str().to_os_string();
-    lock_path.push(".lock");
-    let _ = std::fs::remove_file(std::path::PathBuf::from(lock_path));
-    let _ = std::fs::remove_dir_all(&dir);
+    // Keep the socket and locked sidecar in this unique directory. The accept
+    // thread and ownership lock live until this test process exits.
 }
 
 /// The Windows transport is exercised on every platform (it is plain `std`),

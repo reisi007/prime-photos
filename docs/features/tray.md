@@ -92,11 +92,15 @@ closing the window quits the app.
   `prime-photos:ok`). **Unix stale-socket recovery is race-safe (Issue #3,
   implemented):** an OS-managed exclusive lock on the sibling
   `instance.sock.lock` serializes ownership and stale-socket cleanup; the
-  primary retains it for the process lifetime. A contender that cannot get
-  the lock may hand off the show request through the existing handshake, but if
-  that fails it stops rather than deleting/rebinding the socket or launching
-  without a guard. The sidecar file may remain after exit; the OS releases its
-  lock on process exit, so a later start can recover the socket. The original's
+  primary retains the OS lock in process-lifetime storage, independently of
+  the listener thread. A non-interrupted accept failure is logged once and
+  stops that listener, but the lock remains held so contenders still
+  either hand off through the handshake or reject the start rather than taking
+  over. A contender that cannot get the lock may hand off the show request
+  through the existing handshake, but if that fails it stops rather than
+  deleting/rebinding the socket or launching without a guard. The sidecar file
+  may remain after exit; the OS releases its lock on process exit, so a later
+  start can recover the socket. The original's
   `LSMultipleInstancesProhibited` (`../original/SPEC_OS_INTEGRATION.md` §3.1)
   establishes its single-instance contract only; these Unix lock and socket
   mechanics are Prime Photos' implementation, not facts about the original.
