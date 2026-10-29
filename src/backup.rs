@@ -829,6 +829,54 @@ const WATCH_DEBOUNCE: Duration = Duration::from_secs(5);
 /// (`BackupWatcherPollIntervalInSeconds` = 30 s, §4.3).
 const WATCH_POLL: Duration = Duration::from_secs(30);
 
+/// A failed store read parks every store-dependent part of the watcher pass
+/// until the next poll tick. Events and scan requests may still wake the loop,
+/// but cannot advance this deadline.
+#[derive(Default)]
+struct WatchStoreRetry {
+    retry_at: Option<Instant>,
+}
+
+impl WatchStoreRetry {
+    fn eligible(&self, now: Instant) -> bool {
+        self.retry_at.is_none_or(|retry_at| now >= retry_at)
+    }
+
+    fn remaining(&self, now: Instant) -> Option<Duration> {
+        self.retry_at
+            .filter(|retry_at| now < *retry_at)
+            .map(|retry_at| retry_at.duration_since(now))
+    }
+
+    fn failed(&mut self, now: Instant) {
+        self.retry_at = Some(now + WATCH_POLL);
+    }
+
+    fn succeeded(&mut self) {
+        self.retry_at = None;
+    }
+}
+
+/// The only store-load gate used by `watch_loop`: the work callback is not
+/// invoked for an ineligible retry or a failed read, leaving all parked work
+/// untouched until a fresh snapshot is available.
+fn with_watch_store<T>(
+    retry: &mut WatchStoreRetry,
+    now: Instant,
+    load: impl FnOnce() -> Option<FolderStore>,
+    process: impl FnOnce(&mut FolderStore) -> T,
+) -> Option<T> {
+    if !retry.eligible(now) {
+        return None;
+    }
+    let Some(mut store) = load() else {
+        retry.failed(now);
+        return None;
+    };
+    retry.succeeded();
+    Some(process(&mut store))
+}
+
 /// Set once the supervising background task has been spawned for this process —
 /// `ensure_background_sync` is idempotent through it.
 static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
@@ -1304,6 +1352,39 @@ fn park_paths(
     added
 }
 
+/// Keep event paths that have not yet been mapped to a folder. This is used
+/// while the persisted store is unavailable; the same set also de-duplicates
+/// overlapping watcher reports across those retries.
+fn park_event_paths(
+    pending: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    paths: impl IntoIterator<Item = PathBuf>,
+) {
+    for path in paths {
+        if seen.insert(path.clone()) {
+            pending.push(path);
+        }
+    }
+}
+
+/// Folder indices in parked work come from the store snapshot that first saw
+/// them. Re-resolve their paths against each successful fresh snapshot before
+/// planning, since folders can be added, removed, or reordered while work waits.
+fn refresh_pending_folders(
+    store: &FolderStore,
+    pending: &mut Vec<(usize, PathBuf)>,
+    seen: &mut HashSet<PathBuf>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let paths: Vec<PathBuf> = pending.iter().map(|(_, path)| path.clone()).collect();
+    let mapped = map_to_folders(store, &paths);
+    pending.clear();
+    seen.clear();
+    park_paths(pending, seen, mapped);
+}
+
 /// Fold `files` into the parked stock and, if a run may start right now, upload
 /// **all** of them in a single run; otherwise they stay parked until a later pass
 /// is allowed to start one.
@@ -1520,18 +1601,17 @@ fn sync_watchers(
     watchers: &mut HashMap<PathBuf, notify::RecommendedWatcher>,
     tx: &tokio::sync::mpsc::UnboundedSender<notify::Result<notify::Event>>,
     cfg: &Config,
+    store: Option<&mut FolderStore>,
 ) -> Vec<PathBuf> {
     // No switch or no sign-in → no watcher at all (the same guard that keeps a
-    // run from starting).
-    let mut store = if cfg.background_sync
-        && !cfg.session_id.is_empty()
-        && !cfg.cookie_x_acb.is_empty()
-    {
-        // A damaged store was set aside by `FolderStore::load`; without it there
-        // is nothing to watch (the error is already logged).
-        load_store_logged()
-    } else {
-        None
+    // run from starting). A missing store here means the caller deliberately
+    // disabled watching; a failed load must skip this function so existing
+    // watcher ownership is retained until a successful reconciliation.
+    let Some(store) = store.filter(|_| {
+        cfg.background_sync && !cfg.session_id.is_empty() && !cfg.cookie_x_acb.is_empty()
+    }) else {
+        watchers.clear();
+        return Vec::new();
     };
     // Missing source on the watcher path (user decisions 2026-10-16,
     // 2026-10-17): every pass re-decides each enabled folder's source state with
@@ -1543,19 +1623,12 @@ fn sync_watchers(
     //
     // The paths that just came back are handed to the caller: `watch_loop` parks
     // them so the returned folder's stock is read in **once** (Welle 5.33).
-    let (returned, store_changed) = match store.as_mut() {
-        Some(s) => lift_returned_sources(s, |p| p.is_dir()),
-        None => (Vec::new(), false),
-    };
+    let (returned, store_changed) = lift_returned_sources(store, |p| p.is_dir());
     let desired: Vec<PathBuf> = store
-        .as_ref()
-        .map(|s| {
-            s.enabled_indices()
-                .iter()
-                .filter_map(|&i| s.folders.get(i).map(|f| f.path.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+        .enabled_indices()
+        .iter()
+        .filter_map(|&i| store.folders.get(i).map(|f| f.path.clone()))
+        .collect();
     watchers.retain(|p, _| desired.contains(p));
     for path in desired {
         if watchers.contains_key(&path) {
@@ -1584,9 +1657,7 @@ fn sync_watchers(
         }
     }
     if store_changed {
-        if let Some(s) = store.as_ref() {
-            let _ = s.save();
-        }
+        let _ = store.save();
     }
     returned
 }
@@ -1623,6 +1694,11 @@ async fn watch_loop(
     // The "next run" notice is logged once per parking episode (Verify E): reset
     // whenever the parked list drains (a run took the folders over).
     let mut scan_park_logged = false;
+    // Event paths that have not yet been mapped to a folder are held until a
+    // fresh store snapshot is available.
+    let mut deferred_event_paths: Vec<PathBuf> = Vec::new();
+    let mut deferred_event_seen: HashSet<PathBuf> = HashSet::new();
+    let mut store_retry = WatchStoreRetry::default();
     loop {
         // Freshest settings + store on every pass (the supervisor is detached
         // from the UI struct, so the persisted files are its source — except the
@@ -1630,70 +1706,103 @@ async fn watch_loop(
         // the cookie fields are `#[serde(skip)]`).
         let mut cfg = Config::load().unwrap_or(last_config.clone());
         overlay_session_cookies(&mut cfg, &session);
-        // A source folder that just came back (`NotFound` → present) is read in
-        // **once**, with its full stock: park it here — before the scan block
-        // below — so this same pass handles it (parallel to a live run, or as a
-        // normal run). The global pause is respected downstream: when it is set,
-        // `handle_scan_requests` keeps the folder parked and it starts as soon as
-        // the pause is lifted. The edge is one-shot (`NotFound` is lifted to
-        // `Idle`), so no pass parks it twice.
-        for path in sync_watchers(&mut watchers, &tx, &cfg) {
-            if !pending_scans.contains(&path) {
-                pending_scans.push(path);
-            }
+        let watching_enabled = cfg.background_sync
+            && !cfg.session_id.is_empty()
+            && !cfg.cookie_x_acb.is_empty();
+        if !watching_enabled {
+            // This does not depend on folders.toml: disabling background sync or
+            // signing out still relinquishes watcher ownership immediately.
+            sync_watchers(&mut watchers, &tx, &cfg, None);
         }
 
-        // Retry what was remembered while a run was busy or paused: no new burst,
-        // just the parked stock — merged with itself (a no-op) so no path is taken
-        // up twice, then started if a run is allowed now.
-        if !pending.is_empty() {
-            // A damaged store was set aside by `FolderStore::load`; without it
-            // there is nothing to attribute the parked paths to, so this pass is
-            // skipped (the error is already logged).
-            let Some(mut store) = load_store_logged() else {
-                continue;
-            };
-            handle_files(
-                std::iter::empty(),
-                &mut pending,
-                &mut pending_seen,
-                &mut store,
-                &shared,
-                &paused,
-                &cfg,
-                concurrency,
-                limit_kbps,
-                &album,
-            );
-        }
+        // One load attempt per pass serves watcher reconciliation and every
+        // store-dependent queue. If it fails, the callback is not invoked, so
+        // parked work is untouched and currently-working watchers are retained.
+        let needs_store = watching_enabled
+            || !pending.is_empty()
+            || !pending_scans.is_empty()
+            || !deferred_event_paths.is_empty();
+        if needs_store {
+            let _ = with_watch_store(
+                &mut store_retry,
+                Instant::now(),
+                load_store_logged,
+                |store| {
+                    // A source folder that just came back (`NotFound` → present)
+                    // is read in **once**, with its full stock. The pause remains
+                    // enforced by `handle_scan_requests` below.
+                    if watching_enabled {
+                        for path in sync_watchers(&mut watchers, &tx, &cfg, Some(store)) {
+                            if !pending_scans.contains(&path) {
+                                pending_scans.push(path);
+                            }
+                        }
+                    }
 
-        // A folder the user added while a run was busy: read it in here — on the
-        // supervisor task, so the walk runs **parallel** to a live upload and its
-        // files go into the running run (or a normal run starts, or it stays
-        // parked).
-        if !pending_scans.is_empty() {
-            let Some(mut store) = load_store_logged() else {
-                continue;
-            };
-            handle_scan_requests(
-                &mut pending_scans,
-                &mut scan_park_logged,
-                &mut store,
-                &shared,
-                &cfg,
-                &paused,
-                concurrency,
-                limit_kbps,
-                &album,
+                    // Parked entries carry indices from the snapshot that first
+                    // saw them; re-resolve paths before planning against this one.
+                    refresh_pending_folders(store, &mut pending, &mut pending_seen);
+                    if !pending.is_empty() {
+                        handle_files(
+                            std::iter::empty(),
+                            &mut pending,
+                            &mut pending_seen,
+                            store,
+                            &shared,
+                            &paused,
+                            &cfg,
+                            concurrency,
+                            limit_kbps,
+                            &album,
+                        );
+                    }
+
+                    // A folder added while a run was busy is read on the
+                    // supervisor task, parallel to the live upload.
+                    if !pending_scans.is_empty() {
+                        handle_scan_requests(
+                            &mut pending_scans,
+                            &mut scan_park_logged,
+                            store,
+                            &shared,
+                            &cfg,
+                            &paused,
+                            concurrency,
+                            limit_kbps,
+                            &album,
+                        );
+                        if pending_scans.is_empty() {
+                            scan_park_logged = false;
+                        }
+                    }
+
+                    if !deferred_event_paths.is_empty() {
+                        let paths = std::mem::take(&mut deferred_event_paths);
+                        deferred_event_seen.clear();
+                        let files = map_to_folders(store, &paths);
+                        handle_files(
+                            files,
+                            &mut pending,
+                            &mut pending_seen,
+                            store,
+                            &shared,
+                            &paused,
+                            &cfg,
+                            concurrency,
+                            limit_kbps,
+                            &album,
+                        );
+                    }
+                },
             );
-            if pending_scans.is_empty() {
-                scan_park_logged = false;
-            }
         }
 
         // Wait for the next event, the poll tick (which keeps the watcher set and
         // the pending list moving while nothing changes) — or a folder the user
         // just added while a run was busy.
+        let wait = store_retry
+            .remaining(Instant::now())
+            .unwrap_or(WATCH_POLL);
         let first = tokio::select! {
             ev = rx.recv() => match ev {
                 Some(ev) => ev,
@@ -1708,7 +1817,7 @@ async fn watch_loop(
                 }
                 continue;
             }
-            _ = tokio::time::sleep(WATCH_POLL) => continue,
+            _ = tokio::time::sleep(wait) => continue,
         };
         // Debounce: give the burst time to land, then take all of it at once.
         tokio::time::sleep(WATCH_DEBOUNCE).await;
@@ -1723,26 +1832,13 @@ async fn watch_loop(
                 watchers.clear();
             }
         }
-        let Some(mut store) = load_store_logged() else {
-            continue;
-        };
-        let files = map_to_folders(&store, &paths);
-        // Merge the new burst with the parked stock and start one run for all of
-        // it if one is allowed. Merging (not replacing) is what keeps an earlier
-        // burst — e.g. one parked during a pause — from being dropped by this one;
-        // an empty batch (only directories, only deletions) therefore cannot lose
-        // what is still parked either.
-        handle_files(
-            files,
-            &mut pending,
-            &mut pending_seen,
-            &mut store,
-            &shared,
-            &paused,
-            &cfg,
-            concurrency,
-            limit_kbps,
-            &album,
+        // Mapping requires the persisted folder set, so hold paths until the next
+        // eligible successful store load. Overlapping reports are deduplicated
+        // without disturbing already-parked work.
+        park_event_paths(
+            &mut deferred_event_paths,
+            &mut deferred_event_seen,
+            paths,
         );
     }
 }
@@ -3887,6 +3983,87 @@ mod tests {
         let pending_paths: HashSet<PathBuf> =
             pending.iter().map(|(_, p)| p.clone()).collect();
         assert_eq!(pending_paths, seen);
+    }
+
+    #[test]
+    fn watcher_store_retry_waits_for_the_poll_tick() {
+        let failed_at = Instant::now();
+        let mut retry = WatchStoreRetry::default();
+        assert!(with_watch_store(&mut retry, failed_at, || None, |_| ()).is_none());
+
+        let before_tick = failed_at + WATCH_POLL - Duration::from_nanos(1);
+        let mut loaded = false;
+        assert!(with_watch_store(
+            &mut retry,
+            before_tick,
+            || {
+                loaded = true;
+                Some(FolderStore::default())
+            },
+            |_| (),
+        )
+        .is_none());
+        assert!(!loaded, "a wake before the poll tick must not retry the read");
+
+        let at_tick = failed_at + WATCH_POLL;
+        assert!(retry.eligible(at_tick));
+        assert!(with_watch_store(
+            &mut retry,
+            at_tick,
+            || {
+                loaded = true;
+                Some(FolderStore::default())
+            },
+            |_| (),
+        )
+        .is_some());
+        assert!(loaded);
+        assert!(retry.remaining(at_tick).is_none());
+    }
+
+    #[test]
+    fn failed_watcher_store_load_leaves_parked_work_untouched() {
+        let now = Instant::now();
+        let mut retry = WatchStoreRetry::default();
+        let mut pending = files(0..2);
+        let mut pending_seen: HashSet<PathBuf> = pending.iter().map(|(_, p)| p.clone()).collect();
+        let mut pending_scans = vec![PathBuf::from("/photos/scan")];
+        let mut event_paths = vec![PathBuf::from("/photos/new.jpg")];
+        let mut event_seen: HashSet<PathBuf> = event_paths.iter().cloned().collect();
+
+        let result = with_watch_store(&mut retry, now, || None, |_| {
+            pending.clear();
+            pending_seen.clear();
+            pending_scans.clear();
+            event_paths.clear();
+            event_seen.clear();
+        });
+
+        assert!(result.is_none());
+        assert_eq!(pending, files(0..2));
+        assert_eq!(pending_seen.len(), 2);
+        assert_eq!(pending_scans, vec![PathBuf::from("/photos/scan")]);
+        assert_eq!(event_paths, vec![PathBuf::from("/photos/new.jpg")]);
+        assert_eq!(event_seen, HashSet::from([PathBuf::from("/photos/new.jpg")]));
+    }
+
+    #[test]
+    fn refreshing_parked_paths_uses_fresh_indices_and_keeps_dedup_exact() {
+        let store = FolderStore {
+            folders: vec![
+                folders::BackupFolder::new(PathBuf::from("/photos/b")),
+                folders::BackupFolder::new(PathBuf::from("/photos/a")),
+            ],
+        };
+        let a = PathBuf::from("/photos/a/one.jpg");
+        let b = PathBuf::from("/photos/b/two.jpg");
+        let mut pending = vec![(0, a.clone()), (9, b.clone()), (3, a.clone())];
+        let mut seen = HashSet::from([a.clone(), b.clone()]);
+
+        refresh_pending_folders(&store, &mut pending, &mut seen);
+
+        assert_eq!(pending, vec![(1, a.clone()), (0, b.clone())]);
+        assert_eq!(seen, HashSet::from([a, b]));
     }
 
     // -- "Nicht noch einmal fragen" persisted per folder -------------------

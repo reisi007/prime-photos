@@ -49,7 +49,12 @@ last run.
   parked watcher paths and scan requests intact. Skip work that needs the
   unavailable store, then retry no earlier than the next `WATCH_POLL` tick
   (30 s), even if another event wakes the supervisor; never immediately loop on
-  the failed read. This bounds retries without losing work.
+  the failed read. This bounds retries without losing work. **Implemented in
+  Prime Photos** in `src/backup.rs`: one store load gates each watcher pass,
+  failed reads defer all store-dependent work, collected event paths remain
+  unmapped until recovery, and existing watchers stay owned until a successful
+  store snapshot can reconcile them. This is Prime Photos policy, not behavior
+  attributed to the Amazon Original.
 - **Folder added during a run is not dropped (Welle 5.31):** the detached
   supervisor reads the folder in **parallel** to the running upload
   (`UploadPlan::build_since` with watermark `None`, `handle_scan_requests` in
