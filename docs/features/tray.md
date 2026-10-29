@@ -81,19 +81,25 @@ closing the window quits the app.
   **first**, then calls `unhide` (if hidden, including by ⌘H) and `activate` in
   `show_main_window` — the policy must be `Regular` before `activate`.
 - **Only one instance:** a second start does **not** open a second window — it
-  asks the running instance to show its window and exits. On macOS the bundle's
-  `LSMultipleInstancesProhibited` (`packaging/Info.plist`) already makes Launch
-  Services refuse the second start and activate the running instance instead; for
-  starts that bypass it (a second `./prime-photos` from a shell, Linux/Windows in
-  general) `src/single_instance.rs` keeps a guard: a `UnixListener` on
+  asks the running instance to show its window and exits. The macOS bundle has
+  `LSMultipleInstancesProhibited` (`packaging/Info.plist`), matching the
+  original's single-instance contract; Launch Services may additionally prevent
+  duplicate bundle launches. For starts that bypass that layer (a second
+  `./prime-photos` from a shell, Linux/Windows in general)
+  `src/single_instance.rs` keeps a guard: a `UnixListener` on
   `…/prime_photos/instance.sock` (unix) or a loopback `TcpListener` on a fixed
   port (Windows), same one-line handshake (`prime-photos:show` →
-  `prime-photos:ok`). **Unix stale-socket takeover (Soll-Vertrag, Issue #3):**
-  concurrent starters must still leave exactly one socket owner. A contender
-  that loses the takeover bind must not continue without the guard; it must
-  reach the winner or stop. The original's `LSMultipleInstancesProhibited`
-  (`../original/SPEC_OS_INTEGRATION.md` §3.1) is evidence for the original's
-  single-instance contract, not for this port's socket-race mechanics.
+  `prime-photos:ok`). **Unix stale-socket recovery is race-safe (Issue #3,
+  implemented):** an OS-managed exclusive lock on the sibling
+  `instance.sock.lock` serializes ownership and stale-socket cleanup; the
+  primary retains it for the process lifetime. A contender that cannot get
+  the lock may hand off the show request through the existing handshake, but if
+  that fails it stops rather than deleting/rebinding the socket or launching
+  without a guard. The sidecar file may remain after exit; the OS releases its
+  lock on process exit, so a later start can recover the socket. The original's
+  `LSMultipleInstancesProhibited` (`../original/SPEC_OS_INTEGRATION.md` §3.1)
+  establishes its single-instance contract only; these Unix lock and socket
+  mechanics are Prime Photos' implementation, not facts about the original.
 
 ## Decisions
 

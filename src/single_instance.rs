@@ -12,18 +12,18 @@
 //! `TcpListener` on a fixed port on Windows (std has no named pipes). The
 //! handshake is a single line in each direction: the newcomer sends
 //! `prime-photos:show`, the running instance answers `prime-photos:ok` and
-//! shows its window. A socket file a crash left behind is detected (the
-//! connect fails) and taken over; a foreign program on the Windows port is
-//! logged and tolerated — the app then runs **without** the guard rather than
-//! refusing to start.
+//! shows its window. A Unix sidecar file lock serializes stale-socket recovery
+//! and remains held for the listener's lifetime. A foreign program on the
+//! Windows port is logged and tolerated — the app then runs **without** the
+//! guard rather than refusing to start.
 //!
 //! The accept loop runs on its own thread and never touches the UI: it only
 //! sets an `AtomicBool` and wakes the render loop, exactly like `src/tray.rs`
 //! and `src/app_menu.rs`. `PrimePhotoApp::update` drains the request through
 //! [`take_show_request`] and shows the (possibly hidden) window.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The line a second process sends to ask the running instance to show itself.
 const SHOW_REQUEST: &str = "prime-photos:show\n";
@@ -69,15 +69,14 @@ pub fn take_show_request() -> bool {
 /// Take the single-instance slot, or ask the running instance to show its
 /// window.
 ///
-/// `false` means "another instance answered — it has been asked to show its
-/// window, this process must exit". `true` means "this process owns the slot"
-/// (also when the guard is unavailable for an environmental reason: the app
-/// must always start).
+/// `false` means another instance answered or this process could not safely
+/// acquire the guard; the caller must exit rather than start unguarded. `true`
+/// means this process owns the slot.
 #[cfg(unix)]
 pub fn acquire() -> bool {
     let Some(dir) = dirs::config_dir() else {
         log::warn!("Prime Photos: kein Konfigurationsverzeichnis für den Einzelinstanz-Schutz");
-        return true;
+        return false;
     };
     acquire_at(&dir.join("prime_photos").join("instance.sock"))
 }
@@ -91,35 +90,90 @@ pub fn acquire_at(path: &std::path::Path) -> bool {
     if let Some(dir) = path.parent()
         && let Err(e) = std::fs::create_dir_all(dir)
     {
-        // Not fatal: the bind below reports the real problem.
         log::warn!("Prime Photos: Instanz-Verzeichnis nicht anlegbar: {e}");
+        return false;
     }
 
-    match UnixListener::bind(path) {
-        Ok(listener) => {
-            spawn_accept_loop(listener);
-            true
-        }
-        Err(e) => {
-            // The path is taken — either by a running instance or by a socket
-            // file a crash left behind. Only a running instance answers the
-            // handshake; then we hand the request over and step aside.
+    // Acquire this before even attempting stale-socket cleanup. A contender
+    // that cannot take the lock may activate the current owner, but must never
+    // remove or rebind its socket.
+    let Some(instance_lock) = acquire_unix_lock(path) else {
+        return false;
+    };
+
+    let listener = match UnixListener::bind(path) {
+        Ok(listener) => listener,
+        Err(bind_error) => {
+            // The path may belong to a running instance or be a socket file a
+            // crash left behind. Only remove it after the exclusive sidecar
+            // lock is ours and the existing instance did not answer.
             if ask_existing_instance(path) {
                 return false;
             }
-            log::debug!("Prime Photos: verwaister Instanz-Socket ({e}), wird übernommen");
-            let _ = std::fs::remove_file(path);
-            match UnixListener::bind(path) {
-                Ok(listener) => {
-                    spawn_accept_loop(listener);
-                    true
-                }
-                Err(e) => {
-                    // No guard, but the app must start (never abort on this).
-                    log::warn!("Prime Photos: Einzelinstanz-Schutz nicht verfügbar: {e}");
-                    true
+            log::debug!("Prime Photos: verwaister Instanz-Socket ({bind_error}), wird übernommen");
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    log::warn!("Prime Photos: verwaister Instanz-Socket nicht entfernbar: {error}");
+                    return false;
                 }
             }
+            match UnixListener::bind(path) {
+                Ok(listener) => listener,
+                Err(error) => {
+                    log::warn!("Prime Photos: Einzelinstanz-Schutz nicht verfügbar: {error}");
+                    return false;
+                }
+            }
+        }
+    };
+
+    if let Err(error) = spawn_accept_loop(listener, instance_lock) {
+        // The socket was bound but no thread can serve it. Fail closed and
+        // remove the path if possible; the lock is released as this returns.
+        let _ = std::fs::remove_file(path);
+        log::warn!("Prime Photos: Instanz-Thread nicht startbar: {error}");
+        return false;
+    }
+
+    true
+}
+
+/// Open and exclusively lock the sidecar file (`instance.sock.lock`). The
+/// descriptor is moved into the accept thread after a successful bind, keeping
+/// the OS-managed lock alive for the lifetime of this process.
+#[cfg(unix)]
+fn acquire_unix_lock(path: &std::path::Path) -> Option<std::fs::File> {
+    use std::fs::OpenOptions;
+
+    let mut lock_path = path.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    let lock_file = match OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(std::path::PathBuf::from(lock_path))
+    {
+        Ok(file) => file,
+        Err(error) => {
+            if !ask_existing_instance(path) {
+                log::warn!("Prime Photos: Einzelinstanz-Sperrdatei nicht verfügbar: {error}");
+            }
+            return None;
+        }
+    };
+
+    match lock_file.try_lock() {
+        Ok(()) => Some(lock_file),
+        Err(error) => {
+            if !ask_existing_instance(path) {
+                log::warn!(
+                    "Prime Photos: Einzelinstanz-Schutz bereits belegt oder nicht verfügbar: {error}"
+                );
+            }
+            None
         }
     }
 }
@@ -187,22 +241,31 @@ fn ask_existing_instance(path: &std::path::Path) -> bool {
 
 /// Accept connections for the rest of the process lifetime.
 #[cfg(unix)]
-fn spawn_accept_loop(listener: std::os::unix::net::UnixListener) {
-    let spawned = std::thread::Builder::new()
+fn spawn_accept_loop(
+    listener: std::os::unix::net::UnixListener,
+    instance_lock: std::fs::File,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
         .name("prime-photos-instance".into())
         .spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else {
-                    log::warn!("Prime Photos: Instanz-Listener beendet sich nach einem Fehler");
-                    return;
+            // Keep the process-lifetime ownership lock even across transient
+            // accept errors. A failed listener remains fail-closed rather than
+            // allowing another process to take over while this app is alive.
+            let _instance_lock = instance_lock;
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
+                        serve(&mut stream);
+                    }
+                    Err(error) => {
+                        log::warn!("Prime Photos: Fehler beim Instanz-Listener: {error}");
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
                 };
-                let _ = stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
-                serve(&mut stream);
             }
-        });
-    if let Err(e) = spawned {
-        log::warn!("Prime Photos: Instanz-Thread nicht startbar: {e}");
-    }
+        })
+        .map(|_| ())
 }
 
 /// Windows (and test): the same as [`acquire_at`], over TCP. `port` is
@@ -294,6 +357,70 @@ fn second_instance_defers_and_the_first_shows_its_window() {
     );
 
     let _ = std::fs::remove_file(&path);
+    let mut lock_path = path.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    let _ = std::fs::remove_file(std::path::PathBuf::from(lock_path));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn concurrent_stale_socket_takeover_has_exactly_one_owner() {
+    use std::os::unix::net::UnixListener;
+    use std::sync::Barrier;
+
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let dir = std::env::temp_dir().join(format!(
+        "prime-photos-stale-instance-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("Temp-Verzeichnis");
+    let path = dir.join("instance.sock");
+
+    // Leave behind the filesystem entry from a listener that crashed.
+    drop(UnixListener::bind(&path).expect("stale socket anlegen"));
+    assert!(
+        path.exists(),
+        "der verwaiste Socket-Pfad muss bestehen bleiben"
+    );
+
+    let barrier = std::sync::Arc::new(Barrier::new(3));
+    let contenders = (0..2)
+        .map(|_| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                acquire_at(&path)
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+
+    let owners = contenders
+        .into_iter()
+        .map(|contender| contender.join().expect("contender panicked"))
+        .filter(|owns_guard| *owns_guard)
+        .count();
+    assert_eq!(owners, 1, "genau ein Contender darf Guard-Eigentümer sein");
+
+    // Even when the loser could not handshake during recovery and controlled-
+    // rejected, it must not have removed/rebound the eventual owner's socket.
+    assert!(
+        ask_existing_instance(&path),
+        "der Gewinner-Socket muss nach dem Rennen erreichbar bleiben"
+    );
+    assert!(
+        take_show_request(),
+        "der Gewinner muss mindestens eine Show-Anfrage erhalten"
+    );
+
+    let _ = std::fs::remove_file(&path);
+    let mut lock_path = path.as_os_str().to_os_string();
+    lock_path.push(".lock");
+    let _ = std::fs::remove_file(std::path::PathBuf::from(lock_path));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
