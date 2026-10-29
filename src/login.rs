@@ -247,6 +247,8 @@ pub(crate) struct Session {
     pub(crate) access_token: Option<String>,
     /// When the next access-token refresh is due.
     pub(crate) next_refresh: Option<Instant>,
+    /// When a failed cookie mint should be retried, independently of token refresh.
+    pub(crate) cookie_retry_at: Option<Instant>,
     /// Incremented on every new worker generation (login, logout, invalidated);
     /// a worker that sees a foreign generation stops.
     pub(crate) generation: u64,
@@ -264,12 +266,112 @@ pub(crate) struct Session {
     pub(crate) cookies: SessionCookies,
 }
 
+struct DueSessionWork {
+    refresh_token: Option<String>,
+    refresh_access_token: bool,
+    mint_cookies: bool,
+}
+
+fn next_cookie_retry_at(now: Instant) -> Instant {
+    now + Duration::from_secs(auth::TICK_INTERVAL_SECONDS)
+}
+
+fn schedule_cookie_retry(session: &mut Session, now: Instant) {
+    session.cookie_retry_at = Some(next_cookie_retry_at(now));
+}
+
+fn cookie_retry_is_due(session: &Session, now: Instant) -> bool {
+    session.cookie_retry_at.is_some_and(|retry_at| retry_at <= now)
+}
+
+fn next_login_refresh_at(now: Instant, expires_in: i64) -> Instant {
+    now + auth::next_refresh_delay(expires_in)
+}
+
+fn next_refresh_after_success(now: Instant, expires_in: i64) -> Instant {
+    now + auth::next_refresh_delay(expires_in)
+        .max(Duration::from_secs(auth::TICK_INTERVAL_SECONDS))
+}
+
+fn record_access_refresh_success(
+    session: &mut Session,
+    access_token: String,
+    expires_in: i64,
+    now: Instant,
+) {
+    session.access_token = Some(access_token);
+    session.next_refresh = Some(next_refresh_after_success(now, expires_in));
+}
+
+fn record_cookie_mint_result(
+    session: &mut Session,
+    result: Result<ParsedCookies, auth::AuthError>,
+    now: Instant,
+) -> Result<(), auth::AuthError> {
+    match result {
+        Ok(cookies) => {
+            session.cookie_retry_at = None;
+            session.pending_cookies = Some(cookies);
+            Ok(())
+        }
+        Err(error) => {
+            schedule_cookie_retry(session, now);
+            Err(error)
+        }
+    }
+}
+
+fn install_login_session(
+    session: &mut Session,
+    refresh_token: String,
+    access_token: String,
+    expires_in: i64,
+    cookies_minted: bool,
+    now: Instant,
+) {
+    session.refresh_token = Some(refresh_token);
+    session.access_token = Some(access_token);
+    session.next_refresh = Some(next_login_refresh_at(now, expires_in));
+    session.cookie_retry_at = if cookies_minted {
+        None
+    } else {
+        Some(next_cookie_retry_at(now))
+    };
+    session.invalid = false;
+    session.started = false;
+    session.pending_cookies = None;
+    session.generation += 1;
+}
+
+fn due_session_work(
+    session: &Session,
+    now: Instant,
+    next_token_attempt_at: Option<Instant>,
+) -> DueSessionWork {
+    let has_refresh_token = session.refresh_token.is_some();
+    let refresh_access_token = has_refresh_token
+        && session.next_refresh.is_some_and(|refresh_at| refresh_at <= now)
+        && next_token_attempt_at.is_none_or(|retry_at| retry_at <= now);
+    let mint_cookies = has_refresh_token && cookie_retry_is_due(session, now);
+    let refresh_token = if refresh_access_token || mint_cookies {
+        session.refresh_token.clone()
+    } else {
+        None
+    };
+
+    DueSessionWork {
+        refresh_token,
+        refresh_access_token,
+        mint_cookies,
+    }
+}
+
 /// Background refresh worker (user decision 2026-10-15). Ticks every
 /// [`auth::TICK_INTERVAL_SECONDS`] seconds; refreshes the access token when
-/// [`Session::next_refresh`] is due, then mints fresh cookies from the new
-/// refresh token. Offline errors do **not** count as attempts and never sign
-/// out. After [`auth::ACCESS_TOKEN_MAX_RETRIES`] failed attempts the session
-/// is declared invalid.
+/// [`Session::next_refresh`] is due, and mints fresh cookies independently when
+/// their retry is due. Offline errors do **not** count as access-token attempts
+/// and never sign out. After [`auth::ACCESS_TOKEN_MAX_RETRIES`] failed access
+/// token attempts the session is declared invalid.
 pub(crate) async fn session_worker(
     session: Arc<Mutex<Session>>,
     country: String,
@@ -279,41 +381,51 @@ pub(crate) async fn session_worker(
 ) {
     let client = reqwest::Client::new();
     let mut attempts = 0u32;
+    let mut next_token_attempt_at = None;
     loop {
-        // Check due-ness **first**, then sleep only when nothing is due: a
-        // session restored from the keychain is due immediately (`poll_session`
-        // sets `next_refresh = now`), so the access token and the web cookies
-        // are renewed right at start instead of after the first tick. Whenever
-        // nothing is due we sleep a full tick — never a busy loop.
-        let due_token = {
+        // Check both independent schedules before sleeping. A restored session
+        // has a token refresh due immediately; a failed cookie mint is due on
+        // the next 3-second tick even while its access-token appointment is in
+        // the future. Whenever nothing is due, sleep a full tick — never spin.
+        let work = {
             let s = session.lock().unwrap();
             if s.generation != my_gen {
                 return;
             }
-            match (s.refresh_token.clone(), s.next_refresh) {
-                (Some(rt), Some(t)) if t <= Instant::now() => Some(rt),
-                // No token yet, no schedule yet, or the schedule lies in the
-                // future: nothing to do this pass.
-                _ => None,
-            }
+            due_session_work(&s, Instant::now(), next_token_attempt_at)
         };
-        let Some(refresh_token) = due_token else {
+        let Some(refresh_token) = work.refresh_token else {
             tokio::time::sleep(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)).await;
             continue;
         };
-        // Attempt loop (reuses the client).
-        loop {
-            // Re-check the generation before every attempt.
-            {
-                if session.lock().unwrap().generation != my_gen {
-                    return;
-                }
+
+        if work.refresh_access_token {
+            // Re-check the generation before every access-token attempt.
+            if session.lock().unwrap().generation != my_gen {
+                return;
             }
             match auth::refresh_access_token(&client, &country, &language, &refresh_token).await
             {
                 Ok(outcome) => {
                     log::info!("Access-Token aufgefrischt ({} s gültig).", outcome.expires_in);
-                    let delay = auth::next_refresh_delay(outcome.expires_in);
+                    let refreshed_at = Instant::now();
+                    {
+                        let mut s = session.lock().unwrap();
+                        // Re-check after the await: a logout or new login must
+                        // not be overwritten by this worker generation.
+                        if s.generation != my_gen {
+                            return;
+                        }
+                        record_access_refresh_success(
+                            &mut s,
+                            outcome.access_token,
+                            outcome.expires_in,
+                            refreshed_at,
+                        );
+                    }
+                    attempts = 0;
+                    next_token_attempt_at = None;
+
                     let cookies = auth::fetch_auth_cookies(
                         &client,
                         &country,
@@ -321,7 +433,7 @@ pub(crate) async fn session_worker(
                         &refresh_token,
                     )
                     .await;
-                    {
+                    let cookie_result = {
                         let mut s = session.lock().unwrap();
                         // Re-check the generation *inside* the lock, after the
                         // awaits: a "log out" during the refresh bumped it, so
@@ -329,34 +441,21 @@ pub(crate) async fn session_worker(
                         if s.generation != my_gen {
                             return;
                         }
-                        s.access_token = Some(outcome.access_token);
-                        // Clamp the schedule to at least one tick, so a tiny
-                        // `expires_in` cannot turn the worker into a hot loop.
-                        s.next_refresh = Some(
-                            Instant::now()
-                                + delay.max(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)),
-                        );
-                        match cookies {
-                            Ok(c) => {
-                                log::info!("Web-Cookies erneuert.");
-                                s.pending_cookies = Some(c);
-                            }
-                            Err(e) => {
-                                log::warn!("Cookies konnten nicht erneuert werden: {e}")
-                            }
-                        }
+                        record_cookie_mint_result(&mut s, cookies, Instant::now())
+                    };
+                    match cookie_result {
+                        Ok(()) => log::info!("Web-Cookies erneuert."),
+                        Err(e) => log::warn!("Cookies konnten nicht erneuert werden: {e}"),
                     }
-                    attempts = 0;
                     ctx.request_repaint();
-                    break;
+                    // This pass already minted cookies after the successful
+                    // access-token refresh, whether or not a retry was pending.
+                    continue;
                 }
                 Err(e) if !auth::counts_as_attempt(&e) => {
-                    // Offline: don't count, keep the schedule. `next_refresh`
-                    // still lies in the past, so the outer loop would be due
-                    // again immediately — sleep one tick (3 s) before breaking
-                    // to keep this a paced retry, never a hot request loop.
-                    tokio::time::sleep(Duration::from_secs(auth::TICK_INTERVAL_SECONDS)).await;
-                    break;
+                    // Offline access-token failures keep their existing policy:
+                    // retry on the next worker tick without consuming budget.
+                    next_token_attempt_at = Some(next_cookie_retry_at(Instant::now()));
                 }
                 Err(e) => {
                     attempts += 1;
@@ -370,6 +469,7 @@ pub(crate) async fn session_worker(
                         s.invalid = true;
                         s.access_token = None;
                         s.next_refresh = None;
+                        s.cookie_retry_at = None;
                         s.started = false;
                         ctx.request_repaint();
                         return;
@@ -378,11 +478,36 @@ pub(crate) async fn session_worker(
                         "Auffrischung fehlgeschlagen ({attempts}/{}): {e}",
                         auth::ACCESS_TOKEN_MAX_RETRIES
                     );
-                    tokio::time::sleep(Duration::from_secs(
-                        auth::ACCESS_TOKEN_RETRY_DELAY_SECONDS,
-                    ))
-                    .await;
+                    next_token_attempt_at = Some(
+                        Instant::now()
+                            + Duration::from_secs(auth::ACCESS_TOKEN_RETRY_DELAY_SECONDS),
+                    );
                 }
+            }
+        }
+
+        // A cookie retry is independent of access-token failures and its budget.
+        // If access refresh succeeded above, its cookie call already happened;
+        // otherwise this is the cookie-only retry path.
+        if work.mint_cookies {
+            if session.lock().unwrap().generation != my_gen {
+                return;
+            }
+            let cookies = auth::fetch_auth_cookies(&client, &country, &language, &refresh_token)
+                .await;
+            let result = {
+                let mut s = session.lock().unwrap();
+                if s.generation != my_gen {
+                    return;
+                }
+                record_cookie_mint_result(&mut s, cookies, Instant::now())
+            };
+            match result {
+                Ok(()) => {
+                    log::info!("Web-Cookies erneut gemintet.");
+                    ctx.request_repaint();
+                }
+                Err(e) => log::warn!("Cookies konnten nicht erneuert werden: {e}"),
             }
         }
     }
@@ -423,6 +548,7 @@ impl PrimePhotoApp {
             s.refresh_token = None;
             s.access_token = None;
             s.next_refresh = None;
+            s.cookie_retry_at = None;
             s.invalid = false;
             s.pending_cookies = None;
             s.cookies = SessionCookies::default();
@@ -496,6 +622,7 @@ impl PrimePhotoApp {
                 s.refresh_token = None;
                 s.access_token = None;
                 s.next_refresh = None;
+                s.cookie_retry_at = None;
                 s.invalid = false;
                 s.generation += 1;
                 s.started = false;
@@ -518,10 +645,10 @@ impl PrimePhotoApp {
             self.log(tr("Sitzung abgelaufen – bitte erneut anmelden."));
         }
 
-        // (2) Start the refresh worker. `started` is cleared by a successful
-        // login (`poll_login`), by `logout` and by an invalidated session, so
-        // this branch covers both "app start with a stored token" and "just
-        // signed in".
+        // (2) Start the session worker. It must run even when only cookie retry
+        // work is due and the access-token appointment is still in the future.
+        // `started` is cleared by login, logout and invalidation, so this covers
+        // both "app start with a stored token" and "just signed in".
         let start_gen = {
             let mut s = self.session.lock().unwrap();
             if !s.started && s.refresh_token.is_some() {
@@ -599,26 +726,23 @@ impl PrimePhotoApp {
             match result {
                 Ok(dl) => {
                     // Cookies may be absent: the register succeeded but the
-                    // follow-up cookie fetch failed. That is a **valid** login
-                    // (the refresh token is stored) — the worker is made due
-                    // immediately and mints the cookies on its next pass.
-                    let have_cookies = dl.cookies.is_some();
+                    // follow-up cookie fetch failed. That is a **valid** login;
+                    // the cookie retry is scheduled separately from the
+                    // access-token appointment derived from `expires_in`.
+                    let cookies_minted = dl.cookies.is_some();
                     if let Some(cookies) = &dl.cookies {
                         self.apply_parsed(cookies);
                     }
                     {
                         let mut s = self.session.lock().unwrap();
-                        s.refresh_token = Some(dl.register.refresh_token.clone());
-                        s.access_token = Some(dl.register.access_token.clone());
-                        s.next_refresh = Some(if have_cookies {
-                            Instant::now() + auth::next_refresh_delay(dl.register.expires_in)
-                        } else {
-                            // No cookies yet: refresh at once, not after 80 %.
-                            Instant::now()
-                        });
-                        s.invalid = false;
-                        s.started = false;
-                        s.generation += 1;
+                        install_login_session(
+                            &mut s,
+                            dl.register.refresh_token.clone(),
+                            dl.register.access_token.clone(),
+                            dl.register.expires_in,
+                            cookies_minted,
+                            Instant::now(),
+                        );
                     }
                     match self.config.save() {
                         Ok(_) => self.log(tr("Login erfolgreich – Refresh-Token gespeichert.")),
@@ -884,6 +1008,17 @@ impl PrimePhotoApp {
 mod tests {
     use super::*;
 
+    fn parsed_cookies() -> ParsedCookies {
+        ParsedCookies {
+            session_id: "session".to_string(),
+            country: "de".to_string(),
+            cookie_x_acb: "x-acb".to_string(),
+            cookie_at_acb: "at-acb".to_string(),
+            cookie_ubid_acb: "ubid-acb".to_string(),
+            cookie_x_amz_access_token: "access".to_string(),
+        }
+    }
+
     #[test]
     fn extract_authorization_code_reads_the_return_to_query() {
         // The portal's `return_to` (`/ap/maplanding`) with the completion signal.
@@ -917,5 +1052,95 @@ mod tests {
             extract_authorization_code("https://example.com/?openid.oa2.authorization_code=CODE"),
             None
         );
+    }
+
+    #[test]
+    fn failed_cookie_mint_retries_next_tick_without_moving_refresh_appointment() {
+        let now = Instant::now();
+        let mut session = Session {
+            refresh_token: Some("refresh".to_string()),
+            ..Session::default()
+        };
+
+        record_access_refresh_success(&mut session, "access".to_string(), 3600, now);
+        let access_appointment = session.next_refresh;
+        assert!(record_cookie_mint_result(
+            &mut session,
+            Err(auth::AuthError::Network("offline".to_string())),
+            now,
+        )
+        .is_err());
+
+        let next_tick = now + Duration::from_secs(auth::TICK_INTERVAL_SECONDS);
+        let work = due_session_work(&session, next_tick, None);
+        assert!(work.mint_cookies);
+        assert!(!work.refresh_access_token);
+        assert_eq!(work.refresh_token.as_deref(), Some("refresh"));
+        assert_eq!(session.next_refresh, access_appointment);
+    }
+
+    #[test]
+    fn login_cookie_failure_schedules_retry_without_advancing_access_refresh() {
+        let now = Instant::now();
+        let mut session = Session::default();
+
+        install_login_session(
+            &mut session,
+            "refresh".to_string(),
+            "access".to_string(),
+            3600,
+            false,
+            now,
+        );
+
+        let expected_access_appointment = Some(now + auth::next_refresh_delay(3600));
+        assert_eq!(session.next_refresh, expected_access_appointment);
+        assert_eq!(session.cookie_retry_at, Some(next_cookie_retry_at(now)));
+
+        let work = due_session_work(
+            &session,
+            now + Duration::from_secs(auth::TICK_INTERVAL_SECONDS),
+            None,
+        );
+        assert!(work.mint_cookies);
+        assert!(!work.refresh_access_token);
+    }
+
+    #[test]
+    fn cookie_only_retry_preserves_session_and_refresh_schedule() {
+        let now = Instant::now();
+        let access_appointment = now + Duration::from_secs(600);
+        let mut session = Session {
+            refresh_token: Some("refresh".to_string()),
+            access_token: Some("access".to_string()),
+            next_refresh: Some(access_appointment),
+            cookie_retry_at: Some(now),
+            ..Session::default()
+        };
+
+        let work = due_session_work(&session, now, None);
+        assert!(work.mint_cookies);
+        assert!(!work.refresh_access_token);
+        assert!(record_cookie_mint_result(
+            &mut session,
+            Err(auth::AuthError::HttpStatus {
+                status: 503,
+                body: "unavailable".to_string(),
+            }),
+            now,
+        )
+        .is_err());
+        assert!(!session.invalid);
+        assert_eq!(session.next_refresh, Some(access_appointment));
+
+        let retry_at = session.cookie_retry_at.unwrap();
+        let retry_work = due_session_work(&session, retry_at, None);
+        assert!(retry_work.mint_cookies);
+        assert!(!retry_work.refresh_access_token);
+        assert!(record_cookie_mint_result(&mut session, Ok(parsed_cookies()), retry_at).is_ok());
+        assert!(!session.invalid);
+        assert_eq!(session.next_refresh, Some(access_appointment));
+        assert!(session.cookie_retry_at.is_none());
+        assert!(session.pending_cookies.is_some());
     }
 }
