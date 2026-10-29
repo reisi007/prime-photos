@@ -84,13 +84,14 @@ the app** in an embedded web view — same window, no external browser, no CDP.
      `openid.return_to=https://www.<domain>/ap/maplanding`,
      `openid.pape.max_auth_age=0`, `marketPlaceId`, `language`,
      `forceMobileLayout=true`.
-   2. **Erfolgserkennung:** nicht mehr „Cookies sind da", sondern
+   2. **Erfolgserkennung:** nicht mehr „Cookies sind da“, sondern
       `openid.oa2.authorization_code` in einer `/ap/…`-Navigation (die
-      Navigation selbst wird verworfen — wie im Original). **Soll-Vertrag
-      (Issue #4):** Die gewählte Marketplace-Kennung bleibt maßgeblich. Ein
-      Cookie-Suffix (`x-acb<cc>`) darf `config.country` nicht überschreiben;
-      es beschreibt nur das Cookie. Der aktuelle `apply_parsed`-Pfad schreibt
-      `parsed.country` noch zurück und muss diesem Vertrag folgen.
+      Navigation selbst wird verworfen — wie im Original). **Issue #4
+      umgesetzt:** Die explizit gewählte Marketplace-Kennung bleibt maßgeblich.
+      Cookie-Suffixe (`x-acb<cc>`, `at-acb<cc>` usw.) identifizieren nur das
+      jeweilige Cookie und überschreiben `Config.country` nicht. So bleibt eine
+      Auswahl wie `at` oder `ch` erhalten, auch wenn die Cookies wegen der
+      geteilten Domain auf `de` enden.
   3. **Einlösen:** `POST https://api.amazon.com/auth/register` mit
      `registration_data` (app_name/version, device_type/serial/model,
      os_version) und `auth_data` (`use_global_authentication=false`,

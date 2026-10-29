@@ -1,10 +1,11 @@
 //! The **single** place where marketplace- and zone-dependent URLs are built
 //! (project rule, see `AGENTS.md`).
 //!
-//! `config.country` is a **code** (`de`, `uk`, `jp`, `au`, `br`, `mx`, …) as
-//! read from the `x-acb<code>` cookie name by `countries::parse_cookie_string`,
-//! **not** the marketplace domain. Every Amazon host therefore has to be
-//! derived through [`marketplace_domain`] instead of interpolating the code —
+//! `config.country` is the explicitly selected **marketplace code** (`de`,
+//! `uk`, `jp`, `au`, `br`, `mx`, …), **not** the marketplace domain. Cookie
+//! suffixes identify cookie names and do not select the marketplace. Every
+//! Amazon host therefore has to be derived through [`marketplace_domain`]
+//! instead of interpolating the code —
 //! for `uk`/`jp`/`au`/`br`/`mx` the two differ, and the raw code would hit a
 //! host that does not exist.
 //!

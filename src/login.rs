@@ -891,15 +891,8 @@ impl PrimePhotoApp {
     /// the in-memory session so the **detached** background supervisor has the
     /// live cookies the on-disk `config.toml` no longer carries (`#[serde(skip)]`).
     pub(crate) fn apply_parsed(&mut self, parsed: &ParsedCookies) {
-        self.config.session_id = parsed.session_id.clone();
-        if !parsed.country.is_empty() {
-            self.config.country = parsed.country.clone();
-        }
-        self.config.cookie_x_acb = parsed.cookie_x_acb.clone();
-        self.config.cookie_at_acb = parsed.cookie_at_acb.clone();
-        self.config.cookie_ubid_acb = parsed.cookie_ubid_acb.clone();
-        self.config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token.clone();
-        self.session.lock().unwrap().cookies = SessionCookies::from(parsed);
+        let mut session = self.session.lock().unwrap();
+        apply_parsed_cookies(&mut self.config, &mut session.cookies, parsed);
     }
 
     /// Login phase (same window as the app, like the original).
@@ -1004,6 +997,22 @@ impl PrimePhotoApp {
     }
 }
 
+/// Copy cookie/session data without changing the user's selected marketplace.
+/// Cookie-name suffixes identify which cookie value is being copied; they are
+/// not a source of marketplace selection.
+fn apply_parsed_cookies(
+    config: &mut crate::config::Config,
+    session_cookies: &mut SessionCookies,
+    parsed: &ParsedCookies,
+) {
+    config.session_id = parsed.session_id.clone();
+    config.cookie_x_acb = parsed.cookie_x_acb.clone();
+    config.cookie_at_acb = parsed.cookie_at_acb.clone();
+    config.cookie_ubid_acb = parsed.cookie_ubid_acb.clone();
+    config.cookie_x_amz_access_token = parsed.cookie_x_amz_access_token.clone();
+    *session_cookies = SessionCookies::from(parsed);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1011,12 +1020,35 @@ mod tests {
     fn parsed_cookies() -> ParsedCookies {
         ParsedCookies {
             session_id: "session".to_string(),
-            country: "de".to_string(),
             cookie_x_acb: "x-acb".to_string(),
             cookie_at_acb: "at-acb".to_string(),
             cookie_ubid_acb: "ubid-acb".to_string(),
             cookie_x_amz_access_token: "access".to_string(),
         }
+    }
+
+    #[test]
+    fn applying_de_suffixed_cookies_keeps_the_selected_at_marketplace() {
+        let mut config = crate::config::Config::default();
+        config.country = "at".to_string();
+        let mut session_cookies = SessionCookies::default();
+        let parsed = crate::countries::parse_cookie_string(
+            "session-id=SID; x-acbde=ACB; at-acbde=AT; ubid-acbde=UBID; sess-at-acbde=SESSAT",
+        );
+
+        apply_parsed_cookies(&mut config, &mut session_cookies, &parsed);
+
+        assert_eq!(config.country, "at");
+        assert_eq!(config.session_id, "SID");
+        assert_eq!(config.cookie_x_acb, "ACB");
+        assert_eq!(config.cookie_at_acb, "AT");
+        assert_eq!(config.cookie_ubid_acb, "UBID");
+        assert_eq!(config.cookie_x_amz_access_token, "SESSAT");
+        assert_eq!(session_cookies.session_id, "SID");
+        assert_eq!(session_cookies.cookie_x_acb, "ACB");
+        assert_eq!(session_cookies.cookie_at_acb, "AT");
+        assert_eq!(session_cookies.cookie_ubid_acb, "UBID");
+        assert_eq!(session_cookies.cookie_x_amz_access_token, "SESSAT");
     }
 
     #[test]

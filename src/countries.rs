@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
-// Cookie parsing (manual fallback)
+// Cookie parsing
 // ---------------------------------------------------------------------------
 
 use crate::i18n::tr;
 
 pub(crate) struct ParsedCookies {
     pub(crate) session_id: String,
-    pub(crate) country: String,
     pub(crate) cookie_x_acb: String,
     pub(crate) cookie_at_acb: String,
     pub(crate) cookie_ubid_acb: String,
@@ -16,13 +15,11 @@ pub(crate) struct ParsedCookies {
 pub(crate) fn parse_cookie_string(input: &str) -> ParsedCookies {
     let mut result = ParsedCookies {
         session_id: String::new(),
-        country: String::new(),
         cookie_x_acb: String::new(),
         cookie_at_acb: String::new(),
         cookie_ubid_acb: String::new(),
         cookie_x_amz_access_token: String::new(),
     };
-    let mut detected_country = String::new();
     for part in input.split(';') {
         let part = part.trim();
         if part.is_empty() {
@@ -37,16 +34,10 @@ pub(crate) fn parse_cookie_string(input: &str) -> ParsedCookies {
                     if result.cookie_x_acb.is_empty() {
                         result.cookie_x_acb = value.to_string();
                     }
-                    if detected_country.is_empty() {
-                        detected_country = n["x-acb".len()..].to_lowercase();
-                    }
                 }
                 n if n.starts_with("at-acb") => {
                     if result.cookie_at_acb.is_empty() {
                         result.cookie_at_acb = value.to_string();
-                    }
-                    if detected_country.is_empty() {
-                        detected_country = n["at-acb".len()..].to_lowercase();
                     }
                 }
                 n if n.starts_with("ubid-acb") => {
@@ -63,8 +54,25 @@ pub(crate) fn parse_cookie_string(input: &str) -> ParsedCookies {
             }
         }
     }
-    result.country = detected_country;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_cookie_string;
+
+    #[test]
+    fn parses_cookie_values_without_inferring_a_marketplace_from_suffixes() {
+        let parsed = parse_cookie_string(
+            "session-id=SID; x-acbde=ACB; at-acbde=AT; ubid-acbde=UBID; sess-at-acbde=SESSAT",
+        );
+
+        assert_eq!(parsed.session_id, "SID");
+        assert_eq!(parsed.cookie_x_acb, "ACB");
+        assert_eq!(parsed.cookie_at_acb, "AT");
+        assert_eq!(parsed.cookie_ubid_acb, "UBID");
+        assert_eq!(parsed.cookie_x_amz_access_token, "SESSAT");
+    }
 }
 
 // ---------------------------------------------------------------------------

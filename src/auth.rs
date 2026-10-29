@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn auth_cookies_are_read_case_insensitively_and_set_the_marketplace() {
+    fn auth_cookies_are_read_case_insensitively_without_setting_the_marketplace() {
         // PascalCase (the original's observed casing).
         let pascal = r#"{
             "response": {
@@ -822,8 +822,6 @@ mod tests {
         for body in [pascal, camel] {
             let parsed = parse_auth_cookies(body).expect("valid auth cookies");
             assert_eq!(parsed.session_id, "SID");
-            // `x-acb<cc>` sets the marketplace code.
-            assert_eq!(parsed.country, "de");
             assert_eq!(parsed.cookie_x_acb, "ACB");
             assert_eq!(parsed.cookie_at_acb, "AT");
             assert_eq!(parsed.cookie_ubid_acb, "UBID");
