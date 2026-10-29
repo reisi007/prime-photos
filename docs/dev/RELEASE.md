@@ -523,6 +523,73 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
 - **Verifikationsgrenze:** Windows und Linux wurden im Release-CI kompiliert; Laufzeittests oder
   plattformübergreifende Verifikation sind damit nicht belegt.
 
+**Durch den achten echten Lauf belegt (2026-10-29):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.7` auf Commit
+  `7f91ec1ef1787b2231ddcdd7d29cd79f6e2cb48b`; GitHub-Release `v0.1.7`, veröffentlicht
+  `2026-10-29T07:44:35Z`, **nicht** Draft, **nicht** Pre-Release —
+  [GitHub Release v0.1.7](https://github.com/reisi007/prime-photos/releases/tag/v0.1.7).
+  Paketversion `0.1.7`, macOS-Build `7`.
+- **Runs:** [Push-CI `40836108085`](https://github.com/reisi007/prime-photos/actions/runs/40836108085)
+  (Ratchet-Gate sowie Linux-Build und -Tests) grün; [Release-Workflow `40836346965`](https://github.com/reisi007/prime-photos/actions/runs/40836346965)
+  (`release.yml`, ausgelöst durch den Tag-Push) grün — `Build linux-x64` (6m34s),
+  `Build windows-x64` (9m22s), `Publish GitHub Release` (13s). Die Windows-Signaturschritte wurden
+  mangels Signatur-Secrets übersprungen. Die Linux- und Windows-Jobs kompilieren; daraus sind keine
+  Laufzeittests auf diesen Plattformen belegt.
+- **Assets** (Name — Bytes — SHA-256-Digest laut GitHub-API):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.tar.gz` | 12.389.730 | `85e0cffcee49f25bba0ba2e18dff415a00a0a5b45b28fe7d437f209ffa7ac0a3` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.619.748 | `b815c3451d068cee1b015ef61980f4d624ddf04121ee417eeffb88ec38d7abbc` |
+  | `Prime-Photos-windows-x64.zip` | 8.663.128 | `3af4b67dedc666c7e8a33f1dc86e8c8e410edb562f702835752c5d4477c691fe` |
+
+  Das GitHub-Release enthält genau diese drei Assets. Das DMG wurde lokal erstellt; sein lokaler
+  SHA-256-Digest (`shasum -a 256`) stimmt mit dem von GitHub gemeldeten Asset-Digest überein.
+- **macOS-Bundle (lokal aus dem Tag-Commit gebaut, §4):** `VERSION=0.1.7`, `BUILD=7`; vor dem Build
+  wurde `touch build.rs` ausgeführt. Mit `Prime Photos Local Signer` signiert; Commit-Stempel im
+  Release-Binary `7f91ec1`. `Info.plist`: Version `0.1.7`, Build `7`, Identifier
+  `de.reisinger.prime-photos`. `codesign --verify --strict --verbose=2` war erfolgreich. Das DMG
+  trägt den Volume-Namen `Prime Photos`; `hdiutil verify` meldete **checksum VALID** (zusätzlich
+  erschien die in §4 dokumentierte Deprecation-Warnung).
+- **Installation und Hintergrundstart:** Das Bundle wurde mit `ditto` nach
+  `/Applications/Prime Photos.app` installiert; Codesignatur und `Info.plist`-Werte wurden dort
+  erneut geprüft. Anschließend wurde es mit `open -j` verborgen gestartet. `lsappinfo info -app
+  de.reisinger.prime-photos` zeigte den Executable-Pfad unter `/Applications/Prime Photos.app`,
+  `type="UIElement"`, ARM64, `Version="7"` und PID `98264`. Die Login-Item-Einstellung wurde nicht
+  geändert.
+- **Lokale Prüfbelege (Befehle → beobachtetes Ergebnis):** Die ersten sechs Befehle liefen mit
+  Arbeitsverzeichnis `target/dist-v0.1.7`; die dort angegebenen Pfade `Prime Photos.app` und
+  `Prime-Photos-macos-arm64.dmg` sind relativ zu diesem Verzeichnis. Die anschließenden Prüfungen
+  am installierten Bundle richten sich gegen `/Applications/Prime Photos.app` und verwenden dort
+  absolute Pfade; die `lsappinfo`-Abfrage adressiert die laufende App stattdessen über die
+  Bundle-ID `de.reisinger.prime-photos`, nicht über einen Pfad.
+
+  | Befehl (cwd `target/dist-v0.1.7`) | Ergebnis |
+  |---|---|
+  | `codesign --verify --strict --verbose=2 "Prime Photos.app"` | erfolgreich |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "Prime Photos.app/Contents/Info.plist"` | `0.1.7` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "Prime Photos.app/Contents/Info.plist"` | `7` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "Prime Photos.app/Contents/Info.plist"` | `de.reisinger.prime-photos` |
+  | `hdiutil verify "Prime-Photos-macos-arm64.dmg"` | `checksum VALID` |
+  | `shasum -a 256 "Prime-Photos-macos-arm64.dmg"` | `b815c3451d068cee1b015ef61980f4d624ddf04121ee417eeffb88ec38d7abbc`, identisch mit dem GitHub-API-Digest oben |
+
+  | Befehl (installiertes Bundle) | Ergebnis |
+  |---|---|
+  | `codesign --verify --strict --verbose=2 "/Applications/Prime Photos.app"` | erfolgreich |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "/Applications/Prime Photos.app/Contents/Info.plist"` | `0.1.7` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "/Applications/Prime Photos.app/Contents/Info.plist"` | `7` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "/Applications/Prime Photos.app/Contents/Info.plist"` | `de.reisinger.prime-photos` |
+  | `lsappinfo info -app de.reisinger.prime-photos` | `type="UIElement"`, ARM64, `Version="7"`; Executable unter `/Applications/Prime Photos.app` |
+- **Manueller UI-Smoke-Test:** Bei isolierten Debug-Starts wurden die nativen macOS-Menülabels unter
+  „App“ und „Edit“ auf Deutsch und Englisch geprüft. Dass der Tray vor der Anmeldung nicht vorhanden
+  war, war erwartet. Es wurden weder Live-Anmeldung noch ein manuell initiierter Upload verifiziert.
+  Die nativen Menüs werden hier als
+  Prime-Photos-UI geprüft, nicht aus einem Amazon-Verhalten abgeleitet.
+- **Inhalt dieses Releases:** die sechs Audit-Fixes #3, #4, #5, #6, #7 und #8.
+- **Release-Notes:** vom Workflow erzeugt (`generate_release_notes: true`):
+  `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.6...v0.1.7`.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
