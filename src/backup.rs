@@ -862,15 +862,17 @@ impl WatchStoreRetry {
 /// untouched until a fresh snapshot is available.
 fn with_watch_store<T>(
     retry: &mut WatchStoreRetry,
-    now: Instant,
+    now: impl Fn() -> Instant,
     load: impl FnOnce() -> Option<FolderStore>,
     process: impl FnOnce(&mut FolderStore) -> T,
 ) -> Option<T> {
-    if !retry.eligible(now) {
+    if !retry.eligible(now()) {
         return None;
     }
     let Some(mut store) = load() else {
-        retry.failed(now);
+        // Anchor the backoff to the failure's observation, not the start of a
+        // potentially slow store read.
+        retry.failed(now());
         return None;
     };
     retry.succeeded();
@@ -1725,7 +1727,7 @@ async fn watch_loop(
         if needs_store {
             let _ = with_watch_store(
                 &mut store_retry,
-                Instant::now(),
+                Instant::now,
                 load_store_logged,
                 |store| {
                     // A source folder that just came back (`NotFound` → present)
@@ -3201,6 +3203,7 @@ impl PrimePhotoApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
     use std::collections::VecDeque;
 
     /// `n` distinct event entries for one folder, as `park_paths` takes them.
@@ -3989,13 +3992,13 @@ mod tests {
     fn watcher_store_retry_waits_for_the_poll_tick() {
         let failed_at = Instant::now();
         let mut retry = WatchStoreRetry::default();
-        assert!(with_watch_store(&mut retry, failed_at, || None, |_| ()).is_none());
+        assert!(with_watch_store(&mut retry, || failed_at, || None, |_| ()).is_none());
 
         let before_tick = failed_at + WATCH_POLL - Duration::from_nanos(1);
         let mut loaded = false;
         assert!(with_watch_store(
             &mut retry,
-            before_tick,
+            || before_tick,
             || {
                 loaded = true;
                 Some(FolderStore::default())
@@ -4009,7 +4012,7 @@ mod tests {
         assert!(retry.eligible(at_tick));
         assert!(with_watch_store(
             &mut retry,
-            at_tick,
+            || at_tick,
             || {
                 loaded = true;
                 Some(FolderStore::default())
@@ -4022,6 +4025,59 @@ mod tests {
     }
 
     #[test]
+    fn watcher_store_retry_starts_after_a_slow_failed_load_completes() {
+        let started_at = Instant::now();
+        let completed_at = started_at + WATCH_POLL;
+        let now = Cell::new(started_at);
+        let mut retry = WatchStoreRetry::default();
+
+        assert!(with_watch_store(
+            &mut retry,
+            || now.get(),
+            || {
+                // Model a load that consumes a full poll interval before failing.
+                now.set(completed_at);
+                None
+            },
+            |_| (),
+        )
+        .is_none());
+        assert_eq!(retry.remaining(completed_at), Some(WATCH_POLL));
+
+        // At the old, pre-load deadline the retry is still parked.
+        let mut loaded = false;
+        assert!(with_watch_store(
+            &mut retry,
+            || now.get(),
+            || {
+                loaded = true;
+                Some(FolderStore::default())
+            },
+            |_| (),
+        )
+        .is_none());
+        assert!(!loaded, "a slow failed load must start a fresh poll delay");
+
+        let before_deadline = completed_at + WATCH_POLL - Duration::from_nanos(1);
+        now.set(before_deadline);
+        assert!(!retry.eligible(now.get()));
+
+        let deadline = completed_at + WATCH_POLL;
+        now.set(deadline);
+        assert!(with_watch_store(
+            &mut retry,
+            || now.get(),
+            || {
+                loaded = true;
+                Some(FolderStore::default())
+            },
+            |_| (),
+        )
+        .is_some());
+        assert!(loaded);
+    }
+
+    #[test]
     fn failed_watcher_store_load_leaves_parked_work_untouched() {
         let now = Instant::now();
         let mut retry = WatchStoreRetry::default();
@@ -4031,7 +4087,7 @@ mod tests {
         let mut event_paths = vec![PathBuf::from("/photos/new.jpg")];
         let mut event_seen: HashSet<PathBuf> = event_paths.iter().cloned().collect();
 
-        let result = with_watch_store(&mut retry, now, || None, |_| {
+        let result = with_watch_store(&mut retry, || now, || None, |_| {
             pending.clear();
             pending_seen.clear();
             pending_scans.clear();
