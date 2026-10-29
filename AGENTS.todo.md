@@ -99,7 +99,6 @@ Risiko „selbstsignierte Signatur vs. `SMAppService`" widerlegt). Belege: `docs
 GitHub Issues sind der kanonische Tracker. Einzeln abarbeiten; Soll-Verhalten in `docs/features/`
 festhalten und `docs/original/` nur für belegtes Verhalten der Amazon-Original-App ergänzen.
 
-- [ ] **P3 —** [#8 Native macOS-App-Menü gemäß gewählter Sprache lokalisieren](https://github.com/reisi007/prime-photos/issues/8)
 
 ## Weitere offene Punkte (dokumentiert, nicht eingeplant)
 
