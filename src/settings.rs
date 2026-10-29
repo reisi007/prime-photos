@@ -1,4 +1,5 @@
 use crate::app::{PrimePhotoApp, SettingsTab};
+use crate::app_menu;
 use crate::folders::ConflictResolution;
 use crate::i18n::{self, tr};
 use crate::theme;
@@ -64,6 +65,9 @@ impl PrimePhotoApp {
                     .and_then(i18n::Lang::from_code)
                     .unwrap_or_else(i18n::system_lang);
                 i18n::set_lang(lang);
+                // Refresh the native menu immediately; it is already on screen
+                // and would otherwise keep the old language (Issue #8).
+                app_menu::refresh_labels();
                 self.apply_tray_labels();
                 changed = true;
             }

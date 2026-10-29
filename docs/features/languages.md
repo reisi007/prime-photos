@@ -67,12 +67,19 @@ and could alter the sign-in page.
   greift damit auch ohne POSIX-Umgebung; der Override in den Einstellungen bleibt
   unverändert.
 
-- **Native macOS-Menüs (Soll-Vertrag, Issue #8):** App-Menü und Tray-Menü zeigen
-  die aktuelle UI-Sprache und aktualisieren ihre Labels direkt nach einem
-  Sprachwechsel. Das ist macOS-spezifisch; für Windows/Linux wird kein
-  entsprechendes natives Menüverhalten zugesagt. Aktuell wird das App-Menü nur
-  einmal installiert und beim Sprachwechsel nur das Tray aktualisiert; der
-  Refresh des App-Menüs bleibt umzusetzen.
+- **Native macOS-Menüs (Prime-Photos-Vertrag, Issue #8 umgesetzt):** Das
+  App-Menü („Über Prime Photos", „Prime Photos beenden") und das Edit-Menü
+  (Titel sowie Rückgängig, Wiederholen, Ausschneiden, Kopieren, Einfügen,
+  Alles auswählen) zeigen die aktuelle UI-Sprache. `PrimePhotoApp::new` baut
+  das Menü erst **nach** `i18n::set_lang`, und ein Sprachwechsel in den
+  Einstellungen ruft direkt danach `app_menu::refresh_labels` auf, das die
+  bereits installierten AppKit-Labels in place aktualisiert (idempotent, ohne
+  Panik, wenn noch kein Menü existiert). Das Tray wird weiterhin über
+  `apply_tray_labels` aktualisiert. Das ist der Vertrag für **unser** macOS-Menü;
+  er sagt nichts darüber aus, ob oder wie die Original-App ihre Menüs
+  lokalisiert — die Menübefunde in `docs/original/SPEC_OS_INTEGRATION.md` sind
+  reine Verhaltensbeobachtung. Für Windows/Linux wird kein entsprechendes
+  natives Menüverhalten zugesagt; dort ist der Refresh ein No-op.
 
 - **Dateinamen-Kodierung: NFC (User-Entscheidung 2026-10-14):** die
   Upload-Namens-Kodierung (NFC) betrifft auch den Anzeigetext — Details in

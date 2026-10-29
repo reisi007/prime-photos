@@ -349,9 +349,6 @@ pub(crate) struct PrimePhotoApp {
 impl PrimePhotoApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::apply(&cc.egui_ctx);
-        // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
-        // The context is handed in so the menu's About item can wake the UI.
-        app_menu::install(&cc.egui_ctx);
         // App activation (relaunch / switch-back) and the single-instance
         // handshake both only flag + wake the UI, so they get the context here
         // (see `src/app_activation.rs`, `src/single_instance.rs`).
@@ -374,6 +371,12 @@ impl PrimePhotoApp {
             .and_then(i18n::Lang::from_code)
             .unwrap_or_else(i18n::system_lang);
         i18n::set_lang(lang);
+        // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
+        // It is built only now — after the persisted/system language is set —
+        // so every label (About, Quit, Edit, Undo …) is localized from the
+        // first visible frame. The context is handed in so the menu's About
+        // item can wake the UI (Issue #8).
+        app_menu::install(&cc.egui_ctx);
         // Build the load failure in the UI language (the language is only known
         // now) and log the technical detail — it never reaches the UI (user
         // decision 2026-10-15: no technical messages for the end user).

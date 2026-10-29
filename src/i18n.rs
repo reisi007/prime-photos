@@ -69,7 +69,14 @@ pub(crate) fn lang() -> Lang {
 /// `Lang::De` returns the key unchanged; `Lang::En` returns the English entry,
 /// or the German key if the table has no entry.
 pub(crate) fn tr(key: &'static str) -> &'static str {
-    match lang() {
+    tr_for(lang(), key)
+}
+
+/// [`tr`] for an explicit language. Used by the native macOS menu, whose label
+/// source is also exercised in tests for both languages without mutating the
+/// process-global language.
+pub(crate) fn tr_for(lang: Lang, key: &'static str) -> &'static str {
+    match lang {
         Lang::De => key,
         Lang::En => EN
             .iter()
@@ -77,6 +84,33 @@ pub(crate) fn tr(key: &'static str) -> &'static str {
             .map(|(_, en)| *en)
             .unwrap_or(key),
     }
+}
+
+/// Context tag for the native macOS main menu (see [`tr_ctx_for`]).
+///
+/// Only the macOS app menu needs context-sensitive lookups; the item is
+/// `cfg`-gated with [`tr_ctx_for`] so Windows/Linux builds stay warning-free.
+#[cfg(target_os = "macos")]
+pub(crate) const CONTEXT_NATIVE_MENU: &str = "native-menu";
+
+/// [`tr_for`] with a surface context for German key collisions.
+///
+/// The German source string alone is normally the key, but a few words mean
+/// different things per surface: "Wiederholen" is *Retry* in the backup list
+/// and *Redo* in the native Edit menu. `context` is an internal, never-shown
+/// tag; without a matching entry this falls back to [`tr_for`] (and then to
+/// the German key).
+#[cfg(target_os = "macos")]
+pub(crate) fn tr_ctx_for(lang: Lang, context: &'static str, key: &'static str) -> &'static str {
+    if lang == Lang::En {
+        if let Some((_, _, en)) = EN_CONTEXT
+            .iter()
+            .find(|(ctx, de, _)| *ctx == context && *de == key)
+        {
+            return en;
+        }
+    }
+    tr_for(lang, key)
 }
 
 /// Replace the `{}` placeholders in `tr(key)` with `args`, left to right.
@@ -486,6 +520,17 @@ const EN: &[(&str, &str)] = &[
     ("Beenden", "Quit"),
     ("Fenster anzeigen", "Show window"),
     ("Mit Fehlern abgeschlossen", "Finished with errors"),
+    // -- native macOS main menu (Issue #8) ------------------------------
+    // "Bearbeiten" and "Über Prime Photos" are shared with other surfaces and
+    // live in their feature groups above. "Wiederholen" is deliberately absent:
+    // in the backup list it is "Retry"; the Edit-menu "Redo" is a contextual
+    // entry in `EN_CONTEXT`.
+    ("Alles auswählen", "Select All"),
+    ("Ausschneiden", "Cut"),
+    ("Einfügen", "Paste"),
+    ("Kopieren", "Copy"),
+    ("Prime Photos beenden", "Quit Prime Photos"),
+    ("Rückgängig", "Undo"),
     // -- about / third-party licenses (Welle 4b) ------------------------
     ("Über Prime Photos", "About Prime Photos"),
     ("Version: {}", "Version: {}"),
@@ -496,9 +541,22 @@ const EN: &[(&str, &str)] = &[
     ("Icons und Grafiken", "Icons and graphics"),
 ];
 
+/// Context-qualified English entries for German keys that collide across
+/// surfaces: `(context, German key, English)`. Consulted by [`tr_ctx_for`]
+/// before the plain [`EN`] table; the German key stays the visible reference
+/// text. Entries belong here only when the *same* German string must translate
+/// differently per surface — otherwise the string is its own unambiguous key.
+#[cfg(target_os = "macos")]
+const EN_CONTEXT: &[(&str, &str, &str)] = &[
+    // Backup list = "Retry", native macOS Edit menu = "Redo".
+    (CONTEXT_NATIVE_MENU, "Wiederholen", "Redo"),
+];
+
 #[cfg(test)]
 mod tests {
     use super::{EN, Lang, lang_from_env_value, lang_from_locale_id};
+    #[cfg(target_os = "macos")]
+    use super::{CONTEXT_NATIVE_MENU, EN_CONTEXT, tr_ctx_for, tr_for};
     use std::collections::HashSet;
 
     /// Every German key must appear exactly once. The table is a linear lookup
@@ -513,6 +571,39 @@ mod tests {
                 "duplicate German key in EN table: {de:?}"
             );
         }
+    }
+
+    /// Context entries are looked up linearly too, so `(context, key)` must be
+    /// unique.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn contextual_keys_are_unique() {
+        let mut seen = HashSet::new();
+        for (context, de, _) in EN_CONTEXT {
+            assert!(
+                seen.insert((*context, *de)),
+                "duplicate contextual key in EN table: {context:?}/{de:?}"
+            );
+        }
+    }
+
+    /// The same German key translates per surface: "Wiederholen" stays "Retry"
+    /// in the backup list while the native Edit menu gets "Redo".
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn retry_and_redo_are_distinct() {
+        assert_eq!(tr_for(Lang::De, "Wiederholen"), "Wiederholen");
+        assert_eq!(
+            tr_ctx_for(Lang::De, CONTEXT_NATIVE_MENU, "Wiederholen"),
+            "Wiederholen"
+        );
+        assert_eq!(tr_for(Lang::En, "Wiederholen"), "Retry");
+        assert_eq!(
+            tr_ctx_for(Lang::En, CONTEXT_NATIVE_MENU, "Wiederholen"),
+            "Redo"
+        );
+        // An unknown context falls back to the plain translation.
+        assert_eq!(tr_ctx_for(Lang::En, "other", "Wiederholen"), "Retry");
     }
 
     /// Locale identifiers are classified by their `de` prefix only, in both the
