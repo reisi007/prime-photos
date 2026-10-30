@@ -1,4 +1,5 @@
 [
+  { "preset": "agent-rules" },
   {
     // Schnelle Gates: beide Zähler laufen ohne Build.
     "name": "prime-photos",

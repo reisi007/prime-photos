@@ -5,9 +5,27 @@
       "value": 2,
       "reason": "initial baseline 2026-10-25: 11 Rust files above 500 lines, 2 #[allow] attributes — both ceilings may only decrease"
     },
+    "gates-untouched": {
+      "value": 0
+    },
     "oversized-rust-file": {
       "value": 11,
       "reason": "initial baseline 2026-10-25: 11 Rust files above 500 lines, 2 #[allow] attributes — both ceilings may only decrease"
+    },
+    "plan-status-line": {
+      "value": 0
+    },
+    "rule-file-max-lines": {
+      "value": 41
+    },
+    "rule-file-name": {
+      "value": 0
+    },
+    "rule-file-present": {
+      "value": 1
+    },
+    "unverified-commits": {
+      "value": 253
     }
   }
 }
