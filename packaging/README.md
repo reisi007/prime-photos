@@ -1,7 +1,7 @@
 # packaging/ — Paketierung (PORT-6)
 
-Werkzeuge für das **macOS-Bundle** von *Prime Photos*. Windows/Linux sind hier nur als
-Stichpunkte dokumentiert (keine echten Installer). Die System-Voraussetzungen stehen in
+Werkzeuge für das **macOS-Bundle** und das **Linux-`.deb`** von *Prime Photos*. Windows ist hier
+nur als Stichpunkt dokumentiert (kein Installer). Die System-Voraussetzungen stehen in
 `docs/dev/BUILD.md` (§3 macOS, §4 Windows, §5 Linux).
 
 Dateien:
@@ -10,6 +10,8 @@ Dateien:
 |---|---|
 | `Info.plist` | Vorlage für `Contents/Info.plist` des Bundles; `__VERSION__` / `__BUILD__` werden von `make-app.sh` ersetzt |
 | `make-app.sh` | baut `cargo build --release`, assembliert `target/dist/Prime Photos.app`, signiert und verifiziert |
+| `linux/prime-photos.desktop` | Desktop-Eintrag des `.deb` (Name, `Exec=prime-photos`, Icon, Kategorien) |
+| `make-deb.sh` | baut `release/Prime-Photos-linux-x64.deb` aus Binary, Iconset und Lizenzen |
 | `README.md` | diese Anleitung |
 
 Das Skript legt sein Ergebnis unter `target/dist/` ab — also unter dem bereits ignorierten
@@ -118,10 +120,61 @@ Bauen mit dem MSVC-Target (`cargo build --release`, `docs/dev/BUILD.md` §4). F�
 wäre zusätzlich eine Authenticode-Signatur (SignTool) nötig — **hier nicht umgesetzt**, es gibt
 keinen Installer im Repo.
 
-## Linux (nur Hinweis)
+## Linux: `.deb` (`make-deb.sh`)
 
-Kein Codesigning nötig; es würde reichen, das Binary (`target/release/prime-photos`) bzw. ein
-Archiv mitzugeben. **AppImage/Flatpak/.deb sind nicht Teil dieses Skripts** (out of scope).
+`packaging/linux/prime-photos.desktop` ist der Desktop-Eintrag (Name *Prime Photos*,
+`Exec=prime-photos`, `Icon=prime-photos`, Kategorien `Utility;Graphics;`), `packaging/make-deb.sh`
+baut daraus das Paket `Prime-Photos-linux-x64.deb`. Nötig sind nur die Debian/Ubuntu-Werkzeuge
+`dpkg-deb` und `dpkg-shlibdeps`; **kein** Codesigning, kein macOS-Werkzeug — das macOS-Bundle
+bleibt unverändert.
+
+Das Paket installiert:
+
+- `/usr/bin/prime-photos` (0755)
+- `/usr/share/applications/prime-photos.desktop`
+- das App-Icon als `prime-photos.png` in **16, 32, 64, 128, 256 und 512 px** unter
+  `/usr/share/icons/hicolor/<N>x<N>/apps/` (Quelle ist das im Build erzeugte Iconset
+  `target/pp-appicon.iconset`; 64 px kommt aus `icon_32x32@2x.png`)
+- `/usr/share/doc/prime-photos/` mit `copyright`, `LICENSE-MIT` und `LICENSE-APACHE`
+
+**Deklarierte Abhängigkeiten:** `Depends` ermittelt `dpkg-shlibdeps` aus der ELF-Binary — darunter
+`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libssl3` und die weiteren Bibliotheken, gegen die gelinkt
+wird. Die **Tray-Bibliothek lädt die App per `dlopen`**; sie ist damit für `dpkg-shlibdeps`
+unsichtbar und wird vom Skript fest als Alternative
+`libayatana-appindicator3-1 | libappindicator3-1` ergänzt. Für den Secret-Service (gespeicherter
+Refresh-Token) deklariert das Paket `Recommends: gnome-keyring | kwalletmanager` — ohne ihn
+startet die App, kann sich aber keine Anmeldung merken.
+
+**Lokal bauen** (Binary und Iconset müssen vorliegen; `cargo build --release` erzeugt beides):
+
+```sh
+./packaging/make-deb.sh
+# Ergebnis: release/Prime-Photos-linux-x64.deb
+```
+
+Optionen und Umgebungsvariablen:
+
+| Option / Variable | Wirkung | Standard |
+|---|---|---|
+| `--binary <datei>` | zu verpackende Release-Binary (muss ausführbar sein) | `target/release/prime-photos` |
+| `--iconset <dir>` | Iconset-Verzeichnis des Builds | `target/pp-appicon.iconset` |
+| `--output <dir>` | Ausgabeordner des `.deb` | `release/` (gitignoriert) |
+| `VERSION=x.y.z` | Paketversion (ein führendes `v` wird entfernt) | `version = "…"` aus `Cargo.toml` |
+
+Die Architektur kommt aus `dpkg --print-architecture` (auf dem CI-Runner `amd64`); einen
+ARM64-Build gibt es nicht. Prüfen und installieren:
+
+```sh
+dpkg-deb -I release/Prime-Photos-linux-x64.deb
+dpkg-deb -c release/Prime-Photos-linux-x64.deb
+sudo apt install ./Prime-Photos-linux-x64.deb
+```
+
+**Abgrenzung:** Das `.deb` ist **nicht** dpkg-signiert (das wäre `debsig-verify` bzw. eine
+signierte Paketquelle — ein eigener Vertriebskanal, out of scope); im Release liegt nur die
+abgetrennte GPG-Signatur `.deb.asc` (`docs/dev/RELEASE.md` §3.2). **Flatpak, AppImage und RPM
+bleiben out of scope**, ebenso Snap und AUR; Linux wird ab dem nächsten Release als Tarball
+**und** als `.deb` ausgeliefert.
 
 ## Nicht verifiziert
 
@@ -145,3 +198,7 @@ Archiv mitzugeben. **AppImage/Flatpak/.deb sind nicht Teil dieses Skripts** (out
   nicht geprüft. **Nicht** belegt ist zudem, ob der Schlüsselbund-Dialog damit dauerhaft ausbleibt;
   erwartet wird es, weil das Designated Requirement über Rebuilds gleich bleibt — über mehrere
   aufeinanderfolgende Builds ist das noch nicht abgenommen.
+- **Das Linux-`.deb` ist nicht live verifiziert:** gebaut und mit `dpkg-deb -I`/`dpkg-deb -c`
+  geprüft wurde es lokal, aber aus keinem Release heruntergeladen und auf keinem
+  Debian/Ubuntu-Rechner installiert; Desktop-Eintrag und Icon in der Anwendungsübersicht sind
+  damit nicht abgenommen (offener Punkt, `AGENTS.todo.md`).

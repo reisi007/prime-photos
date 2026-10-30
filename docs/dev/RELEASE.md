@@ -54,7 +54,7 @@ läuft damit **nur, wenn beide Beine grün sind** — sonst entsteht kein Releas
 | Bein | Runner | Artefakt |
 |---|---|---|
 | Windows x64 | `windows-latest` | `Prime-Photos-windows-x64.zip` (enthält `prime-photos.exe`) |
-| Linux x64 | `ubuntu-latest` | `Prime-Photos-linux-x64.tar.gz` (enthält `prime-photos`) (+ `.asc` und `Prime-Photos-release-key.asc`, wenn GPG konfiguriert) |
+| Linux x64 | `ubuntu-latest` | `Prime-Photos-linux-x64.tar.gz` (enthält `prime-photos`) **und** `Prime-Photos-linux-x64.deb` (+ je eine `.asc` und `Prime-Photos-release-key.asc`, wenn GPG konfiguriert) |
 
 - Beide bauen mit `cargo build --release --locked`.
 - Der Linux-Job installiert die System-Abhängigkeiten aus `BUILD.md` §5:
@@ -151,10 +151,22 @@ Signatur erscheinen, bis genügend Downloads ohne Beanstandung vorliegen.
 
 ### 3.2 Linux: abgetrennte GPG-Signatur
 
-Ausgeliefert wird **genau ein** Linux-Format: `Prime-Photos-linux-x64.tar.gz`. Es gibt **kein**
-AppImage, **kein** `.deb` und **kein** `.rpm`. Bei konfiguriertem `GPG_PRIVATE_KEY` legt der Workflow
-zusätzlich `Prime-Photos-linux-x64.tar.gz.asc` (abgetrennt, ASCII-armored) und
-`Prime-Photos-release-key.asc` (öffentlicher Schlüssel) ins Release.
+Ausgeliefert werden **zwei** Linux-Formate: `Prime-Photos-linux-x64.tar.gz` (Archiv) und
+`Prime-Photos-linux-x64.deb` (Debian/Ubuntu-Paket, §3.2.1). Es gibt **kein** AppImage, **kein**
+Flatpak und **kein** `.rpm`. Bei konfiguriertem `GPG_PRIVATE_KEY` legt der Workflow für **beide**
+Dateien eine eigene, abgetrennte ASCII-armored Signatur ab — `Prime-Photos-linux-x64.tar.gz.asc`
+und `Prime-Photos-linux-x64.deb.asc` — plus einmal `Prime-Photos-release-key.asc` (öffentlicher
+Schlüssel). Das `.deb` selbst ist **nicht** dpkg-signiert: eine Signatur, die der Paketmanager
+prüft (`debsig-verify` bzw. eine signierte Repository-/Paketquelle), wäre ein eigener
+Vertriebskanal und ist hier ausdrücklich **out of scope**; es entsteht nur die abgetrennte `.asc`.
+
+Im Linux-Bein ruft der Schritt „Sign Linux release artifacts (GPG)“ das Skript **zweimal** auf —
+der erste Aufruf exportiert zusätzlich den öffentlichen Schlüssel, der zweite signiert nur:
+
+```sh
+bash scripts/sign-linux-release.sh release/Prime-Photos-linux-x64.tar.gz release/Prime-Photos-release-key.asc
+bash scripts/sign-linux-release.sh release/Prime-Photos-linux-x64.deb
+```
 
 Ablauf in `scripts/sign-linux-release.sh` (vom Linux-Bein aufgerufen, nur wenn `GPG_PRIVATE_KEY`
 gesetzt ist):
@@ -201,6 +213,7 @@ Derselbe Fingerprint gehört zusätzlich in die Release-Notes. Nur über ihn lä
 gpg --import Prime-Photos-release-key.asc
 gpg --fingerprint                     # mit dem oben veröffentlichten Fingerprint vergleichen
 gpg --verify Prime-Photos-linux-x64.tar.gz.asc Prime-Photos-linux-x64.tar.gz
+gpg --verify Prime-Photos-linux-x64.deb.asc Prime-Photos-linux-x64.deb
 ```
 
 **Grenze:** Desktop-Umgebungen (GNOME/KDE) validieren eine solche Signatur **nicht** automatisch; sie
@@ -210,6 +223,52 @@ ist ein manueller Prüfschritt. Es gibt keine Signatur des Paketmanagers und kei
 > Punkt, `AGENTS.todo.md`); der Workflow-Schritt wurde daher noch nie mit echten Secrets ausgeführt.
 > Das Skript selbst wurde lokal mit einem Wegwerf-Schlüssel in `/tmp` geprüft (Signatur erzeugt,
 > `gpg --verify` grün, Public Key exportiert); im Repo liegt kein Schlüsselmaterial.
+
+### 3.2.1 Das Linux-`.deb`
+
+Das Debian-Paket baut `packaging/make-deb.sh` im Linux-Bein direkt nach dem Tarball, aus derselben
+Release-Binary und dem im Build erzeugten Iconset (`target/pp-appicon.iconset`):
+
+```sh
+bash packaging/make-deb.sh --binary target/release/prime-photos \
+  --iconset target/pp-appicon.iconset --output release
+```
+
+`VERSION` kommt aus `github.ref_name` (das führende `v` entfernt das Skript); ohne `VERSION` nimmt
+es `version = "…"` aus `Cargo.toml`. Details zum Paketaufbau: `packaging/README.md`.
+
+**Inhalt:**
+
+- `/usr/bin/prime-photos` (0755)
+- `/usr/share/applications/prime-photos.desktop` (`Exec=prime-photos`, `Icon=prime-photos`)
+- `/usr/share/icons/hicolor/<N>x<N>/apps/prime-photos.png` für 16, 32, 64, 128, 256 und 512 px
+- `/usr/share/doc/prime-photos/` mit `copyright`, `LICENSE-MIT` und `LICENSE-APACHE`
+
+**Laufzeit-Abhängigkeiten:** `Depends` erzeugt `dpkg-shlibdeps` aus der ELF-Binary (u. a.
+`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libssl3`). Die Tray-Bibliothek ist **`dlopen`t** und damit
+für `dpkg-shlibdeps` unsichtbar; das Skript ergänzt sie deshalb fest als Alternative
+`libayatana-appindicator3-1 | libappindicator3-1`. Für den Secret-Service deklariert das Paket
+`Recommends: gnome-keyring | kwalletmanager`. Die Versionen stammen aus den Bibliotheken des
+**Runners**, nicht aus einer gepflegten Liste: `Depends` kodiert damit eine Mindest-Baseline
+(derzeit das `ubuntu-latest`-Image), gegen die ältere Debian-/Ubuntu-Releases **nicht** getestet
+sind.
+
+**Architektur:** `amd64` (`dpkg --print-architecture` des Runners). Einen ARM64-Build gibt es
+nicht, also auch kein `arm64`-Paket.
+
+**Installation** (nach dem Download, mit dem heruntergeladenen Dateinamen):
+
+```sh
+sudo apt install ./Prime-Photos-linux-x64.deb
+```
+
+`apt install ./…` löst die deklarierten Abhängigkeiten aus den Paketquellen auf; `dpkg -i` würde
+sie nicht nachziehen. Das `.deb` ist **nicht** dpkg-signiert (siehe §3.2) — geprüft wird es über
+die abgetrennte `.asc` (§7).
+
+> **Noch nicht live:** Bisher ist kein Release mit einem `.deb` erschienen; das Paket wurde nur
+> lokal gebaut und mit `dpkg-deb -I`/`dpkg-deb -c` geprüft. Installation, Desktop-Eintrag und Icon
+> auf einem Debian/Ubuntu-Rechner sind nicht abgenommen (offener Punkt, `AGENTS.todo.md`).
 
 ### 3.3 Artifact Attestations (Build-Provenance)
 
@@ -225,6 +284,7 @@ Prüfung durch Nutzer:
 
 ```sh
 gh attestation verify Prime-Photos-linux-x64.tar.gz --repo reisi007/prime-photos
+gh attestation verify Prime-Photos-linux-x64.deb --repo reisi007/prime-photos
 gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
 ```
 
@@ -388,18 +448,28 @@ GitHub-Secrets: `APPLE_CERTIFICATE` (+ Passwort), `APPLE_SIGNING_IDENTITY`, `APP
 
 **Linux**
 
+Tarball entpacken:
+
 ```sh
 tar -xzf Prime-Photos-linux-x64.tar.gz
 ./prime-photos
 ```
 
-Nur wenn GPG konfiguriert war (`.asc` liegt im Release), zusätzlich die Signatur prüfen (§3.2):
+Oder das Debian-Paket installieren (§3.2.1; `apt` zieht die deklarierten Abhängigkeiten nach):
+
+```sh
+sudo apt install ./Prime-Photos-linux-x64.deb
+```
+
+Nur wenn GPG konfiguriert war (`.asc` liegt im Release), zusätzlich die Signatur prüfen (§3.2) —
+für **beide** Artefakte gilt derselbe Schlüssel:
 
 ```sh
 gpg --import Prime-Photos-release-key.asc
 gpg --fingerprint                                    # Fingerprint notieren
 # Mit dem in §3.2 (und in den Release-Notes) veröffentlichten Fingerprint vergleichen.
 gpg --verify Prime-Photos-linux-x64.tar.gz.asc Prime-Photos-linux-x64.tar.gz
+gpg --verify Prime-Photos-linux-x64.deb.asc Prime-Photos-linux-x64.deb
 ```
 
 Die Reihenfolge ist entscheidend: Erst nach dem Fingerprint-Vergleich belegt `gpg --verify`, dass die
@@ -423,6 +493,7 @@ Auch **mit** gültiger Signatur kann SmartScreen warnen — Reputation ist davon
 
 ```sh
 gh attestation verify Prime-Photos-linux-x64.tar.gz --repo reisi007/prime-photos
+gh attestation verify Prime-Photos-linux-x64.deb --repo reisi007/prime-photos
 gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
 ```
 
@@ -594,6 +665,11 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 - **GPG (§3.2) nicht live:** Release-Schlüssel, `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` und
   der Fingerprint in der Doku stehen aus; bis dahin wird Linux **unsigniert** veröffentlicht. Das
   Skript ist nur lokal mit einem Wegwerf-Schlüssel geprüft.
+- **Linux-`.deb` (§3.2.1) nicht live:** Es ist noch kein Release mit einem `.deb` erschienen; das
+  Paket wurde nur lokal gebaut und mit `dpkg-deb -I`/`dpkg-deb -c` geprüft (Inhalt und
+  `Depends` inkl. der `dlopen`ten AppIndicator-Alternative). Installation auf einem
+  Debian/Ubuntu-Rechner, Desktop-Eintrag und Icon in der Anwendungsübersicht sind **nicht**
+  abgenommen.
 - macOS-Notarisierung/Stapling (§6) nicht eingerichtet und nicht geprüft.
 - Keine SHA256-Prüfsummen-**Dateien** im Release (nicht implementiert); die GitHub-API liefert je
   Asset aber ein `sha256`-Digest (§2).

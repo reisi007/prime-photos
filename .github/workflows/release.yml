@@ -146,8 +146,25 @@ jobs:
           mkdir -p release
           tar -czf release/Prime-Photos-linux-x64.tar.gz -C target/release prime-photos
 
+      # Debian-Paket aus derselben Release-Binary und dem im Build erzeugten Iconset.
+      # `dpkg-shlibdeps` ermittelt die deklarierten Laufzeit-Abhängigkeiten aus den ELF-Bibliotheken
+      # (u. a. libwebkit2gtk-4.1-0, libgtk-3-0); die Tray-Bibliothek wird per `dlopen` geladen und
+      # ist für `dpkg-shlibdeps` unsichtbar, deshalb ergänzt `make-deb.sh` sie als Alternative
+      # `libayatana-appindicator3-1 | libappindicator3-1` selbst. VERSION kommt aus dem Tag.
+      - name: Package Linux binary (.deb)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: bash packaging/make-deb.sh --binary target/release/prime-photos --iconset target/pp-appicon.iconset --output release
+
       # --- Linux: abgetrennte, ASCII-armored GPG-Signatur, nur wenn GPG_PRIVATE_KEY gesetzt ---
-      - name: Sign Linux release tarball (GPG)
+      # Signiert werden beide Linux-Artefakte (Tarball und .deb); der öffentliche Schlüssel wird
+      # genau einmal exportiert (erster Aufruf mit Zielpfad, zweiter ohne).
+      # Das .deb selbst ist NICHT dpkg-signiert: `debsig-verify` bzw. eine signierte
+      # Repository-/Paketquelle wäre ein eigener Vertriebskanal und ist hier ausdrücklich out of
+      # scope — es entsteht nur die abgetrennte `.asc`. Sowohl das `.deb` als auch seine `.asc`
+      # fallen unter das bestehende Attestation-Glob `artifacts/Prime-Photos-*`.
+      - name: Sign Linux release artifacts (GPG)
         if: matrix.os == 'ubuntu-latest' && env.GPG_ENABLED == 'true'
         # Das Schlüsselmaterial steht nur hier im Schritt-Env, nicht auf Job-Ebene (siehe oben).
         env:
@@ -155,9 +172,8 @@ jobs:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
-          bash scripts/sign-linux-release.sh \
-            release/Prime-Photos-linux-x64.tar.gz \
-            release/Prime-Photos-release-key.asc
+          bash scripts/sign-linux-release.sh release/Prime-Photos-linux-x64.tar.gz release/Prime-Photos-release-key.asc
+          bash scripts/sign-linux-release.sh release/Prime-Photos-linux-x64.deb
 
       - name: Upload release artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
