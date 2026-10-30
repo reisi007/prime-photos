@@ -1,1 +1,3 @@
 target/
+# Ausgabeordner von packaging/make-deb.sh (lokal und im Linux-Bein des Release-Workflows)
+release/

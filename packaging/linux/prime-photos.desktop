@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Prime Photos
+GenericName=Photo Backup
+Comment=Back up photos from local folders to your own Amazon Photos account
+Exec=prime-photos
+Icon=prime-photos
+Terminal=false
+Categories=Utility;Graphics;
+Keywords=photos;backup;amazon;upload;sync;
+StartupNotify=true

@@ -1,0 +1,48 @@
+name: Dependabot metadata
+
+# `pull_request_target`, damit Dependabot-PRs einen Schreib-Token bekommen: die eigenen
+# `pull_request`-Läufe von Dependabot sind read-only. Es wird NIE PR-Code ausgecheckt
+# oder ausgeführt — nur Metadaten gelesen und Labels gesetzt.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  label:
+    name: Label Dependabot PR
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    env:
+      PR_URL: ${{ github.event.pull_request.html_url }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Das Label muss existieren, sonst schlägt `gh pr edit --add-label` fehl.
+      - name: Ensure automerge label exists
+        run: |
+          gh label create automerge --repo "$GITHUB_REPOSITORY" --color 0E8A16 --description "Auto-merge after green CI" || true
+
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Nur Patch/Minor automatisieren; Major-Updates und unbekannte Update-Typen
+      # bleiben manuell. Positiv auf die beiden erlaubten Typen prüfen, damit ein
+      # leerer/unbekannter `update-type` nicht automatisch das Label erhält.
+      - name: Add automerge label (nur Patch/Minor)
+        if: >-
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: |
+          gh pr edit "$PR_URL" --add-label automerge
+
+      - name: Remove automerge label (major)
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        run: |
+          gh pr edit "$PR_URL" --remove-label automerge || true

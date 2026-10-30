@@ -32,13 +32,17 @@ lokal über `packaging/make-app.sh` und wird bei Bedarf manuell an ein Release g
   sein (`needs:`), sonst kein Release → GitHub Release mit den Artefakten.
 - **macOS wird NICHT im CI gebaut** (User-Entscheidung 2026-10-13: „nur lokal macOS bauen ist
   ok") — lokal über `packaging/make-app.sh` (arm64) und bei Bedarf manuell ans Release hängen.
-- **Signierung ist nur auf macOS relevant.** Dort ist eine (selbstsignierte) Codesignatur nötig,
-  damit Benachrichtigungen/Bundle-Identifier sauber funktionieren; Windows/Linux brauchen keine.
+- **Signierung:** Windows wird bei konfiguriertem `SIGNPATH_API_TOKEN` über **SignPath**
+  Authenticode-signiert, Linux bei konfiguriertem `GPG_PRIVATE_KEY` mit einer abgetrennten
+  **GPG**-Signatur (`.asc`) versehen (§3). macOS bleibt unverändert: lokale (selbstsignierte)
+  Codesignatur, damit Benachrichtigungen/Bundle-Identifier sauber funktionieren (§4–§6).
+  Signiert wird **nur** bei einem Tag-Push; ein konfigurierter, aber fehlschlagender Signaturschritt
+  lässt den Job **fehlschlagen**, statt ein unsigniertes Artefakt still zu veröffentlichen.
 - **Warnungs-Baseline 0:** `[lints.rust] warnings = "deny"` in `Cargo.toml` — jede Warnung ist
   ein harter Build-Fehler. Kein `.cargo/config.toml` mit `-Dwarnings` (würde auch Dependencies
   hart nehmen). `cargo fmt --check` ist **kein** Gate — das Repo ist nicht fmt-clean.
-- **Secrets nur in `main`/Tag-Läufen** (fork-PRs erhalten keine Secrets). Windows: Authenticode
-  optional (sonst SmartScreen-Hinweis); Linux: keine Signatur.
+- **Secrets nur in `main`/Tag-Läufen** (fork-PRs erhalten keine Secrets). Windows: SignPath
+  optional (sonst unsigniert + SmartScreen-Hinweis); Linux: GPG optional (sonst unsigniert).
 
 ---
 
@@ -50,36 +54,252 @@ läuft damit **nur, wenn beide Beine grün sind** — sonst entsteht kein Releas
 | Bein | Runner | Artefakt |
 |---|---|---|
 | Windows x64 | `windows-latest` | `Prime-Photos-windows-x64.zip` (enthält `prime-photos.exe`) |
-| Linux x64 | `ubuntu-latest` | `Prime-Photos-linux-x64.tar.gz` (enthält `prime-photos`) |
+| Linux x64 | `ubuntu-latest` | `Prime-Photos-linux-x64.tar.gz` (enthält `prime-photos`) **und** `Prime-Photos-linux-x64.deb` (+ je eine `.asc` und `Prime-Photos-release-key.asc`, wenn GPG konfiguriert) |
 
 - Beide bauen mit `cargo build --release --locked`.
 - Der Linux-Job installiert die System-Abhängigkeiten aus `BUILD.md` §5:
   `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev libssl-dev pkg-config build-essential`.
 - **Es werden keine SHA256-Prüfsummen erzeugt** (nicht implementiert) — im Release liegt **keine**
-  mitgelieferte Prüfsummendatei. Davon zu unterscheiden ist der `sha256`-**Digest**, den die
-  GitHub-API **je Asset** liefert (abfragbar z. B. mit `gh release view <tag> --json assets`); das ist
-  keine Datei im Release.
+  mitgelieferte Prüfsummendatei. Stattdessen erzeugt der Release-Workflow **ab dem ersten mit ihm
+  gebauten Release** GitHub Artifact Attestations (Build-Provenance, §3.3), prüfbar mit
+  `gh attestation verify`; live verifiziert sind sie noch **nicht** (§3.3). Davon zu unterscheiden ist
+  der `sha256`-**Digest**, den die GitHub-API **je Asset** liefert (abfragbar z. B. mit
+  `gh release view <tag> --json assets`); das ist keine Datei im Release.
 
 ---
 
-## 3. Optionale Windows-Signatur (Authenticode)
+## 3. Signierung und Herkunftsnachweis
 
-Der Windows-Build ist **standardmäßig unsigniert**; Windows zeigt dann beim Start den
-SmartScreen-Hinweis („Unbekannter Herausgeber"). Eine Authenticode-Signatur ist **optional** und
-nur aktiv, wenn beide Secrets gesetzt sind:
+Alle Signaturschritte laufen **ausschließlich** im Release-Workflow, also nur bei einem Tag-Push im
+Haupt-Repo. Fehlt das jeweilige Secret, wird unsigniert gebaut und veröffentlicht; ist es gesetzt und
+der Schritt scheitert, **scheitert der Job** — es entsteht kein stilles unsigniertes Release.
 
-| Secret-Name | Inhalt |
-|---|---|
-| `WINDOWS_CERTIFICATE` | Base64-kodierte Code-Signing-PFX-Datei (`.pfx`) |
-| `WINDOWS_CERTIFICATE_PASSWORD` | Passwort der PFX-Datei |
+### 3.1 Windows: SignPath (Authenticode)
 
-Der Workflow macht die Secrets als **Job-Env** sichtbar und prüft in den Schritten
-`env.WINDOWS_CERTIFICATE != ''` (der `secrets`-Kontext ist in job-level `if` nicht zuverlässig).
-Fehlen die Secrets, werden Cert- und Signaturschritt übersprungen; das Release ist unsigniert und
-**läuft trotzdem durch**.
+Der Windows-Build wird über die **SignPath Foundation** Authenticode-signiert. Voraussetzung ist ein
+`SIGNPATH_API_TOKEN`; zusätzlich müssen die Organisation/Projekt-/Policy-Slugs als Repository-
+**Variablen** hinterlegt sein.
 
-> **Nicht verifiziert:** Der Signaturschritt (`signtool` `/f`/`/p`, Zeitstempel über
-> `timestamp.digicert.com`) wurde nicht ausgeführt; `signtool` muss auf dem Runner im `PATH` liegen.
+Ablauf im Workflow (`release.yml`, Windows-Bein, nur wenn `SIGNPATH_ENABLED == 'true'`):
+
+1. Die unsignierte `target/release/prime-photos.exe` wird als Workflow-Artefakt
+   `windows-signing-input` hochgeladen (`if-no-files-found: error`, `retention-days: 1`).
+2. `signpath/github-action-submit-signing-request@f6d0478` (`# v3`) stellt die Signieranfrage mit
+   `github-artifact-id: ${{ steps.signpath-upload.outputs.artifact-id }}`, `wait-for-completion: true`
+   und `output-artifact-directory: signed`. Weil `actions/upload-artifact@v4` das Artefakt immer als
+   ZIP ablegt, entpackt die Action das signierte ZIP nach `signed/` (Default `skip-decompress: false`);
+   dort liegt dann `signed/prime-photos.exe`.
+3. Die signierte Binary ersetzt die unsignierte:
+   `Copy-Item -Force signed/prime-photos.exe target/release/prime-photos.exe`.
+4. `Get-AuthenticodeSignature` auf `target/release/prime-photos.exe`; bei `Status -ne 'Valid'` bricht
+   der Job ab (PowerShell `throw`).
+
+**Eignungsprüfung (SignPath Foundation):** Der Dienst ist für **Open-Source-Projekte** ohne
+kommerzielle Absicht gedacht; Voraussetzung sind ein öffentliches Repo, eine freie Lizenz
+(hier `MIT OR Apache-2.0`), ein nachvollziehbarer Build im CI und ein Projektverantwortlicher, der
+die Bedingungen akzeptiert. Die Freigabe erfolgt durch SignPath, nicht durch dieses Repo.
+
+**Manuelle Schritte zur Registrierung** (einmalig, außerhalb des Repos):
+
+1. Auf <https://signpath.io> mit dem GitHub-Konto anmelden und die **SignPath Foundation** als
+   Signatur-Anbieter beantragen (Projekt-URL, Lizenz, Build-Workflow benennen).
+2. **Nach der Freigabe:** Organisation anlegen, Projekt `prime-photos` und eine Signing-Policy
+   (z. B. `release-signing`) erstellen.
+3. Das vordefinierte **Trusted Build System `GitHub.com`** mit dem Projekt verknüpfen und die
+   **SignPath GitHub App** für dieses Repository installieren. Die App ist empfohlen, weil die
+   Policy-Auswertung anhand des Audit-Logs sie voraussetzt; ohne sie braucht der Connector die
+   Berechtigungen `actions: read` und `contents: read` des Jobs, die `release.yml` bereits
+   gewährt. Dokumentation:
+   <https://about.signpath.io/documentation/trusted-build-systems/github>.
+4. **Artifact Configuration** anlegen — Wurzelknoten ist das ZIP-Artefakt, darin die zu
+   signierende PE-Datei:
+
+   ```xml
+   <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+     <zip-file>
+       <pe-file path="prime-photos.exe">
+         <authenticode-sign/>
+       </pe-file>
+     </zip-file>
+   </artifact-configuration>
+   ```
+
+   `actions/upload-artifact@v4` erzeugt immer ein ZIP (es gibt dort keinen `archive`-Input), deshalb
+   muss die Wurzel der Konfiguration `zip-file` sein. `archive: false` gäbe es erst mit einer neueren
+   `upload-artifact`-Hauptversion und wird mit dieser Änderung bewusst nicht eingeführt.
+5. API-Token für den CI-Benutzer erzeugen und als Secret hinterlegen; die Slugs als Variablen.
+
+> **Timeout:** Die Signing-Policy muss **ohne manuelle Freigabe** auskommen. Der Workflow wartet mit
+> dem Default der SignPath-Action (`wait-for-completion-timeout-in-seconds: 600`) und schlägt danach
+> fehl; ist ein Approval-Gate gewollt, muss der Wert in `release.yml` erhöht werden.
+
+| Name | Art | Inhalt |
+|---|---|---|
+| `SIGNPATH_API_TOKEN` | Secret | API-Token des CI-Benutzers; sein Vorhandensein schaltet die Signatur ein |
+| `SIGNPATH_ORGANIZATION_ID` | Variable | Organisations-ID aus SignPath |
+| `SIGNPATH_PROJECT_SLUG` | Variable | Projekt-Slug (z. B. `prime-photos`) |
+| `SIGNPATH_SIGNING_POLICY_SLUG` | Variable | Signing-Policy (z. B. `release-signing`) |
+| `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | Variable | Slug der Artifact Configuration |
+
+**Grenze SmartScreen:** Eine gültige Authenticode-Signatur belegt Urheber und Unverändertheit, baut
+aber **kein** SmartScreen-Reputation auf. Der Hinweis „Unbekannter Herausgeber" kann trotz gültiger
+Signatur erscheinen, bis genügend Downloads ohne Beanstandung vorliegen.
+
+> **Nicht live verifiziert:** Weder die Signieranfrage noch `Get-AuthenticodeSignature` wurden
+> ausgeführt — es existiert noch kein SignPath-Konto/Token für dieses Projekt (offener Punkt,
+> `AGENTS.todo.md`). Bis dahin wird Windows **unsigniert** veröffentlicht.
+
+### 3.2 Linux: abgetrennte GPG-Signatur
+
+Ausgeliefert werden **zwei** Linux-Formate: `Prime-Photos-linux-x64.tar.gz` (Archiv) und
+`Prime-Photos-linux-x64.deb` (Debian/Ubuntu-Paket, §3.2.1). Es gibt **kein** AppImage, **kein**
+Flatpak und **kein** `.rpm`. Bei konfiguriertem `GPG_PRIVATE_KEY` legt der Workflow für **beide**
+Dateien eine eigene, abgetrennte ASCII-armored Signatur ab — `Prime-Photos-linux-x64.tar.gz.asc`
+und `Prime-Photos-linux-x64.deb.asc` — plus einmal `Prime-Photos-release-key.asc` (öffentlicher
+Schlüssel). Das `.deb` selbst ist **nicht** dpkg-signiert: eine Signatur, die der Paketmanager
+prüft (`debsig-verify` bzw. eine signierte Repository-/Paketquelle), wäre ein eigener
+Vertriebskanal und ist hier ausdrücklich **out of scope**; es entsteht nur die abgetrennte `.asc`.
+
+Im Linux-Bein ruft der Schritt „Sign Linux release artifacts (GPG)“ das Skript **zweimal** auf —
+der erste Aufruf exportiert zusätzlich den öffentlichen Schlüssel, der zweite signiert nur:
+
+```sh
+bash scripts/sign-linux-release.sh release/Prime-Photos-linux-x64.tar.gz release/Prime-Photos-release-key.asc
+bash scripts/sign-linux-release.sh release/Prime-Photos-linux-x64.deb
+```
+
+Ablauf in `scripts/sign-linux-release.sh` (vom Linux-Bein aufgerufen, nur wenn `GPG_PRIVATE_KEY`
+gesetzt ist):
+
+1. Temporäres `GNUPGHOME` (Modus 700) und eine temporäre Schlüsseldatei anlegen; `trap` räumt beides
+   auf (`gpgconf --kill all`, `rm -rf`).
+2. Schlüssel importieren (`gpg --batch --import`).
+3. Signatur erzeugen: `gpg --batch --yes --pinentry-mode loopback --armor --detach-sign`, mit
+   `--local-user "$GPG_KEY_ID"` falls gesetzt; eine nicht-leere `GPG_PASSPHRASE` wird über
+   `--passphrase-fd 0` eingespeist, sonst wird ohne Passphrase signiert.
+4. Signatur gegen das Artefakt prüfen (`gpg --verify`).
+5. Öffentlichen Schlüssel nach `Prime-Photos-release-key.asc` exportieren (mit `$GPG_KEY_ID`, falls
+   gesetzt).
+
+**Schlüssel-Einrichtung** (einmalig, lokal — das Schlüsselmaterial gehört **nicht** ins Repo):
+
+```sh
+gpg --quick-generate-key "Prime Photos Release <release@example.invalid>" rsa4096 sign 2y
+gpg --armor --export-secret-keys <FINGERPRINT>   # -> Secret GPG_PRIVATE_KEY
+gpg --armor --export <FINGERPRINT>               # -> öffentlicher Schlüssel (Publikation)
+gpg --fingerprint <FINGERPRINT>                  # Fingerprint für die Doku
+```
+
+| Name | Art | Inhalt |
+|---|---|---|
+| `GPG_PRIVATE_KEY` | Secret | ASCII-armored privater Signaturschlüssel; sein Vorhandensein schaltet die Signatur ein |
+| `GPG_PASSPHRASE` | Secret | Passphrase des Schlüssels (leer/fehlend = keiner) |
+| `GPG_KEY_ID` | Secret | Schlüssel-ID/Fingerprint, falls der Import mehrdeutig ist |
+
+**Fingerprint (Vertrauensanker):** Der Fingerprint des Release-Schlüssels wird nach der
+Schlüsselerzeugung **hier eingetragen** — siehe `AGENTS.todo.md`; es gibt ihn noch nicht, und es wird
+hier bewusst keiner erfunden:
+
+```
+FINGERPRINT: <wird nach der Schlüsselerzeugung hier eingetragen — siehe AGENTS.todo.md>
+```
+
+Derselbe Fingerprint gehört zusätzlich in die Release-Notes. Nur über ihn lässt sich der importierte
+öffentliche Schlüssel (§7) gegen eine **unabhängige** Quelle prüfen.
+
+**Prüfung durch Nutzer** (nach dem Download; vollständige Reihenfolge in §7):
+
+```sh
+gpg --import Prime-Photos-release-key.asc
+gpg --fingerprint                     # mit dem oben veröffentlichten Fingerprint vergleichen
+gpg --verify Prime-Photos-linux-x64.tar.gz.asc Prime-Photos-linux-x64.tar.gz
+gpg --verify Prime-Photos-linux-x64.deb.asc Prime-Photos-linux-x64.deb
+```
+
+**Grenze:** Desktop-Umgebungen (GNOME/KDE) validieren eine solche Signatur **nicht** automatisch; sie
+ist ein manueller Prüfschritt. Es gibt keine Signatur des Paketmanagers und keine Paketquellen.
+
+> **Nicht live verifiziert:** Der GPG-Schlüssel für dieses Projekt existiert noch nicht (offener
+> Punkt, `AGENTS.todo.md`); der Workflow-Schritt wurde daher noch nie mit echten Secrets ausgeführt.
+> Das Skript selbst wurde lokal mit einem Wegwerf-Schlüssel in `/tmp` geprüft (Signatur erzeugt,
+> `gpg --verify` grün, Public Key exportiert); im Repo liegt kein Schlüsselmaterial.
+
+### 3.2.1 Das Linux-`.deb`
+
+Das Debian-Paket baut `packaging/make-deb.sh` im Linux-Bein direkt nach dem Tarball, aus derselben
+Release-Binary und dem im Build erzeugten Iconset (`target/pp-appicon.iconset`):
+
+```sh
+bash packaging/make-deb.sh --binary target/release/prime-photos \
+  --iconset target/pp-appicon.iconset --output release
+```
+
+`VERSION` kommt aus `github.ref_name` (das führende `v` entfernt das Skript); ohne `VERSION` nimmt
+es `version = "…"` aus `Cargo.toml`. Details zum Paketaufbau: `packaging/README.md`.
+
+**Inhalt:**
+
+- `/usr/bin/prime-photos` (0755)
+- `/usr/share/applications/prime-photos.desktop` (`Exec=prime-photos`, `Icon=prime-photos`)
+- `/usr/share/icons/hicolor/<N>x<N>/apps/prime-photos.png` für 16, 32, 64, 128, 256 und 512 px
+- `/usr/share/doc/prime-photos/` mit `copyright`, `LICENSE-MIT` und `LICENSE-APACHE`
+
+**Laufzeit-Abhängigkeiten:** `Depends` erzeugt `dpkg-shlibdeps` aus der ELF-Binary (u. a.
+`libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libssl3`). Die Tray-Bibliothek ist **`dlopen`t** und damit
+für `dpkg-shlibdeps` unsichtbar; das Skript ergänzt sie deshalb fest als Alternative
+`libayatana-appindicator3-1 | libappindicator3-1`. Für den Secret-Service deklariert das Paket
+`Recommends: gnome-keyring | kwalletmanager`. Die Versionen stammen aus den Bibliotheken des
+**Runners**, nicht aus einer gepflegten Liste: `Depends` kodiert damit eine Mindest-Baseline
+(derzeit das `ubuntu-latest`-Image), gegen die ältere Debian-/Ubuntu-Releases **nicht** getestet
+sind.
+
+**Architektur:** `amd64` (`dpkg --print-architecture` des Runners). Einen ARM64-Build gibt es
+nicht, also auch kein `arm64`-Paket.
+
+**Installation** (nach dem Download, mit dem heruntergeladenen Dateinamen):
+
+```sh
+sudo apt install ./Prime-Photos-linux-x64.deb
+```
+
+`apt install ./…` löst die deklarierten Abhängigkeiten aus den Paketquellen auf; `dpkg -i` würde
+sie nicht nachziehen. Das `.deb` ist **nicht** dpkg-signiert (siehe §3.2) — geprüft wird es über
+die abgetrennte `.asc` (§7).
+
+> **Noch nicht live:** Bisher ist kein Release mit einem `.deb` erschienen; das Paket wurde nur
+> lokal gebaut und mit `dpkg-deb -I`/`dpkg-deb -c` geprüft. Installation, Desktop-Eintrag und Icon
+> auf einem Debian/Ubuntu-Rechner sind nicht abgenommen (offener Punkt, `AGENTS.todo.md`).
+
+### 3.3 Artifact Attestations (Build-Provenance)
+
+Der `release`-Job erzeugt **GitHub Artifact Attestations** für alle heruntergeladenen
+Release-Artefakte (`actions/attest-build-provenance@4d10147`, `# v4.2.2`,
+`subject-path: "artifacts/Prime-Photos-*"`). Die Attestation wird **vor** dem Release-Upload erzeugt
+und belegt, dass die Dateien aus diesem Repo/Workflow/Commit gebaut wurden (Sigstore/OIDC).
+
+Benötigte Job-Permissions: `id-token: write` (OIDC-Token) und `attestations: write` (Attestation
+schreiben); `contents: write` für den Release-Upload, `actions: read` für die Artefakt-Metadaten.
+
+Prüfung durch Nutzer:
+
+```sh
+gh attestation verify Prime-Photos-linux-x64.tar.gz --repo reisi007/prime-photos
+gh attestation verify Prime-Photos-linux-x64.deb --repo reisi007/prime-photos
+gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
+```
+
+> **Nicht live verifiziert:** Es wurde noch **keine** Attestation erzeugt — der erste Beleg ist der
+> erste Release, der mit diesem Workflow gebaut wird. Belegt ist bis dahin nur die
+> Workflow-Konfiguration, nicht `gh attestation verify` gegen ein echtes Release.
+
+### 3.4 Was die Mechanismen belegen
+
+| Mechanismus | Belegt | Belegt **nicht** |
+|---|---|---|
+| SignPath Authenticode | Urheber (SignPath Foundation), Unverändertheit der `.exe` seit der Signatur | SmartScreen-Reputation, Freiheit von Schadcode, Laufzeitverhalten |
+| GPG-Signatur (`.asc`) | dass die Datei mit dem Release-Schlüssel signiert und nicht verändert wurde | Vertrauen in den Schlüssel selbst (Fingerprint-Prüfung nötig), automatische Prüfung durch das OS |
+| Artifact Attestation | Herkunft: Repo, Workflow, Commit und Digest des Artefakts | Wer den Commit erstellt hat, Qualität/Laufzeitverhalten |
+| macOS-Codesignatur (lokal) | Bundle-Integrität und Identität auf dem eigenen Rechner | Vertrauen auf fremden Macs — keine Notarisierung (§5–§6) |
 
 ---
 
@@ -228,21 +448,54 @@ GitHub-Secrets: `APPLE_CERTIFICATE` (+ Passwort), `APPLE_SIGNING_IDENTITY`, `APP
 
 **Linux**
 
+Tarball entpacken:
+
 ```sh
 tar -xzf Prime-Photos-linux-x64.tar.gz
 ./prime-photos
 ```
+
+Oder das Debian-Paket installieren (§3.2.1; `apt` zieht die deklarierten Abhängigkeiten nach):
+
+```sh
+sudo apt install ./Prime-Photos-linux-x64.deb
+```
+
+Nur wenn GPG konfiguriert war (`.asc` liegt im Release), zusätzlich die Signatur prüfen (§3.2) —
+für **beide** Artefakte gilt derselbe Schlüssel:
+
+```sh
+gpg --import Prime-Photos-release-key.asc
+gpg --fingerprint                                    # Fingerprint notieren
+# Mit dem in §3.2 (und in den Release-Notes) veröffentlichten Fingerprint vergleichen.
+gpg --verify Prime-Photos-linux-x64.tar.gz.asc Prime-Photos-linux-x64.tar.gz
+gpg --verify Prime-Photos-linux-x64.deb.asc Prime-Photos-linux-x64.deb
+```
+
+Die Reihenfolge ist entscheidend: Erst nach dem Fingerprint-Vergleich belegt `gpg --verify`, dass die
+Datei von **diesem** Schlüssel stammt. Schlüssel und Artefakt aus **derselben** Quelle zu importieren
+beweist nur ihre gegenseitige Konsistenz, **nicht** ihre Authentizität — wer das Release manipuliert,
+kann beide ersetzen.
 
 **Windows**
 
 ```powershell
 Expand-Archive Prime-Photos-windows-x64.zip -DestinationPath .
 .\prime-photos.exe
-# Nur wenn Authenticode aktiv war:
+# Nur wenn SignPath aktiv war:
 Get-AuthenticodeSignature .\prime-photos.exe   # Status "Valid" bei signiert
 ```
 
 Unsigniert/ohne gültige Signatur ⇒ SmartScreen: „Weitere Informationen" → „Trotzdem ausführen".
+Auch **mit** gültiger Signatur kann SmartScreen warnen — Reputation ist davon unabhängig (§3.1).
+
+**Herkunftsnachweis (alle Plattformen, wenn die Attestation vorhanden ist)**
+
+```sh
+gh attestation verify Prime-Photos-linux-x64.tar.gz --repo reisi007/prime-photos
+gh attestation verify Prime-Photos-linux-x64.deb --repo reisi007/prime-photos
+gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
+```
 
 **macOS**
 
@@ -263,8 +516,12 @@ Bei einem ad-hoc-/selbstsignierten Bundle meldet `spctl` „rejected" → Workar
 ## 8. Fork-PRs und Secrets
 
 Secrets werden **nicht** an Läufe aus Forks weitergereicht (GitHub-Verhalten). Ein `pull_request`
-aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secrets. Release-Läufe
-(`push` eines Tags) entstehen im Haupt-Repo und erhalten die Secrets.
+aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secrets, und die CI
+(`ci.yml`) verwendet überhaupt keine Secrets. Release-Läufe entstehen ausschließlich durch einen
+`push` eines Tags im Haupt-Repo und erhalten die Secrets; die Signaturschritte (SignPath, GPG) sind
+damit **tag-only**. Dependabot-PRs laufen wie jeder andere PR ohne Secrets durch die CI; die
+Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
+`.github/workflows/dependabot-auto-merge.yml`) lesen nur Metadaten und führen **keinen** PR-Code aus.
 
 ---
 
@@ -402,11 +659,25 @@ aus einem Fork sieht die Signatur-Secrets nicht; Build und Test laufen ohne Secr
 
 **Weiterhin offen / nicht verifiziert:**
 
-- Windows-Authenticode-Signatur (§3) nicht ausgeführt; `signtool`-Verfügbarkeit auf dem Runner nicht
-  geprüft.
+- **SignPath (§3.1) nicht live:** Registrierung/Freigabe durch die SignPath Foundation steht aus,
+  ebenso `SIGNPATH_API_TOKEN` und die vier Slugs; bis dahin wird Windows **unsigniert**
+  veröffentlicht. Der Signaturschritt (`Get-AuthenticodeSignature`) wurde nie ausgeführt.
+- **GPG (§3.2) nicht live:** Release-Schlüssel, `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` und
+  der Fingerprint in der Doku stehen aus; bis dahin wird Linux **unsigniert** veröffentlicht. Das
+  Skript ist nur lokal mit einem Wegwerf-Schlüssel geprüft.
+- **Linux-`.deb` (§3.2.1) nicht live:** Es ist noch kein Release mit einem `.deb` erschienen; das
+  Paket wurde nur lokal gebaut und mit `dpkg-deb -I`/`dpkg-deb -c` geprüft (Inhalt und
+  `Depends` inkl. der `dlopen`ten AppIndicator-Alternative). Installation auf einem
+  Debian/Ubuntu-Rechner, Desktop-Eintrag und Icon in der Anwendungsübersicht sind **nicht**
+  abgenommen.
 - macOS-Notarisierung/Stapling (§6) nicht eingerichtet und nicht geprüft.
 - Keine SHA256-Prüfsummen-**Dateien** im Release (nicht implementiert); die GitHub-API liefert je
   Asset aber ein `sha256`-Digest (§2).
+- **Artifact Attestations (§3.3) nicht live verifiziert:** Sie entstehen erst ab dem ersten mit
+  diesem Workflow gebauten Release; `gh attestation verify` wurde gegen noch kein Release ausgeführt.
+- **Dependabot-Auto-Merge nicht live verifiziert:** der erste echte Dependabot-PR muss zeigen,
+  dass das Label `automerge` bei Patch/Minor gesetzt und der Merge erst nach grünem `CI`-Lauf
+  ausgeführt wird; Major-Updates dürfen kein Label erhalten.
 - **Beobachtung (nicht Teil dieses Stands):** beide Job-Arten melden `Node.js 20 is deprecated` für
   `actions/checkout@v4`, `actions/upload-artifact@v4`, `actions/download-artifact@v4` (werden auf
   Node.js 24 gezwungen); außerdem der Hinweis, dass `ubuntu-latest` ab 2026-10-19 auf Ubuntu 26
