@@ -101,10 +101,12 @@ die Bedingungen akzeptiert. Die Freigabe erfolgt durch SignPath, nicht durch die
 
 **Manuelle Schritte zur Registrierung** (einmalig, außerhalb des Repos):
 
-1. Auf <https://signpath.io> mit dem GitHub-Konto anmelden und die **SignPath Foundation** als
-   Signatur-Anbieter beantragen (Projekt-URL, Lizenz, Build-Workflow benennen).
-2. **Nach der Freigabe:** Organisation anlegen, Projekt `prime-photos` und eine Signing-Policy
-   (z. B. `release-signing`) erstellen.
+1. **Antrag stellen** auf <https://signpath.org/apply> (Formular der SignPath Foundation): Projekt-URL,
+   Lizenz (`MIT OR Apache-2.0`), öffentliches Repo und CI-Build-Workflow benennen. Es gibt **kein**
+   Selbstbedienungs-Login und keine GitHub-Anmeldung — die Freigabe erfolgt durch SignPath, der
+   Antragsteller wird per E-Mail kontaktiert.
+2. **Nach der Freigabe:** Organisation in <https://signpath.io> anlegen, Projekt `prime-photos` und
+   eine Signing-Policy (z. B. `release-signing`) erstellen.
 3. Das vordefinierte **Trusted Build System `GitHub.com`** mit dem Projekt verknüpfen und die
    **SignPath GitHub App** für dieses Repository installieren. Die App ist empfohlen, weil die
    Policy-Auswertung anhand des Audit-Logs sie voraussetzt; ohne sie braucht der Connector die
