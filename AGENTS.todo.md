@@ -64,9 +64,20 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
   Lauf (CI auf `main`; das nächste Release erst beim nächsten Tag). **Dabei mitziehen:** die Aufzählung
   in `docs/dev/RELEASE.md` §9 nennt `softprops/action-gh-release@v2` nicht, das ebenfalls „Node.js 20 is
   deprecated" meldet (Verifier-`nit` aus Welle 5.25).
-- **Nicht** offen, nur zur Einordnung: Windows-Authenticode, macOS-Notarisierung und Prüfsummendateien
+- **Nicht** offen, nur zur Einordnung: macOS-Notarisierung und Prüfsummendateien
   bleiben laut `docs/dev/RELEASE.md` §9 unverifiziert bzw. nicht implementiert — dafür gibt es keinen
   Auftrag.
+
+## Offen: Release-Signierung & Dependabot-Automerge (Welle 2026-10-30)
+
+- [ ] **SignPath Foundation: Registrierung/Freigabe + Secrets/Variablen** (`docs/dev/RELEASE.md` §3.1);
+  danach ein Tag-Push als Beleg (Signatur „Valid").
+- [ ] **GPG-Release-Schlüssel + Secrets + Fingerprint** (`docs/dev/RELEASE.md` §3.2): Fingerprint nach
+  der Schlüsselerzeugung in §3.2 **und** in den Release-Notes eintragen; danach ein Tag-Push als Beleg
+  (`.asc` + `Prime-Photos-release-key.asc` im Release, `gpg --verify` grün).
+- [ ] **Dependabot-Automerge live verifizieren** (`docs/dev/RELEASE.md` §8, §9): erster echter
+  Dependabot-PR — Label `automerge` nur bei Patch/Minor, Major ohne Label, Merge erst nach grünem
+  `CI`-Lauf.
 
 ## Offen aus der Live-Abnahme 2026-10-17 (Bundle aus 5.21–5.24)
 

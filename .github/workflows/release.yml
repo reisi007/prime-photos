@@ -1,19 +1,29 @@
 name: Release
 
 # Release nur über einen Git-Tag v* (z. B. v0.1.0).
+#
+# Signierung (Windows via SignPath, Linux via GPG) läuft ausschließlich in diesem
+# Workflow, also nur bei einem Tag-Push im Haupt-Repo. Secrets werden niemals an
+# Fork-PRs weitergereicht (pull_request aus einem Fork sieht sie nicht). Ist ein
+# Signatur-Secret gesetzt, führt ein Fehler im Signaturschritt zum Fehlschlag des
+# Jobs — es wird dann kein unsigniertes Artefakt still veröffentlicht.
 on:
   push:
     tags:
       - "v*"
 
-# Der Release-Job braucht Schreibrechte, um ein GitHub Release anzulegen.
+# Least privilege auf oberster Ebene; die Jobs heben nur an, was sie brauchen.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build ${{ matrix.artifact }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      # Der SignPath-Connector liest Workflow-/Job-Metadaten und das hochgeladene Artefakt.
+      actions: read
     strategy:
       # Ein fehlgeschlagenes Bein darf die anderen nicht abbrechen; der Release-Job
       # läuft trotzdem nur, wenn ALLE Beine erfolgreich sind (needs-Kette).
@@ -22,18 +32,25 @@ jobs:
         include:
           - os: windows-latest
             artifact: windows-x64
-            path: Prime-Photos-windows-x64.zip
           - os: ubuntu-latest
             artifact: linux-x64
-            path: Prime-Photos-linux-x64.tar.gz
 
-    # Optionale Signatur-Secrets als Job-Env verfügbar machen (der `secrets`-Kontext
-    # ist in job-level `if` nicht zuverlässig -> in Schritten über `env.X != ''`
-    # prüfen). Ohne diese Secrets baut und veröffentlicht das Release unsigniert.
-    # Namen sind in docs/dev/RELEASE.md dokumentiert; siehe auch AGENTS.md "CI/Release".
+    # Signatur-Konfiguration als Job-Env verfügbar machen (der `secrets`-Kontext ist in
+    # job-level `if` nicht zuverlässig -> in Schritten über `env.X == 'true'` prüfen).
+    # Fehlen die Secrets, wird unsigniert gebaut und veröffentlicht.
+    # Namen sind in docs/dev/RELEASE.md §3 dokumentiert.
+    #
+    # Least Privilege: Hier stehen nur nicht-geheime Schalter und Variablen. Ein Job-Env
+    # ist für JEDEN Schritt sichtbar, also auch für Third-Party-Actions wie die
+    # Rust-Toolchain und den Cargo-Cache; die Secrets stehen deshalb ausschließlich im
+    # `env:` des Schritts, der sie braucht.
     env:
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      SIGNPATH_ENABLED: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      GPG_ENABLED: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+      SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+      SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+      SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
 
     steps:
       - name: Checkout
@@ -63,41 +80,90 @@ jobs:
       - name: cargo build --release --locked
         run: cargo build --release --locked
 
-      # --- Windows: optionale Authenticode-Signatur (nur wenn Secrets gesetzt) ---
-      - name: Prepare Windows code-signing certificate
-        if: matrix.os == 'windows-latest' && env.WINDOWS_CERTIFICATE != ''
+      # --- Windows: SignPath (SignPath Foundation), nur wenn SIGNPATH_API_TOKEN gesetzt ---
+      # 1) Unsigned exe als Workflow-Artefakt bereitstellen (SignPath holt sie über die API).
+      - name: Upload unsigned Windows binary for SignPath
+        id: signpath-upload
+        if: matrix.os == 'windows-latest' && env.SIGNPATH_ENABLED == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-signing-input
+          path: target/release/prime-photos.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      # 2) Signieranfrage stellen und auf das signierte Artefakt warten.
+      - name: Submit SignPath signing request
+        if: matrix.os == 'windows-latest' && env.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        # Das API-Token steht nur hier im Schritt-Env, nicht auf Job-Ebene (siehe oben).
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        # `actions/upload-artifact@v4` verpackt das Artefakt immer als ZIP (ein `archive`-Input
+        # gibt es dort nicht). SignPath erwartet deshalb eine Artifact Configuration mit
+        # `<zip-file>` als Wurzel; `skip-decompress` bleibt auf dem Default `false`, damit das
+        # signierte ZIP nach `signed/` entpackt wird und `signed/prime-photos.exe` entsteht.
+        with:
+          api-token: ${{ env.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ env.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ env.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ env.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ env.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.signpath-upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      # 3) Signierte Binary einsetzen.
+      - name: Replace Windows binary with signed one
+        if: matrix.os == 'windows-latest' && env.SIGNPATH_ENABLED == 'true'
         shell: pwsh
         run: |
-          $bytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
-          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", $bytes)
+          Copy-Item -Force signed/prime-photos.exe target/release/prime-photos.exe
 
-      - name: Sign Windows binary (Authenticode)
-        if: matrix.os == 'windows-latest' && env.WINDOWS_CERTIFICATE != ''
+      # 4) Signatur prüfen; ein ungültiger Status bricht den Job ab.
+      - name: Verify Windows Authenticode signature
+        if: matrix.os == 'windows-latest' && env.SIGNPATH_ENABLED == 'true'
         shell: pwsh
         run: |
-          signtool sign /f "$env:RUNNER_TEMP\cert.pfx" `
-            /p "$env:WINDOWS_CERTIFICATE_PASSWORD" `
-            /fd SHA256 `
-            /tr http://timestamp.digicert.com /td SHA256 `
-            target\release\prime-photos.exe
+          $sig = Get-AuthenticodeSignature -FilePath target/release/prime-photos.exe
+          Write-Host "Signature status: $($sig.Status) — signer: $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') {
+            throw "Authenticode signature is not valid (status: $($sig.Status))"
+          }
 
+      # --- Paketierung ---
       - name: Package Windows binary (.zip)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
           Compress-Archive -Path target/release/prime-photos.exe `
-            -DestinationPath Prime-Photos-windows-x64.zip
+            -DestinationPath release/Prime-Photos-windows-x64.zip
 
       - name: Package Linux binary (.tar.gz)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          tar -czf Prime-Photos-linux-x64.tar.gz -C target/release prime-photos
+          mkdir -p release
+          tar -czf release/Prime-Photos-linux-x64.tar.gz -C target/release prime-photos
+
+      # --- Linux: abgetrennte, ASCII-armored GPG-Signatur, nur wenn GPG_PRIVATE_KEY gesetzt ---
+      - name: Sign Linux release tarball (GPG)
+        if: matrix.os == 'ubuntu-latest' && env.GPG_ENABLED == 'true'
+        # Das Schlüsselmaterial steht nur hier im Schritt-Env, nicht auf Job-Ebene (siehe oben).
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          bash scripts/sign-linux-release.sh \
+            release/Prime-Photos-linux-x64.tar.gz \
+            release/Prime-Photos-release-key.asc
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.path }}
+          path: release/*
           if-no-files-found: error
           retention-days: 7
 
@@ -107,18 +173,34 @@ jobs:
     # in der Matrix, Standard-needs-Semantik hier).
     needs: [build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      # Build-Provenance-Attestations (Sigstore/OIDC).
+      id-token: write
+      attestations: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      # Nur die finalen Matrix-Artefakte; `windows-signing-input` wird dadurch
+      # bewusst ausgeschlossen (Pattern `*-x64`).
+      - name: Download final artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          pattern: "*-x64"
           path: artifacts
           merge-multiple: true
 
       - name: List downloaded artifacts
         run: ls -laR artifacts
 
+      # Herkunftsnachweis vor dem Upload erzeugen; das Glob deckt alle vorhandenen
+      # Artefakte ab (inkl. `.asc` und Public Key, sofern GPG konfiguriert ist).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: "artifacts/Prime-Photos-*"
+
       - name: Create / update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: artifacts/**/*
           generate_release_notes: true

@@ -1,0 +1,65 @@
+name: Dependabot auto-merge
+
+# `workflow_run` läuft im Kontext des Basis-Repos (nicht des Forks) — daher steht hier
+# ein Schreib-Token zur Verfügung, anders als in einem `pull_request`-Lauf aus einem Fork.
+# Gemerged wird ausschließlich, nachdem der Workflow `CI` für diesen PR **erfolgreich**
+# abgeschlossen wurde; ein roter Lauf erreicht diesen Job gar nicht.
+#
+# Grenze des Gates: das `CI`-Gate (`.github/workflows/ci.yml`) baut und testet **nur Linux** —
+# das ist das geforderte Pflicht-Gate.
+# Ein Bump, der ausschließlich den Windows- oder macOS-Build bricht, kommt hier also
+# trotzdem durch — das ist die bekannte, akzeptierte Grenze dieses Gates.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Squash-merge Dependabot PR
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find open Dependabot PR with automerge label
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          # Nur Dependabot-Branches sind interessant; alles andere folgenlos beenden.
+          case "$HEAD_BRANCH" in
+            dependabot/*) ;;
+            *) echo "not a dependabot branch: $HEAD_BRANCH"; exit 0 ;;
+          esac
+
+          number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" \
+            --state open --label automerge --json number,author \
+            --jq '.[] | select(.author.login == "dependabot[bot]") | .number' | head -n1)"
+
+          if [ -n "$number" ]; then
+            echo "number=$number" >>"$GITHUB_OUTPUT"
+            echo "found PR #$number"
+          else
+            echo "no open automerge PR for $HEAD_BRANCH"
+          fi
+
+      - name: Enable auto-merge (squash)
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ steps.pr.outputs.number }}
+          # Genau der Commit, den der grüne `CI`-Lauf getestet hat. Ohne diese Bindung
+          # würde ein Dependabot-Push zwischen grünem Lauf und Merge einen ungetesteten
+          # Commit mergen; `--match-head-commit` lehnt den Merge dann ab.
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # Ein Merge mit `GITHUB_TOKEN` löst KEINEN nachfolgenden `push`-Workflow aus —
+          # der `main`-Lauf nach dem Merge entfällt für automatisch gemergte Bumps.
+          gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --squash --delete-branch \
+            --match-head-commit "$HEAD_SHA"
