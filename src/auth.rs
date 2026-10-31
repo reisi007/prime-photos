@@ -17,7 +17,6 @@ use std::time::Duration;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use keyring::Entry;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -135,7 +134,7 @@ pub(crate) fn code_challenge(verifier: &str) -> String {
 /// generated once and stored in `config.toml`.
 pub(crate) fn new_device_serial() -> String {
     let mut bytes = [0u8; 16];
-    rand::rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes[..]);
     hex(&bytes)
 }
 
@@ -150,7 +149,7 @@ pub(crate) fn client_id(device_serial: &str, device_type: &str) -> String {
 /// Random `len` bytes, url-safe base64 without `=` padding (the PKCE alphabet).
 fn random_urlsafe(len: usize) -> String {
     let mut bytes = vec![0u8; len];
-    rand::rng().fill_bytes(&mut bytes);
+    rand::fill(&mut bytes[..]);
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
