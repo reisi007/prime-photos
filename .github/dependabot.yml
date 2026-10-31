@@ -7,6 +7,20 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+    # egui 0.37 redesigns the app surface instead of extending it:
+    # `eframe::App::update(ctx, frame)` becomes `ui(&mut Ui, &mut Frame)`,
+    # `TopBottomPanel`/`SidePanel` move into `egui::containers::panel`,
+    # `egui::popup` is removed, `Context::screen_rect`/`Context::style` too,
+    # `Id::new` is replaced by `Id::unique`/`IdSalt::new` and `WidgetType` by
+    # `Role`. This crate is on the 0.31 line, so the jump is six releases; the
+    # port is its own task. Blocking the 0.37 line keeps `eframe` and `egui`
+    # on one version — a lone eframe bump already failed because it pulled
+    # egui 0.37 beside the declared egui 0.31.
+    ignore:
+      - dependency-name: eframe
+        versions: [">= 0.37.0, < 0.38.0"]
+      - dependency-name: egui
+        versions: [">= 0.37.0, < 0.38.0"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
