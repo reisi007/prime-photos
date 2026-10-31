@@ -22,13 +22,15 @@ pub(crate) enum Scenario {
     ManyFolders,
     /// The settings page instead of the backup page.
     Settings,
+    /// The settings page on the bandwidth tab.
+    SettingsBandwidth,
     /// No session: the sign-in screen (rendered by our own UI, no webview).
     SignedOut,
 }
 
 impl Scenario {
     /// Every scenario, in the order `--demo-list` prints them.
-    pub(crate) const ALL: [Scenario; 9] = [
+    pub(crate) const ALL: [Scenario; 10] = [
         Scenario::Mixed,
         Scenario::Uploading,
         Scenario::Paused,
@@ -37,6 +39,7 @@ impl Scenario {
         Scenario::Empty,
         Scenario::ManyFolders,
         Scenario::Settings,
+        Scenario::SettingsBandwidth,
         Scenario::SignedOut,
     ];
 
@@ -51,6 +54,7 @@ impl Scenario {
             Scenario::Empty => "empty",
             Scenario::ManyFolders => "many-folders",
             Scenario::Settings => "settings",
+            Scenario::SettingsBandwidth => "settings-bandwidth",
             Scenario::SignedOut => "signed-out",
         }
     }
@@ -66,6 +70,7 @@ impl Scenario {
             Scenario::Empty => "Angemeldet, aber keine Sicherungsziele",
             Scenario::ManyFolders => "Zwölf Sicherungsziele (Liste scrollen)",
             Scenario::Settings => "Einstellungsseite, Tab Allgemeines",
+            Scenario::SettingsBandwidth => "Einstellungsseite, Tab Bandbreite",
             Scenario::SignedOut => "Anmeldebildschirm ohne Sitzung",
         }
     }

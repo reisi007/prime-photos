@@ -966,7 +966,16 @@ impl PrimePhotoApp {
             return;
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| self.login_screen_ui(ui));
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::PAGE_BG)
+                    .inner_margin(egui::Margin::symmetric(
+                        theme::PAGE_MARGIN_X,
+                        theme::PAGE_MARGIN_Y,
+                    )),
+            )
+            .show(ctx, |ui| self.login_screen_ui(ui));
     }
 
     /// Our own sign-in screen, shown before the Amazon page is opened.
@@ -980,22 +989,47 @@ impl PrimePhotoApp {
             ui.label(theme::muted(tr("Fotos & Videos zu Amazon Photos hochladen")));
             ui.add_space(26.0);
 
-            // Marketplace selection before signing in.
-            ui.horizontal(|ui| {
-                ui.label(tr("Land / Amazon-Marktplatz:"));
-                let current = self.config.country.clone();
-                egui::ComboBox::from_id_salt("login-country")
-                    .selected_text(country_label(&current))
-                    .show_ui(ui, |ui| {
-                        for &(code, _) in COUNTRIES {
-                            ui.selectable_value(
-                                &mut self.config.country,
-                                code.to_string(),
-                                country_label(code),
-                            );
-                        }
-                    });
+            // Marketplace selection before signing in. A bare `ui.horizontal`
+            // inside `vertical_centered` starts at the window's left edge
+            // (`horizontal` spans the full width, so the centring never sees a
+            // narrower rect). The row's own width is therefore measured first
+            // and used as the form block's width: the block (and with it the
+            // label + combo row) is centred as a whole, exactly on the page
+            // centre at 1400 and 760 (Issue #30, F2).
+            const COUNTRY_COMBO_W: f32 = 200.0;
+            let label = tr("Land / Amazon-Marktplatz:");
+            let label_w = ui.fonts(|f| {
+                f.layout_no_wrap(
+                    label.to_owned(),
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x
             });
+            let form_w = label_w + ui.spacing().item_spacing.x + COUNTRY_COMBO_W;
+            ui.allocate_ui_with_layout(
+                egui::vec2(form_w, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(label);
+                        let current = self.config.country.clone();
+                        egui::ComboBox::from_id_salt("login-country")
+                            .width(COUNTRY_COMBO_W)
+                            .selected_text(country_label(&current))
+                            .show_ui(ui, |ui| {
+                                for &(code, _) in COUNTRIES {
+                                    ui.selectable_value(
+                                        &mut self.config.country,
+                                        code.to_string(),
+                                        country_label(code),
+                                    );
+                                }
+                            });
+                    });
+                },
+            );
             ui.add_space(14.0);
 
             if ui.add(theme::primary_button(tr("Mit Amazon anmelden"))).clicked() {

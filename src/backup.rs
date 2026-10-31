@@ -312,11 +312,19 @@ fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<
 /// row height is fixed. The header uses the same widths, so both line up.
 const QUEUE_ROW_H: f32 = 20.0;
 const QUEUE_HEADER_H: f32 = 20.0;
+/// Vertical space above the table's first row: the header row, the item
+/// spacing after it, the 1 px divider and the item spacing before the rows.
+/// `page_heights` must reserve all of it, otherwise the added divider pushes
+/// the folder list (and its last card) off the bottom (Issue #30).
+const QUEUE_HEADER_TOTAL_H: f32 = QUEUE_HEADER_H + 8.0 + 1.0 + 8.0;
 /// Compact column carrying the backup folder of each queue row (user decision
 /// 2026-10-16): without it the files of several targets are indistinguishable.
 const QUEUE_FOLDER_W: f32 = 120.0;
-const QUEUE_SIZE_W: f32 = 72.0;
-const QUEUE_STATUS_W: f32 = 104.0;
+const QUEUE_SIZE_W: f32 = 80.0;
+/// Wide enough for "In Bearbeitung · 100 %" at 12 pt (Issue #30); the text is
+/// truncated instead of painting over the next column if a translation is
+/// longer.
+const QUEUE_STATUS_W: f32 = 140.0;
 const QUEUE_MIN_NAME_W: f32 = 80.0;
 /// Height of the centred empty-state block while the queue is empty.
 const QUEUE_EMPTY_H: f32 = 72.0;
@@ -337,48 +345,180 @@ const QUEUE_MAX_FRAC: f32 = 0.50;
 /// panel share — it stays absolute on purpose; only the *range caps/floors* of
 /// the two scroll areas are relative. The Backup page has no scroll area of its
 /// own, so the table may never eat this space; the list below then gets what is
-/// left.
+/// left. The space **above** the first table row (header, both item spacings,
+/// the 1 px divider) is [`QUEUE_HEADER_TOTAL_H`].
 const QUEUE_BELOW_H: f32 = 96.0;
 /// Height the folder list must leave for the footer below it (8 px gap + line).
 const QUEUE_FOOTER_H: f32 = 30.0;
-/// Height of one folder card (Variant A), **measured headless** with egui
-/// 0.31.1 at the default font: name line + small path/progress/updated line +
-/// outcome line + frame margins. The list's content height is derived from it
-/// (Welle 5.17): `page_heights` needs exactly this plus the gaps to size
-/// the area to what the cards actually occupy.
-const FOLDER_CARD_H: f32 = 60.0;
-/// Vertical gap between two folder cards (the frame's outer margin, 4 + 4).
+/// Vertical inner margin of a folder card (top and bottom). Shared by the
+/// drawn frame and the height reservation below, so they cannot drift.
+const FOLDER_CARD_INNER_Y: i8 = 10;
+/// Vertical outer margin of a folder card (top and bottom).
+const FOLDER_CARD_OUTER_Y: i8 = 4;
+/// Fixed vertical chrome of one folder card: inner margin + 1 px stroke + outer
+/// margin, on both sides. The margin values are the very constants the frame at
+/// the draw site uses (Issue #30, R1).
+const FOLDER_CARD_CHROME_H: f32 =
+    2.0 * (FOLDER_CARD_INNER_Y as f32 + 1.0 + FOLDER_CARD_OUTER_Y as f32);
+/// Vertical gap between two folder cards: egui's `item_spacing.y` between the
+/// two frames (the frame's own outer margin is part of
+/// [`FOLDER_CARD_CHROME_H`]).
 const FOLDER_CARD_GAP: f32 = 8.0;
+
+/// Height of one folder card from the **actual galley heights** of the labels
+/// it draws, the item spacing between them and the fixed frame chrome.
+///
+/// The status/action block on the right is a single row; its buttons are
+/// `interact_size.y` high, so `row_h` (the theme's `interact_size.y`) covers it
+/// and the content is the taller of the text column and that row floor. No
+/// per-line constant is involved: a wrapped 15 pt name contributes its real
+/// 17 pt line, an 11 pt meta line its real 13 pt (Issue #30, R1).
+fn folder_card_height(label_heights: &[f32], spacing: f32, row_h: f32) -> f32 {
+    let text_h =
+        label_heights.iter().sum::<f32>() + spacing * label_heights.len().saturating_sub(1) as f32;
+    FOLDER_CARD_CHROME_H + text_h.max(row_h)
+}
+
+/// Column geometry of the queue table, derived once per frame and reused by the
+/// header and **every** row (Issue #30: both used to recompute the name width,
+/// and the header's cells were centred while the values were not).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct QueueColumns {
+    /// Width the table occupies: the page content minus the scroll-bar strip
+    /// the theme reserves.
+    table_w: f32,
+    folder_w: f32,
+    name_w: f32,
+    size_w: f32,
+    status_w: f32,
+}
+
+/// Pure table geometry. `gap` is the theme's horizontal `item_spacing` (three
+/// gaps between four cells), `bar_w` the reserved scroll-bar strip. The table
+/// ends at `content_w - bar_w`; the name takes what is left, at least
+/// [`QUEUE_MIN_NAME_W`] (the minimum window is wide enough for that).
+fn queue_columns(content_w: f32, gap: f32, bar_w: f32) -> QueueColumns {
+    let table_w = (content_w - bar_w).max(0.0);
+    let name_w = (table_w - QUEUE_FOLDER_W - QUEUE_SIZE_W - QUEUE_STATUS_W - 3.0 * gap)
+        .max(QUEUE_MIN_NAME_W);
+    QueueColumns {
+        table_w,
+        folder_w: QUEUE_FOLDER_W,
+        name_w,
+        size_w: QUEUE_SIZE_W,
+        status_w: QUEUE_STATUS_W,
+    }
+}
+
+/// One queue-table cell, allocated at exactly `width` × `height` and aligned
+/// inside it (`right_aligned` puts the widget at the cell's right edge). The
+/// cell is its own `Ui`, so alignment does not depend on the widgets before it,
+/// and a long value can never paint into the next column (Issue #30).
+fn table_cell(
+    ui: &mut egui::Ui,
+    width: f32,
+    height: f32,
+    right_aligned: bool,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    let layout = if right_aligned {
+        egui::Layout::right_to_left(egui::Align::Center)
+    } else {
+        egui::Layout::left_to_right(egui::Align::Center)
+    };
+    ui.allocate_ui_with_layout(egui::vec2(width, height), layout, |ui| {
+        // Reserve the full cell before adding the widget: a short label's own
+        // rect would otherwise shrink the cell and shift every later column.
+        ui.set_min_size(egui::vec2(width, height));
+        add_contents(ui);
+    });
+}
+
+/// The card's small meta line: path · progress · last updated (each present part
+/// exactly once, empty parts omitted). Shared by the card draw and by the
+/// height reservation, so both measure exactly the same string (Issue #30, F1).
+fn folder_card_meta(r: &Row) -> String {
+    let mut line = crate::text::nfc(&r.path.display().to_string());
+    let progress = folder_progress_text(r.status, r.done, r.total);
+    if !progress.is_empty() {
+        line.push_str(" · ");
+        line.push_str(&progress);
+    }
+    if !r.last_updated.is_empty() {
+        line.push_str(" · ");
+        line.push_str(&tr1("Zuletzt aktualisiert: {}", &r.last_updated));
+    }
+    line
+}
+
+/// One text block in a folder card's left column.
+struct CardLabel {
+    text: String,
+    font: egui::FontId,
+    /// `theme::muted` (meta/outcome); the name uses the strong 15 pt style.
+    muted: bool,
+}
+
+/// The left column of a folder card: name, meta line and — **only when the run
+/// produced a result for it** — the outcome line. The draw and the height
+/// reservation both iterate this list, so the reserved height always includes
+/// exactly the blocks the card draws (Issue #30, R1).
+fn folder_card_labels(r: &Row) -> Vec<CardLabel> {
+    let mut labels = vec![
+        CardLabel {
+            text: crate::text::nfc(&r.name),
+            font: egui::FontId::proportional(15.0),
+            muted: false,
+        },
+        CardLabel {
+            text: folder_card_meta(r),
+            font: egui::FontId::proportional(11.0),
+            muted: true,
+        },
+    ];
+    let outcome = outcome_text(r.new, r.existing, r.unchanged, r.failed);
+    if !outcome.is_empty() {
+        labels.push(CardLabel {
+            text: outcome,
+            font: egui::FontId::proportional(11.0),
+            muted: true,
+        });
+    }
+    labels
+}
 
 /// Vertical budget of the Backup page's two scroll areas for a given free
 /// height — the single source both draw sites use, so the queue (drawn first)
 /// leaves exactly what the folder list was promised.
 ///
 /// Priority (user decision 2026-10-16, Welle 5.17): the **folder list takes
-/// what its content needs** — `cards` measured cards plus the gaps between
-/// them (0 cards ⇒ 0) — but never so much that the queue falls below its
-/// floor or the chrome is eaten; the queue then takes the rest, capped at
-/// half of the free height. All caps and floors are fractions of `free`
-/// except the measured chrome ([`QUEUE_BELOW_H`], [`QUEUE_FOOTER_H`],
-/// [`QUEUE_HEADER_H`]) and the card metrics ([`FOLDER_CARD_H`],
-/// [`FOLDER_CARD_GAP`]), which stay absolute.
+/// what its content needs** — the sum of the passed per-card heights plus the
+/// gaps between them (0 cards ⇒ 0) — but never so much that the queue falls
+/// below its floor or the chrome is eaten; the queue then takes the rest,
+/// capped at half of the free height. All caps and floors are fractions of
+/// `free` except the measured chrome ([`QUEUE_HEADER_TOTAL_H`],
+/// [`QUEUE_BELOW_H`], [`QUEUE_FOOTER_H`]) and the card metrics, which stay
+/// absolute. The card heights come from [`folder_card_height`] with the actual
+/// galley heights of the labels the card draws (the outcome only when it is
+/// present), so a card whose name or meta line wraps is reserved at its real
+/// height (Issue #30, F1/R1).
 ///
 /// Guarantees for every `free >= 0`:
-/// - `queue_h + list_h + QUEUE_HEADER_H + QUEUE_BELOW_H <= free` — nothing
-///   runs off the bottom edge (the 2 px margin inside `QUEUE_BELOW_H` covers
-///   the header being 2 px more conservative than the measured 114 px);
+/// - `queue_h + list_h + QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H <= free` —
+///   nothing runs off the bottom edge;
 /// - `queue_h <= QUEUE_MAX_FRAC * free` — the queue stays at or below 50 %;
 /// - `list_h` never spends the queue's floor reservation — the queue keeps
 ///   at least `QUEUE_MIN_FRAC * free` whenever the chrome fits at all.
-fn page_heights(free: f32, cards: usize) -> (f32, f32) {
-    // The queue's fixed chrome: its own column header plus everything below
-    // the table (aggregate bar zone + footer room).
-    let chrome = QUEUE_HEADER_H + QUEUE_BELOW_H;
-    // 1) The folder list first: exactly its content's need — `cards` measured
-    //    cards plus the gaps between them (0 cards ⇒ 0) — capped so the queue
+fn page_heights(free: f32, card_heights: &[f32]) -> (f32, f32) {
+    // The queue's fixed chrome: everything above its first row (header, both
+    // item spacings and the 1 px divider) plus everything below the table
+    // (aggregate bar zone + footer room).
+    let chrome = QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H;
+    // 1) The folder list first: exactly its content's need — the passed card
+    //    heights plus the gaps between them (0 cards ⇒ 0) — capped so the queue
     //    keeps its floor and the chrome is never eaten.
-    let content_h =
-        cards as f32 * FOLDER_CARD_H + cards.saturating_sub(1) as f32 * FOLDER_CARD_GAP;
+    let content_h = card_heights.iter().sum::<f32>()
+        + card_heights.len().saturating_sub(1) as f32 * FOLDER_CARD_GAP;
     let list_h = content_h.min((free - chrome - QUEUE_MIN_FRAC * free).max(0.0));
     // 2) The queue takes what is left, capped at half the free height; its
     //    floor only applies when it actually fits.
@@ -2605,6 +2745,96 @@ impl PrimePhotoApp {
         }
     }
 
+    /// Status word and row actions at a folder card's right edge.
+    ///
+    /// `with_popup == false` is the invisible measuring pass: the popup is an
+    /// overlay and contributes no row width, and skipping it prevents the
+    /// probe from creating a second popup area next to the real one.
+    fn folder_card_side(
+        ui: &mut egui::Ui,
+        r: &Row,
+        status_txt: &str,
+        status_col: egui::Color32,
+        running: bool,
+        with_popup: bool,
+        actions: &mut Vec<FolderAction>,
+    ) {
+        // The one-time target is transient: no kebab/refresh action icons
+        // (nothing to edit, reveal or stop) and no pause toggle.
+        if r.idx != ONE_TIME_IDX {
+            // Row actions. `egui::menu_button` cannot carry an image (0.31 has
+            // no `From<Image> for WidgetText`), so the kebab is a
+            // `Button::image` and the popup is driven by hand via
+            // `toggle_popup` + `popup_below_widget`. The tint follows the theme
+            // text colour (the raster is white).
+            let kebab = ui
+                .add(
+                    egui::Button::image(icons::kebab_icon(ui))
+                        .image_tint_follows_text_color(true)
+                        .frame(false),
+                )
+                .on_hover_text(tr("Aktionen"));
+            let popup_id = ui.make_persistent_id(("folder_row_actions", r.idx));
+            if kebab.clicked() {
+                ui.memory_mut(|m| m.toggle_popup(popup_id));
+            }
+            if with_popup {
+                egui::popup::popup_below_widget(
+                    ui,
+                    popup_id,
+                    &kebab,
+                    egui::popup::PopupCloseBehavior::CloseOnClick,
+                    |ui| {
+                        // popup_below_widget sizes the popup to its parent
+                        // widget — here the ~26 px kebab icon — which would wrap
+                        // every entry character by character.
+                        ui.set_min_width(220.0);
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        if ui.button(tr("Im Dateimanager anzeigen")).clicked() {
+                            actions.push(FolderAction::OpenFinder(r.idx));
+                        }
+                        if ui.button(tr("Wiederholen")).clicked() {
+                            actions.push(FolderAction::Retry(r.idx));
+                        }
+                        if ui.button(tr("Bearbeiten")).clicked() {
+                            actions.push(FolderAction::Edit(r.idx));
+                        }
+                        ui.separator();
+                        if ui.button(tr("Datensicherung stoppen")).clicked() {
+                            actions.push(FolderAction::Remove(r.idx));
+                        }
+                    },
+                );
+            }
+            // The rescan is its own, always visible button — no longer hidden
+            // inside the popup.
+            if ui
+                .add(
+                    egui::Button::image(icons::refresh_icon(ui))
+                        .image_tint_follows_text_color(true)
+                        .frame(false),
+                )
+                .on_hover_text(tr("Jetzt scannen und hochladen"))
+                .clicked()
+            {
+                actions.push(FolderAction::Upload(r.idx));
+            }
+            if ui
+                .add_enabled(
+                    running,
+                    egui::Button::new(
+                        RichText::new(if r.enabled { "⏸" } else { "▶" }).size(16.0),
+                    )
+                    .frame(false),
+                )
+                .clicked()
+            {
+                actions.push(FolderAction::ToggleEnabled(r.idx));
+            }
+        }
+        ui.label(RichText::new(status_txt).color(status_col).size(12.0));
+    }
+
     pub(crate) fn backup_ui(&mut self, ui: &mut egui::Ui) {
         // Background sync (PORT-5): starts the supervising timer once we are
         // signed in; from then on this is a cheap no-op.
@@ -2792,29 +3022,92 @@ impl PrimePhotoApp {
         ui.add_space(12.0);
         ui.label(RichText::new(tr1("Warteschlange ({})", remaining)).strong().size(14.0));
 
-        // Shared geometry: header and rows derive the name width the same way so
-        // the four columns line up. The scroll bar's width is reserved with the
-        // floating style too: `theme.rs` sets `floating_allocated_width =
-        // bar_width + 8`, so `allocated_width()` yields 18, not 0.
-        let avail = ui.available_width();
+        // Shared geometry: header and rows use the same `QueueColumns`, so the
+        // four columns line up exactly (Issue #30). The scroll-bar strip is
+        // reserved with the floating style too: `theme.rs` sets
+        // `floating_allocated_width = bar_width + 8`, so `allocated_width()`
+        // yields 18, not 0. The table therefore ends `bar_w` before the page
+        // gutter, and `AlwaysVisible` keeps that right edge constant.
+        let content_w = ui.available_width();
         let spacing_x = ui.spacing().item_spacing.x;
         let bar_w = ui.spacing().scroll.allocated_width();
-        let name_w = (avail
-            - bar_w
-            - QUEUE_FOLDER_W
-            - QUEUE_SIZE_W
-            - QUEUE_STATUS_W
-            - 3.0 * spacing_x)
-        .max(QUEUE_MIN_NAME_W);
+        let cols = queue_columns(content_w, spacing_x, bar_w);
+
+        // Per-card heights for the folder list's reservation (Issue #30,
+        // F1/R1). The list is a plain ScrollArea, so its viewport must be as
+        // tall as the cards it draws. For every card we measure the status/action
+        // block with the same probe the card uses, then lay out the very labels
+        // the card draws (same texts, fonts and column width) and use their
+        // **galley heights** — never a per-line constant. This covers a wrapped
+        // 15 pt name with its real ~17.22 pt line as well as wrapped 11 pt meta
+        // or outcome lines, and it includes the outcome only when the card draws
+        // it.
+        let running = self.upload.lock().unwrap().active;
+        let card_content_w =
+            (cols.table_w - 2.0 * f32::from(theme::PAGE_MARGIN_X) - 2.0).max(1.0);
+        let spacing_y = ui.spacing().item_spacing.y;
+        let row_h = ui.spacing().interact_size.y;
+        let (side_ws, card_heights): (Vec<f32>, Vec<f32>) = rows
+            .iter()
+            .map(|r| {
+                let (status_txt, status_col) = status_text(r.status, r.total);
+                let mut ignored = Vec::new();
+                let side_w = {
+                    let mut probe = ui.new_child(
+                        egui::UiBuilder::new()
+                            .invisible()
+                            .max_rect(egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                egui::vec2(card_content_w, 40.0),
+                            )),
+                    );
+                    let side = probe.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            Self::folder_card_side(
+                                ui,
+                                r,
+                                &status_txt,
+                                status_col,
+                                running,
+                                false,
+                                &mut ignored,
+                            );
+                        },
+                    );
+                    side.response.rect.width()
+                };
+                let column_w = (card_content_w - side_w - spacing_x).max(1.0);
+                let label_heights: Vec<f32> = folder_card_labels(r)
+                    .iter()
+                    .map(|label| {
+                        ui.fonts(|f| {
+                            f.layout(
+                                label.text.clone(),
+                                label.font.clone(),
+                                egui::Color32::WHITE,
+                                column_w,
+                            )
+                            .size()
+                            .y
+                        })
+                    })
+                    .collect();
+                (
+                    side_w,
+                    folder_card_height(&label_heights, spacing_y, row_h),
+                )
+            })
+            .unzip();
 
         // The page's vertical budget, decided **before** the queue is drawn: the
-        // folder list takes what its `rows.len()` cards need, capped so the queue
+        // folder list takes what its measured cards need, capped so the queue
         // keeps its floor; the queue takes the rest, never more than half of the
         // free height (user decision 2026-10-16, Welle 5.17). `list_h` is used
         // again at the folder list's own draw time; the function is pure, so
         // both sites agree.
         let free = ui.available_height();
-        let (table_h, list_h) = page_heights(free, rows.len());
+        let (table_h, list_h) = page_heights(free, &card_heights);
 
         if layout.is_empty() {
             // Centred empty state (Welle 3.1) instead of an empty table. The
@@ -2822,32 +3115,40 @@ impl PrimePhotoApp {
             // header it saves), or it would eat the list's promised height in a
             // very small window.
             let empty_h = QUEUE_EMPTY_H.min(QUEUE_HEADER_H + table_h + 2.0);
-            ui.allocate_ui(egui::vec2(avail, empty_h), |ui| {
+            ui.allocate_ui(egui::vec2(cols.table_w, empty_h), |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.label(theme::muted(tr("Keine Uploads in der Warteschlange")));
                 });
             });
         } else {
             // Fixed column header (Ordner · Name · Größe · Status), above the
-            // scroll area so it never scrolls away.
+            // scroll area so it never scrolls away. Every cell is allocated at
+            // exactly its column width; folder/name/status are left-aligned,
+            // the size is right-aligned — the values below use the same cells.
             ui.horizontal(|ui| {
-                ui.add_sized(
-                    [QUEUE_FOLDER_W, QUEUE_HEADER_H],
-                    egui::Label::new(RichText::new(tr("Ordner")).strong().size(11.0)),
-                );
-                ui.add_sized(
-                    [name_w, QUEUE_HEADER_H],
-                    egui::Label::new(RichText::new(tr("Name")).strong().size(11.0)),
-                );
-                ui.add_sized(
-                    [QUEUE_SIZE_W, QUEUE_HEADER_H],
-                    egui::Label::new(RichText::new(tr("Größe")).strong().size(11.0)),
-                );
-                ui.add_sized(
-                    [QUEUE_STATUS_W, QUEUE_HEADER_H],
-                    egui::Label::new(RichText::new(tr("Status")).strong().size(11.0)),
-                );
+                table_cell(ui, cols.folder_w, QUEUE_HEADER_H, false, |ui| {
+                    ui.label(RichText::new(tr("Ordner")).strong().size(11.0));
+                });
+                table_cell(ui, cols.name_w, QUEUE_HEADER_H, false, |ui| {
+                    ui.label(RichText::new(tr("Name")).strong().size(11.0));
+                });
+                table_cell(ui, cols.size_w, QUEUE_HEADER_H, true, |ui| {
+                    ui.label(RichText::new(tr("Größe")).strong().size(11.0));
+                });
+                table_cell(ui, cols.status_w, QUEUE_HEADER_H, false, |ui| {
+                    ui.label(RichText::new(tr("Status")).strong().size(11.0));
+                });
             });
+            // 1 px divider under the header, spanning exactly the table width
+            // (never the reserved scroll-bar strip). The item spacing below it
+            // is the 8 px air before the first row.
+            let (divider, _) =
+                ui.allocate_exact_size(egui::vec2(cols.table_w, 1.0), egui::Sense::hover());
+            ui.painter().hline(
+                divider.x_range(),
+                divider.center().y,
+                egui::Stroke::new(1.0_f32, theme::BORDER),
+            );
             // A page that has no scroll area of its own: the table gets exactly
             // the height `page_heights` reserved for it — never more than what
             // is free, so at the minimum window size nothing runs off the
@@ -2864,11 +3165,22 @@ impl PrimePhotoApp {
                 // `min_scrolled_height` (64 px) would otherwise overrule a
                 // smaller `max_height` and push the list below off the edge.
                 .min_scrolled_height(0.0)
+                // Reserve the 18 px strip on every frame, not only while the
+                // pointer hovers the area: the table's right edge must never
+                // jump (Issue #30). The floating handle stays dormant (alpha 0)
+                // until hover, so the strip is invisible at rest.
+                .scroll_bar_visibility(
+                    egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                )
                 // `QUEUE_ROW_H` is the *measured* row height without spacing:
                 // every row below is allocated at exactly that height, so it
                 // advances by `QUEUE_ROW_H + item_spacing.y` (20 + 8 = 28 px),
                 // which is precisely what `show_rows` derives internally.
                 .show_rows(ui, QUEUE_ROW_H, layout.len(), |ui, range| {
+                    // Keep the content at the table width even while the
+                    // scroll-bar animation has not reserved its full strip yet;
+                    // the columns below are fixed widths anyway.
+                    ui.set_width(cols.table_w);
                     // Lock the shared state once per frame for the visible slice.
                     let s = self.upload.lock().unwrap();
                     for &queue_idx in &layout[range] {
@@ -2908,46 +3220,48 @@ impl PrimePhotoApp {
                         // Allocated at exactly `QUEUE_ROW_H` so the row
                         // advances by `QUEUE_ROW_H + item_spacing.y`,
                         // matching what `show_rows` derives.
-                        let row_w = ui.available_width();
                         ui.allocate_ui_with_layout(
-                            egui::vec2(row_w, QUEUE_ROW_H),
+                            egui::vec2(cols.table_w, QUEUE_ROW_H),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
-                                ui.add_sized(
-                                    [QUEUE_FOLDER_W, QUEUE_ROW_H],
-                                    egui::Label::new(RichText::new(folder_label).size(12.0))
-                                        .truncate(),
-                                )
-                                .on_hover_text(folder_tip);
-                                ui.add_sized(
-                                    [name_w, QUEUE_ROW_H],
-                                    egui::Label::new(
-                                        RichText::new(crate::text::nfc(&e.name)).size(12.0),
+                                table_cell(ui, cols.folder_w, QUEUE_ROW_H, false, |ui| {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(folder_label).size(12.0))
+                                            .truncate(),
                                     )
-                                    .truncate(),
-                                )
-                                .on_hover_text(full);
-                                ui.add_sized(
-                                    [QUEUE_SIZE_W, QUEUE_ROW_H],
-                                    egui::Label::new(
+                                    .on_hover_text(folder_tip);
+                                });
+                                table_cell(ui, cols.name_w, QUEUE_ROW_H, false, |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(crate::text::nfc(&e.name)).size(12.0),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(full);
+                                });
+                                table_cell(ui, cols.size_w, QUEUE_ROW_H, true, |ui| {
+                                    ui.label(
                                         RichText::new(crate::text::format_size(e.size)).size(12.0),
-                                    ),
-                                );
-                                let status = ui.add_sized(
-                                    [QUEUE_STATUS_W, QUEUE_ROW_H],
-                                    egui::Label::new(
-                                        RichText::new(txt).color(col).size(12.0),
-                                    ),
-                                );
-                                // Optional byte detail while a transfer is
-                                // live (Befund 11c).
-                                if e.state == FileState::Uploading && e.size > 0 {
-                                    status.on_hover_text(tr2(
-                                        "{} von {}",
-                                        crate::text::format_size(e.bytes_sent),
-                                        crate::text::format_size(e.size),
-                                    ));
-                                }
+                                    );
+                                });
+                                table_cell(ui, cols.status_w, QUEUE_ROW_H, false, |ui| {
+                                    // Truncated as well: a longer translation
+                                    // must never paint over the page edge.
+                                    let status = ui.add(
+                                        egui::Label::new(RichText::new(txt).color(col).size(12.0))
+                                            .truncate(),
+                                    );
+                                    // Optional byte detail while a transfer is
+                                    // live (Befund 11c).
+                                    if e.state == FileState::Uploading && e.size > 0 {
+                                        status.on_hover_text(tr2(
+                                            "{} von {}",
+                                            crate::text::format_size(e.bytes_sent),
+                                            crate::text::format_size(e.size),
+                                        ));
+                                    }
+                                });
                             },
                         );
                     }
@@ -3000,7 +3314,9 @@ impl PrimePhotoApp {
             // right edge (~105 %). The bar now gets an explicit width: the full
             // row without a spinner, the row minus the spinner and the item
             // spacing with one (clamped at 0).
-            let row_w = ui.available_width();
+            // The bar spans exactly the table width (not the full page), so it
+            // ends on the same right edge as the header, rows and cards.
+            let row_w = cols.table_w;
             ui.horizontal(|ui| {
                 // A spinner belongs to this one display and only while a run is
                 // active — never a second, separate indicator.
@@ -3066,152 +3382,84 @@ impl PrimePhotoApp {
             // (64 px) would otherwise override a smaller `max_height` and push the
             // footer below off the bottom edge in a very small window.
             .min_scrolled_height(0.0)
+            // Always reserve the 18 px strip: the card's right border must stay
+            // visible and both lists must end on the same edge (Issue #30).
+            .scroll_bar_visibility(
+                egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible,
+            )
             .show(ui, |ui| {
+                // The cards use the table width — not the scroll area's
+                // animated content width — so their right edge is constant and
+                // matches the queue table above.
+                ui.set_width(cols.table_w);
                 // While a file drag hovers the window, the backup page keeps
                 // its hands off: no clicks out from under the overlay.
                 if self.dropping_files {
                     ui.disable();
                 }
-                for r in &rows {
+                for (i, r) in rows.iter().enumerate() {
                     let (status_txt, status_col) = status_text(r.status, r.total);
                     egui::Frame::new()
                         .fill(theme::CARD_BG)
                         .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                        .inner_margin(egui::Margin::symmetric(12, 10))
-                        .outer_margin(egui::Margin::symmetric(0, 4))
+                        .corner_radius(6.0)
+                        .inner_margin(egui::Margin::symmetric(
+                            theme::PAGE_MARGIN_X,
+                            FOLDER_CARD_INNER_Y,
+                        ))
+                        .outer_margin(egui::Margin::symmetric(0, FOLDER_CARD_OUTER_Y))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.label(RichText::new(crate::text::nfc(&r.name)).strong().size(15.0));
-                                    // Line 2 (Variant A, user decision 2026-10-16):
-                                    // the original's three building blocks, each
-                                    // exactly once — the path (always visible), the
-                                    // progress line and "Zuletzt aktualisiert".
-                                    // Empty parts are omitted, so a never-scanned
-                                    // folder shows nothing but its path.
-                                    let mut line2 =
-                                        crate::text::nfc(&r.path.display().to_string());
-                                    let progress =
-                                        folder_progress_text(r.status, r.done, r.total);
-                                    if !progress.is_empty() {
-                                        line2.push_str(" · ");
-                                        line2.push_str(&progress);
-                                    }
-                                    if !r.last_updated.is_empty() {
-                                        line2.push_str(" · ");
-                                        line2.push_str(&tr1(
-                                            "Zuletzt aktualisiert: {}",
-                                            &r.last_updated,
-                                        ));
-                                    }
-                                    ui.label(theme::muted(line2).size(11.0));
-                                    // The target's own outcome breakdown (user
-                                    // decision 2026-10-14). Only shown when the
-                                    // run produced at least one result for it —
-                                    // an untouched row (all zero) stays quiet.
-                                    let outcome =
-                                        outcome_text(r.new, r.existing, r.unchanged, r.failed);
-                                    if !outcome.is_empty() {
-                                        ui.label(theme::muted(outcome).size(11.0));
-                                    }
-                                });
+                                // The left column wraps inside what the right
+                                // block leaves, so no line can run under the
+                                // icons at the card's right edge. `side_ws[i]`
+                                // was measured with the same probe that fed the
+                                // card-height reservation above, and both use
+                                // `card_content_w`, so the draw and the
+                                // reservation use exactly the same column width.
+                                // `allocate_new_ui` (not `allocate_ui_with_layout`
+                                // with height 0): the latter would center the
+                                // zero-height frame in the row and push the
+                                // first line down.
+                                let gap = ui.spacing().item_spacing.x;
+                                let left_w = (card_content_w - side_ws[i] - gap).max(0.0);
+                                ui.allocate_new_ui(
+                                    egui::UiBuilder::new()
+                                        .max_rect(egui::Rect::from_min_size(
+                                            ui.cursor().min,
+                                            egui::vec2(left_w, ui.available_height()),
+                                        ))
+                                        .layout(egui::Layout::top_down(egui::Align::Min)),
+                                    |ui| {
+                                        ui.set_min_width(left_w);
+                                        // The very list the height reservation
+                                        // measured: name (strong 15 pt), meta
+                                        // (muted 11 pt) and the outcome only
+                                        // when the run produced one for this
+                                        // target (user decision 2026-10-14).
+                                        for label in folder_card_labels(r) {
+                                            let rich = if label.muted {
+                                                theme::muted(label.text).size(label.font.size)
+                                            } else {
+                                                RichText::new(label.text)
+                                                    .strong()
+                                                    .size(label.font.size)
+                                            };
+                                            ui.label(rich);
+                                        }
+                                    },
+                                );
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        // The one-time target is transient:
-                                        // no kebab/refresh action icons (nothing
-                                        // to edit, reveal or stop) and no pause
-                                        // toggle.
-                                        if r.idx != ONE_TIME_IDX {
-                                            // Row actions. `egui::menu_button`
-                                            // cannot carry an image (0.31 has no
-                                            // `From<Image> for WidgetText`), so
-                                            // the kebab is a `Button::image` and
-                                            // the popup is driven by hand via
-                                            // `toggle_popup` + `popup_below_widget`.
-                                            // The tint follows the theme text
-                                            // colour (the raster is white).
-                                            let kebab = ui
-                                                .add(
-                                                    egui::Button::image(icons::kebab_icon(ui))
-                                                        .image_tint_follows_text_color(true)
-                                                        .frame(false),
-                                                )
-                                                .on_hover_text(tr("Aktionen"));
-                                            let popup_id =
-                                                ui.make_persistent_id(("folder_row_actions", r.idx));
-                                            if kebab.clicked() {
-                                                ui.memory_mut(|m| m.toggle_popup(popup_id));
-                                            }
-                                            egui::popup::popup_below_widget(
-                                                ui,
-                                                popup_id,
-                                                &kebab,
-                                                egui::popup::PopupCloseBehavior::CloseOnClick,
-                                                |ui| {
-                                                    // popup_below_widget sizes the popup to
-                                                    // its parent widget — here the ~26 px
-                                                    // kebab icon — which would wrap every
-                                                    // entry character by character.
-                                                    ui.set_min_width(220.0);
-                                                    ui.style_mut().wrap_mode =
-                                                        Some(egui::TextWrapMode::Extend);
-                                                    if ui
-                                                        .button(tr("Im Dateimanager anzeigen"))
-                                                        .clicked()
-                                                    {
-                                                        actions.push(FolderAction::OpenFinder(r.idx));
-                                                    }
-                                                    if ui.button(tr("Wiederholen")).clicked() {
-                                                        actions.push(FolderAction::Retry(r.idx));
-                                                    }
-                                                    if ui.button(tr("Bearbeiten")).clicked() {
-                                                        actions.push(FolderAction::Edit(r.idx));
-                                                    }
-                                                    ui.separator();
-                                                    if ui
-                                                        .button(tr("Datensicherung stoppen"))
-                                                        .clicked()
-                                                    {
-                                                        actions.push(FolderAction::Remove(r.idx));
-                                                    }
-                                                },
-                                            );
-                                            // The rescan is its own, always
-                                            // visible button — no longer hidden
-                                            // inside the popup.
-                                            if ui
-                                                .add(
-                                                    egui::Button::image(icons::refresh_icon(ui))
-                                                        .image_tint_follows_text_color(true)
-                                                        .frame(false),
-                                                )
-                                                .on_hover_text(tr("Jetzt scannen und hochladen"))
-                                                .clicked()
-                                            {
-                                                actions.push(FolderAction::Upload(r.idx));
-                                            }
-                                            let running = self.upload.lock().unwrap().active;
-                                            if ui
-                                                .add_enabled(
-                                                    running,
-                                                    egui::Button::new(
-                                                        RichText::new(if r.enabled {
-                                                            "⏸"
-                                                        } else {
-                                                            "▶"
-                                                        })
-                                                        .size(16.0),
-                                                    )
-                                                    .frame(false),
-                                                )
-                                                .clicked()
-                                            {
-                                                actions.push(FolderAction::ToggleEnabled(r.idx));
-                                            }
-                                        }
-                                        ui.label(
-                                            RichText::new(status_txt).color(status_col).size(12.0),
+                                        Self::folder_card_side(
+                                            ui,
+                                            r,
+                                            &status_txt,
+                                            status_col,
+                                            running,
+                                            true,
+                                            &mut actions,
                                         );
                                     },
                                 );
@@ -3477,37 +3725,43 @@ mod tests {
         assert_eq!(capped_done(3, 0), 0);
     }
 
-    /// The list's content height: `cards` measured cards plus the gaps between
-    /// them — the same formula `page_heights` uses, stated once here so the
-    /// tests can assert against the content, not against a bare number.
-    fn list_content_h(cards: usize) -> f32 {
-        cards as f32 * FOLDER_CARD_H + cards.saturating_sub(1) as f32 * FOLDER_CARD_GAP
+    /// The list's content height: the passed per-card heights plus the gaps
+    /// between them — the same formula `page_heights` uses, stated once here so
+    /// the tests can assert against the content, not against a bare number.
+    fn list_content_h(heights: &[f32]) -> f32 {
+        heights.iter().sum::<f32>() + heights.len().saturating_sub(1) as f32 * FOLDER_CARD_GAP
+    }
+
+    /// A representative single-line card height from the measured font row
+    /// heights (15 pt name + 11 pt meta + 11 pt outcome, two 8 pt gaps, 30 pt
+    /// frame chrome). Only used as input for the pure budget tests.
+    fn single_line_card_h() -> f32 {
+        // Galley heights are pixel-rounded: 15 pt → 17, 11 pt → 13.
+        folder_card_height(&[17.0, 13.0, 13.0], 8.0, 26.0)
     }
 
     #[test]
     fn page_heights_three_cards_fit_when_tight() {
-        // A tight window (400 px free): the list claims exactly its content —
-        // three cards (3×60) plus two gaps (2×8) = 196 px — and the cap
-        // (400 − 116 chrome − 80 queue floor = 204) leaves room for all of it.
-        // Before Welle 5.17 the list was capped at 45 % of `free` (180 px) and
-        // the third card was visibly cut off.
-        let (queue_h, list_h) = page_heights(400.0, 3);
-        assert_eq!(list_h, list_content_h(3));
+        // A window with 600 px free: the list claims exactly its content —
+        // three single-line cards (~283 px incl. gaps) — and the cap
+        // (600 − 133 chrome − 120 queue floor = 347) leaves room for all of it.
+        let heights = [single_line_card_h(); 3];
+        let (queue_h, list_h) = page_heights(600.0, &heights);
+        assert_eq!(list_h, list_content_h(&heights));
         // The queue still gets more than its floor.
-        assert!(queue_h >= QUEUE_MIN_FRAC * 400.0);
+        assert!(queue_h >= QUEUE_MIN_FRAC * 600.0);
     }
 
     #[test]
     fn page_heights_ten_cards_keep_the_queue_floor() {
-        // Ten cards (672 px of content) in a 500 px window: the list is capped
-        // at exactly the point where the queue keeps its floor
-        // (500 − 116 − 100 = 284) — never below `QUEUE_MIN_FRAC * free`.
-        // `QUEUE_BELOW_H` grew by the 8 px heading→list air (UI review 0.1.1),
-        // so the chrome term is 116 px, not the earlier 108 px.
-        let (queue_h, list_h) = page_heights(500.0, 10);
+        // Ten single-line cards (~962 px of content) in a 500 px window: the
+        // list is capped at exactly the point where the queue keeps its floor
+        // (500 − 133 − 100 = 267) — never below `QUEUE_MIN_FRAC * free`.
+        let heights = [single_line_card_h(); 10];
+        let (queue_h, list_h) = page_heights(500.0, &heights);
         assert_eq!(
             list_h,
-            500.0 - (QUEUE_HEADER_H + QUEUE_BELOW_H) - QUEUE_MIN_FRAC * 500.0
+            500.0 - (QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H) - QUEUE_MIN_FRAC * 500.0
         );
         assert!(queue_h >= QUEUE_MIN_FRAC * 500.0);
         // The queue also never exceeds its ceiling.
@@ -3518,18 +3772,142 @@ mod tests {
     fn page_heights_zero_cards_give_the_room_to_the_queue() {
         // No cards: the list collapses to zero and the queue takes the rest —
         // here capped at half the free height, well above its floor.
-        let (queue_h, list_h) = page_heights(500.0, 0);
+        let (queue_h, list_h) = page_heights(500.0, &[]);
         assert_eq!(list_h, 0.0);
         assert_eq!(queue_h, QUEUE_MAX_FRAC * 500.0);
     }
 
     #[test]
     fn page_heights_tiny_window_never_overflows() {
-        // Below the chrome (116 px) both areas collapse to zero — nothing may
+        // Below the chrome (133 px) both areas collapse to zero — nothing may
         // run off the bottom edge.
-        let (queue_h, list_h) = page_heights(50.0, 5);
+        let (queue_h, list_h) = page_heights(50.0, &[single_line_card_h(); 5]);
         assert_eq!(queue_h, 0.0);
         assert_eq!(list_h, 0.0);
+    }
+
+    #[test]
+    fn page_heights_reserve_the_wrapped_card_height() {
+        // R1: a 2-line 15 pt name adds the real 15 pt row height (17.22), not
+        // an 11 pt line step. The reservation must carry that extra height.
+        let single = single_line_card_h();
+        let two_line_name = folder_card_height(&[34.0, 13.0, 13.0], 8.0, 26.0);
+        assert!((two_line_name - single - 17.0).abs() < 0.001);
+        let heights = [single, two_line_name];
+        let (_, list_h) = page_heights(1000.0, &heights);
+        assert_eq!(list_h, list_content_h(&heights));
+    }
+
+    /// Build a text whose galley needs exactly `lines` lines at `column_w` by
+    /// appending one word at a time. Returns `(text, galley_height, lines)`.
+    /// Used to exercise the 15 pt name and 11 pt meta line heights for real.
+    fn text_with_lines(
+        ui: &egui::Ui,
+        column_w: f32,
+        size: f32,
+        lines: usize,
+    ) -> (String, f32, usize) {
+        let mut text = String::new();
+        loop {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str("Ordner");
+            let galley = ui.fonts(|f| {
+                f.layout(
+                    text.clone(),
+                    egui::FontId::proportional(size),
+                    egui::Color32::WHITE,
+                    column_w,
+                )
+            });
+            let got = galley.rows.len();
+            if got >= lines {
+                return (text, galley.size().y, got);
+            }
+        }
+    }
+
+    #[test]
+    fn folder_card_height_uses_the_real_galley_heights() {
+        // R1/R3: the text-column widths measured by the runtime probe —
+        // `failures` at 760: 341.5 (Fehler) and 210.66 (Datensicherung
+        // abgeschlossen); `mixed` at 760: 260.34; at 1400: 981.5 / 850.66 /
+        // 900.34. 208/306 are the verifier's rounded minimum-window cases. For
+        // name/meta 1–3 lines and with/without outcome the reserved height must
+        // be exactly the galley heights plus spacing and chrome, and a list
+        // reserved with it must fit the full cards.
+        let ctx = egui::Context::default();
+        let mut checked = 0;
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let spacing = 8.0;
+                let row_h = ui.spacing().interact_size.y;
+                for column in [
+                    208.0_f32, 306.0, 210.66, 260.34, 341.5, 850.66, 900.34, 981.5,
+                ] {
+                    for name_lines in 1..=3 {
+                        for meta_lines in 1..=3 {
+                            let (name, name_h, got_name) =
+                                text_with_lines(ui, column, 15.0, name_lines);
+                            assert_eq!(got_name, name_lines, "name at {column}: {name:?}");
+                            let (meta, meta_h, got_meta) =
+                                text_with_lines(ui, column, 11.0, meta_lines);
+                            assert_eq!(got_meta, meta_lines, "meta at {column}: {meta:?}");
+                            let (_, outcome_h, _) = text_with_lines(ui, column, 11.0, 1);
+                            let with_outcome =
+                                folder_card_height(&[name_h, meta_h, outcome_h], spacing, row_h);
+                            assert_eq!(
+                                with_outcome,
+                                FOLDER_CARD_CHROME_H + name_h + meta_h + outcome_h + 2.0 * spacing,
+                                "column {column}, name {name_lines}, meta {meta_lines}"
+                            );
+                            let without_outcome =
+                                folder_card_height(&[name_h, meta_h], spacing, row_h);
+                            assert_eq!(
+                                without_outcome,
+                                FOLDER_CARD_CHROME_H + name_h + meta_h + spacing
+                            );
+                            assert!(with_outcome > without_outcome);
+                            let (_, list_h) = page_heights(1000.0, &[with_outcome, with_outcome]);
+                            assert_eq!(list_h, 2.0 * with_outcome + FOLDER_CARD_GAP);
+                            checked += 1;
+                        }
+                    }
+                }
+                // The per-line delta is the real row height of the block, not a
+                // shared constant: 15 pt name ≈ 17.22, 11 pt meta ≈ 12.66.
+                let (_, name1, _) = text_with_lines(ui, 208.0, 15.0, 1);
+                let (_, name2, _) = text_with_lines(ui, 208.0, 15.0, 2);
+                // Galley heights are pixel-rounded: 15 pt → 17, 11 pt → 13.
+                assert!((name2 - name1 - 17.0).abs() < 0.01);
+                assert!(name2 - name1 > 13.0, "name lines must not use the 11 pt step");
+                let (_, meta1, _) = text_with_lines(ui, 208.0, 11.0, 1);
+                let (_, meta2, _) = text_with_lines(ui, 208.0, 11.0, 2);
+                assert!((meta2 - meta1 - 13.0).abs() < 0.01);
+            });
+        });
+        assert_eq!(checked, 8 * 3 * 3);
+    }
+
+    #[test]
+    fn queue_columns_fill_the_table_and_keep_the_name_at_least_80() {
+        // Issue #30: the table ends exactly at `content - scroll bar`, the four
+        // cells plus their three gaps add up to the table width, and the name
+        // column never drops below 80 px — not even at the minimum window
+        // (760 - 220 sidebar - 2 * 16 page gutter = 508 content px).
+        for content_w in [1400.0, 1000.0, 760.0, 508.0] {
+            let cols = queue_columns(content_w, 8.0, 18.0);
+            assert_eq!(cols.table_w, content_w - 18.0, "content {content_w}");
+            assert!(cols.name_w >= QUEUE_MIN_NAME_W, "content {content_w}");
+            assert_eq!(
+                cols.folder_w + cols.name_w + cols.size_w + cols.status_w + 3.0 * 8.0,
+                cols.table_w,
+                "columns must add up exactly at content {content_w}"
+            );
+            assert_eq!(cols.size_w, 80.0);
+            assert_eq!(cols.status_w, 140.0);
+        }
     }
 
     #[test]

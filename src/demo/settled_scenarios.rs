@@ -156,6 +156,14 @@ pub(super) fn settings() -> Fixture {
     }
 }
 
+/// The same settings data on the second tab (Issue #30): the bandwidth page
+/// has its own control heights and must also sit inside the page gutter.
+pub(super) fn settings_bandwidth() -> Fixture {
+    let mut fixture = settings();
+    fixture.settings_tab = SettingsTab::Bandwidth;
+    fixture
+}
+
 pub(super) fn signed_out() -> Fixture {
     Fixture {
         // No session material at all: `is_logged_in()` is false, so the app

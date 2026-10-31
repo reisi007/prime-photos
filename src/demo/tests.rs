@@ -8,6 +8,23 @@ fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|v| v.to_string()).collect()
 }
 
+/// The default interactive demo mode for `scenario`.
+fn demo(scenario: Scenario) -> Mode {
+    Mode::Demo {
+        scenario,
+        size: DemoSize::INTERACTIVE,
+    }
+}
+
+/// A screenshot mode with the default screenshot size.
+fn shot(scenario: Scenario, path: &str) -> Mode {
+    Mode::Screenshot {
+        scenario,
+        path: PathBuf::from(path),
+        size: DemoSize::SCREENSHOT,
+    }
+}
+
 #[test]
 fn no_arguments_means_the_normal_app() {
     assert_eq!(parse_args(&[]), Ok(Mode::Off));
@@ -15,34 +32,28 @@ fn no_arguments_means_the_normal_app() {
 
 #[test]
 fn demo_without_a_value_is_the_mixed_scenario() {
-    assert_eq!(
-        parse_args(&args(&["--demo"])),
-        Ok(Mode::Demo(Scenario::Mixed))
-    );
+    assert_eq!(parse_args(&args(&["--demo"])), Ok(demo(Scenario::Mixed)));
 }
 
 #[test]
 fn demo_accepts_both_attached_and_separate_values() {
     assert_eq!(
         parse_args(&args(&["--demo=uploading"])),
-        Ok(Mode::Demo(Scenario::Uploading))
+        Ok(demo(Scenario::Uploading))
     );
     assert_eq!(
         parse_args(&args(&["--demo", "all-done"])),
-        Ok(Mode::Demo(Scenario::AllDone))
+        Ok(demo(Scenario::AllDone))
     );
     // Case-insensitive: a shell completion or a hand-typed id works.
     assert_eq!(
         parse_args(&args(&["--demo=Signed-Out"])),
-        Ok(Mode::Demo(Scenario::SignedOut))
+        Ok(demo(Scenario::SignedOut))
     );
     // `--demo` followed by another flag must not consume that flag.
     assert_eq!(
         parse_args(&args(&["--demo", "--screenshot=/tmp/x.png"])),
-        Ok(Mode::Screenshot {
-            scenario: Scenario::Mixed,
-            path: PathBuf::from("/tmp/x.png"),
-        })
+        Ok(shot(Scenario::Mixed, "/tmp/x.png"))
     );
 }
 
@@ -50,26 +61,122 @@ fn demo_accepts_both_attached_and_separate_values() {
 fn screenshot_implies_the_demo_and_combines_with_a_scenario() {
     assert_eq!(
         parse_args(&args(&["--screenshot", "/tmp/shot.png"])),
-        Ok(Mode::Screenshot {
-            scenario: Scenario::Mixed,
-            path: PathBuf::from("/tmp/shot.png"),
-        })
+        Ok(shot(Scenario::Mixed, "/tmp/shot.png"))
     );
     assert_eq!(
         parse_args(&args(&["--demo=failures", "--screenshot", "/tmp/f.png"])),
-        Ok(Mode::Screenshot {
-            scenario: Scenario::Failures,
-            path: PathBuf::from("/tmp/f.png"),
-        })
+        Ok(shot(Scenario::Failures, "/tmp/f.png"))
     );
     // Order must not matter, and the attached form works too.
     assert_eq!(
         parse_args(&args(&["--screenshot=/tmp/g.png", "--demo=paused"])),
-        Ok(Mode::Screenshot {
-            scenario: Scenario::Paused,
-            path: PathBuf::from("/tmp/g.png"),
+        Ok(shot(Scenario::Paused, "/tmp/g.png"))
+    );
+}
+
+#[test]
+fn size_accepts_both_forms_and_both_defaults() {
+    // The screenshot default stays 1400x900, the interactive one 1200x800.
+    assert_eq!(DemoSize::SCREENSHOT.points(), [1400.0, 900.0]);
+    assert_eq!(DemoSize::INTERACTIVE.points(), [1200.0, 800.0]);
+
+    let size = DemoSize {
+        width: 760,
+        height: 520,
+    };
+    assert_eq!(
+        parse_args(&args(&["--demo=mixed", "--size", "760x520"])),
+        Ok(Mode::Demo {
+            scenario: Scenario::Mixed,
+            size,
         })
     );
+    // Attached form, uppercase separator and every combination order.
+    assert_eq!(
+        parse_args(&args(&["--size=760X520", "--demo=failures"])),
+        Ok(Mode::Demo {
+            scenario: Scenario::Failures,
+            size,
+        })
+    );
+    assert_eq!(
+        parse_args(&args(&[
+            "--size",
+            "1000x700",
+            "--demo",
+            "mixed",
+            "--screenshot=/tmp/s.png",
+        ])),
+        Ok(Mode::Screenshot {
+            scenario: Scenario::Mixed,
+            path: PathBuf::from("/tmp/s.png"),
+            size: DemoSize {
+                width: 1000,
+                height: 700,
+            },
+        })
+    );
+    // A `--demo` followed by `--size` must not consume the flag as a scenario.
+    assert_eq!(
+        parse_args(&args(&["--demo", "--size", "800x600"])),
+        Ok(Mode::Demo {
+            scenario: Scenario::Mixed,
+            size: DemoSize {
+                width: 800,
+                height: 600,
+            },
+        })
+    );
+}
+
+#[test]
+fn size_is_validated_and_only_valid_for_demo_runs() {
+    for invalid in ["760", "760x", "x520", "axb", "760x520x1", "760,520"] {
+        let err = parse_args(&args(&["--demo", "--size", invalid]))
+            .expect_err("invalid size must be rejected");
+        assert!(
+            err.contains("Ungültige Fenstergröße") && err.contains("Verwendung"),
+            "{invalid}: {err}"
+        );
+    }
+    // Below the app minimum is a usage error, not a silently clamped window.
+    for too_small in ["759x520", "760x519", "0x0"] {
+        let err = parse_args(&args(&["--demo", "--size", too_small]))
+            .expect_err("size below the minimum must be rejected");
+        assert!(err.contains("zu klein"), "{too_small}: {err}");
+    }
+    // Above the supported maximum is a typo, not a window-manager problem.
+    for too_large in ["8193x520", "760x8193", "10000x10000"] {
+        let err = parse_args(&args(&["--demo", "--size", too_large]))
+            .expect_err("size above the maximum must be rejected");
+        assert!(
+            err.contains("zu groß") && err.contains("Maximum 8192x8192"),
+            "{too_large}: {err}"
+        );
+    }
+    // The boundary itself is accepted (no window is opened in a parse test).
+    assert_eq!(
+        parse_args(&args(&["--demo", "--size", "8192x8192"])),
+        Ok(Mode::Demo {
+            scenario: Scenario::Mixed,
+            size: DemoSize {
+                width: 8192,
+                height: 8192,
+            },
+        })
+    );
+    // A missing value is a usage error too, not a panic.
+    let err = parse_args(&args(&["--demo", "--size"])).expect_err("missing size");
+    assert!(err.contains("erwartet WxH"), "{err}");
+    // Malformed flags stay in our namespace and are reported.
+    let err = parse_args(&args(&["--demo", "--sizes=760x520"])).expect_err("typo");
+    assert!(err.contains("Unbekanntes Argument"), "{err}");
+    // A normal start has no demo window: `--size` is not a real-app option.
+    let err = parse_args(&args(&["--size", "760x520"])).expect_err("size without demo");
+    assert!(err.contains("nur mit --demo oder --screenshot"), "{err}");
+    // `--demo-list` takes no size.
+    let err = parse_args(&args(&["--demo-list", "--size=760x520"])).expect_err("list + size");
+    assert!(err.contains("--demo-list"), "{err}");
 }
 
 #[test]
@@ -140,14 +247,8 @@ fn every_explicit_mode_is_recognised_by_mode_predicates() {
     assert!(!Mode::Off.is_demo());
     assert!(!Mode::List.is_demo());
     assert_eq!(Mode::List.into_demo(), None);
-    assert!(Mode::Demo(Scenario::Mixed).is_demo());
-    assert!(
-        Mode::Screenshot {
-            scenario: Scenario::Mixed,
-            path: PathBuf::from("/tmp/x.png"),
-        }
-        .is_demo()
-    );
+    assert!(demo(Scenario::Mixed).is_demo());
+    assert!(shot(Scenario::Mixed, "/tmp/x.png").is_demo());
 }
 
 #[test]
@@ -163,7 +264,12 @@ fn every_scenario_round_trips_through_its_id() {
         );
         seen.push(scenario.id());
     }
-    assert_eq!(Scenario::ALL.len(), 9);
+    assert_eq!(Scenario::ALL.len(), 10);
+    assert!(seen.contains(&"settings-bandwidth"));
     assert_eq!(Scenario::parse("  MIXED "), Some(Scenario::Mixed));
+    assert_eq!(
+        Scenario::parse("settings-bandwidth"),
+        Some(Scenario::SettingsBandwidth)
+    );
     assert_eq!(Scenario::parse("nope"), None);
 }

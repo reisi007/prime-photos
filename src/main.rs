@@ -69,7 +69,7 @@ fn main() -> eframe::Result<()> {
     };
     if mode == demo::Mode::List {
         for scenario in demo::Scenario::ALL {
-            println!("{:<14} {}", scenario.id(), scenario.description());
+            println!("{:<18} {}", scenario.id(), scenario.description());
         }
         return Ok(());
     }
@@ -97,17 +97,21 @@ fn main() -> eframe::Result<()> {
     app_activation::install_launch_diagnostic();
 
     // The demo window has a fixed size so a screenshot does not depend on the
-    // developer's screen; the normal app keeps its preferred start size.
+    // developer's screen; `--size WxH` picks a different one (Issue #30),
+    // defaulting to the historical values. The normal app keeps its preferred
+    // start size.
     let inner_size = match &mode {
-        demo::Mode::Screenshot { .. } => [1400.0, 900.0],
-        demo::Mode::Demo(_) => [1200.0, 800.0],
+        demo::Mode::Screenshot { size, .. } | demo::Mode::Demo { size, .. } => size.points(),
         // `List` already returned above; keep the normal start size for it so
         // the match stays exhaustive without a wildcard.
         demo::Mode::Off | demo::Mode::List => [1000.0, 700.0],
     };
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size(inner_size)
-        .with_min_inner_size([760.0, 520.0])
+        .with_min_inner_size([
+            demo::DemoSize::MIN_WIDTH as f32,
+            demo::DemoSize::MIN_HEIGHT as f32,
+        ])
         .with_icon(window_icon());
     let viewport = if mode.is_demo() {
         // A demo run is meant to be looked at (and captured) — no hidden start.

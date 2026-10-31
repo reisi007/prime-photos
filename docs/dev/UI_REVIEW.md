@@ -1,0 +1,121 @@
+# UI-Review-Checkliste (Issue #30)
+
+Prüfliste und Befehle für die visuelle Abnahme von Fenster-Layout, Abständen und
+Textabbrüchen. Die Zustände kommen aus der Demo-Datenquelle
+([`UI_FIXTURES.md`](UI_FIXTURES.md)); es wird **nichts** am echten Konto, an
+`config.toml`, Keychain, SQLite oder im Netzwerk angefasst.
+
+## Bauen
+
+```bash
+cargo build --release
+```
+
+Für eine **Retina-Sichtprüfung** zusätzlich das Bundle bauen
+([`DEV_NOTES.md`](DEV_NOTES.md) §7): die nackte Binary hat keine `Info.plist` und
+kann je nach Startweg unscharf sein.
+
+```bash
+packaging/make-app.sh
+```
+
+## Screenshot-Matrix
+
+Alle Bilder entstehen über den Harness (`--screenshot`), nicht von Hand. Die
+PNG-Datei enthält **physische Pixel**: auf einem 2×-Display ist ein
+1400×900-Fenster 2800×1800 Pixel groß, ein 760×520-Fenster 1520×1040.
+
+```bash
+OUT=/tmp/prime-ui-review
+mkdir -p "$OUT"
+BIN=target/release/prime-photos
+
+# Zehn Zustände bei 1400×900
+for s in mixed uploading paused all-done failures empty many-folders \
+         settings settings-bandwidth signed-out; do
+  "$BIN" --demo="$s" --size 1400x900 --screenshot="$OUT/${s}-1400x900.png"
+done
+
+# Minimum-Fenster und eine mittlere Größe
+"$BIN" --demo=mixed    --size 760x520  --screenshot="$OUT/mixed-760x520.png"
+"$BIN" --demo=mixed    --size 1000x700 --screenshot="$OUT/mixed-1000x700.png"
+"$BIN" --demo=failures --size 760x520  --screenshot="$OUT/failures-760x520.png"
+"$BIN" --demo=failures --size 760x700  --screenshot="$OUT/failures-760x700.png"
+"$BIN" --demo=signed-out --size 760x520 --screenshot="$OUT/signed-out-760x520.png"
+```
+
+| Zustand | Größe |
+|---|---|
+| `mixed`, `uploading`, `paused`, `all-done`, `failures`, `empty`, `many-folders`, `settings`, `settings-bandwidth`, `signed-out` | 1400×900 |
+| `mixed` | 760×520 und 1000×700 |
+| `failures` | 760×520 und 760×700 |
+| `signed-out` | 760×520 |
+
+## Prüfung pro Zustand
+
+Die ersten sieben Zustände sind die Backup-Seite, dazu `settings`/
+`settings-bandwidth` (Einstellungen) und `signed-out` (Anmeldung).
+
+- [ ] **Seitenrand 16 px** links und rechts: kein Inhalt berührt den
+  Fensterrand. Die Inhaltskante liegt bei 1400×900 auf x = 236 (links) bzw.
+  x = 1384 (rechts) in Punkten.
+- [ ] **Sidebar und Inhalt**: Die Sidebar beginnt links bei 16 px; ihr Logo und
+  die erste Inhaltszeile der Seite liegen auf derselben y-Höhe (12 px
+  Innenabstand oben).
+- [ ] **Tabelle**: Kopfzeile und Werte stehen exakt übereinander — Ordner, Name
+  und Status linksbündig, Größe rechtsbündig. Die Trennlinie unter dem Kopf ist
+  1 px hoch und endet auf derselben Kante wie die Tabelle.
+- [ ] **Statusspalte**: „In Bearbeitung · 100 %“ (bzw. die längste Übersetzung)
+  ist vollständig sichtbar und läuft nie in die nächste Spalte.
+- [ ] **Gemeinsame rechte Kante**: Tabelle, Fortschrittsbalken und Ordnerkarten
+  enden auf derselben x-Position; die 18 px Scrollbar-Reserve steht konstant zur
+  Verfügung (auch ohne Hover).
+- [ ] **Ordnerkarte**: rechter Rahmen sichtbar; Status und Aktionssymbole enden
+  16 px vor dem Kartenrand; kein Text läuft unter die Symbole.
+- [ ] **Umbrechende Karte (760)**: in `failures-760x700` ist die zweite Karte
+  samt unterem Rahmen und letzter Meta-Zeile vollständig sichtbar (die Höhe wird
+  aus den tatsächlichen Zeilenumbrüchen reserviert). In `failures-760x520` darf
+  sie nur als Teil des **scrollenden** Listen-Viewports angeschnitten sein.
+- [ ] **Gesamtbalken** liegt vollständig innerhalb des Seitenrands.
+- [ ] **Kontoblock**: Marktplatz, Kontoname und „Abmelden“ sind vollständig
+  sichtbar — auch im Zustand `failures` mit zweizeiliger Fehlermeldung und bei
+  760×520. Unter dem Knopf bleibt der 12-px-Rand frei.
+- [ ] **Anmeldebildschirm**: Logo, Titel und Marktplatz-Auswahl sind zentriert;
+  nichts berührt den Fensterrand bei 760×520.
+- [ ] **Keine unerwarteten Textabbrüche**: Lange Pfade/Dateinamen werden
+  gekürzt und bleiben im Tooltip erreichbar; halb sichtbare Zeilen/Karten sind
+  nur dort erlaubt, wo die Liste tatsächlich scrollt.
+- [ ] **Theme-Abstände**: `item_spacing` ist 8/8, die Scrollbar-Reserve 18 px,
+  die Seite hat den Hintergrund `#F7F8F8`, Karten bleiben weiß.
+- [ ] **Einstellungen**: Tab-Zeile und Trennlinien beginnen am Seitenrand
+  (x = 236) und enden an der Seitenkante (x = 1384); kein Redesign.
+
+## Automatisierte Randprüfung
+
+Ein kurzes Skript (Python + Pillow) beantwortet die harten Fragen aus der
+Matrix:
+
+```bash
+python3 - <<'PY'
+from PIL import Image
+from pathlib import Path
+OUT = Path("/tmp/prime-ui-review")
+BG = (0xF7, 0xF8, 0xF8)          # theme::PAGE_BG
+for png in sorted(OUT.glob("*.png")):
+    im = Image.open(png).convert("RGB")
+    w, h = im.size
+    # Rechte Kante: 1400 - 16 (Gutter) - 18 (Scrollbar) = 1366 Punkte
+    limit = w - 2 * (16 + 18) if "1400x900" in png.name else None
+    if limit:
+        right = max(x for y in range(h - 80) for x in range(w - 1, 440, -1)
+                    if im.getpixel((x, y)) != BG)
+        assert right <= limit, (png.name, right, limit)
+    print(f"{png.name}: {w}x{h} ok")
+PY
+```
+
+Die logische Grenze für 1400×900 ist **1366 Punkte** (= 2732 physische Pixel bei
+2×): 1400 minus 16 px Seitenrand minus 18 px Scrollbar-Reserve. Die
+Einstellungsseite hat keine Scrollbar und endet deshalb an der Seitenkante
+1384 (2768 Pixel). Der Trennstrich der Log-Leiste ist Panel-Chrome und wird
+nicht mitgemessen.

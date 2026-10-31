@@ -14,12 +14,44 @@ pub const GREEN: Color32 = Color32::from_rgb(0x06, 0x7D, 0x2F);
 pub const AMBER: Color32 = Color32::from_rgb(0xB0, 0x6A, 0x00);
 pub const RED: Color32 = Color32::from_rgb(0xC4, 0x00, 0x00);
 
+/// Page background behind the content (`#F7F8F8`). Cards and controls stay
+/// white, so the page reads as one surface with raised cards.
+pub const PAGE_BG: Color32 = Color32::from_rgb(0xF7, 0xF8, 0xF8);
+/// Horizontal gutter between the window edge and every page's content.
+pub const PAGE_MARGIN_X: i8 = 16;
+/// Vertical gutter above and below every page's content.
+pub const PAGE_MARGIN_Y: i8 = 12;
+/// Horizontal gutter of the navigation sidebar's content.
+pub const SIDEBAR_MARGIN_X: i8 = 16;
+/// Vertical gutter of the navigation sidebar's content.
+pub const SIDEBAR_MARGIN_Y: i8 = 12;
+
 pub fn muted(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).color(MUTED)
 }
 
 pub fn apply(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
+    // Apply to **both** style maps (light and dark), not only the active one.
+    // `set_style` writes just the style of the currently selected theme; egui
+    // then switches to the system theme (light) on the first frame and selects
+    // its default light style, discarding every custom value — spacing,
+    // reserved scroll-bar width, panel fill, fonts. `all_styles_mut` keeps the
+    // custom look whichever theme preference the OS/app ends up using (the app
+    // is intentionally light-only: `dark_mode = false` in both).
+    ctx.all_styles_mut(apply_style);
+}
+
+/// The custom style, shared by light and dark so a theme switch cannot drop it.
+fn apply_style(style: &mut egui::Style) {
+    // `Style::default()` carries `Visuals::dark()` (egui 0.31: `Visuals::default()
+    // = Visuals::dark()`), so start from the **light** visuals explicitly. Both
+    // maps get the same light-based style, and fields this theme does not
+    // overwrite (window stroke/shadow, menu and warn colours) have no dark
+    // leftovers in windows and popups.
+    *style = egui::Style {
+        visuals: egui::Visuals::light(),
+        ..egui::Style::default()
+    };
 
     // --- Colours -------------------------------------------------------
     let v = &mut style.visuals;
@@ -93,8 +125,6 @@ pub fn apply(ctx: &egui::Context) {
         ),
     ]
     .into();
-
-    ctx.set_style(style);
 }
 
 /// A prominent dark, pill-shaped primary button (like "Datensicherung hinzufügen …").
@@ -125,5 +155,60 @@ mod tests {
         assert!(scroll.allocated_width() >= scroll.bar_width);
         // Der Reststreifen neben dem Griff ist der sichtbare Abstand zum Inhalt.
         assert!(scroll.allocated_width() - scroll.bar_width >= 8.0);
+    }
+
+    #[test]
+    fn custom_style_survives_a_theme_switch() {
+        // Regression (Issue #30): `set_style` wrote only the active style, and
+        // the first frame's switch to the system theme replaced it with egui's
+        // default light style. `all_styles_mut` must keep the custom values in
+        // both theme maps, whichever preference is active afterwards.
+        let ctx = egui::Context::default();
+        super::apply(&ctx);
+        // Fields the custom theme deliberately does not overwrite must still
+        // come from the **light** visuals. `Style::default()` would carry
+        // `Visuals::dark()` (egui 0.31), so a future revert would fail here:
+        // the About and backup-config windows would then get a dark window
+        // stroke/shadow and dark warn colours.
+        let light = egui::Visuals::light();
+        let dark = egui::Visuals::dark();
+        assert_ne!(light.window_stroke.color, dark.window_stroke.color);
+        assert_ne!(light.window_shadow.color, dark.window_shadow.color);
+        assert_ne!(light.warn_fg_color, dark.warn_fg_color);
+        for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+            ctx.set_theme(preference);
+            let style = ctx.style();
+            assert!(
+                !style.visuals.dark_mode,
+                "the app is light-only, also under {preference:?}"
+            );
+            assert_eq!(
+                style.spacing.item_spacing,
+                egui::vec2(8.0, 8.0),
+                "spacing lost under {preference:?}"
+            );
+            assert_eq!(style.spacing.button_padding, egui::vec2(12.0, 7.0));
+            assert_eq!(style.spacing.scroll.allocated_width(), 18.0);
+            assert_eq!(style.spacing.scroll.floating_allocated_width, 18.0);
+            assert_eq!(style.visuals.panel_fill, super::PANEL_BG);
+            assert_eq!(style.visuals.widgets.noninteractive.fg_stroke.color, super::INK);
+            assert_eq!(
+                style.visuals.window_stroke.color, light.window_stroke.color,
+                "dark window stroke under {preference:?}"
+            );
+            assert_eq!(
+                style.visuals.window_shadow.color, light.window_shadow.color,
+                "dark window shadow under {preference:?}"
+            );
+            assert_eq!(
+                style.visuals.warn_fg_color, light.warn_fg_color,
+                "dark warn colour under {preference:?}"
+            );
+            assert_eq!(
+                style.text_styles[&egui::TextStyle::Body].size,
+                14.0,
+                "type scale lost under {preference:?}"
+            );
+        }
     }
 }

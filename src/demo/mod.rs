@@ -51,20 +51,89 @@ pub(crate) enum Mode {
     /// `--demo-list`: print the scenarios and exit, without starting the app.
     List,
     /// Interactive demo window: fixtures, no session, no side effects.
-    Demo(Scenario),
+    Demo { scenario: Scenario, size: DemoSize },
     /// Fixtures, one captured frame, then exit. The path must be absolute so
     /// the process can write it regardless of its working directory.
     Screenshot {
         scenario: Scenario,
         path: PathBuf,
+        size: DemoSize,
     },
+}
+
+/// Window size of a demo run in points (Issue #30).
+///
+/// The normal app keeps its screen-derived start size; a demo run is meant to
+/// be looked at and captured, so its size is explicit and reproducible — also
+/// at the minimum window size, where clipping shows up first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DemoSize {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+impl DemoSize {
+    /// Default of a screenshot run: the full reference picture.
+    pub(crate) const SCREENSHOT: Self = Self {
+        width: 1400,
+        height: 900,
+    };
+    /// Default of the interactive demo window.
+    pub(crate) const INTERACTIVE: Self = Self {
+        width: 1200,
+        height: 800,
+    };
+    /// The app's minimum window (`main.rs` sets the same viewport minimum).
+    pub(crate) const MIN_WIDTH: u32 = 760;
+    pub(crate) const MIN_HEIGHT: u32 = 520;
+    /// Upper bound for a demo window. Anything larger is almost certainly a
+    /// typo and would only be clamped by the window manager, so it is rejected
+    /// instead of handed to the OS.
+    pub(crate) const MAX_WIDTH: u32 = 8192;
+    pub(crate) const MAX_HEIGHT: u32 = 8192;
+
+    /// `WxH` in points, e.g. `760x520`. Any other shape and anything outside
+    /// the app's supported range is a usage error, never a silently clamped
+    /// window.
+    fn parse(value: &str) -> Result<Self, String> {
+        let invalid = || {
+            arg_error(format!(
+                "Ungültige Fenstergröße: {value} (erwartet z. B. 760x520)"
+            ))
+        };
+        let (width, height) = value
+            .split_once(|c: char| c == 'x' || c == 'X')
+            .ok_or_else(invalid)?;
+        let width: u32 = width.parse().map_err(|_| invalid())?;
+        let height: u32 = height.parse().map_err(|_| invalid())?;
+        if width < Self::MIN_WIDTH || height < Self::MIN_HEIGHT {
+            return Err(arg_error(format!(
+                "Fenstergröße zu klein: {value} (Minimum {}x{})",
+                Self::MIN_WIDTH,
+                Self::MIN_HEIGHT
+            )));
+        }
+        if width > Self::MAX_WIDTH || height > Self::MAX_HEIGHT {
+            return Err(arg_error(format!(
+                "Fenstergröße zu groß: {value} (Maximum {}x{})",
+                Self::MAX_WIDTH,
+                Self::MAX_HEIGHT
+            )));
+        }
+        Ok(Self { width, height })
+    }
+
+    /// The size as egui points (the viewport API takes floats).
+    pub(crate) fn points(self) -> [f32; 2] {
+        [self.width as f32, self.height as f32]
+    }
 }
 
 impl Mode {
     /// Whether this run uses the demo fixtures at all. `List` does not: it only
     /// prints the scenario table and exits.
     pub(crate) fn is_demo(&self) -> bool {
-        matches!(self, Mode::Demo(_) | Mode::Screenshot { .. })
+        matches!(self, Mode::Demo { .. } | Mode::Screenshot { .. })
     }
 
     /// Split the mode into what the app constructor needs: the scenario and an
@@ -72,8 +141,8 @@ impl Mode {
     pub(crate) fn into_demo(self) -> Option<(Scenario, Option<PathBuf>)> {
         match self {
             Mode::Off | Mode::List => None,
-            Mode::Demo(scenario) => Some((scenario, None)),
-            Mode::Screenshot { scenario, path } => Some((scenario, Some(path))),
+            Mode::Demo { scenario, .. } => Some((scenario, None)),
+            Mode::Screenshot { scenario, path, .. } => Some((scenario, Some(path))),
         }
     }
 }
@@ -88,6 +157,8 @@ pub(crate) fn usage() -> &'static str {
   prime-photos --screenshot <Pfad>      Demo-Frame als PNG nach <Pfad> schreiben, dann beenden
   prime-photos --screenshot=<Pfad> --demo=<id>
                                         Screenshot eines bestimmten Szenarios
+  prime-photos --demo=mixed --size 760x520
+                                        Demo in einer bestimmten Fenstergröße (760x520…8192x8192)
 
 Der Screenshot-Pfad muss absolut sein. Die Demo liest und schreibt weder
 config.toml noch Keychain, SQLite oder Netzwerk.
@@ -103,6 +174,7 @@ zu Prime Photos gehören (z. B. von macOS injizierte), werden dabei ignoriert."
 pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
     let mut scenario: Option<Scenario> = None;
     let mut screenshot: Option<PathBuf> = None;
+    let mut size: Option<DemoSize> = None;
     let mut demo_requested = false;
     let mut list_requested = false;
     // Tokens that are not ours at all. Launchers inject such arguments (macOS
@@ -136,7 +208,18 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
                 .ok_or_else(|| arg_error("--screenshot erwartet einen Pfad".to_string()))?;
             screenshot = Some(absolute_screenshot_path(value)?);
             i += 1;
-        } else if arg.starts_with("--demo") || arg.starts_with("--screenshot") {
+        } else if let Some(value) = arg.strip_prefix("--size=") {
+            size = Some(DemoSize::parse(value)?);
+        } else if arg == "--size" {
+            let value = args
+                .get(i + 1)
+                .ok_or_else(|| arg_error("--size erwartet WxH".to_string()))?;
+            size = Some(DemoSize::parse(value)?);
+            i += 1;
+        } else if arg.starts_with("--demo")
+            || arg.starts_with("--screenshot")
+            || arg.starts_with("--size")
+        {
             // Our namespace, but not a form we know: always an error, even for
             // a normal start — a typo must not silently start the real app.
             return Err(arg_error(format!("Unbekanntes Argument: {arg}")));
@@ -147,9 +230,10 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
     }
 
     if list_requested {
-        if demo_requested || screenshot.is_some() {
+        if demo_requested || screenshot.is_some() || size.is_some() {
             return Err(arg_error(
-                "--demo-list kann nicht mit --demo/--screenshot kombiniert werden".to_string(),
+                "--demo-list kann nicht mit --demo/--screenshot/--size kombiniert werden"
+                    .to_string(),
             ));
         }
         if let Some(arg) = foreign.first() {
@@ -167,6 +251,12 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
         if let Some(arg) = foreign.first() {
             return Err(arg_error(format!("Unbekanntes Argument: {arg}")));
         }
+    } else if size.is_some() {
+        // `--size` only makes sense for a demo/screenshot run; the normal app
+        // keeps its screen-derived start size.
+        return Err(arg_error(
+            "--size ist nur mit --demo oder --screenshot gültig".to_string(),
+        ));
     }
 
     match screenshot {
@@ -175,8 +265,12 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
             // selects which one, otherwise the everyday picture.
             scenario: scenario.unwrap_or(Scenario::Mixed),
             path,
+            size: size.unwrap_or(DemoSize::SCREENSHOT),
         }),
-        None if demo_requested => Ok(Mode::Demo(scenario.unwrap_or(Scenario::Mixed))),
+        None if demo_requested => Ok(Mode::Demo {
+            scenario: scenario.unwrap_or(Scenario::Mixed),
+            size: size.unwrap_or(DemoSize::INTERACTIVE),
+        }),
         // `Mode::Off` with foreign arguments: the normal app ignores them.
         None => Ok(Mode::Off),
     }

@@ -1,8 +1,9 @@
 # UI-Fixtures und Screenshot-Harness (Issue #29)
 
-Die Demo-Datenquelle rendert neun ausgewählte UI-Zustände ohne echte
+Die Demo-Datenquelle rendert zehn ausgewählte UI-Zustände ohne echte
 Amazon-Sitzung und ohne echte Fotordner. Sie ist ausschließlich für Entwicklung
-und Sichtprüfung gedacht; die normale Anwendung ändert sich nicht.
+und Sichtprüfung gedacht; die normale Anwendung ändert sich nicht. Die
+zustandsbezogene Prüfliste steht in [`UI_REVIEW.md`](UI_REVIEW.md).
 
 ## Zweck
 
@@ -15,9 +16,9 @@ und Sichtprüfung gedacht; die normale Anwendung ändert sich nicht.
   Rendering-Weg — ein Screenshot zeigt, was ein echter Frame zeigt.
 
 **Nicht abgedeckt** (bewusst noch kein Szenario): der Anlegen-/Bearbeiten-Dialog
-(„Datensicherungseinstellungen"), der Namenskonflikt-Dialog, der Tab
-„Bandbreite", eine laufende Anmeldung mit Webview, die abgelaufene Sitzung, das
-Drag-&-Drop-Overlay sowie das Über-/Lizenzfenster.
+(„Datensicherungseinstellungen"), der Namenskonflikt-Dialog, eine laufende
+Anmeldung mit Webview, die abgelaufene Sitzung, das Drag-&-Drop-Overlay sowie
+das Über-/Lizenzfenster.
 
 ## Benutzung
 
@@ -35,12 +36,22 @@ target/release/prime-photos --demo-list
 # Screenshot: fester Frame-Ablauf, PNG schreiben, selbst beenden
 target/release/prime-photos --screenshot=/tmp/prime-demo-mixed.png
 target/release/prime-photos --demo=failures --screenshot=/tmp/prime-demo-failures.png
+
+# Screenshot in einer bestimmten Fenstergröße (Punkte, Minimum 760×520)
+target/release/prime-photos --demo=mixed --size 760x520 \
+    --screenshot=/tmp/prime-demo-mixed-760.png
 ```
+
+`--size WxH` gilt nur für Demo-/Screenshot-Läufe und akzeptiert `760x520` wie
+`760X520`; alles unter dem App-Minimum **760×520**, über **8192×8192** oder in
+einem anderen Format (z. B. `760`, `760x`, `760,520`) wird mit Exit-Code 2
+abgelehnt. Ohne `--size` gilt 1400×900 für Screenshots und 1200×800 für die
+interaktive Demo.
 
 Der Screenshot-Pfad **muss absolut** sein; ein relativer Pfad wird mit einer
 Fehlermeldung und Exit-Code 2 abgelehnt. Ebenso ein unbekanntes Szenario, ein
-unbekanntes Flag aus unserem Namensraum (`--demo…`/`--screenshot…`) oder ein
-weiteres Argument neben `--demo-list`.
+unbekanntes Flag aus unserem Namensraum (`--demo…`/`--screenshot…`/`--size…`)
+oder ein weiteres Argument neben `--demo-list`.
 
 Argumente, die **nicht** zu Prime Photos gehören, werden beim normalen Start
 ignoriert — macOS injiziert z. B. `-psn_0_…` beim ersten Bundle-Start, IDEs
@@ -59,6 +70,7 @@ solches Argument als Tippfehler und wird gemeldet.
 | `empty` | Angemeldet, aber keine Sicherungsziele und keine Warteschlange (beide Leerzustände). |
 | `many-folders` | 12 Ordner: 0–5 nehmen am Lauf teil („Upload-Vorgang läuft"), 6 „Warten", 7 „Fehler", 8 nie gescannt (kein Status), 9–11 „Ordner nicht gefunden" — prüft das Scrollen der Liste. |
 | `settings` | Einstellungsseite, Tab „Allgemeines". |
+| `settings-bandwidth` | Einstellungsseite, Tab „Bandbreite" (Slider, Rate, Standardwerte für neue Ziele). |
 | `signed-out` | Anmeldebildschirm. Unsere eigene Seite rendert ohne Webview. In der **Demo** ist „Mit Amazon anmelden" wirkungslos (kein Webview, kein Netzwerk); in der normalen App öffnet derselbe Knopf die Anmeldung. |
 
 Neue Szenarien gehören in `src/demo/scenario.rs` (ID, Beschreibung, `ALL`) und
@@ -121,6 +133,10 @@ Zwei Wege, bewusst getrennt:
 # Automatisiert (1×): 1400×900 PNG
 target/release/prime-photos --demo=mixed --screenshot=/tmp/prime-demo-mixed.png
 
+# Minimum-Fenster für die Rand-/Clip-Prüfung (Issue #30)
+target/release/prime-photos --demo=mixed --size 760x520 \
+    --screenshot=/tmp/prime-demo-mixed-760.png
+
 # Retina-Sichtprüfung über das Bundle (2× → 2800×1800 PNG)
 packaging/make-app.sh
 "target/dist/Prime Photos.app/Contents/MacOS/prime-photos" \
@@ -128,10 +144,11 @@ packaging/make-app.sh
 ```
 
 Die Fenstergröße wird in **Punkten** angefordert: 1400×900 im Screenshot-Modus,
-1200×800 interaktiv (Minimum 760×520). Die PNG-Datei enthält **physische
-Pixel**; auf einem 2×-Display bzw. im Bundle ist sie daher 2800×1800. Beide
-Demo-Modi behalten ihre Größe (keine bildschirmabhängige Anpassung), damit das
-Bild reproduzierbar bleibt.
+1200×800 interaktiv, per `--size` frei wählbar (Minimum 760×520). Die PNG-Datei
+enthält **physische Pixel**; auf einem 2×-Display bzw. im Bundle ist sie daher
+2800×1800, bei `--size 760x520` also 1520×1040. Beide Demo-Modi behalten ihre
+Größe (keine bildschirmabhängige Anpassung), damit das Bild reproduzierbar
+bleibt.
 
 Das Fenster wird sichtbar und fokussiert gestartet und nach dem Schreiben
 geschlossen; der Prozess endet von selbst. Angefordert wird nach drei
@@ -148,13 +165,15 @@ damit ein späterer Frame den Erfolg nicht in einen Timeout umdeutet.
 `cargo test` deckt die Demo ohne Fenster ab (`src/demo/tests.rs`):
 
 - Argumente: alle Formen (`--demo`, `--demo=<id>`, `--demo <id>`,
-  `--screenshot <Pfad>`, `--screenshot=<Pfad>`, Kombination, Reihenfolge),
-  Off ohne Argumente, `--demo-list` (eigener Modus; zusätzliche oder
-  kombinierte Argumente sind ein Fehler), Injektionen wie `-psn_0_…`
-  (Normalstart bleibt möglich), relative Screenshot-Pfade, unbekannte
-  Argumente und Szenarien (Fehler enthalten die Verwendung).
+  `--screenshot <Pfad>`, `--screenshot=<Pfad>`, `--size WxH`/
+  `--size=WxH`, Kombination, Reihenfolge), Off ohne Argumente, `--demo-list`
+  (eigener Modus; zusätzliche oder kombinierte Argumente sind ein Fehler),
+  Injektionen wie `-psn_0_…` (Normalstart bleibt möglich), relative
+  Screenshot-Pfade, unbekannte Argumente und Szenarien (Fehler enthalten die
+  Verwendung). `--size` wird auf Format und den Bereich 760×520…8192×8192
+  geprüft und ist ohne `--demo`/`--screenshot` ein Fehler.
 - Szenarien: `parse(id())` ist für jedes Szenario ein Roundtrip, IDs sind
-  eindeutig und vollständig.
+  eindeutig und vollständig (zehn, inklusive `settings-bandwidth`).
 - Fixtures: ein `source_exists`-Eintrag pro Ordner; `mixed` hat exakt 187
   Zeilen (37/9/141), 150 offene Zeilen, die Prozentwerte 12/100/21/8 und
   Live-Zähler 63/13, 62/12, 62/12 auf den vorhandenen Ordnern; `all-done` hat

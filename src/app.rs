@@ -1075,7 +1075,8 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn sidebar(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(4.0);
+        // No top space: the sidebar's 12 px inner margin and the page's 12 px
+        // inner margin put the logo and the content's first row on the same y.
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), 30.0),
             egui::Layout::left_to_right(egui::Align::Center),
@@ -1101,15 +1102,36 @@ impl PrimePhotoApp {
             nav_settings_icon,
         );
 
-        // Account block at the bottom of the sidebar. A fixed reserve plus a
-        // plain top-down layout is far more predictable than `bottom_up`, which
-        // mis-places a nested `vertical` and let the logout button collide with
-        // the status line.
-        const ACCOUNT_BLOCK_H: f32 = 104.0;
-        let free = ui.available_height() - ACCOUNT_BLOCK_H;
+        // Account block at the bottom of the sidebar. **Measured**, not
+        // reserved (Issue #30): the old fixed `ACCOUNT_BLOCK_H = 104` clipped
+        // the "Abmelden" button as soon as the config error wrapped onto a
+        // second line at 760×520. The block is first laid out in an invisible,
+        // non-interactive probe with the real content width to learn its
+        // height; the free space above it is then consumed, so the real block
+        // always ends exactly at the sidebar's bottom margin.
+        let block_h = {
+            let mut probe = ui.new_child(
+                egui::UiBuilder::new()
+                    .invisible()
+                    .max_rect(egui::Rect::from_min_size(
+                        ui.cursor().min,
+                        egui::vec2(ui.available_width(), ui.available_height()),
+                    )),
+            );
+            self.sidebar_account(&mut probe);
+            probe.min_rect().height()
+        };
+        let free = ui.available_height() - block_h;
         if free > 0.0 {
             ui.add_space(free);
         }
+        self.sidebar_account(ui);
+    }
+
+    /// The bottom sidebar block: config error, account badge/name and the
+    /// logout button. Drawn once per frame (see the measured placement in
+    /// [`Self::sidebar`]).
+    fn sidebar_account(&mut self, ui: &mut egui::Ui) {
         if let Some(e) = &self.config_error {
             ui.label(RichText::new(e).color(theme::RED).size(11.0));
             ui.add_space(4.0);
@@ -1441,66 +1463,86 @@ impl eframe::App for PrimePhotoApp {
                 .frame(
                     egui::Frame::new()
                         .fill(theme::SIDEBAR_BG)
-                        .inner_margin(egui::Margin::symmetric(12, 16)),
+                        .inner_margin(egui::Margin::symmetric(
+                            theme::SIDEBAR_MARGIN_X,
+                            theme::SIDEBAR_MARGIN_Y,
+                        )),
                 )
                 .show(ctx, |ui| self.sidebar(ui));
 
-            // Bottom log panel (collapsible) for transparency.
+            // Bottom log panel (collapsible) for transparency. The page
+            // background continues behind it (only a separator line marks the
+            // strip), and the inner margin matches the page gutter so its text
+            // starts on the same vertical line as the page content.
             egui::TopBottomPanel::bottom("log")
-            .resizable(true)
-            .default_height(24.0)
-            .min_height(24.0)
-            .show(ctx, |ui| {
-                let s = self.upload.lock().unwrap();
-                let summary = if s.active {
-                    crate::upload::active_log_summary(&s, || {
-                        tr3(
-                            "Upload läuft: {} · {} · {}",
-                            format!("{}/{}", s.done, s.total),
-                            &s.current,
-                            eta_suffix(&s),
+                .resizable(true)
+                .default_height(24.0)
+                .min_height(24.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::PAGE_BG)
+                        .inner_margin(egui::Margin::symmetric(theme::PAGE_MARGIN_X, 2)),
+                )
+                .show(ctx, |ui| {
+                    let s = self.upload.lock().unwrap();
+                    let summary = if s.active {
+                        crate::upload::active_log_summary(&s, || {
+                            tr3(
+                                "Upload läuft: {} · {} · {}",
+                                format!("{}/{}", s.done, s.total),
+                                &s.current,
+                                eta_suffix(&s),
+                            )
+                        })
+                    } else if s.total > 0 {
+                        tr1(
+                            "Letzter Upload: {} erfolgreich",
+                            format!("{}/{}", s.done, s.total - s.failed),
                         )
-                    })
-                } else if s.total > 0 {
-                    tr1(
-                        "Letzter Upload: {} erfolgreich",
-                        format!("{}/{}", s.done, s.total - s.failed),
-                    )
-                } else {
-                    tr("Bereit").to_string()
-                };
-                egui::CollapsingHeader::new(summary)
-                    // Fixed id: `summary` changes with every counter / file / ETA
-                    // update, so an id derived from the label would lose the
-                    // open state on each update (docs/dev/DEV_NOTES.md §3).
-                    .id_salt("log_panel")
-                    .show(ui, |ui| {
-                        // Definite body height given to the scroll area as a
-                        // *floor*. With `max_height(available_height)` alone the
-                        // loop settled on the scroll area's `min_scrolled_size`
-                        // (64 px) and pinned the viewport to 64 px. With the
-                        // floor the expanded panel is header + 200 px, and since
-                        // the scroll area still fills whatever the panel hands
-                        // it, a height enlarged by dragging persists; shrinking
-                        // below the floor is not possible. Capped by the window
-                        // so header + body always fit.
-                        let body_h = 200.0_f32
-                            .min(ui.ctx().screen_rect().height() - 120.0)
-                            .max(64.0);
-                        egui::ScrollArea::vertical()
-                            .min_scrolled_height(body_h)
-                            .show(ui, |ui| {
-                                for line in &s.log {
-                                    ui.label(line);
-                                }
-                            });
-                    });
-            });
+                    } else {
+                        tr("Bereit").to_string()
+                    };
+                    egui::CollapsingHeader::new(summary)
+                        // Fixed id: `summary` changes with every counter / file / ETA
+                        // update, so an id derived from the label would lose the
+                        // open state on each update (docs/dev/DEV_NOTES.md §3).
+                        .id_salt("log_panel")
+                        .show(ui, |ui| {
+                            // Definite body height given to the scroll area as a
+                            // *floor*. With `max_height(available_height)` alone the
+                            // loop settled on the scroll area's `min_scrolled_size`
+                            // (64 px) and pinned the viewport to 64 px. With the
+                            // floor the expanded panel is header + 200 px, and since
+                            // the scroll area still fills whatever the panel hands
+                            // it, a height enlarged by dragging persists; shrinking
+                            // below the floor is not possible. Capped by the window
+                            // so header + body always fit.
+                            let body_h = 200.0_f32
+                                .min(ui.ctx().screen_rect().height() - 120.0)
+                                .max(64.0);
+                            egui::ScrollArea::vertical()
+                                .min_scrolled_height(body_h)
+                                .show(ui, |ui| {
+                                    for line in &s.log {
+                                        ui.label(line);
+                                    }
+                                });
+                        });
+                });
 
-            egui::CentralPanel::default().show(ctx, |ui| match self.page {
-                Page::Backup => self.backup_ui(ui),
-                Page::Settings => self.settings_ui(ui),
-            });
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::PAGE_BG)
+                        .inner_margin(egui::Margin::symmetric(
+                            theme::PAGE_MARGIN_X,
+                            theme::PAGE_MARGIN_Y,
+                        )),
+                )
+                .show(ctx, |ui| match self.page {
+                    Page::Backup => self.backup_ui(ui),
+                    Page::Settings => self.settings_ui(ui),
+                });
 
             let active = self.upload.lock().unwrap().active;
             // Also latch background runs (PORT-5): the tick starts them without

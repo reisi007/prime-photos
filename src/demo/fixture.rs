@@ -3,7 +3,9 @@
 
 use super::Scenario;
 use super::live_scenarios::{many_folders, mixed, uploading};
-use super::settled_scenarios::{all_done, empty, failures, settings, signed_out};
+use super::settled_scenarios::{
+    all_done, empty, failures, settings, settings_bandwidth, signed_out,
+};
 use crate::app::{Page, SettingsTab};
 use crate::config::Config;
 use crate::folders::{BackupFolder, ConflictResolution, ContentFilter, FolderStatus, FolderStore};
@@ -41,6 +43,7 @@ pub(crate) fn fixture(scenario: Scenario) -> Fixture {
         Scenario::Empty => empty(),
         Scenario::ManyFolders => many_folders(),
         Scenario::Settings => settings(),
+        Scenario::SettingsBandwidth => settings_bandwidth(),
         Scenario::SignedOut => signed_out(),
     }
 }
