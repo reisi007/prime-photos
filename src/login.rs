@@ -529,6 +529,12 @@ impl PrimePhotoApp {
     /// the server (`/auth/deregister`) is **best-effort**: a failure only logs a
     /// warning, the local sign-out still happens.
     pub(crate) fn logout(&mut self) {
+        // Nothing to sign out of in the demo: the fixture session lives in
+        // memory only, and no keychain/config write may happen.
+        if self.is_demo() {
+            self.demo_skip("Abmelden");
+            return;
+        }
         self.config_form = None;
         // Cancel a running upload (user decision 2026-10-16): the worker holds
         // its own `Config` clone with the old cookies and would keep failing
@@ -600,6 +606,12 @@ impl PrimePhotoApp {
     /// generation. It also reacts to an invalidated session and picks up freshly
     /// minted cookies.
     pub(crate) fn poll_session(&mut self, ctx: &egui::Context) {
+        // No session worker in the demo: there is no refresh token, and the
+        // worker would talk to the network and the keychain.
+        if self.is_demo() {
+            self.demo_skip("Sitzungs-Aktualisierung");
+            return;
+        }
         // (1) The worker declared the session invalid (too many failed refresh
         // attempts): drop every token and return to the login screen — **no**
         // app restart (user decision 2026-10-15). This runs **before** the spawn
@@ -717,6 +729,13 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn poll_login(&mut self) {
+        // Defence in depth: no device login ever runs in the demo (no webview),
+        // and a result must never install a real session or save the fixture
+        // config over the developer's `config.toml`.
+        if self.is_demo() {
+            self.demo_skip("Anmelde-Status abfragen");
+            return;
+        }
         // (1) The device redemption (background task) reported back.
         if let Some(result) = self.login.take_device_result() {
             // The user cancelled while the task ran: drop the result.

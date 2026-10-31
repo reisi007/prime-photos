@@ -1938,10 +1938,22 @@ impl PrimePhotoApp {
     /// asynchronously (Welle 5.1) — the UI keeps running; `poll_folder_picker`
     /// opens the Create form once a folder was picked.
     pub(crate) fn add_backup_folder(&mut self, ctx: &egui::Context) {
+        // Demo fixtures are read-only: no native dialog, no store write.
+        if self.is_demo() {
+            self.demo_skip("Ordner-Dialog öffnen");
+            return;
+        }
         self.spawn_folder_picker(FolderPickerTarget::NewBackup, ctx);
     }
 
     pub(crate) fn apply_action(&mut self, action: FolderAction) {
+        // Demo fixtures are read-only: no remove/toggle/upload/reveal/edit side
+        // effect. The global pause button does not route through here, so the
+        // paused state stays inspectable.
+        if self.is_demo() {
+            self.demo_skip("Ordner-Aktion");
+            return;
+        }
         match action {
             FolderAction::Upload(i) | FolderAction::Retry(i) => {
                 self.start_folder_upload(vec![i]);
@@ -2182,6 +2194,11 @@ impl PrimePhotoApp {
     /// starts (user decision 2026-10-14), so a restart resumes the row; it is
     /// dropped again once the run finished clean (`finalize_upload`).
     pub(crate) fn start_one_time_upload(&mut self, paths: Vec<PathBuf>) {
+        // Demo fixtures are read-only: no folder scan, no SQLite queue, no run.
+        if self.is_demo() {
+            self.demo_skip("Einmalige Sicherung starten");
+            return;
+        }
         if self.upload_busy() {
             self.log(tr("Es läuft bereits ein Upload."));
             return;
@@ -2237,6 +2254,12 @@ impl PrimePhotoApp {
     /// (per the decision, not by a timer).
     pub(crate) fn resume_one_time(&mut self) {
         if !self.one_time_resume {
+            return;
+        }
+        // Defence in depth: a demo fixture never carries a restored queue, and
+        // resuming one would open the SQLite index and start a real run.
+        if self.is_demo() {
+            self.demo_skip("Einmalige Sicherung fortsetzen");
             return;
         }
         if self.upload_busy()
@@ -2436,6 +2459,11 @@ impl PrimePhotoApp {
     /// the OS filesystem watchers — and it does so from the same task, so the
     /// watchers can never race the pass above into a second run.
     fn ensure_background_sync(&mut self) {
+        // No supervisor, no filesystem watchers and no uploads from a demo run.
+        if self.is_demo() {
+            self.demo_skip("Hintergrund-Synchronisierung starten");
+            return;
+        }
         if !self.config.background_sync || !self.is_logged_in() {
             return;
         }
@@ -2476,6 +2504,12 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn finalize_upload(&mut self) {
+        // Defence in depth: the demo never starts a run, and finalizing one
+        // would write the fixture store to disk and ask the SQLite for a queue.
+        if self.is_demo() {
+            self.demo_skip("Upload abschließen");
+            return;
+        }
         // A cancelled run (sign-out) is not a finished run: no folder status, no
         // counters, no `last_updated`, no store save, and the one-time queue is
         // kept so the next start resumes it (user decision 2026-10-16). The
@@ -2658,8 +2692,13 @@ impl PrimePhotoApp {
                         // which the UI's in-memory store never reloads — so the
                         // row applies the very same rule (`source_status`) itself.
                         // Same helper, no second logic; a returned drive flips
-                        // the row back on its own.
-                        source_status(f.path.is_dir(), f.status)
+                        // the row back on its own. A demo fixture supplies the
+                        // answer (no directory exists for its fake paths).
+                        source_status(
+                            self.demo_source_exists(i)
+                                .unwrap_or_else(|| f.path.is_dir()),
+                            f.status,
+                        )
                     } else {
                         f.status
                     };

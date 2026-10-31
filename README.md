@@ -95,6 +95,7 @@ Exact paths per platform: [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §6.
 - [`docs/protocol/PROTOCOL.md`](docs/protocol/PROTOCOL.md) — the wire protocol notes.
 - [`docs/dev/I18N.md`](docs/dev/I18N.md) — the internationalization layer.
 - [`docs/dev/DEV_NOTES.md`](docs/dev/DEV_NOTES.md) — codebase pitfalls (developer knowledge).
+- [`docs/dev/UI_FIXTURES.md`](docs/dev/UI_FIXTURES.md) — demo UI fixtures and the screenshot harness (developer-only).
 - [`docs/dev/THIRD_PARTY.md`](docs/dev/THIRD_PARTY.md) — third-party component attribution.
 - [`AGENTS.md`](AGENTS.md) — durable agent rules (agent/developer-oriented, not an end-user guide).
 

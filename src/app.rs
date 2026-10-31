@@ -6,6 +6,7 @@ use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
 use crate::dedup::DedupIndex;
+use crate::demo;
 use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
 use crate::icons::{app_logo, draw_flag_badge, nav_backup_icon, nav_settings_icon};
@@ -344,15 +345,25 @@ pub(crate) struct PrimePhotoApp {
     /// Shared slot written by the background folder picker, polled in `update`
     /// (Welle 5.1: the native dialog runs off the UI thread).
     pub(crate) folder_picker: Arc<Mutex<FolderPicker>>,
+    /// Developer demo/screenshot runtime (issue #29); `None` in the normal app.
+    /// While it is `Some`, every real side effect (config/keychain/SQLite/
+    /// network/notifications) is guarded off — see [`Self::is_demo`].
+    pub(crate) demo: Option<demo::DemoRuntime>,
 }
 
 impl PrimePhotoApp {
-    pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>, mode: demo::Mode) -> Self {
         theme::apply(&cc.egui_ctx);
         // App activation (relaunch / switch-back) and the single-instance
         // handshake both only flag + wake the UI, so they get the context here
         // (see `src/app_activation.rs`, `src/single_instance.rs`).
         app_activation::install(&cc.egui_ctx);
+        // Demo/screenshot runs branch off **before** any real IO: no
+        // `Config::load`, no `folders.toml`, no SQLite, no keychain, no
+        // autostart registration and no config write.
+        if let Some((scenario, screenshot)) = mode.into_demo() {
+            return Self::new_demo(cc, scenario, screenshot);
+        }
         single_instance::attach_ctx(&cc.egui_ctx);
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         // `config_loaded_ok` is derived directly from the `Config::load()`
@@ -548,6 +559,7 @@ impl PrimePhotoApp {
             avatar_texture: None,
             avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
             folder_picker: Arc::new(Mutex::new(FolderPicker::default())),
+            demo: None,
         };
         // Session (S-C): only the **refresh token** is persisted, and it lives in
         // the OS keychain. Load it into the in-memory session; the refresh
@@ -599,6 +611,129 @@ impl PrimePhotoApp {
         app
     }
 
+    /// Build the app on the demo fixtures (issue #29).
+    ///
+    /// Deliberately a sibling of [`Self::new`] instead of a flag inside it: the
+    /// demo must never *execute* the real start path (config load, folder store,
+    /// dedup queue, keychain, autostart, first-run country) — not merely
+    /// overwrite its result. Everything here is in-memory fixture data; the
+    /// side-effect guards in the rest of the app key on [`Self::is_demo`].
+    fn new_demo(
+        cc: &eframe::CreationContext<'_>,
+        scenario: demo::Scenario,
+        screenshot: Option<PathBuf>,
+    ) -> Self {
+        let fixture = demo::fixture(scenario);
+        // Fixtures are German by contract: their texts and the screenshots are
+        // the reference language, independent of the developer's system locale.
+        i18n::set_lang(i18n::Lang::De);
+        // Same menu as the real start (⌘C/⌘V/About); it only wires labels and
+        // flags, no IO.
+        app_menu::install(&cc.egui_ctx);
+
+        let app = Self {
+            rt: Arc::new(Runtime::new().expect("tokio runtime")),
+            config: fixture.config,
+            config_error: fixture.config_error,
+            folders_error: false,
+            login: login::WebviewLogin::new(),
+            // No session at all: the fixture's config only carries dummy cookie
+            // strings so the UI renders as signed in. A refresh token would
+            // start the real refresh worker.
+            session: Arc::new(Mutex::new(login::Session::default())),
+            pending_login: false,
+            window_title: None,
+            // Every demo run keeps the fixed size requested in `main.rs`
+            // (1200×800 interactive, 1400×900 for a screenshot): the size is
+            // part of the reproducible picture, so the one-time screen-based
+            // resize in `update` is suppressed for the whole demo.
+            sized: true,
+            page: fixture.page,
+            settings_tab: fixture.settings_tab,
+            store: fixture.store,
+            upload: Arc::new(Mutex::new(fixture.upload)),
+            paused: watch::Sender::new(fixture.paused),
+            slow_mode: false,
+            album_name: String::new(),
+            was_active: false,
+            scan_tx: None,
+            config_form: None,
+            about_open: false,
+            license_open: false,
+            license_tab: about::LicenseTab::Components,
+            // No tray in the demo: the menu-bar icon belongs to the real
+            // instance and would need a session/kill path.
+            tray: None,
+            quitting: false,
+            window_hidden: false,
+            ignore_initial_login_activation: false,
+            tray_build_failed: false,
+            tray_paused: false,
+            tray_icon_state: None,
+            tray_last_run_failed: false,
+            tray_done_at: None,
+            // No `Autostart::new()`: it probes the login-item registration. The
+            // struct stays empty, so every autostart call answers "unsupported"
+            // — and `set_autostart` is guarded anyway.
+            autostart: Autostart { inner: None },
+            autostart_enabled: false,
+            dropping_files: false,
+            one_time: fixture.one_time,
+            one_time_resume: false,
+            avatar_attempts: 0,
+            avatar_failed: false,
+            avatar_name: fixture.account_name,
+            avatar_texture: None,
+            avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
+            folder_picker: Arc::new(Mutex::new(FolderPicker::default())),
+            demo: Some(demo::DemoRuntime::new(
+                scenario,
+                screenshot,
+                fixture.source_exists,
+            )),
+        };
+
+        // A demo run is always visible and focused: unlike the real start there
+        // is no login-item/tray decision to honour.
+        app_activation::become_regular();
+        cc.egui_ctx
+            .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+        log::info!(
+            "Demo-Modus: Szenario {}, {} Ordner, {} Warteschlangen-Einträge",
+            scenario.id(),
+            app.store.folders.len(),
+            app.upload.lock().unwrap().queue.len()
+        );
+        app
+    }
+
+    /// Whether this session runs on the demo fixtures.
+    pub(crate) fn is_demo(&self) -> bool {
+        self.demo.is_some()
+    }
+
+    /// Note a side effect the demo mode deliberately suppresses.
+    ///
+    /// Debug level: some guards sit on per-frame paths, and a demo run must not
+    /// flood the log — but the action is always named, so nothing disappears
+    /// silently.
+    pub(crate) fn demo_skip(&self, action: &str) {
+        log::debug!("Demo-Modus: {action} übersprungen.");
+    }
+
+    /// The fixture's faked `path.is_dir()` for `store.folders[idx]`.
+    ///
+    /// `None` outside the demo, where the real filesystem answers the question.
+    /// Inside the demo an index without a fixture flag answers `false` (fail
+    /// closed): the UI must never probe a real path for a folder the fixture
+    /// does not describe.
+    pub(crate) fn demo_source_exists(&self, idx: usize) -> Option<bool> {
+        let demo = self.demo.as_ref()?;
+        Some(demo.source_exists.get(idx).copied().unwrap_or(false))
+    }
+
     pub(crate) fn log(&self, msg: impl Into<String>) {
         self.upload.lock().unwrap().log(msg);
     }
@@ -612,6 +747,12 @@ impl PrimePhotoApp {
     /// per-write "saved" log line would flood the protocol; only failures are
     /// logged and surfaced through `config_error`).
     pub(crate) fn save_config(&mut self) {
+        // Demo fixtures are never persisted: writing here would clobber the
+        // developer's real `config.toml`.
+        if self.is_demo() {
+            self.demo_skip("Einstellungen speichern");
+            return;
+        }
         match self.config.save() {
             Ok(_) => {
                 self.config_error = None;
@@ -704,6 +845,11 @@ impl PrimePhotoApp {
     /// Never panics: on failure the cause is reported on the `log` facade and
     /// the flag snaps back to the real OS state.
     pub(crate) fn set_autostart(&mut self, enabled: bool) {
+        // Never touch the developer's login items from a demo run.
+        if self.is_demo() {
+            self.demo_skip("Autostart (Login-Item) ändern");
+            return;
+        }
         let result = if enabled {
             self.autostart.enable()
         } else {
@@ -744,6 +890,11 @@ impl PrimePhotoApp {
     /// when a session already exists. Never blocks a frame: the network + disk
     /// work runs on the tokio runtime and reports back through `avatar_fetch`.
     pub(crate) fn spawn_avatar_fetch(&self, ctx: &egui::Context) {
+        // No network from a demo run: the fixture names the account itself.
+        if self.is_demo() {
+            self.demo_skip("Kontodaten abrufen");
+            return;
+        }
         let cfg = self.config.clone();
         let shared = self.avatar_fetch.clone();
         let ctx = ctx.clone();
@@ -1023,6 +1174,12 @@ impl PrimePhotoApp {
 
 impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Demo/screenshot step first: it consumes a screenshot answer and, in a
+        // screenshot run, requests one after the UI has settled.
+        if let Some(demo) = self.demo.as_mut() {
+            demo.handle_ui(ctx);
+        }
+
         {
             let mut shared = self.upload.lock().unwrap();
             if shared.ctx.is_none() {
@@ -1030,7 +1187,11 @@ impl eframe::App for PrimePhotoApp {
             }
         }
 
-        let reload_store = {
+        let reload_store = if self.is_demo() {
+            // A fixture store is the truth; reloading the real `folders.toml`
+            // would replace it (and read the developer's backup targets).
+            false
+        } else {
             let shared = self.upload.lock().unwrap();
             // Keep the marker pending while a run is active so its finished
             // store state is reloaded on the next idle frame. Peek here:
@@ -1060,7 +1221,12 @@ impl eframe::App for PrimePhotoApp {
             .input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         self.dropping_files = drag_hover;
         if !dropped.is_empty() {
-            self.start_one_time_upload(dropped);
+            // A demo run never starts the real one-time upload (scan + SQLite).
+            if self.is_demo() {
+                self.demo_skip("Drag-&-Drop-Sicherung");
+            } else {
+                self.start_one_time_upload(dropped);
+            }
         }
 
         // Tray / menu-bar events (PORT-3). Delivered through `tray`'s queue so
@@ -1131,7 +1297,9 @@ impl eframe::App for PrimePhotoApp {
             }
         }
 
-        // Size the window to the screen once, on the first frame.
+        // Size the window to the screen once, on the first frame. Demo runs
+        // keep the fixed size from `main.rs` (`sized` is already set) — a
+        // screen-derived resize would change the reproducible picture.
         if !self.sized {
             self.sized = true;
             if let Some(ms) = ctx.input(|i| i.viewport().monitor_size) {
@@ -1154,7 +1322,8 @@ impl eframe::App for PrimePhotoApp {
         // icon appears only after sign-in). Reconciled every frame right where
         // the token states are applied, so all paths stay covered — keychain
         // token at start, successful login, logout and an invalidated session.
-        if self.has_pending_session() {
+        // The demo never builds one: no session, no tray, no menu-bar icon.
+        if self.has_pending_session() && !self.is_demo() {
             if self.tray.is_none() && !self.tray_build_failed {
                 self.tray = tray::build(ctx.clone());
                 if self.tray.is_none() {
@@ -1228,8 +1397,12 @@ impl eframe::App for PrimePhotoApp {
         // retry after a failed attempt (see `should_fetch_avatar`). A success is
         // final, so there is no loop and no endless retry. The actual work
         // happens on the tokio runtime (`spawn_avatar_fetch`); here we only
-        // decide to start it and pick up its results.
-        if self.is_logged_in() && should_fetch_avatar(self.avatar_attempts, self.avatar_failed) {
+        // decide to start it and pick up its results. The demo has no network
+        // and no avatar: the fixture names the account.
+        if !self.is_demo()
+            && self.is_logged_in()
+            && should_fetch_avatar(self.avatar_attempts, self.avatar_failed)
+        {
             self.avatar_attempts += 1;
             self.spawn_avatar_fetch(ctx);
         }
@@ -1365,7 +1538,10 @@ impl eframe::App for PrimePhotoApp {
                         // "error" (sticky until the next run) or "done" (briefly).
                         self.tray_last_run_failed = failed > 0;
                         self.tray_done_at = Some(Instant::now());
-                        if self.config.notifications {
+                        // The demo's `notify::init` did not even run; the guard
+                        // is explicit so this unreachable path cannot regress
+                        // silently into a real desktop notification.
+                        if self.config.notifications && !self.is_demo() {
                             notify::run_finished(done, failed, total);
                         }
                     }
@@ -1425,8 +1601,15 @@ impl eframe::App for PrimePhotoApp {
         // Deferred login start: creating the webview needs the window handle.
         if self.pending_login {
             self.pending_login = false;
-            let _ = self.config.save();
-            self.begin_login(frame, ctx);
+            if self.is_demo() {
+                // A demo run must not start the real device login (webview +
+                // network) — and, more importantly, must never save the
+                // fixture config over the developer's `config.toml`.
+                self.demo_skip("Anmeldung starten");
+            } else {
+                let _ = self.config.save();
+                self.begin_login(frame, ctx);
+            }
         }
         if self.login.running {
             ctx.request_repaint_after(Duration::from_millis(200));

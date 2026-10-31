@@ -85,6 +85,9 @@ fehlt `NSHighResolutionCapable`, die Darstellung erscheint pixelig. Das gebaute
 **Konsequenz:** UI-Sichtprüfungen und Screenshots **immer** über das Bundle, nie
 über die nackte Binary — sonst misst man Artefakte der Startmethode.
 
+Für reproduzierbare Sichten ohne echte Sitzung/Fotordner gibt es die
+Demo-Datenquelle mit Screenshot-Harness: `docs/dev/UI_FIXTURES.md`.
+
 ## 8. Zwei Gates, die es (bewusst) nicht gibt
 
 | Gate | Stand |

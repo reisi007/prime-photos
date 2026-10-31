@@ -160,6 +160,13 @@ impl PrimePhotoApp {
         action: ConfigFormAction,
         ctx: &egui::Context,
     ) {
+        // Defence in depth: the demo never opens this form (no folder dialog,
+        // no row edit), and a Save here would write the fixture store to disk
+        // and start a real upload.
+        if self.is_demo() {
+            self.demo_skip("Datensicherungseinstellungen speichern");
+            return;
+        }
         match action {
             ConfigFormAction::Cancel => self.config_form = None,
             ConfigFormAction::PickFolder => {

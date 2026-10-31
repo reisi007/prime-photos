@@ -6,6 +6,7 @@ mod auth;
 mod config;
 mod countries;
 mod dedup;
+mod demo;
 mod destination;
 mod folders;
 mod i18n;
@@ -47,38 +48,87 @@ fn window_icon() -> egui::IconData {
 fn main() -> eframe::Result<()> {
     logging::init();
 
-    // Only one instance at a time: a second start asks the running instance to
-    // show its window (see `src/single_instance.rs`) and exits instead of
-    // opening a second window. Runs before `notify::init()` so that a start
-    // which immediately gives up never builds the notification binding.
-    if !single_instance::acquire() {
-        log::info!("Prime Photos läuft bereits — Fenster der laufenden Instanz angefordert");
+    // Developer-only demo/screenshot mode (issue #29). Parsed before anything
+    // else so `--demo-list` and argument errors never touch the app's state.
+    // `args_os` + a UTF-8 filter instead of `std::env::args()`: the latter
+    // panics on a non-UTF-8 argument, and a launcher may hand us one. Such an
+    // argument cannot be one of our flags, so dropping it is the same as "not
+    // ours".
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .filter_map(|arg| arg.into_string().ok())
+        .collect();
+    let mode = match demo::parse_args(&args) {
+        Ok(mode) => mode,
+        Err(message) => {
+            // Usage errors are a developer-facing start failure: stderr and a
+            // nonzero exit, never a half-started window.
+            eprintln!("{message}");
+            std::process::exit(2);
+        }
+    };
+    if mode == demo::Mode::List {
+        for scenario in demo::Scenario::ALL {
+            println!("{:<14} {}", scenario.id(), scenario.description());
+        }
         return Ok(());
     }
 
-    notify::init();
+    // A demo run never takes the single-instance slot (a running real instance
+    // would swallow it) and never replaces that instance's notification
+    // binding — it has no tray and never uploads in the background.
+    if mode.is_demo() {
+        log::info!("Prime Photos startet im Demo-Modus (keine echten Daten)");
+    } else {
+        // Only one instance at a time: a second start asks the running instance
+        // to show its window (see `src/single_instance.rs`) and exits instead of
+        // opening a second window. Runs before `notify::init()` so that a start
+        // which immediately gives up never builds the notification binding.
+        if !single_instance::acquire() {
+            log::info!("Prime Photos läuft bereits — Fenster der laufenden Instanz angefordert");
+            return Ok(());
+        }
+
+        notify::init();
+    }
 
     // Observe AppKit's first launch notification before eframe runs its launch
     // path, without taking over the application delegate or Apple-event handler.
     app_activation::install_launch_diagnostic();
 
+    // The demo window has a fixed size so a screenshot does not depend on the
+    // developer's screen; the normal app keeps its preferred start size.
+    let inner_size = match &mode {
+        demo::Mode::Screenshot { .. } => [1400.0, 900.0],
+        demo::Mode::Demo(_) => [1200.0, 800.0],
+        // `List` already returned above; keep the normal start size for it so
+        // the match stays exhaustive without a wildcard.
+        demo::Mode::Off | demo::Mode::List => [1000.0, 700.0],
+    };
+    let viewport = egui::ViewportBuilder::default()
+        .with_inner_size(inner_size)
+        .with_min_inner_size([760.0, 520.0])
+        .with_icon(window_icon());
+    let viewport = if mode.is_demo() {
+        // A demo run is meant to be looked at (and captured) — no hidden start.
+        viewport.with_visible(true)
+    } else {
+        // The window starts invisible — this only avoids the first-frame
+        // flash. It does **not** keep the window hidden: eframe shows it
+        // itself (unconditionally) after the first frame, so the start
+        // decision in `PrimePhotoApp::new` (silent login-item start vs.
+        // manual start) holds the hidden state with an explicit
+        // `ViewportCommand::Visible(false)`.
+        viewport.with_visible(false)
+    };
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 700.0])
-            .with_min_inner_size([760.0, 520.0])
-            // The window starts invisible — this only avoids the first-frame
-            // flash. It does **not** keep the window hidden: eframe shows it
-            // itself (unconditionally) after the first frame, so the start
-            // decision in `PrimePhotoApp::new` (silent login-item start vs.
-            // manual start) holds the hidden state with an explicit
-            // `ViewportCommand::Visible(false)`.
-            .with_visible(false)
-            .with_icon(window_icon()),
+        viewport,
         ..Default::default()
     };
     eframe::run_native(
         "Prime Photos",
         options,
-        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc, mode)))),
     )
 }
