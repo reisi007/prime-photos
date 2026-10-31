@@ -23,8 +23,10 @@ notify = "8.2.0"
 notify-rust = "4.18"
 # `stream` enables `reqwest::Body::wrap_stream`, the chunked upload body the
 # per-file progress counter is built on (Befund 11c). Not part of reqwest's
-# default feature set.
-reqwest = { version = "0.13.5", features = ["json", "stream"] }
+# default feature set. Neither is `query` — since 0.13 the `RequestBuilder`
+# `query`/`form` methods live behind their own features, so the search call
+# needs it named explicitly.
+reqwest = { version = "0.13.5", features = ["json", "query", "stream"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.44.2", features = ["full"] }
