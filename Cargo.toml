@@ -44,7 +44,7 @@ unicode-normalization = "0.1.25"
 # keeps the refresh token in the OS credential store.
 sha2 = "0.10"
 base64 = "0.22"
-rand = "0.9"
+rand = "0.10"
 # `default-features = false` + explicit per-OS stores keeps the **blocking** API
 # on every target: macOS Keychain (`apple-native`), Windows Credential Manager
 # (`windows-native`) and the Linux Secret Service (`sync-secret-service`, with
