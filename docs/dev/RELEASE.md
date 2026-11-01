@@ -34,8 +34,9 @@ lokal über `packaging/make-app.sh` und wird bei Bedarf manuell an ein Release g
   ok") — lokal über `packaging/make-app.sh` (arm64) und bei Bedarf manuell ans Release hängen.
 - **Signierung:** Windows wird bei konfiguriertem `SIGNPATH_API_TOKEN` über **SignPath**
   Authenticode-signiert, Linux bei konfiguriertem `GPG_PRIVATE_KEY` mit einer abgetrennten
-  **GPG**-Signatur (`.asc`) versehen (§3). macOS bleibt unverändert: lokale (selbstsignierte)
-  Codesignatur, damit Benachrichtigungen/Bundle-Identifier sauber funktionieren (§4–§6).
+  **GPG**-Signatur (`.asc`) versehen (§3). macOS wird ab 0.1.8 standardmäßig **ad-hoc**
+  signiert (`codesign --sign -`, §4); von 0.1.4 bis 0.1.7 war die lokale Identität der Standard. Ob
+  Benachrichtigungen mit ad-hoc funktionieren, ist weiterhin offen (§9).
   Signiert wird **nur** bei einem Tag-Push; ein konfigurierter, aber fehlschlagender Signaturschritt
   lässt den Job **fehlschlagen**, statt ein unsigniertes Artefakt still zu veröffentlichen.
 - **Warnungs-Baseline 0:** `[lints.rust] warnings = "deny"` in `Cargo.toml` — jede Warnung ist
@@ -301,7 +302,7 @@ gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
 | SignPath Authenticode | Urheber (SignPath Foundation), Unverändertheit der `.exe` seit der Signatur | SmartScreen-Reputation, Freiheit von Schadcode, Laufzeitverhalten |
 | GPG-Signatur (`.asc`) | dass die Datei mit dem Release-Schlüssel signiert und nicht verändert wurde | Vertrauen in den Schlüssel selbst (Fingerprint-Prüfung nötig), automatische Prüfung durch das OS |
 | Artifact Attestation | Herkunft: Repo, Workflow, Commit und Digest des Artefakts | Wer den Commit erstellt hat, Qualität/Laufzeitverhalten |
-| macOS-Codesignatur (lokal) | Bundle-Integrität und Identität auf dem eigenen Rechner | Vertrauen auf fremden Macs — keine Notarisierung (§5–§6) |
+| macOS-Codesignatur (lokal) | Bundle-Integrität auf dem eigenen Rechner; Signer-Identität nur bei explizit über `CODESIGN_IDENTITY` gewählter Zertifikats-Identität (§4) | Vertrauen auf fremden Macs — keine Notarisierung (§5–§6) |
 
 ---
 
@@ -309,26 +310,28 @@ gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
 
 ```sh
 ./packaging/make-app.sh
-# Ergebnis: target/dist/Prime Photos.app   (arm64, mit der lokalen Identität
-# "Prime Photos Local Signer" signiert; ad-hoc nur als Rückfall)
+# Ergebnis: target/dist/Prime Photos.app   (arm64, ad-hoc signiert: codesign --sign -)
 ```
 
-- Das Skript baut `cargo build --release`, assembliert das Bundle und signiert mit der lokalen
-  Codesigning-Identität `Prime Photos Local Signer`, wenn sie im Schlüsselbund liegt. **Ad-hoc**
-  (`codesign --sign -`) wird nur verwendet, wenn die Identität fehlt **und** `CODESIGN_IDENTITY`
-  nicht gesetzt oder leer ist. Jeder nicht-leere Wert in `CODESIGN_IDENTITY` gewinnt immer: ein
-  anderer Identitätsname ebenso wie `-` (erzwingt ad-hoc).
-- **Warum die Identität der Standard ist:** Bei ad-hoc ist das Designated Requirement der cdhash
-  und ändert sich mit jedem Build — die Keychain-ACL des gespeicherten Refresh-Tokens passt nach
-  einem selbst gebauten Update nicht mehr, und macOS fragt beim Start nach dem Passwort für den
-  Schlüsselbund „Anmeldung" (am 2026-10-26 live beobachtet). Eine Zertifikats-Identität hält das
-  Designated Requirement (Identifier + Zertifikat) über Rebuilds stabil; dass der Dialog damit
-  dauerhaft ausbleibt, ist die **erwartete** Wirkung. Abgenommen ist sie noch nicht: beim Start des
-  0.1.4-Bundles mit dieser Identität erschien der `SecurityAgent`-Dialog erneut und verschwand nach
-  wenigen Sekunden von selbst, die App meldete sich danach normal an (§9, fünfter Lauf). Auf
-  Rechnern ohne diese Identität (andere Rechner, Rechner ohne den Schlüsselbund-Eintrag) bleibt es
-  beim bisherigen ad-hoc-Verhalten, und für **fremde Macs** ändert sich nichts — Gatekeeper blockt
-  weiterhin (§6).
+- Das Skript baut `cargo build --release`, assembliert das Bundle und signiert **ad-hoc**
+  (`codesign --sign -`) — das ist der Standard. Eine andere Signatur-Identität, auch eine lokale
+  selbstsignierte, wird ausschließlich explizit über `CODESIGN_IDENTITY=<Name>` gewählt: jeder
+  nicht-leere Wert wird unverändert an `codesign --sign` übergeben, ohne Angabe (oder leer) gilt
+  `-` = ad-hoc. Eine automatische Erkennung im Schlüsselbund gibt es nicht.
+- **Warum ad-hoc der Standard ist:** es braucht keine Schlüsselbund-Identität (funktioniert auf
+  jedem Rechner, auch ohne selbstsigniertes Zertifikat), `codesign --verify` prüft die
+  Bundle-Integrität, und ad-hoc ist der Standard; die Bundles aus 0.1.4–0.1.7 trugen die lokale
+  Identität (§9). Bekannter Nachteil:
+  bei ad-hoc ist das Designated Requirement der cdhash und ändert sich mit jedem Build — die
+  Keychain-ACL des gespeicherten Refresh-Tokens passt nach einem selbst gebauten Update nicht mehr,
+  und macOS kann beim Start nach dem Passwort für den Schlüsselbund „Anmeldung" fragen (am
+  2026-10-26 live beobachtet). Eine Zertifikats-Identität hält das Designated Requirement (Identifier
+  + Zertifikat) über Rebuilds stabil und bleibt als optionale, explizite Wahl über
+  `CODESIGN_IDENTITY` verfügbar; dass der Dialog damit dauerhaft ausbleibt, ist die **erwartete**
+  Wirkung, aber nicht abgenommen: beim Start des 0.1.4-Bundles mit dieser Identität erschien der
+  `SecurityAgent`-Dialog erneut und verschwand nach wenigen Sekunden von selbst, die App meldete
+  sich danach normal an (§9, fünfter Lauf). Für **fremde Macs** ändert sich nichts — Gatekeeper
+  blockt weiterhin (§6).
 - **App-Icon:** das Dock-/Taskbar-Icon wird **im Build** erzeugt, nichts ist eingecheckt —
   `build.rs` rastert `assets/logo.svg` (die SVG-Quelle) in die zehn iconset-Größen nach
   `target/pp-appicon.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
@@ -364,8 +367,8 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (Default `VERSION=0.1.7`, `BUILD=7`, mit der lokalen Identität
-   `Prime Photos Local Signer` signiert; ad-hoc nur als Rückfall):
+2. **Bundle bauen** (Default `VERSION=0.1.8`, `BUILD=8`, ad-hoc signiert
+   (`codesign --sign -`); eine andere Identität nur explizit über `CODESIGN_IDENTITY`):
 
    ```sh
    ./packaging/make-app.sh
@@ -897,6 +900,6 @@ die Datei mit `packaging/gen-third-party-licenses.sh`.
 ## 12. Referenzen
 
 - `BUILD.md` — System-Voraussetzungen macOS/Windows/Linux.
-- `packaging/README.md` — `make-app.sh`, `Info.plist`, Signatur (lokale Identität vs. ad-hoc).
+- `packaging/README.md` — `make-app.sh`, `Info.plist`, Signatur (ad-hoc als Standard, lokale Identität nur über `CODESIGN_IDENTITY`).
 - `AGENTS.md` „CI/Release" — die getroffenen Entscheidungen.
 - `.github/workflows/ci.yml`, `.github/workflows/release.yml` — die Workflows selbst.

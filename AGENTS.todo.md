@@ -201,23 +201,21 @@ Queue-Paginierung, Fehlerfenster (`readdtoqueue`/`retryall`), Pause **pro Ordner
 
 ## Zurückgestellt — braucht eine bewusste User-Entscheidung (nicht autonom lösbar)
 
-Nichts davon ist umgesetzt — **außer** dem Signatur-Default aus Punkt 3 (`d360174`); die übrigen
-Punkte brauchen eine Vorgabe.
+Die Punkte brauchen eine Vorgabe; Punkt 3 hält nur noch die offenen Belege fest.
 
 1. **Hintergrund-Sync-Rest:** (a) ob nach einem Event-Lauf ein Cooldown gelten soll (mehrere Drops
    kurz hintereinander) und (b) ob ein Lauf nur bei bestehendem WLAN/nicht-kostenpflichtigem Netz
    starten soll — beides Plattform-APIs, noch nicht festgelegt (das Original kennt **nur** die
    Bandbreiten-Drosselung, siehe `docs/features/scope.md`).
 2. **Pro-Ziel-Limit / netzwerkgesteuerte Drosselung** (bereits als Post-MVP markiert).
-3. **macOS-Signatur:** Die Identität „Prime Photos Local Signer" ist seit `d360174` der Default von
-   `packaging/make-app.sh` (ad-hoc nur als Rückfall). **Korrigierte Annahme (2026-10-26):** die
-   Erwartung „der Keychain-Dialog erscheint damit nur einmal" stimmt **nicht** — beim ersten Start des
-   0.1.4-Bundles erschien das `SecurityAgent`-Fenster erneut und verschwand nach wenigen Sekunden von
-   selbst, die App meldete sich danach normal an (Beleg: `docs/dev/RELEASE.md` §9, fünfter Lauf). Die
-   ACL-Frage ist damit **offen**: erst ein Klick auf „Immer erlauben" setzt sie dauerhaft, und es ist
-   unklar, ob der Dialog danach ausbleibt. Ebenfalls offen: ob **Benachrichtigungen** im signierten
-   Bundle erscheinen und ob `--options runtime` für ad-hoc nötig ist (Signaturlage:
-   `docs/features/platform.md`).
+3. **macOS-Signatur:** ad-hoc (`codesign --sign -`) ist ab 0.1.8 der Default von
+   `packaging/make-app.sh` (User-Entscheidung 2026-11-01; Begründung `docs/dev/RELEASE.md` §4); eine
+   Zertifikats-Identität nur noch explizit über `CODESIGN_IDENTITY`. Offen bleibt: ob
+   **Benachrichtigungen** im ad-hoc-signierten Bundle erscheinen und ob `--options runtime` dafür nötig
+   ist; außerdem, ob ein Klick auf „Immer erlauben" den Keychain-Dialog dauerhaft abstellen kann
+   (Beleg-Lage: `docs/dev/RELEASE.md` §9, fünfter Lauf; `docs/features/platform.md`); ebenso, ob die
+   Autostart-Registrierung (`SMAppService`) auch mit ad-hoc signiertem Bundle live durchgeht — der
+   Beleg vom 2026-10-17 stammt von einem selbstsignierten Bundle (`docs/features/autostart.md`).
 4. **Farbe/Sprache des Multi-Fenster-Verhaltens** („Einmalige Sicherung"-Zeilendarstellung;
    Original-Referenz: `docs/original/UI_FLOWS.md`, `SPEC_ONE_TIME_UPLOAD.md`).
 

@@ -21,10 +21,13 @@ macOS-specific APIs.
   cross-platform (macOS WKWebView / Windows WebView2 / Linux WebKitGTK) and
   is attached to the eframe window via `raw-window-handle`; no change to the
   fundamental architecture is needed.
-- **Signing is only relevant on macOS.** There a (self-signed) code
-  signature is required so that notifications/bundle identifier work
-  cleanly; Windows/Linux need none. The macOS `.app` bundling + signature
-  is delivered as a separate package.
+- **Signing is only relevant on macOS.** There a code signature is
+  required — bundles are **ad-hoc** signed by default (`codesign --sign -`;
+  a certificate identity only via explicit `CODESIGN_IDENTITY`,
+  `docs/dev/RELEASE.md` §4); Windows/Linux need none. Whether notifications
+  work with an ad-hoc signature is **unverified** (`docs/dev/RELEASE.md`
+  §9; `AGENTS.todo.md` "Zurückgestellt" item 3). The macOS `.app` bundling +
+  signature is delivered as a separate package.
 - **Verification boundary:** On this machine only the **macOS build is
   runnable and testable**. Windows/Linux are covered by `cfg` guards and
   cross-platform crates and are **compiled** in the release workflow
@@ -66,10 +69,13 @@ macOS-specific APIs.
     ist cross-platform (macOS WKWebView / Windows WebView2 / Linux WebKitGTK)
     und wird über `raw-window-handle` an das eframe-Fenster gehängt; keine
     Änderung an der Grundarchitektur nötig.
-  - **Signierung ist nur auf macOS relevant.** Dort ist eine
-    (selbstsignierte) Codesignatur nötig, damit
-    Benachrichtigungen/Bundle-Identifier sauber funktionieren;
-    Windows/Linux brauchen keine. Das macOS-`.app`-Bundling + Signatur wird
+  - **Signierung ist nur auf macOS relevant.** Dort ist eine Codesignatur
+    nötig — Bundles werden standardmäßig **ad-hoc** signiert
+    (`codesign --sign -`; eine Zertifikats-Identität nur explizit über
+    `CODESIGN_IDENTITY`, `docs/dev/RELEASE.md` §4); Windows/Linux brauchen
+    keine. Ob Benachrichtigungen mit ad-hoc funktionieren, ist **nicht
+    verifiziert** (`docs/dev/RELEASE.md` §9; `AGENTS.todo.md`
+    „Zurückgestellt", Punkt 3). Das macOS-`.app`-Bundling + Signatur wird
     als eigenes Paket geliefert.
   - **Verifikationsgrenze:** Auf diesem Rechner ist nur der **macOS-Build
     lauffähig und testbar**. Windows/Linux werden durch `cfg`-Guards und

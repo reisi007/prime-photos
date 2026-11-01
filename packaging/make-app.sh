@@ -10,25 +10,29 @@
 #   5. Contents/Resources/AppIcon.icns aus target/pp-appicon.iconset bauen (iconutil);
 #      das iconset rastert build.rs aus assets/logo.svg, es ist nicht eingecheckt
 #   6. codesign --force --options runtime --sign "$CODESIGN_IDENTITY"
-#      (Standard: lokale Identität "Prime Photos Local Signer", sonst "-" = ad-hoc)
+#      (Standard: "-" = ad-hoc; eine andere Identität nur explizit über CODESIGN_IDENTITY)
 #      und anschließendes codesign --verify --verbose=2
 #   7. Pfad + Startkommando ausgeben
 #
 # Umgebungsvariablen:
 #   SKIP_BUILD=1                 überspringt `cargo build --release`
-#   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.1.7)
-#   BUILD=<n>                    CFBundleVersion             (Standard: 7)
-#   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; Standard ist die lokale Identität
-#                                "Prime Photos Local Signer", sonst "-" = ad-hoc
+#   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.1.8)
+#   BUILD=<n>                    CFBundleVersion             (Standard: 8)
+#   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; Standard ist "-" = ad-hoc.
+#                                Jede andere Identität (auch die lokale
+#                                "Prime Photos Local Signer") nur explizit hier.
 #   DIST_DIR=<dir>               Ausgabeordner des Bundles (Standard: target/dist)
 #
 # Das Ausgabeverzeichnis liegt per Standard unter dem ignorierten `target/`, damit kein
 # unversionierter Build-Müll im Repo entsteht.
-# Signatur: Bei ad-hoc-Signatur ist das Designated Requirement der cdhash und ändert sich mit
-# jedem Build; die Keychain-ACL des gespeicherten Refresh-Tokens passt danach nicht mehr und
-# macOS fragt beim Start nach dem Schlüsselbund-Passwort. Eine Zertifikats-Identität hält das
-# Designated Requirement (Identifier + Zertifikat) über Rebuilds stabil — deshalb ist die lokale
-# Identität der Standard, ad-hoc nur der Rückfall.
+# Signatur: Standard ist ad-hoc (`codesign --sign -`). Das braucht keine Schlüsselbund-Identität,
+# `codesign --verify` prüft die Bundle-Integrität, und ad-hoc ist der Standard (die Bundles aus
+# 0.1.4–0.1.7 trugen die lokale Identität).
+# Bekannter Nachteil: bei ad-hoc ist das Designated Requirement der cdhash und
+# ändert sich mit jedem Build — die Keychain-ACL des gespeicherten Refresh-Tokens passt danach
+# nicht mehr und macOS kann beim Start nach dem Schlüsselbund-Passwort fragen. Eine
+# Zertifikats-Identität hält das Designated Requirement (Identifier + Zertifikat) über Rebuilds
+# stabil; sie wird ausschließlich explizit über CODESIGN_IDENTITY gewählt.
 # Idempotent: ein erneuter Lauf entfernt das Bundle und baut es sauber neu.
 # Hinweis: bindet keine neuen Abhängigkeiten und braucht kein Netz. Nur macOS.
 # Hinweis: CARGO_TARGET_DIR wird nicht berücksichtigt — das iconset legt build.rs in
@@ -43,31 +47,16 @@ cd "${REPO_ROOT}"
 APP_NAME="Prime Photos"
 BIN_NAME="prime-photos"
 
-VERSION="${VERSION:-0.1.7}"
-BUILD="${BUILD:-7}"
-CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
+VERSION="${VERSION:-0.1.8}"
+BUILD="${BUILD:-8}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
-# Signatur-Identität ermitteln: (a) explizite Umgebungsvariable gewinnt, (b) sonst die lokale
-# Identität "Prime Photos Local Signer", (c) sonst ad-hoc ("-"). Kein `security | grep -q`:
-# SIGPIPE würde die Pipeline unter `set -o pipefail` scheitern lassen.
-LOCAL_SIGN_IDENTITY="Prime Photos Local Signer"
-if [[ -n "${CODESIGN_IDENTITY}" ]]; then
-	echo "==> Signatur: ${CODESIGN_IDENTITY} (aus der Umgebung)"
-elif command -v security >/dev/null 2>&1; then
-	identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
-	case "${identities}" in
-	*\""${LOCAL_SIGN_IDENTITY}"\"*)
-		CODESIGN_IDENTITY="${LOCAL_SIGN_IDENTITY}"
-		echo "==> Signatur: ${CODESIGN_IDENTITY} (lokale Identität gefunden)"
-		;;
-	*)
-		CODESIGN_IDENTITY="-"
-		echo "==> Signatur: - (ad-hoc-Rückfall; '${LOCAL_SIGN_IDENTITY}' nicht gefunden)"
-		;;
-	esac
+# Signatur-Identität: ad-hoc ("-") ist der Standard. Eine andere Identität wird ausschließlich
+# explizit über CODESIGN_IDENTITY gewählt; es gibt keine automatische Erkennung im Schlüsselbund.
+if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
+	echo "==> Signatur: - (ad-hoc)"
 else
-	CODESIGN_IDENTITY="-"
-	echo "==> Signatur: - (ad-hoc-Rückfall; 'security' nicht verfügbar)"
+	echo "==> Signatur: ${CODESIGN_IDENTITY} (aus der Umgebung)"
 fi
 
 BIN_SRC="target/release/${BIN_NAME}"
@@ -116,7 +105,11 @@ echo "==> AppIcon.icns aus ${ICONSET_DIR} bauen (iconutil)"
 iconutil -c icns "${ICONSET_DIR}" -o "${CONTENTS}/Resources/AppIcon.icns"
 
 # --- 6) Codesignieren + verifizieren ------------------------------------------
-echo "==> codesign (Identität: ${CODESIGN_IDENTITY})"
+if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
+	echo "==> codesign (Identität: - = ad-hoc)"
+else
+	echo "==> codesign (Identität: ${CODESIGN_IDENTITY})"
+fi
 codesign --force --options runtime --sign "${CODESIGN_IDENTITY}" "${APP_DIR}"
 codesign --verify --verbose=2 "${APP_DIR}"
 

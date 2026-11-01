@@ -11,7 +11,7 @@ Prime Photos is **not** an official Amazon product and is **not** affiliated wit
 - **Early stage / MVP.**
 - **macOS (Apple Silicon) is the primary target and the only platform that has been built *and* run-tested.** The macOS bundle is built locally, not in CI.
 - **Windows and Linux are declared, equal targets.** The release workflow **builds** them (Windows x64 on `windows-latest`, Linux x64 on `ubuntu-latest`), and both legs have been green on every release so far — they are **compiled in CI but not run-tested**.
-- **Signing:** Windows binaries are Authenticode-signed via **SignPath** once the SignPath Foundation approval is granted and the token is configured (**currently unsigned**); Linux ships a detached **GPG** signature (`.asc`) per artifact — the tarball and the `.deb` — when the GPG key is configured (otherwise unsigned), and the `.deb` declares its runtime dependencies, including the `dlopen`ed AppIndicator library (Flatpak and AppImage are not offered); macOS bundles are signed with a **local self-signed identity where one is available** (otherwise ad-hoc) and are **not notarized**.
+- **Signing:** Windows binaries are Authenticode-signed via **SignPath** once the SignPath Foundation approval is granted and the token is configured (**currently unsigned**); Linux ships a detached **GPG** signature (`.asc`) per artifact — the tarball and the `.deb` — when the GPG key is configured (otherwise unsigned), and the `.deb` declares its runtime dependencies, including the `dlopen`ed AppIndicator library (Flatpak and AppImage are not offered); macOS bundles are signed **ad-hoc** by default (a self-signed identity only when passed explicitly via `CODESIGN_IDENTITY`) and are **not notarized**.
 
 See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
 
@@ -23,7 +23,7 @@ Free code signing provided by [SignPath.io](https://signpath.io), certificate by
 
 - **Windows:** once the approval is granted and signing is configured, `prime-photos.exe` carries a SignPath Authenticode signature; the publisher shown is the **SignPath Foundation**. A valid signature does **not** guarantee that SmartScreen stops warning — SmartScreen reputation is built separately and is not granted by a signature.
 - **Linux:** when a GPG release key is configured, both Linux artifacts ship with a detached ASCII-armored signature of their own (`Prime-Photos-linux-x64.tar.gz.asc`, `Prime-Photos-linux-x64.deb.asc`) plus the public key (`Prime-Photos-release-key.asc`). The `.deb` is **not** dpkg-signed (that would need `debsig-verify` or a signed repository, a separate distribution channel). Desktop environments do **not** validate this automatically; verification is manual ([`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §7).
-- **macOS:** the bundle is signed with a local self-signed identity (or ad-hoc) and is **not notarized**; Gatekeeper therefore blocks the first start of a downloaded copy — see [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §5–§6.
+- **macOS:** the bundle is signed **ad-hoc** by default (a self-signed identity only when explicitly requested) and is **not notarized**; Gatekeeper therefore blocks the first start of a downloaded copy — see [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §5–§6.
 - **Build provenance:** the release workflow attests build provenance with GitHub Artifact Attestations for the files **it publishes itself** (the Windows `.zip`, the Linux `.tar.gz` and `.deb` and, when GPG is configured, the `.asc` files and the public key). Artifacts from older releases and the manually attached macOS DMG are **not** attested. Verify a download with `gh attestation verify <artifact> --repo reisi007/prime-photos`.
 - **Roles:** committers and reviewers are the repository collaborators with push access ([access settings](https://github.com/reisi007/prime-photos/settings/access)); the approver is the repository owner [@reisi007](https://github.com/reisi007). The repository owner and every account with write access **must** use multi-factor authentication (enforced in the account/organisation settings).
 - **Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Backups and sign-in talk only to the user's own Amazon Photos account; there is no telemetry.
@@ -34,12 +34,12 @@ Current builds are attached to the [GitHub Releases](https://github.com/reisi007
 
 | Asset | Platform | Install |
 |---|---|---|
-| `Prime-Photos-macos-arm64.dmg` | macOS (Apple Silicon) | Open the DMG, drag **Prime Photos** into `/Applications`. The bundle is self-signed or ad-hoc and not notarized, so Gatekeeper blocks the first start — see [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §5. |
+| `Prime-Photos-macos-arm64.dmg` | macOS (Apple Silicon) | Open the DMG, drag **Prime Photos** into `/Applications`. The bundle is signed locally (ad-hoc or with a certificate identity) and not notarized, so Gatekeeper blocks the first start — see [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §5. |
 | `Prime-Photos-windows-x64.zip` | Windows x64 | Unzip, then run `prime-photos.exe`. |
 | `Prime-Photos-linux-x64.tar.gz` | Linux x64 | `tar -xzf Prime-Photos-linux-x64.tar.gz`, then run `./prime-photos`. |
 | `Prime-Photos-linux-x64.deb` | Linux x64 (`amd64` only) | `sudo apt install ./Prime-Photos-linux-x64.deb`. Debian/Ubuntu package with desktop entry and icons; the AppIndicator tray library is a declared dependency. No ARM64 package, and no Flatpak or AppImage build is offered. |
 
-When the GPG release key is configured, each Linux artifact ships with its own `.asc` (`Prime-Photos-linux-x64.tar.gz.asc`, `Prime-Photos-linux-x64.deb.asc`) plus `Prime-Photos-release-key.asc`; verification steps are in [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §3. The `.deb` is added by the release workflow from the next release on — no published release contains one yet.
+When the GPG release key is configured, each Linux artifact ships with its own `.asc` (`Prime-Photos-linux-x64.tar.gz.asc`, `Prime-Photos-linux-x64.deb.asc`) plus `Prime-Photos-release-key.asc`; verification steps are in [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §3. The `.deb` is built by the release workflow from the same binary as the tarball and attached to the release that run creates.
 
 Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §7.
 
@@ -69,7 +69,7 @@ cargo build --release    # release binary: target/release/prime-photos
 
 Per-platform prerequisites (macOS / Windows / Linux system packages) are in **[`docs/dev/BUILD.md`](docs/dev/BUILD.md)**.
 
-macOS `.app` bundle (signed with the local self-signed identity where available, otherwise ad-hoc):
+macOS `.app` bundle (ad-hoc signed by default; an identity only via `CODESIGN_IDENTITY`):
 
 ```sh
 ./packaging/make-app.sh  # -> target/dist/Prime Photos.app

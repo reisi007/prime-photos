@@ -40,7 +40,12 @@ sleep.
   („Prime Photos Local Signer") war für `SMAppService.mainApp.register()` also
   ausreichend. Der `RequiresApproval`-Fall trat **nicht** auf; er bleibt als
   theoretischer Fall im Code (die `RequiresApproval`-Behandlung in „How it works"
-  und die Veto-Falle unten beschreiben ihn weiterhin).
+  und die Veto-Falle unten beschreiben ihn weiterhin). Dieser Beleg entstand
+  mit einem Bundle, das mit der lokalen selbstsignierten Identität signiert
+  war; ab 0.1.8 ist ad-hoc (`codesign --sign -`, siehe
+  [`../dev/RELEASE.md`](../dev/RELEASE.md) §4) der Standard, eine
+  Live-Nachprüfung der Autostart-Registrierung mit einem ad-hoc signierten
+  Bundle steht also noch aus.
   **Abweichung vom Original:** Das Original schaltet Autostart per
   `osascript` / System Events (`../original/SPEC_OS_INTEGRATION.md` §3.6,
   Vergleichstabelle Z. 357); wir weichen davon bewusst ab, weil SMAppService der
