@@ -78,10 +78,11 @@ Das erste Release ist ausgelöst und belegt (`docs/dev/RELEASE.md` §9): Tag `v0
 - [ ] **Dependabot-Automerge live verifizieren** (`docs/dev/RELEASE.md` §8, §9): erster echter
   Dependabot-PR — Label `automerge` nur bei Patch/Minor, Major ohne Label, Merge erst nach grünem
   `CI`-Lauf.
-- [ ] **Erstes `.deb` aus einem echten Release prüfen** (`docs/dev/RELEASE.md` §3.2.1): `dpkg-deb -I`
-  und `dpkg-deb -c` auf dem heruntergeladenen Asset, Installation mit `sudo apt install
-  ./Prime-Photos-linux-x64.deb` auf einem Debian/Ubuntu-Rechner, Desktop-Eintrag und Icon in der
-  Anwendungsübersicht, `gpg --verify Prime-Photos-linux-x64.deb.asc Prime-Photos-linux-x64.deb`.
+- [ ] **`.deb` auf Debian/Ubuntu abnehmen** (`docs/dev/RELEASE.md` §3.2.1, §9): das Asset aus `v0.1.8`
+  ist geladen und auf macOS mit `ar`/`tar` geprüft (Digest, Kontrollfelder, 32 Dateneinträge) —
+  `dpkg-deb` gibt es dort nicht. Offen: `sudo apt install ./Prime-Photos-linux-x64.deb` auf einem
+  Debian/Ubuntu-Rechner, Desktop-Eintrag und Icon in der Anwendungsübersicht; `gpg --verify` erst,
+  wenn der GPG-Schlüssel konfiguriert ist (bisher gibt es keine `.asc`).
 
 ## Offen aus der Live-Abnahme 2026-10-17 (Bundle aus 5.21–5.24)
 

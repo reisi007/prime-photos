@@ -63,7 +63,7 @@ läuft damit **nur, wenn beide Beine grün sind** — sonst entsteht kein Releas
 - **Es werden keine SHA256-Prüfsummen erzeugt** (nicht implementiert) — im Release liegt **keine**
   mitgelieferte Prüfsummendatei. Stattdessen erzeugt der Release-Workflow **ab dem ersten mit ihm
   gebauten Release** GitHub Artifact Attestations (Build-Provenance, §3.3), prüfbar mit
-  `gh attestation verify`; live verifiziert sind sie noch **nicht** (§3.3). Davon zu unterscheiden ist
+  `gh attestation verify`; für `v0.1.8` sind sie live verifiziert (§3.3, §9). Davon zu unterscheiden ist
   der `sha256`-**Digest**, den die GitHub-API **je Asset** liefert (abfragbar z. B. mit
   `gh release view <tag> --json assets`); das ist keine Datei im Release.
 
@@ -269,9 +269,20 @@ sudo apt install ./Prime-Photos-linux-x64.deb
 sie nicht nachziehen. Das `.deb` ist **nicht** dpkg-signiert (siehe §3.2) — geprüft wird es über
 die abgetrennte `.asc` (§7).
 
-> **Noch nicht live:** Bisher ist kein Release mit einem `.deb` erschienen; das Paket wurde nur
-> lokal gebaut und mit `dpkg-deb -I`/`dpkg-deb -c` geprüft. Installation, Desktop-Eintrag und Icon
-> auf einem Debian/Ubuntu-Rechner sind nicht abgenommen (offener Punkt, `AGENTS.todo.md`).
+> **Live, Installation offen:** Seit `v0.1.8` (2026-11-01, §9) enthält ein Release ein
+> `Prime-Photos-linux-x64.deb`. Das veröffentlichte Asset wurde mit
+> `gh release download v0.1.8 -p Prime-Photos-linux-x64.deb` geladen; sein `shasum -a 256` ist
+> identisch mit dem GitHub-API-Digest. Geprüft wurde es mit `ar`/`tar`, weil `dpkg-deb` auf macOS
+> **nicht** verfügbar ist (`which dpkg-deb` → not found): `ar t` listet `debian-binary`,
+> `control.tar.zst` und `data.tar.zst`; die Kontrollfelder lesen `Package: prime-photos`,
+> `Version: 0.1.8`, `Architecture: amd64` und
+> `Depends: libc6 (>= 2.39), libdbus-1-3 (>= 1.9.14), libgcc-s1 (>= 4.2),
+> libgdk-pixbuf-2.0-0 (>= 2.22.0), libglib2.0-0t64 (>= 2.66.0), libgtk-3-0t64 (>= 3.21.5),
+> libjavascriptcoregtk-4.1-0, libsoup-3.0-0 (>= 3.0.3), libssl3t64 (>= 3.0.0),
+> libwebkit2gtk-4.1-0 (>= 2.35.1), libayatana-appindicator3-1 | libappindicator3-1` sowie
+> `Recommends: gnome-keyring | kwalletmanager`. Das Daten-Tarball enthält 32 Einträge
+> (21 Verzeichnisse und 11 Dateien aus der Liste oben). Installation, Desktop-Eintrag und Icon auf
+> einem Debian/Ubuntu-Rechner sind weiterhin nicht verifiziert (offener Punkt, `AGENTS.todo.md`).
 
 ### 3.3 Artifact Attestations (Build-Provenance)
 
@@ -291,9 +302,11 @@ gh attestation verify Prime-Photos-linux-x64.deb --repo reisi007/prime-photos
 gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
 ```
 
-> **Nicht live verifiziert:** Es wurde noch **keine** Attestation erzeugt — der erste Beleg ist der
-> erste Release, der mit diesem Workflow gebaut wird. Belegt ist bis dahin nur die
-> Workflow-Konfiguration, nicht `gh attestation verify` gegen ein echtes Release.
+> **Live verifiziert (`v0.1.8`, §9):** `gh attestation verify <asset> --repo reisi007/prime-photos`
+> war für alle drei workflow-gebauten Assets erfolgreich — `Prime-Photos-linux-x64.tar.gz`,
+> `Prime-Photos-linux-x64.deb` und `Prime-Photos-windows-x64.zip`, je Exit 0; die JSON-Ausgabe
+> enthält ein Sigstore-Bundle. Das von Hand angehängte macOS-DMG trägt **keine** Attestation — es
+> wird nicht vom Workflow gebaut.
 
 ### 3.4 Was die Mechanismen belegen
 
@@ -865,6 +878,95 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 - **Inhalt dieses Releases:** die sechs Audit-Fixes #3, #4, #5, #6, #7 und #8.
 - **Release-Notes:** vom Workflow erzeugt (`generate_release_notes: true`):
   `**Full Changelog**: https://github.com/reisi007/prime-photos/compare/v0.1.6...v0.1.7`.
+
+**Durch den neunten echten Lauf belegt (2026-11-01):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.8` (Tag-Objekt `f5425f9d…`) auf Commit
+  `b2f895e29b05c0f551a194447fcbd207a7f5e691`; GitHub-Release `v0.1.8`, veröffentlicht
+  `2026-11-01T09:20:29Z`, **nicht** Draft, **nicht** Pre-Release —
+  [GitHub Release v0.1.8](https://github.com/reisi007/prime-photos/releases/tag/v0.1.8).
+  Paketversion `0.1.8`, macOS-Build `8`.
+- **Runs:** [Push-CI `41292136726`](https://github.com/reisi007/prime-photos/actions/runs/41292136726)
+  grün; [Release-Workflow `41292138270`](https://github.com/reisi007/prime-photos/actions/runs/41292138270)
+  (`release.yml`, ausgelöst durch den Tag-Push) grün — `Build linux-x64` (431 s),
+  `Build windows-x64` (408 s), `Publish GitHub Release` (15 s). Die SignPath-Schritte (Upload
+  unsigned Windows binary / Submit SignPath signing request / Replace / Verify) und
+  `Sign Linux release artifacts (GPG)` wurden übersprungen; `Attest build provenance` war
+  **success**. Damit ist das Windows-`.zip` unsigniert, und es gibt keine `.asc`.
+- **Attestations (live geprüft):** `gh attestation verify <asset> --repo reisi007/prime-photos`
+  endete für `Prime-Photos-linux-x64.tar.gz`, `Prime-Photos-linux-x64.deb` und
+  `Prime-Photos-windows-x64.zip` mit Exit 0; die JSON-Ausgabe enthält je ein Sigstore-Bundle. Das
+  macOS-DMG ist **nicht** attestiert (manuell angehängt, nicht workflow-gebaut).
+- **Assets** (Name — Bytes — SHA-256-Digest laut GitHub-API):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 10.432.474 | `ed823f4d26c927845e8462b126bde8b33f7d9d4bfa101006fd3dee5cfdb31457` |
+  | `Prime-Photos-linux-x64.tar.gz` | 14.079.216 | `eb90af9ccd0810443c7f3b93e6b5177f7248d590885126e61922b1da03da9a7c` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.635.451 | `b9270bd918a8fee54c13462ec5a2bb0c64225adad6c1bee9ede78906a197b51e` |
+  | `Prime-Photos-windows-x64.zip` | 8.772.878 | `442c86e3ca46c47ba522a708ff04486d7e7f391e66107d8e49163843ca05ae3b` |
+
+  `v0.1.8` trägt vier Assets — **erstmals** mit einem `.deb` (`v0.1.7` hatte nur tar.gz, dmg und
+  zip). Das DMG wurde lokal gebaut und nachträglich von Hand hochgeladen; sein lokaler
+  `shasum -a 256`-Digest stimmt mit dem von GitHub gemeldeten Asset-Digest überein.
+- **macOS-Bundle (lokal aus dem Tag-Commit gebaut, §4):** `VERSION=0.1.8`, `BUILD=8`; vor dem Build
+  wurde `touch build.rs` ausgeführt. **Ad-hoc signiert** (`codesign --sign -`) — erstes Release mit
+  dem neuen ad-hoc-Standard (§4). `codesign -dv --verbose=2`: `Signature=adhoc`,
+  `flags=0x10002(adhoc,runtime)`, `TeamIdentifier=not set`, `Identifier=de.reisinger.prime-photos`.
+  `codesign --verify --strict --verbose=2` war erfolgreich („valid on disk“, „satisfies its
+  Designated Requirement“). Commit-Stempel im Release-Binary: `b2f895e`. `Info.plist`:
+  `CFBundleShortVersionString 0.1.8`, `CFBundleVersion 8`,
+  `CFBundleIdentifier de.reisinger.prime-photos`. `lipo -archs`: `arm64`. Das DMG trägt den
+  Volume-Namen `Prime Photos`; `hdiutil verify` meldete **checksum VALID** (zusätzlich erschien die
+  in §4 dokumentierte Deprecation-Warnung).
+- **Installation und Hintergrundstart:** Das Bundle wurde mit `ditto` nach
+  `/Applications/Prime Photos.app` installiert; `codesign --verify` war dort erfolgreich
+  (`Signature=adhoc`), Version `0.1.8`, Build `8`. Gestartet mit
+  `open -a "/Applications/Prime Photos.app"`; `lsappinfo info -app de.reisinger.prime-photos`
+  zeigte `bundle path="/Applications/Prime Photos.app"`,
+  `executable path="/Applications/Prime Photos.app/Contents/MacOS/prime-photos"`,
+  `type="Foreground"`, `Version="8"`, `Arch=ARM64` und PID `31803`.
+- **Lokale Prüfbelege (Befehle → beobachtetes Ergebnis):** Die Befehle am lokalen Bundle liefen im
+  Build-Ausgabeverzeichnis aus §4 (`target/dist`); die dort angegebenen Pfade `Prime Photos.app`
+  und `Prime-Photos-macos-arm64.dmg` sind relativ zu diesem Verzeichnis.
+
+  | Befehl (cwd `target/dist`) | Ergebnis |
+  |---|---|
+  | `codesign --verify --strict --verbose=2 "Prime Photos.app"` | erfolgreich („valid on disk“, „satisfies its Designated Requirement“) |
+  | `codesign -dv --verbose=2 "Prime Photos.app"` | `Signature=adhoc`, `flags=0x10002(adhoc,runtime)`, `TeamIdentifier=not set`, `Identifier=de.reisinger.prime-photos` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "Prime Photos.app/Contents/Info.plist"` | `0.1.8` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "Prime Photos.app/Contents/Info.plist"` | `8` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "Prime Photos.app/Contents/Info.plist"` | `de.reisinger.prime-photos` |
+  | `lipo -archs "Prime Photos.app/Contents/MacOS/prime-photos"` | `arm64` |
+  | `hdiutil verify "Prime-Photos-macos-arm64.dmg"` | `checksum VALID` |
+  | `shasum -a 256 "Prime-Photos-macos-arm64.dmg"` | `b9270bd918a8fee54c13462ec5a2bb0c64225adad6c1bee9ede78906a197b51e`, identisch mit dem GitHub-API-Digest oben |
+
+  | Befehl (gemountetes DMG) | Ergebnis |
+  |---|---|
+  | `hdiutil attach -nobrowse -readonly "Prime-Photos-macos-arm64.dmg"` | gemountet unter `/Volumes/Prime Photos`; das Volume enthält genau `Prime Photos.app` |
+  | `codesign --verify --verbose=2 "/Volumes/Prime Photos/Prime Photos.app"` | erfolgreich |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "/Volumes/Prime Photos/Prime Photos.app/Contents/Info.plist"` | `0.1.8` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "/Volumes/Prime Photos/Prime Photos.app/Contents/Info.plist"` | `8` |
+  | `hdiutil detach "/Volumes/Prime Photos"` | ausgeworfen |
+
+  | Befehl (installiertes Bundle) | Ergebnis |
+  |---|---|
+  | `codesign --verify "/Applications/Prime Photos.app"` | erfolgreich, `Signature=adhoc` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "/Applications/Prime Photos.app/Contents/Info.plist"` | `0.1.8` |
+  | `/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "/Applications/Prime Photos.app/Contents/Info.plist"` | `8` |
+  | `open -a "/Applications/Prime Photos.app"` | gestartet |
+  | `lsappinfo info -app de.reisinger.prime-photos` | `bundle path="/Applications/Prime Photos.app"`, `executable path="/Applications/Prime Photos.app/Contents/MacOS/prime-photos"`, `type="Foreground"`, `Version="8"`, `Arch=ARM64`, PID `31803` |
+- **Manueller UI-Smoke-Test:** Das installierte Bundle wurde mit
+  `--demo --screenshot <pfad> --size 1400x900` gestartet; der Screenshot wurde erzeugt und visuell
+  geprüft (Queue-Tabelle, Ordner-Karten, Statusfarben, Kontoblock in der Seitenleiste — wie im
+  verifizierten 0.1.8-Screenshot-Satz).
+- **Verifikationsgrenze:** Mit diesem Release-Build wurde **kein** Live-Upload zu Amazon
+  durchgeführt. Ob Benachrichtigungen und `SMAppService`-Autostart mit einem ad-hoc signierten
+  Bundle funktionieren, ist weiterhin **nicht** verifiziert. Das `.deb`-Asset wurde heruntergeladen
+  (Digest identisch mit dem GitHub-API-Digest) und mit `ar`/`tar` geprüft (Kontrollfelder, 32
+  Einträge — 21 Verzeichnisse und 11 Dateien); `dpkg-deb` ist auf macOS nicht verfügbar, und auf
+  einem Debian/Ubuntu-Rechner ist es weiterhin nicht installiert (offener Punkt,
+  `AGENTS.todo.md`). Windows und Linux wurden im Release-CI nur kompiliert.
 
 ---
 
