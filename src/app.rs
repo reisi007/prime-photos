@@ -302,6 +302,10 @@ pub(crate) struct PrimePhotoApp {
     /// Last tray glyph state (plus the OS theme it was drawn for), so the icon
     /// is only re-set on an actual change — see [`Self::update_tray_icon`].
     pub(crate) tray_icon_state: Option<(tray::TrayState, Option<egui::Theme>)>,
+    /// Start time for the current Active tray animation; cleared outside Active.
+    pub(crate) tray_animation_started_at: Option<Instant>,
+    /// Last Active frame applied to the tray icon.
+    pub(crate) tray_animation_frame: usize,
     /// Whether the last finished upload run had failures (drives the "error"
     /// glyph until the next run).
     pub(crate) tray_last_run_failed: bool,
@@ -546,6 +550,8 @@ impl PrimePhotoApp {
             tray_build_failed: false,
             tray_paused: false,
             tray_icon_state: None,
+            tray_animation_started_at: None,
+            tray_animation_frame: 0,
             tray_last_run_failed: false,
             tray_done_at: None,
             autostart,
@@ -670,6 +676,8 @@ impl PrimePhotoApp {
             tray_build_failed: false,
             tray_paused: false,
             tray_icon_state: None,
+            tray_animation_started_at: None,
+            tray_animation_frame: 0,
             tray_last_run_failed: false,
             tray_done_at: None,
             // No `Autostart::new()`: it probes the login-item registration. The
@@ -798,12 +806,13 @@ impl PrimePhotoApp {
     }
 
     /// Derive the tray glyph state from the current app state and apply it —
-    /// only when the state (or the OS theme it is drawn for) actually changed,
-    /// so the menu-bar icon is not touched every frame. Also schedules the one
-    /// repaint that turns the "done" glyph back into "idle" when its window
-    /// expires (no polling/busy loop).
+    /// only when the state/theme or Active animation frame changed. Schedules
+    /// Active frame changes and the "done"-to-idle transition with delayed
+    /// repaints, not polling or a busy loop.
     pub(crate) fn update_tray_icon(&mut self, ctx: &egui::Context) {
         if self.tray.is_none() {
+            self.tray_animation_started_at = None;
+            self.tray_animation_frame = 0;
             return;
         }
         let paused = *self.paused.borrow();
@@ -811,17 +820,43 @@ impl PrimePhotoApp {
         let since_done = self.tray_done_at.map(|t| t.elapsed());
         let state = tray::tray_state(paused, busy, self.tray_last_run_failed, since_done);
         let theme = ctx.system_theme();
-        if self.tray_icon_state != Some((state, theme)) {
-            self.tray_icon_state = Some((state, theme));
-            // `set_state` also re-applies the (now dynamic) tooltip, so the
-            // status shows up there on every state change.
-            if let Some(tray) = self.tray.as_mut() {
-                tray.set_state(state, theme);
+        let previous_state = self.tray_icon_state.map(|(previous, _)| previous);
+        if state == tray::TrayState::Active {
+            if previous_state != Some(tray::TrayState::Active)
+                || self.tray_animation_started_at.is_none()
+            {
+                self.tray_animation_started_at = Some(Instant::now());
             }
+        } else {
+            self.tray_animation_started_at = None;
+            self.tray_animation_frame = 0;
         }
-        // Wake up exactly when the "done" window ends so the glyph flips to
-        // "idle"; a plain state change repaints from its own cause.
-        if state == tray::TrayState::Done {
+        let active_frame = self
+            .tray_animation_started_at
+            .map(|started_at| tray::active_frame_index(started_at.elapsed()))
+            .unwrap_or(0);
+        let state_or_theme_changed = self.tray_icon_state != Some((state, theme));
+        if state_or_theme_changed {
+            self.tray_icon_state = Some((state, theme));
+            if let Some(tray) = self.tray.as_mut() {
+                tray.set_state(state, theme, active_frame);
+            }
+            self.tray_animation_frame = active_frame;
+        } else if state == tray::TrayState::Active && active_frame != self.tray_animation_frame {
+            if let Some(tray) = self.tray.as_ref() {
+                tray.set_active_frame(active_frame, theme);
+            }
+            self.tray_animation_frame = active_frame;
+        }
+        // Active rotates without polling: wake at the next frame boundary.
+        // Theme changes draw the current frame and do not restart this clock.
+        if state == tray::TrayState::Active {
+            if let Some(started_at) = self.tray_animation_started_at {
+                ctx.request_repaint_after(tray::active_frame_remaining(started_at.elapsed()));
+            }
+        } else if state == tray::TrayState::Done {
+            // Wake up exactly when the "done" window ends so the glyph flips
+            // to "idle"; a plain state change repaints from its own cause.
             if let Some(remaining) = self
                 .tray_done_at
                 .and_then(|t| tray::DONE_WINDOW.checked_sub(t.elapsed()))
@@ -1646,7 +1681,7 @@ impl eframe::App for PrimePhotoApp {
 
         // Tray glyph (idle/active/paused/done/error). Runs on every frame —
         // also before sign-in and while the window is hidden — but re-sets the
-        // icon only on change.
+        // icon only on state/theme changes or an Active animation frame change.
         self.update_tray_icon(ctx);
 
         // Name-conflict prompt (`ConflictResolution::Ask`).
