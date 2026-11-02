@@ -843,8 +843,13 @@ fn publish_state(
     shared: &Arc<Mutex<UploadShared>>,
     msg: String,
     folder_paths: HashMap<usize, PathBuf>,
+    slow_mode: Option<bool>,
 ) {
     let mut s = shared.lock().unwrap();
+    // UI start paths pass the app's transient value explicitly. A detached
+    // supervisor passes `None` and keeps the latest shared value, which is also
+    // updated immediately by `set_slow_mode` while the supervisor is alive.
+    s.slow_mode = slow_mode.unwrap_or(s.slow_mode);
     s.active = true;
     s.started = Some(Instant::now());
     s.done = 0;
@@ -919,9 +924,10 @@ fn publish_plan(
     store: &mut FolderStore,
     shared: &Arc<Mutex<UploadShared>>,
     msg: String,
+    slow_mode: Option<bool>,
 ) {
     let folder_paths = plan_folder_paths(plan, store);
-    publish_state(plan, shared, msg, folder_paths);
+    publish_state(plan, shared, msg, folder_paths, slow_mode);
     publish_folder_status(plan, store);
 }
 
@@ -1220,7 +1226,10 @@ fn start_background_run(
             .entry(scan.idx)
             .or_insert_with(|| scan.path.clone());
     }
-    publish_plan(&mut plan, store, &shared, msg);
+    // The detached supervisor has no `PrimePhotoApp`; the shared field is the
+    // live app value and remains authoritative even if the user toggles while
+    // this run is being prepared.
+    publish_plan(&mut plan, store, &shared, msg, None);
 
     // Spawned, not awaited: the supervisor must keep watching while the run
     // uploads (the `active` guard in `can_start` already prevents a second one).
@@ -2274,7 +2283,7 @@ impl PrimePhotoApp {
                     .or_insert_with(|| folder.path.clone());
             }
         }
-        let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
+        let concurrency = self.config.concurrency();
         let limit = if self.config.limit_enabled {
             self.config.limit_kbps
         } else {
@@ -2286,6 +2295,7 @@ impl PrimePhotoApp {
             &mut self.store,
             &self.upload,
             msg,
+            Some(self.slow_mode),
         );
         if self.slow_mode {
             self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
@@ -2451,7 +2461,7 @@ impl PrimePhotoApp {
         // One plan, one synthetic folder index: the counters, the live queue
         // and `folder_opts` look exactly like a single-folder run.
         let mut plan = UploadPlan::from_files(ONE_TIME_IDX, dedup, conflict_resolution, files);
-        let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
+        let concurrency = self.config.concurrency();
         let limit = if self.config.limit_enabled {
             self.config.limit_kbps
         } else {
@@ -2465,6 +2475,7 @@ impl PrimePhotoApp {
             &self.upload,
             tr1("{} Datei(en) werden hochgeladen …", count),
             HashMap::new(),
+            Some(self.slow_mode),
         );
         if self.slow_mode {
             self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
@@ -2616,7 +2627,7 @@ impl PrimePhotoApp {
         // disk; the detached supervisor gets the shared in-memory session.
         let session = self.session.clone();
         let cfg = self.config.clone();
-        let concurrency = if self.slow_mode { 1 } else { self.config.concurrency() };
+        let concurrency = self.config.concurrency();
         let limit = if self.config.limit_enabled {
             self.config.limit_kbps
         } else {
@@ -4028,7 +4039,7 @@ mod tests {
         let shared = Arc::new(Mutex::new(UploadShared::default()));
         let folder_paths = plan_folder_paths(&plan, &store);
 
-        publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
+        publish_state(&mut plan, &shared, "test".to_string(), folder_paths, None);
 
         let display = {
             let state = shared.lock().unwrap();
@@ -4152,7 +4163,7 @@ mod tests {
 
         let shared = Arc::new(Mutex::new(UploadShared::default()));
         let folder_paths = plan_folder_paths(&plan, &store);
-        publish_state(&mut plan, &shared, "test".to_string(), folder_paths);
+        publish_state(&mut plan, &shared, "test".to_string(), folder_paths, None);
         let state = shared.lock().unwrap();
         assert_eq!(state.total, 1);
         assert_eq!(state.queue.len(), 1);
@@ -4188,6 +4199,7 @@ mod tests {
             &all_current_shared,
             tr("Alles aktuell").to_string(),
             folder_paths,
+            None,
         );
         let state = all_current_shared.lock().unwrap();
         assert_eq!(state.total, 0);

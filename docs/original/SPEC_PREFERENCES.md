@@ -522,9 +522,9 @@ lives in About under `…send_logs_button_text`, **not** `…preferences_send_lo
 | Sync tab | conditional tab, selective sync, `ExcludeNewCloudFolders` | out of scope (AGENTS.md: no bidirectional sync) | — |
 | Backup tab | reset-all-backups button, **dead** (never added) | none; per-target edit exists instead | `src/backup_config.rs` |
 | Per-backup defaults in prefs | `BackupItemInterval` (Immediate), `ContentFilter` (PhotosAndVideo), `EnableDeduplicationForPhotosAndVideos` (false) stored in `settings.json` | per-target fields live in `folders.toml` (`dedup`, conflict policy); **no interval/content-filter defaults** | `src/folders.rs` (`FolderStore`, `ConflictResolution`), `src/backup_config.rs` |
-| Slow-Mode (temporary concurrency=1) | not present as such — the original has no "one file at a time" toggle; concurrency is a slider | `slow_mode` checkbox, **run-scoped, reset on restart** | `src/app.rs` (`slow_mode`), `src/backup.rs` (`if self.slow_mode { 1 }`) |
+| Slow-Mode (temporary concurrency=1) | not present as such — the original has no "one file at a time" toggle; concurrency is a slider | `slow_mode` checkbox, **transient, reset on restart, and applied immediately to an active run**: in-flight transfers finish; no new transfer starts while more than one is still in flight, then the live limit is one; switching it off restores configured parallelism | `src/settings.rs` (`general_settings` checkbox), `src/app.rs` (`set_slow_mode`), `src/upload.rs` (`UploadShared::slow_mode`, `try_acquire_transfer_slot`, `TransferSlot`), `src/backup.rs` (run-start concurrency sets worker capacity) |
 | Persistence format | `settings.json` (flat JSON, hot reload via `FileSystemWatcher`) + `app-settings.json` (server, 1 h refresh) + OS login items + SQLite | `config.toml` (TOML, explicit save) + `folders.toml` + SQLite (dedup index) | `src/config.rs`, `src/folders.rs`, `src/dedup.rs` |
-| Live reload of settings | yes — `Changed` observable, subscribers re-read (queues, throttle) without restart | no — settings are read at run start; `Save` writes the file, a run takes the current values | `src/settings.rs` (`save_config`), `src/backup.rs` |
+| Live reload of settings | yes — `Changed` observable, subscribers re-read (queues, throttle) without restart | persisted settings are read at run start; **Slow-Mode is the deliberate runtime exception**: its checkbox calls `set_slow_mode` immediately and updates `UploadShared`, whose transfer-slot gate applies the new limit to an active run | `src/settings.rs` (`general_settings`, `save_config`), `src/app.rs` (`set_slow_mode`), `src/upload.rs` (`UploadShared`, `try_acquire_transfer_slot`) |
 | Auto-update | CloudFront manifests, rollout gate, 30-min grace, stub installer `--quiet/--unattended`, failure dialog | **none** (GitHub Release + manual build per AGENTS.md; `../dev/RELEASE.md`) | — (deliberate: different distribution channel) |
 | About window | sheet with version, device serial, send-logs, 3 legal links, copyright | **none** — no About dialog, no third-party-license notice; marked "release-relevant" in AGENTS.md | — (gap) |
 | Legal links | ToS / Privacy / Third-Party-Licenses → web URLs | none | — (gap) |
@@ -595,7 +595,8 @@ is saved-but-unbound. → **belegt**
 - Our code: `src/config.rs` (`Config`, `notifications`, `language`, `background_sync`),
   `src/settings.rs` (`settings_ui`, `general_settings`, `bandwidth_settings`),
   `src/app.rs` (`PrimePhotoApp` fields, `set_autostart`, `save_config`), `src/upload.rs`
-  (`upload_worker`, per-file pacing), `src/backup.rs` (run start: `slow_mode`/`concurrency`/
-  `limit`), `src/folders.rs` (`FolderStore`, `scan_images`, `ConflictResolution`),
+  (`upload_worker`, `UploadShared`, live transfer-slot gate and per-file pacing),
+  `src/backup.rs` (run start: worker capacity from `concurrency`, plus `limit`),
+  `src/folders.rs` (`FolderStore`, `scan_images`, `ConflictResolution`),
   `src/dedup.rs`, `src/platform.rs` (`open_url`, `reveal_in_file_manager`), `src/i18n.rs`,
   `src/tray.rs`, `src/login.rs`.

@@ -17,7 +17,8 @@ name-conflict default), and the account block. Sign-in is automatic and is
 - **Concurrency/Rate in `Config`:** `concurrency`/`limit_enabled`/`limit_kbps`
   are config fields (serde defaults, old `config.toml` loads); clamping
   **1..=8** stays.
-- `slow_mode` remains deliberately **transient**.
+- `slow_mode` remains deliberately **transient** (never persisted), but it
+  takes effect **immediately**, including on a running upload.
 - Marketplace is chosen only at sign-in, not in settings.
 
 ## Decisions
@@ -26,7 +27,8 @@ name-conflict default), and the account block. Sign-in is automatic and is
   „Erweitert (Konto)" (Konfig-Pfad, Marktplatz, Zone, User-Agent) ist
   **entfernt**; jede Änderung wird **sofort** persistiert (Muster
   `if changed { save_config() }`). Folge: den Marktplatz wählt man nur noch
-  beim Anmelden. `slow_mode` bleibt bewusst **transient**.
+  beim Anmelden. `slow_mode` bleibt bewusst **transient** (wird nie
+  gespeichert), wirkt aber **sofort** — auch auf einen laufenden Lauf.
 
 - **Concurrency/Rate in `Config` (F6, Welle 5.6).** `concurrency`/`limit_enabled`/`limit_kbps`
   als Config-Felder (serde-Defaults, alte `config.toml` lädt weiter);

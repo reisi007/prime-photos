@@ -883,6 +883,28 @@ impl PrimePhotoApp {
         }
     }
 
+    /// Apply the transient Slow-Mode switch, live while a run is active.
+    ///
+    /// The workers read `UploadShared::slow_mode` on every transfer attempt, so
+    /// the change reaches a running upload without respawning them. Logging
+    /// stays silent while idle: the start paths print the same note from their
+    /// own snapshot, and a second line would only duplicate it.
+    pub(crate) fn set_slow_mode(&mut self, enabled: bool) {
+        self.slow_mode = enabled;
+        // One lock for both fields and the log: the worker must never observe
+        // the new switch without the matching message (and vice versa).
+        let mut s = self.upload.lock().unwrap();
+        s.slow_mode = enabled;
+        if s.active {
+            s.log(if enabled {
+                tr("Slow-Mode aktiv: laufende Uploads laufen zu Ende, danach 1 Datei gleichzeitig.")
+                    .to_string()
+            } else {
+                tr("Slow-Mode aus: konfigurierte Parallelität wiederhergestellt.").to_string()
+            });
+        }
+    }
+
     // -- account fetch (name + avatar) --------------------------------------
 
     /// Kick off the one-shot account fetch (name + avatar), unless it already

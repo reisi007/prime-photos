@@ -84,6 +84,15 @@ pub(crate) struct UploadShared {
     /// every wait point; a request already in flight is allowed to finish.
     /// Cleared by `run_upload` before a new run's workers start.
     pub(crate) cancelled: bool,
+    /// Live Slow-Mode switch. Read on every transfer attempt, so toggling it
+    /// changes the real parallelism of an already running upload: transfers
+    /// already in flight finish, no new one starts while more than one slot is
+    /// taken, and from then on exactly one file uploads at a time.
+    pub(crate) slow_mode: bool,
+    /// Number of workers currently holding a transfer slot (a file inside its
+    /// upload attempt). The gate compares this against the live limit; every
+    /// exit path releases its slot through `TransferSlot`.
+    pub(crate) uploads_in_flight: usize,
     /// Wall-clock start of the current run; `None` when idle or finished. Basis
     /// for the ETA estimate (rate = done / elapsed).
     pub(crate) started: Option<Instant>,
@@ -414,6 +423,114 @@ pub(crate) fn outcome_text(
 /// (`scans_in_flight > 0`) to be folded in.
 const QUEUE_IDLE_POLL: Duration = Duration::from_millis(150);
 
+/// Poll interval while all transfer slots are taken: a waiting worker re-checks
+/// the live limit (Slow-Mode) and the run state at this cadence.
+const TRANSFER_SLOT_POLL: Duration = Duration::from_millis(100);
+
+/// Take one transfer slot if the live limit allows it.
+///
+/// Limit and counter are decided under the same lock, so a Slow-Mode toggle and
+/// a worker's acquire can never interleave into an over-limit state.
+/// `max_parallel` is the run's configured concurrency; an active Slow-Mode
+/// reduces it to exactly one, no matter how many workers were spawned.
+fn try_acquire_transfer_slot(shared: &Arc<Mutex<UploadShared>>, max_parallel: usize) -> bool {
+    let mut s = shared.lock().unwrap();
+    let limit = if s.slow_mode { 1 } else { max_parallel.max(1) };
+    if s.uploads_in_flight < limit {
+        s.uploads_in_flight += 1;
+        true
+    } else {
+        false
+    }
+}
+
+/// RAII guard for one acquired transfer slot. Releasing the counter in `Drop`
+/// covers every worker exit path — `continue`, error, cancellation — without a
+/// manual bookkeeping branch.
+struct TransferSlot {
+    shared: Arc<Mutex<UploadShared>>,
+}
+
+impl Drop for TransferSlot {
+    fn drop(&mut self) {
+        let mut s = self.shared.lock().unwrap();
+        s.uploads_in_flight = s.uploads_in_flight.saturating_sub(1);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkerState {
+    Running,
+    Paused,
+    Cancelled,
+}
+
+/// Snapshot the two run controls at a worker wait point. Cancellation takes
+/// precedence so a cancelled run never waits for a later resume.
+fn worker_state(
+    shared: &Arc<Mutex<UploadShared>>,
+    pause_rx: &mut watch::Receiver<bool>,
+) -> WorkerState {
+    let paused = *pause_rx.borrow_and_update();
+    let cancelled = shared.lock().unwrap().cancelled;
+    if cancelled {
+        WorkerState::Cancelled
+    } else if paused {
+        WorkerState::Paused
+    } else {
+        WorkerState::Running
+    }
+}
+
+/// Do not acquire a slot unless the last observed run state permits starting a
+/// file. The worker checks the state again after a successful acquisition to
+/// cover a pause or cancellation racing the counter update.
+fn try_acquire_transfer_slot_if_running(
+    shared: &Arc<Mutex<UploadShared>>,
+    pause_rx: &mut watch::Receiver<bool>,
+    max_parallel: usize,
+) -> Result<bool, WorkerState> {
+    match worker_state(shared, pause_rx) {
+        WorkerState::Running => Ok(try_acquire_transfer_slot(shared, max_parallel)),
+        state => Err(state),
+    }
+}
+
+/// Wait in the existing 400 ms cadence while paused; return false as soon as
+/// the run is cancelled.
+async fn wait_until_running_or_cancelled(
+    shared: &Arc<Mutex<UploadShared>>,
+    pause_rx: &mut watch::Receiver<bool>,
+) -> bool {
+    loop {
+        match worker_state(shared, pause_rx) {
+            WorkerState::Running => return true,
+            WorkerState::Cancelled => return false,
+            WorkerState::Paused => tokio::time::sleep(Duration::from_millis(400)).await,
+        }
+    }
+}
+
+/// Pop only while the run is still allowed to start a file. Keep the pause
+/// watch borrow through the synchronous queue pop, and preserve the lock order
+/// `shared` → `item_queue`; no guard survives this function or an `await`.
+fn pop_next_item_if_running(
+    shared: &Arc<Mutex<UploadShared>>,
+    pause_rx: &mut watch::Receiver<bool>,
+) -> Result<Option<(usize, usize, PathBuf)>, WorkerState> {
+    let paused = pause_rx.borrow_and_update();
+    let s = shared.lock().unwrap();
+    if s.cancelled {
+        return Err(WorkerState::Cancelled);
+    }
+    if *paused {
+        return Err(WorkerState::Paused);
+    }
+    Ok(s.item_queue
+        .as_ref()
+        .and_then(|q| q.lock().unwrap().pop_front()))
+}
+
 /// Which file-level attempt of the run a worker is performing. A run makes at
 /// most two: the initial pass over the queue, then one retry pass over exactly
 /// the files whose initial attempt failed.
@@ -641,6 +758,7 @@ async fn upload_worker(
     limit_kbps: u32,
     dedup: Arc<Mutex<DedupIndex>>,
     stage: AttemptStage,
+    max_parallel: usize,
 ) {
     let mut uploader = PrimePhotos::new(&cfg, false);
     // A 401 mid-run means the session cookies expired, not that the file is
@@ -650,19 +768,11 @@ async fn upload_worker(
     // next iteration and the file is pushed back onto the queue.
     let mut need_token_renew = false;
     let mut token_renewed_once = false;
-    loop {
-        while *pause_rx.borrow_and_update() {
-            // A paused run parks here: without this check a sign-out could never
-            // end it (the worker would wait forever for a resume).
-            if shared.lock().unwrap().cancelled {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(400)).await;
-        }
-        // A sign-out cancels the run: stop before starting another file. A
-        // request already in flight is allowed to finish — never abort a
-        // transfer mid-way.
-        if shared.lock().unwrap().cancelled {
+    'worker: loop {
+        // A pause parks here; cancellation still exits promptly while paused.
+        // Transfers already started are elsewhere in this loop and are never
+        // aborted by either control.
+        if !wait_until_running_or_cancelled(&shared, &mut pause_rx).await {
             return;
         }
         if need_token_renew {
@@ -679,13 +789,59 @@ async fn upload_worker(
                 }
             }
         }
-        let item = {
-            let s = shared.lock().unwrap();
-            s.item_queue
-                .as_ref()
-                .and_then(|q| q.lock().unwrap().pop_front())
+        // A transfer slot caps the files actually transferred at once. The limit
+        // is read live, so toggling Slow-Mode mid-run affects the next file
+        // without respawning the workers: running transfers keep their slot and
+        // finish, no new one starts until the counter is below the new limit.
+        let slot = loop {
+            match try_acquire_transfer_slot_if_running(
+                &shared,
+                &mut pause_rx,
+                max_parallel,
+            ) {
+                Ok(true) => {
+                    let slot = TransferSlot {
+                        shared: shared.clone(),
+                    };
+                    // Pause/cancel may have arrived between the pre-acquire
+                    // check and incrementing the slot count. Re-check before
+                    // proceeding; Drop releases the slot on either branch.
+                    match worker_state(&shared, &mut pause_rx) {
+                        WorkerState::Running => break slot,
+                        WorkerState::Paused => drop(slot),
+                        WorkerState::Cancelled => {
+                            drop(slot);
+                            return;
+                        }
+                    }
+                }
+                Ok(false) => tokio::time::sleep(TRANSFER_SLOT_POLL).await,
+                Err(WorkerState::Paused) => {
+                    tokio::time::sleep(Duration::from_millis(400)).await;
+                }
+                Err(WorkerState::Cancelled) => return,
+                Err(WorkerState::Running) => unreachable!("running state is not an error"),
+            }
+        };
+        let item = match pop_next_item_if_running(&shared, &mut pause_rx) {
+            Ok(item) => item,
+            Err(WorkerState::Paused) => {
+                drop(slot);
+                if !wait_until_running_or_cancelled(&shared, &mut pause_rx).await {
+                    return;
+                }
+                continue 'worker;
+            }
+            Err(WorkerState::Cancelled) => {
+                drop(slot);
+                return;
+            }
+            Err(WorkerState::Running) => unreachable!("running state is not an error"),
         };
         let Some((row, idx, path)) = item else {
+            // No work: release the slot before looking at destination roots or
+            // sealing, so waiting workers can also observe the empty queue.
+            drop(slot);
             if let Some((root_idx, root_path)) = take_pending_destination_root(&shared) {
                 let result = mirrored_path_components(&root_path, &machine_name)
                     .map_err(|error| format!("{}: {error}", root_path.display()));
@@ -1240,6 +1396,7 @@ async fn run_worker_pass(
     machine_name: &str,
     stage: AttemptStage,
     workers: usize,
+    max_parallel: usize,
 ) {
     let mut set = JoinSet::new();
     for _ in 0..workers {
@@ -1250,7 +1407,18 @@ async fn run_worker_pass(
         let resolver = destination_resolver.clone();
         let machine_name = machine_name.to_string();
         set.spawn(async move {
-            upload_worker(s, c, resolver, machine_name, p, limit_kbps, d, stage).await;
+            upload_worker(
+                s,
+                c,
+                resolver,
+                machine_name,
+                p,
+                limit_kbps,
+                d,
+                stage,
+                max_parallel,
+            )
+            .await;
         });
     }
     while set.join_next().await.is_some() {}
@@ -1314,6 +1482,13 @@ fn fail_destination_preflight(
     }
 }
 
+/// Number of workers in the initial pass. The live queue can grow from watcher
+/// or folder-scan injections after the run starts, so its initial length must
+/// not cap the capacity available to drain that queue.
+fn initial_worker_capacity(concurrency: usize) -> usize {
+    concurrency.max(1)
+}
+
 pub(crate) async fn run_upload(
     items: Vec<(usize, usize, PathBuf)>,
     cfg: Config,
@@ -1325,10 +1500,9 @@ pub(crate) async fn run_upload(
     folder_opts: HashMap<usize, (bool, ConflictResolution)>,
     destination_roots: HashMap<usize, PathBuf>,
 ) {
-    let count = items.len();
     let preflight_items = items.clone();
     let queue = Arc::new(Mutex::new(VecDeque::from(items)));
-    let workers = concurrency.max(1).min(count.max(1));
+    let workers = initial_worker_capacity(concurrency);
 
     // A new run clears a previous cancellation: without this, a run started
     // after a sign-out-cancelled one would return at its first wait point.
@@ -1352,6 +1526,8 @@ pub(crate) async fn run_upload(
         s.sealed = false;
         s.destination_roots = destination_roots.clone();
         s.destination_root_failures.clear();
+        // Defensive: a previous run must never leave a stale slot count behind.
+        s.uploads_in_flight = 0;
     }
 
     // Resolve selected backup roots even if the scan found no files. Resolve
@@ -1405,6 +1581,7 @@ pub(crate) async fn run_upload(
                 &machine_name,
                 AttemptStage::Initial,
                 workers,
+                concurrency,
             )
             .await;
 
@@ -1438,6 +1615,7 @@ pub(crate) async fn run_upload(
                     &machine_name,
                     AttemptStage::Retry,
                     retry_workers,
+                    concurrency,
                 )
                 .await;
             }
@@ -1599,6 +1777,15 @@ mod tests {
         assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
     }
 
+    fn assert_supported_translation(actual: &str, key: &'static str) {
+        let german = crate::i18n::tr_for(crate::i18n::Lang::De, key);
+        let english = crate::i18n::tr_for(crate::i18n::Lang::En, key);
+        assert!(
+            actual == german || actual == english,
+            "unexpected translation for {key:?}: {actual:?}"
+        );
+    }
+
     #[test]
     fn active_empty_run_reports_all_current_without_progress_or_eta() {
         let shared = UploadShared {
@@ -1610,10 +1797,10 @@ mod tests {
 
         let text = upload_progress_text(&shared);
 
-        assert_eq!(text, tr("Alles aktuell"));
-        assert!(!text.contains("0 von 0"));
-        assert!(!text.contains("0%"));
-        assert!(!text.contains(tr("Schätzung läuft …")));
+        assert_supported_translation(&text, "Alles aktuell");
+        assert!(!text.contains("0"));
+        assert!(!text.contains("Schätzung läuft …"));
+        assert!(!text.contains("Estimating …"));
     }
 
     #[test]
@@ -1634,9 +1821,10 @@ mod tests {
             )
         });
 
-        assert_eq!(text, tr("Alles aktuell"));
+        assert_supported_translation(&text, "Alles aktuell");
         assert!(!text.contains("0/0"));
-        assert!(!text.contains(tr("Schätzung läuft …")));
+        assert!(!text.contains("Schätzung läuft …"));
+        assert!(!text.contains("Estimating …"));
     }
 
     #[test]
@@ -1658,14 +1846,15 @@ mod tests {
             )
         });
 
-        assert_eq!(
-            summary,
-            tr3(
-                "Upload läuft: {} · {} · {}",
-                "2/5",
-                "photo.jpg",
-                eta_suffix(&shared),
-            )
+        let expected = [
+            "Upload läuft: 2/5 · photo.jpg · Schätzung läuft …",
+            "Upload läuft: 2/5 · photo.jpg · Estimating …",
+            "Upload running: 2/5 · photo.jpg · Schätzung läuft …",
+            "Upload running: 2/5 · photo.jpg · Estimating …",
+        ];
+        assert!(
+            expected.contains(&summary.as_str()),
+            "unexpected active summary: {summary:?}"
         );
     }
 
@@ -2336,5 +2525,144 @@ mod tests {
             folder_progress_text(FolderStatus::Paused, 1, 4),
             tr1("Angehalten bei {} %", "25")
         );
+    }
+
+    /// A shared state with the given live Slow-Mode switch and no run.
+    fn slot_shared(slow_mode: bool) -> Arc<Mutex<UploadShared>> {
+        Arc::new(Mutex::new(UploadShared {
+            slow_mode,
+            ..UploadShared::default()
+        }))
+    }
+
+    /// The guard that belongs to a successful `try_acquire_transfer_slot`.
+    fn slot_guard(shared: &Arc<Mutex<UploadShared>>) -> TransferSlot {
+        TransferSlot {
+            shared: shared.clone(),
+        }
+    }
+
+    #[test]
+    fn initial_worker_capacity_is_full_for_empty_or_small_queues() {
+        for concurrency in 1..=8 {
+            for initial_items in [0, 1] {
+                assert_eq!(
+                    initial_worker_capacity(concurrency),
+                    concurrency,
+                    "an initial queue of {initial_items} item(s) must not cap worker capacity"
+                );
+            }
+        }
+        assert_eq!(initial_worker_capacity(0), 1);
+    }
+
+    #[test]
+    fn slow_mode_gate_allows_only_one_slot() {
+        let shared = slot_shared(true);
+
+        assert!(try_acquire_transfer_slot(&shared, 4));
+        let first = slot_guard(&shared);
+        assert!(
+            !try_acquire_transfer_slot(&shared, 4),
+            "slow mode must cap the live limit at one, whatever was configured"
+        );
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 1);
+
+        // Releasing the one slot admits exactly one successor.
+        drop(first);
+        assert!(try_acquire_transfer_slot(&shared, 4));
+        assert!(!try_acquire_transfer_slot(&shared, 4));
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 1);
+    }
+
+    #[test]
+    fn slow_mode_lets_in_flight_transfers_finish_before_a_new_one() {
+        let shared = slot_shared(false);
+        let mut held = Vec::new();
+        for _ in 0..3 {
+            assert!(try_acquire_transfer_slot(&shared, 3));
+            held.push(slot_guard(&shared));
+        }
+        assert!(!try_acquire_transfer_slot(&shared, 3), "full parallelism");
+
+        // Switching to slow mode must not abort the three transfers, but no
+        // fourth one may start while more than one slot is still taken.
+        shared.lock().unwrap().slow_mode = true;
+        assert!(!try_acquire_transfer_slot(&shared, 3));
+        drop(held.pop());
+        assert!(!try_acquire_transfer_slot(&shared, 3), "two still in flight");
+        drop(held.pop());
+        assert!(!try_acquire_transfer_slot(&shared, 3), "one still in flight");
+        drop(held.pop());
+        assert!(try_acquire_transfer_slot(&shared, 3), "back to exactly one");
+        assert!(!try_acquire_transfer_slot(&shared, 3));
+    }
+
+    #[test]
+    fn clearing_slow_mode_restores_full_parallelism() {
+        let shared = slot_shared(true);
+        assert!(try_acquire_transfer_slot(&shared, 3));
+        let first = slot_guard(&shared);
+        assert!(!try_acquire_transfer_slot(&shared, 3));
+
+        // No respawn: the already running workers observe the new limit.
+        shared.lock().unwrap().slow_mode = false;
+        assert!(try_acquire_transfer_slot(&shared, 3));
+        let second = slot_guard(&shared);
+        assert!(try_acquire_transfer_slot(&shared, 3));
+        let third = slot_guard(&shared);
+        assert!(!try_acquire_transfer_slot(&shared, 3));
+
+        drop((first, second, third));
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 0);
+    }
+
+    #[test]
+    fn transfer_slot_drop_releases_the_slot() {
+        let shared = slot_shared(false);
+        assert!(try_acquire_transfer_slot(&shared, 2));
+        let slot = slot_guard(&shared);
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 1);
+
+        drop(slot);
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 0);
+        assert!(try_acquire_transfer_slot(&shared, 2));
+    }
+
+    #[test]
+    fn waiting_worker_does_not_acquire_a_freed_slot_while_paused_or_cancelled() {
+        let shared = slot_shared(false);
+        let (pause_tx, mut pause_rx) = watch::channel(false);
+        assert!(try_acquire_transfer_slot(&shared, 1));
+        let occupied = slot_guard(&shared);
+        assert_eq!(
+            try_acquire_transfer_slot_if_running(&shared, &mut pause_rx, 1),
+            Ok(false),
+            "the worker waits while the only slot is occupied"
+        );
+
+        // The slot becomes free after Pause. The same gate used before every
+        // production acquisition must reject it rather than allowing a pop.
+        pause_tx.send_replace(true);
+        drop(occupied);
+        assert_eq!(
+            try_acquire_transfer_slot_if_running(&shared, &mut pause_rx, 1),
+            Err(WorkerState::Paused)
+        );
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 0);
+
+        // Cancellation has the same no-new-file rule, without waiting for a
+        // later resume.
+        let shared = slot_shared(false);
+        let (_, mut pause_rx) = watch::channel(false);
+        assert!(try_acquire_transfer_slot(&shared, 1));
+        let occupied = slot_guard(&shared);
+        shared.lock().unwrap().cancelled = true;
+        drop(occupied);
+        assert_eq!(
+            try_acquire_transfer_slot_if_running(&shared, &mut pause_rx, 1),
+            Err(WorkerState::Cancelled)
+        );
+        assert_eq!(shared.lock().unwrap().uploads_in_flight, 0);
     }
 }

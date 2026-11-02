@@ -486,6 +486,14 @@ const EN: &[(&str, &str)] = &[
     ("{} von {}", "{} of {}"),
     ("Schätzung läuft …", "Estimating …"),
     ("Slow-Mode aktiv: 1 Datei gleichzeitig.", "Slow mode active: 1 file at a time."),
+    (
+        "Slow-Mode aktiv: laufende Uploads laufen zu Ende, danach 1 Datei gleichzeitig.",
+        "Slow mode active: running uploads finish, then 1 file at a time.",
+    ),
+    (
+        "Slow-Mode aus: konfigurierte Parallelität wiederhergestellt.",
+        "Slow mode off: configured parallelism restored.",
+    ),
     ("UEBERSPRUNGEN {}: bereits hochgeladen", "SKIPPED {}: already uploaded"),
     ("Übersprungen", "Skipped"),
     ("Warteschlange ({})", "Queue ({})"),

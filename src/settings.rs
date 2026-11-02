@@ -108,10 +108,17 @@ impl PrimePhotoApp {
         ui.label(theme::muted(tr(
             "Startet Prime Photos automatisch, wenn du dich am System anmeldest.",
         )));
-        // `slow_mode` stays transient on purpose (documented below the checkbox):
-        // it must never reach `Config`, so it does not set `changed`.
+        // `slow_mode` stays transient on purpose (documented below the
+        // checkbox): it must never reach `Config`, so it does not set
+        // `changed`. `set_slow_mode` also pushes the switch into a live run.
         ui.add_space(8.0);
-        ui.checkbox(&mut self.slow_mode, tr("Slow-Mode (1 Datei gleichzeitig)"));
+        let mut slow_mode = self.slow_mode;
+        if ui
+            .checkbox(&mut slow_mode, tr("Slow-Mode (1 Datei gleichzeitig)"))
+            .changed()
+        {
+            self.set_slow_mode(slow_mode);
+        }
         ui.label(theme::muted(tr("Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.")));
 
         // No "Erweitert (Konto)" section anymore (user decision 2026-10-16):

@@ -15,7 +15,10 @@ outcome.
   greater than global). In the MVP it is deliberately **not** implemented.
 - **Network awareness (MVP):** "Slow mode" is a temporary, **not**
   persisted run-time setting (`PrimePhotoApp.slow_mode`, checkbox in Settings
-  → Upload), which forces `concurrency = 1` for the current run; reset at
+  → Upload) that applies **immediately**, including to a running upload:
+  transfers already in flight finish, no new one starts while more than one
+  is running, then exactly one file uploads at a time. Switching it off
+  restores the configured concurrency without restarting the run; reset at
   app restart. Automatic throttling based on network/SSID/name is
   **deferred** (platform APIs, Post-MVP).
 - **Progress/ETA:** for scan-planned runs (manual and background scans via
@@ -106,10 +109,13 @@ outcome.
     vorbereitet. Im MVP bewusst **nicht** umgesetzt.
   - **Netzwerkabhängigkeit (MVP):** „Slow-Mode" als temporäre, **nicht**
     persistierte Run-Zeit-Einstellung (`PrimePhotoApp.slow_mode`, Checkbox
-    in Einstellungen → Upload), die für den aktuellen Lauf `concurrency = 1`
-    erzwingt; bei App-Neustart zurückgesetzt. Automatische Drosselung anhand
-    des Netzwerks/SSID/Namen ist **nachgeordnet** (Plattform-APIs,
-    Post-MVP).
+    in Einstellungen → Upload), die **sofort** wirkt — auch auf einen bereits
+    laufenden Upload: laufende Transfers werden zu Ende geführt, solange noch
+    mehr als einer läuft startet kein neuer, danach läuft genau 1 Datei
+    gleichzeitig. Ausschalten stellt die konfigurierte Parallelität ohne
+    Neustart des Laufs wieder her; bei App-Neustart zurückgesetzt.
+    Automatische Drosselung anhand des Netzwerks/SSID/Namen ist
+    **nachgeordnet** (Plattform-APIs, Post-MVP).
 
 - **Statussortierung der Warteschlange (User-Entscheidung 2026-10-26):** die
   Live-Warteschlange wird **global und flach** nach Dateistatus sortiert statt
