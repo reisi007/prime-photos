@@ -968,6 +968,47 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   einem Debian/Ubuntu-Rechner ist es weiterhin nicht installiert (offener Punkt,
   `AGENTS.todo.md`). Windows und Linux wurden im Release-CI nur kompiliert.
 
+**Durch den zehnten echten Lauf belegt (2026-11-02):**
+
+- **Release ausgelöst:** annotierter Tag `v0.1.9` (Tag-Objekt
+  `ae3e68cc0999c9f8c094b5cf9eec0a3c72b94dd9`) auf Commit
+  `e195abfaf435dcbc33734d4ad1ed785f6898b4d1`; GitHub-Release `v0.1.9`, veröffentlicht
+  `2026-11-02T19:21:58Z`, **nicht** Draft, **nicht** Pre-Release —
+  [GitHub Release v0.1.9](https://github.com/reisi007/prime-photos/releases/tag/v0.1.9).
+  Paketversion `0.1.9`, macOS-Build `9`.
+- **Release-CI:** [Workflow-Lauf `41508062172`](https://github.com/reisi007/prime-photos/actions/runs/41508062172)
+  erfolgreich — `Build windows-x64` (5m43s), `Build linux-x64` (7m9s), `Publish GitHub Release`
+  (24s). Die Windows-SignPath-Schritte und `Sign Linux release artifacts (GPG)` wurden übersprungen;
+  `Attest build provenance` war erfolgreich. Eine manuelle `gh attestation verify`-Prüfung wurde
+  nicht ausgeführt; das manuell angehängte macOS-DMG ist nicht workflow-attestiert. Die automatisch
+  erzeugten Release-Notes verweisen auf den Full Changelog `v0.1.8...v0.1.9`.
+- **Assets** (Name — Bytes — SHA-256-Digest laut GitHub-API):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 10.487.482 | `63ff9c8a7f1afb7a6c6dd146e552b36489c157c89eb25329241796667ac62b01` |
+  | `Prime-Photos-linux-x64.tar.gz` | 14.205.381 | `a6511c2198ba016656f89614f9a953d6095f56223bfdcffff412e55eaae2183f` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.815.442 | `5f1ea3651a1622ba10c37ccf3b0d3d8a515e6354c5dbaf0ebd73b4a63168c40a` |
+  | `Prime-Photos-windows-x64.zip` | 8.788.339 | `77e9b3681699c84c3f347f775af74419dbfb98cd459016ee382cce8650adde43` |
+
+  Die Release enthält vier Assets; der lokale `shasum -a 256`-Digest des DMG stimmt mit dem
+  GitHub-API-Digest überein.
+- **macOS-Bundle und DMG (lokal aus dem Tag-Commit gebaut, §4):** Nach `touch build.rs` lief
+  `VERSION=0.1.9 BUILD=9 CODESIGN_IDENTITY=- ./packaging/make-app.sh`. Das Bundle ist ad-hoc
+  signiert (`Signature=adhoc`, `flags=0x10002(adhoc,runtime)`, `TeamIdentifier=not set`), hat die
+  Kennung `de.reisinger.prime-photos` und Architektur `arm64`; `codesign --verify --strict
+  --verbose=2` war erfolgreich. `Info.plist` nennt Version `0.1.9` und Build `9`, der Commit-Stempel
+  `e195abf` wurde im Binary gefunden. Das DMG wurde aus `target/dist/Prime Photos.app` mit Volume-
+  Namen `Prime Photos` erstellt; `hdiutil verify` meldete **checksum VALID**. Read-only gemountet
+  waren Plist-Werte und `codesign`-Prüfung der App erfolgreich; anschließend wurde es ausgeworfen.
+- **Installation und UI-Smoke:** Nach Bestätigung wurde `/Applications/Prime Photos.app` durch den
+  Kandidaten ersetzt. Installierte Plist-Werte: Version `0.1.9`, Build `9`; Binary `arm64`, ad-hoc
+  signiert, `codesign --verify` erfolgreich. Ein normaler App-Start wurde nicht geprüft. Der direkte
+  Aufruf des installierten Executables im sicheren Demo-Modus
+  `--demo=uploading --screenshot="$PWD/target/dist/Prime-Photos-v0.1.9-smoke.png" --size=1400x900`
+  erzeugte einen visuell geprüften Screenshot. Dieser Demo-Modus führt keinen echten Upload aus und
+  erzeugt keine Tray-Animation; ein Live-Upload zu Amazon wurde nicht durchgeführt.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
