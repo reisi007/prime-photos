@@ -6,7 +6,10 @@
 #   1. Binary nach usr/bin/prime-photos (0755) installieren
 #   2. .desktop-Datei (packaging/linux/prime-photos.desktop) nach usr/share/applications/
 #   3. Hicolor-Icons 16/32/64/128/256/512 aus dem iconset nach usr/share/icons/hicolor/
-#      (das iconset rastert build.rs aus assets/logo.svg; 64 kommt aus icon_32x32@2x.png)
+#      (das iconset rastert build.rs aus assets/logo.svg; 64 kommt aus icon_32x32@2x.png).
+#      Es ist der **vollflächige** Rastersatz (`target/pp-appicon.iconset`), nicht der
+#      macOS-Satz `target/pp-macos.iconset` mit Apple-Rand: das Linux-Icon soll so groß
+#      wirken wie das Fenster-Icon `logo.png`, das die App zur Laufzeit zeigt.
 #   4. Lizenzen + copyright nach usr/share/doc/prime-photos/
 #   5. DEBIAN/control schreiben; Depends aus `dpkg-shlibdeps`, ergänzt um die per
 #      dlopen geladene Tray-Bibliothek (libayatana-appindicator3-1 | libappindicator3-1),
@@ -20,7 +23,7 @@
 #   packaging/make-deb.sh [--binary <datei>] [--iconset <dir>] [--output <dir>]
 #
 # Standard: --binary target/release/prime-photos
-#           --iconset target/pp-appicon.iconset
+#           --iconset target/pp-appicon.iconset   (vollflächig, für Linux)
 #           --output  release/
 #
 # Hinweis: nur für Debian/Ubuntu (dpkg-deb, dpkg-shlibdeps); kein Codesigning —

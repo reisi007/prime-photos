@@ -230,7 +230,8 @@ ist ein manueller Prüfschritt. Es gibt keine Signatur des Paketmanagers und kei
 ### 3.2.1 Das Linux-`.deb`
 
 Das Debian-Paket baut `packaging/make-deb.sh` im Linux-Bein direkt nach dem Tarball, aus derselben
-Release-Binary und dem im Build erzeugten Iconset (`target/pp-appicon.iconset`):
+Release-Binary und dem im Build erzeugten **vollflächigen** Rastersatz
+`target/pp-appicon.iconset`:
 
 ```sh
 bash packaging/make-deb.sh --binary target/release/prime-photos \
@@ -245,6 +246,9 @@ es `version = "…"` aus `Cargo.toml`. Details zum Paketaufbau: `packaging/READM
 - `/usr/bin/prime-photos` (0755)
 - `/usr/share/applications/prime-photos.desktop` (`Exec=prime-photos`, `Icon=prime-photos`)
 - `/usr/share/icons/hicolor/<N>x<N>/apps/prime-photos.png` für 16, 32, 64, 128, 256 und 512 px
+  (aus `target/pp-appicon.iconset`, **vollflächig**; der macOS-Satz
+  `target/pp-macos.iconset` mit Apple-Rand ist bewusst **nicht** die Quelle, sonst wirkte das
+  Linux-Icon ~19,6 % kleiner als das Fenster-Icon `logo.png`, das die App zur Laufzeit zeigt)
 - `/usr/share/doc/prime-photos/` mit `copyright`, `LICENSE-MIT` und `LICENSE-APACHE`
 
 **Laufzeit-Abhängigkeiten:** `Depends` erzeugt `dpkg-shlibdeps` aus der ELF-Binary (u. a.
@@ -347,10 +351,29 @@ gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
   blockt weiterhin (§6).
 - **App-Icon:** das Dock-/Taskbar-Icon wird **im Build** erzeugt, nichts ist eingecheckt —
   `build.rs` rastert `assets/logo.svg` (die SVG-Quelle) in die zehn iconset-Größen nach
-  `target/pp-appicon.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
+  `target/pp-macos.iconset/`, und `make-app.sh` wandelt das Verzeichnis mit
   `iconutil -c icns` in `Contents/Resources/AppIcon.icns` um. `Contents/Info.plist` verweist
   per `CFBundleIconFile = AppIcon` darauf. (`CARGO_TARGET_DIR` wird dabei nicht
   berücksichtigt: das Skript liest das iconset aus `target/`.)
+  Das macOS-Icon sitzt auf Apples Raster und ist **nicht** randvoll (#34): das Motiv füllt
+  824 von 1024 px, zentriert, der Rest bleibt transparent; die Ecken sind auf Apples
+  Radius von ~22,5 % der Motivkante nachgerundet (das SVG zeichnet 19,8 %). Beides passiert
+  nur beim Rastern (`APPICON_MOTIF_FRACTION`, `APPICON_CORNER_RADIUS_FRACTION`, `Fit::Centred`);
+  `assets/logo.svg` bleibt unverändert, weil dasselbe Motiv Fenster- und Sidebar-Logo
+  (`logo.png`, `logo-small.png`) speist.
+  Nachgemessen an den erzeugten PNGs: Motivkante 824 px im 1024er Raster (Rand 100 px je
+  Seite), 412 px im 512er (Rand 50 px), 206 px im 256er (Rand 25 px) — jeweils 80,47 % der
+  Kante; 103/128 sind ebenfalls 80,47 %, bei 16/32/64 px rundet die ganzzahlige Skalierung
+  auf 13/16, 26/32 und 52/64 px, also 81,25 %, und der ungerade Rest geht auf eine Seite
+  (16er Raster: Rand 2/2/1/1). Eckenradius aus dem Kreis-Fit der Alpha-Kontur: ≈185 px
+  (≈22,5 % der Motivkante) im 1024er, ≈92 px (≈22,5 %) im 512er — die Konstante ist
+  0,225 × 824 = 185,4 px; der 45°-Scan ab Ecke trifft bei 54 px bzw. 27 px.
+  Volltransparenter Anteil 38,0 % im 1024er Raster (vor #34: 3,2 %).
+  Das **vollflächige** Pendant `target/pp-appicon.iconset` (dieselben zehn Raster mit
+  `Fit::Fill`) gehört dem Linux-`.deb` (§3.2.1), damit dessen Icon so groß wirkt wie das
+  Fenster-Icon. Den Sichtvergleich (vollflächig / macOS-Raster / System-Icon bei 512 px)
+  erzeugt `python3 scripts/icon-comparison.py` nach `target/icon-comparison.png`; das PNG
+  ist nicht eingecheckt, das Skript braucht Python 3 mit Pillow.
 - Kein `codesign --deep` (von Apple abgeraten). Details: `packaging/README.md`.
 - Das fertige Bundle wird bei Bedarf **manuell** an ein bestehendes GitHub Release gehängt — das ist
   **nicht** automatisierter Teil des Workflows. Ausgeliefert wird **nur das DMG** (Entscheidung

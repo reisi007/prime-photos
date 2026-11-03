@@ -100,7 +100,7 @@ All of these are preinstalled system binaries; none needs installation.
 | Tool | Path | Used for | Referenced in the repo |
 |---|---|---|---|
 | `codesign` | `/usr/bin/codesign` | ad-hoc / identity signing + verification of the `.app` | `packaging/make-app.sh`, `docs/dev/RELEASE.md` |
-| `iconutil` | `/usr/bin/iconutil` | `target/pp-appicon.iconset` ⇒ `AppIcon.icns` | `packaging/make-app.sh`, `build.rs` |
+| `iconutil` | `/usr/bin/iconutil` | `target/pp-macos.iconset` ⇒ `AppIcon.icns` (der vollflächige Satz `target/pp-appicon.iconset` gehört dem `.deb`) | `packaging/make-app.sh`, `build.rs` |
 | `security` | `/usr/bin/security` | `security find-identity -v -p codesigning` (signing identity) | `packaging/README.md` |
 | `xattr` | `/usr/bin/xattr` | drop `com.apple.quarantine` after installing a build | `docs/dev/RELEASE.md` |
 | `screencapture` | `/usr/sbin/screencapture` | UI screenshots for visual checks | `AGENTS.todo.md` (UX review) |

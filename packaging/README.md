@@ -36,11 +36,19 @@ open "target/dist/Prime Photos.app"
 ```
 
 Das Bundle trägt ein **App-Icon** (Dock-/Taskbar-Icon): `build.rs` rastert die SVG-Quelle
-`assets/logo.svg` in die zehn iconset-Größen nach `target/pp-appicon.iconset/`, und `make-app.sh`
+`assets/logo.svg` in die zehn iconset-Größen nach `target/pp-macos.iconset/`, und `make-app.sh`
 bündelt dieses Verzeichnis mit `iconutil -c icns` zu `Contents/Resources/AppIcon.icns`. Darauf
 verweist `CFBundleIconFile = AppIcon` in `packaging/Info.plist`. Das Icon entsteht also **im Build
 und ist nicht eingecheckt** — im Repo liegt keine `.icns`/PNG-Datei, sie liegt unter dem
 ignorierten `target/`.
+
+Die macOS-Raster sitzen auf Apples Icon-Raster: das Motiv füllt 824 von 1024 px (80,47 % der
+Kante), zentriert, der Rest bleibt transparent, und die Ecken sind auf Apples Radius von ≈22,5 %
+der Motivkante nachgerundet (das SVG zeichnet 19,8 %). Sonst wirkt die randlos gemalte Kachel im
+Dock größer als die System-Icons. Skaliert/maskiert wird nur beim Rastern in `build.rs`;
+`assets/logo.svg` bleibt unverändert, weil dasselbe Motiv auch Fenster- und Sidebar-Logo speist.
+Bei 16/32/64 px rundet die ganzzahlige Skalierung auf 13/16, 26/32 und 52/64 px (81,25 %), der
+ungerade Rest geht auf eine Seite (16er Raster: Rand 2/2/1/1).
 
 ### Umgebungsvariablen
 
@@ -114,7 +122,7 @@ Das Skript ruft `codesign --force --options runtime --sign "<Name>"` auf (ohne
 `CODESIGN_IDENTITY` mit `-`) und prüft mit
 `codesign --verify --verbose=2`. Zum erneuten Signieren nur der Signatur-Schritt reicht
 `SKIP_BUILD=1` (bzw. ein erneuter vollständiger Lauf — das Bundle wird dabei sauber neu gebaut); mit
-`SKIP_BUILD=1` muss das vom Build erzeugte `target/pp-appicon.iconset` allerdings schon aus einem
+`SKIP_BUILD=1` muss das vom Build erzeugte `target/pp-macos.iconset` allerdings schon aus einem
 früheren Build vorliegen, sonst bricht das Skript beim Icon-Schritt ab.
 
 ## Windows (nur Hinweis)
@@ -136,8 +144,10 @@ Das Paket installiert:
 - `/usr/bin/prime-photos` (0755)
 - `/usr/share/applications/prime-photos.desktop`
 - das App-Icon als `prime-photos.png` in **16, 32, 64, 128, 256 und 512 px** unter
-  `/usr/share/icons/hicolor/<N>x<N>/apps/` (Quelle ist das im Build erzeugte Iconset
-  `target/pp-appicon.iconset`; 64 px kommt aus `icon_32x32@2x.png`)
+  `/usr/share/icons/hicolor/<N>x<N>/apps/` (Quelle ist der **vollflächige** Rastersatz
+  `target/pp-appicon.iconset`; 64 px kommt aus `icon_32x32@2x.png`). Bewusst **nicht**
+  `target/pp-macos.iconset`: dessen Apple-Rand machte das Linux-Icon ~19,6 % kleiner als das
+  Fenster-Icon `logo.png`, das die App zur Laufzeit zeigt.
 - `/usr/share/doc/prime-photos/` mit `copyright`, `LICENSE-MIT` und `LICENSE-APACHE`
 
 **Deklarierte Abhängigkeiten:** `Depends` ermittelt `dpkg-shlibdeps` aus der ELF-Binary — darunter
@@ -194,6 +204,8 @@ Tarball **und** `.deb`; das erste Release, das ein `.deb` enthalten soll, ist 0.
   Der Icon-Schritt ist ebenso belegt: `iconutil -c icns target/pp-appicon.iconset` liefert eine
   gültige `.icns`, die sich über alle zehn Größen (16–1024 px) zurückwandeln lässt; das Bundle
   enthält `Contents/Resources/AppIcon.icns` und `CFBundleIconFile = AppIcon` im `Info.plist`.
+  (Der Lauf stammt aus der Zeit vor #34; seither liest `make-app.sh` den eingerückten Satz
+  `target/pp-macos.iconset`, der Rückweg über die zehn Größen ist unverändert belegt.)
   Der Pfad mit einer selbstsignierten Identität (`CODESIGN_IDENTITY=<Name>`) wurde am 2026-10-26
   für die lokale Identität `Prime Photos Local Signer` auf diesem Rechner mit `SKIP_BUILD=1`
   geprüft: `codesign -dv --verbose=2` meldet `Authority=Prime Photos Local Signer`,

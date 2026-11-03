@@ -50,13 +50,20 @@ use std::path::{Path, PathBuf};
 //     assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)
 //     assets/icon-refresh.svg   ⇒ $OUT_DIR/icon-refresh.png   (64 px, white)
 //
-//   macOS app icon (the Dock/taskbar icon of the .app bundle):
-//     assets/logo.svg ⇒ <target>/pp-appicon.iconset/<name>.png  (10 files)
-//   Deliberately **not** inside `$OUT_DIR`: `packaging/make-app.sh` hands the
-//   directory to `iconutil -c icns` to build `Contents/Resources/AppIcon.icns`,
-//   so it has to live at a path the script can name. `<target>` is recovered
-//   from `$OUT_DIR` (see `target_dir_from_out_dir`). The ten file names and
-//   their pixel sizes are fixed by `iconutil` and must not be renamed.
+//   App icons (the macOS Dock/taskbar icon and the Linux `.deb` icons):
+//     assets/logo.svg ⇒ <target>/pp-macos.iconset/<name>.png    (10 files, macOS)
+//                      <target>/pp-appicon.iconset/<name>.png   (10 files, Linux)
+//   Deliberately **not** inside `$OUT_DIR`: `packaging/make-app.sh` and
+//   `make-deb.sh` name the directories, and the ten file names/pixel sizes are
+//   fixed by `iconutil` — do not rename them. `<target>` is recovered from
+//   `$OUT_DIR` (see `target_dir_from_out_dir`).
+//   Only the fit differs: macOS gets Apple's grid (motif 824 of 1024 px,
+//   centred, corners re-rounded to ~22.5 % — `Fit::Centred`), because the
+//   edge-to-edge tile looks oversized in the Dock; the Linux `.deb` keeps the
+//   full-bleed rasters (`Fit::Fill`) so its icon matches the window icon. The
+//   SVG itself stays untouched: `logo.png`/`logo-small.png` (window, sidebar)
+//   want the full-bleed tile. At 16/32/64 px the integer motif edge rounds to
+//   13/26/52 px (81.25 %), the odd leftover pixel goes to one side.
 
 /// Tray glyph stems, in the order idle / active / paused / done / error.
 const TRAY_STEMS: [&str; 5] = [
@@ -100,9 +107,27 @@ const ICONS: [(&str, u32); 4] = [
     ("icon-refresh", 64),
 ];
 
-/// Directory (directly under Cargo's `<target>`) that `packaging/make-app.sh`
-/// feeds to `iconutil` to build `AppIcon.icns`.
-const APPICON_ICONSET_DIR: &str = "pp-appicon.iconset";
+/// Directory (under Cargo's `<target>`) with the **full-bleed** base rasters of
+/// the ten icon sizes: `packaging/make-deb.sh` installs six of them as the
+/// Linux hicolor icons. Historic name, named by the release workflow, so it
+/// stays.
+const BASE_ICONSET_DIR: &str = "pp-appicon.iconset";
+
+/// Directory (under `<target>`) that `packaging/make-app.sh` feeds to
+/// `iconutil`: the same ten rasters on Apple's icon grid (padded, re-rounded).
+const MACOS_ICONSET_DIR: &str = "pp-macos.iconset";
+
+/// Share of the raster edge the macOS app-icon motif occupies: Apple's grid
+/// draws it on 824 of 1024 px (a ~10 % transparent margin on every side), so
+/// third-party icons match the system ones in Dock, Launchpad and Finder. The
+/// padding happens while rastering, never in the SVG — which is also the
+/// window/sidebar logo.
+const APPICON_MOTIF_FRACTION: f32 = 824.0 / 1024.0;
+
+/// Corner radius of the macOS motif, as a share of its edge: Apple's grid
+/// rounds the 824 px motif by ~185 px (22.5 %), `assets/logo.svg` only by
+/// 19.8 %, so the raster masks the corners instead of changing the SVG.
+const APPICON_CORNER_RADIUS_FRACTION: f32 = 0.225;
 
 /// The ten iconset entries `iconutil` requires, as (file name, pixel size).
 /// The names and sizes are mandated by `iconutil` and mirrored by the Tray/
@@ -130,6 +155,20 @@ enum Recolor {
     Fill(&'static str),
 }
 
+/// How the rendered motif sits inside its raster.
+#[derive(Clone, Copy)]
+enum Fit {
+    /// Edge to edge (tray glyphs, UI icons, logos, Linux icons).
+    Fill,
+    /// Scaled to `fraction` of the raster width, centred (the raster is square
+    /// for every caller that uses this), transparent surround, corners masked to
+    /// `corner_radius` (share of the motif edge) — Apple's macOS app-icon grid.
+    Centred {
+        fraction: f32,
+        corner_radius: f32,
+    },
+}
+
 fn main() {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set"));
@@ -140,14 +179,7 @@ fn main() {
         for (color_name, color_hex) in TRAY_COLORS {
             for size in TRAY_SIZES {
                 let png = format!("{stem}-{color_name}-{size}.png");
-                render(
-                    &manifest_dir,
-                    &out_dir,
-                    &svg,
-                    Recolor::Fill(color_hex),
-                    &png,
-                    size,
-                );
+                render(&manifest_dir, &out_dir, &svg, Recolor::Fill(color_hex), &png, size, Fit::Fill);
             }
         }
     }
@@ -157,14 +189,7 @@ fn main() {
         for (color_name, color_hex) in TRAY_COLORS {
             for size in TRAY_SIZES {
                 let png = format!("{stem}-{color_name}-{size}.png");
-                render(
-                    &manifest_dir,
-                    &out_dir,
-                    &svg,
-                    Recolor::Fill(color_hex),
-                    &png,
-                    size,
-                );
+                render(&manifest_dir, &out_dir, &svg, Recolor::Fill(color_hex), &png, size, Fit::Fill);
             }
         }
     }
@@ -172,34 +197,25 @@ fn main() {
     for (stem, size) in LOGOS {
         let svg = format!("{stem}.svg");
         let png = format!("{stem}.png");
-        render(&manifest_dir, &out_dir, &svg, Recolor::AsIs, &png, size);
+        render(&manifest_dir, &out_dir, &svg, Recolor::AsIs, &png, size, Fit::Fill);
     }
 
     for (stem, size) in ICONS {
         let svg = format!("{stem}.svg");
         let png = format!("{stem}.png");
-        render(&manifest_dir, &out_dir, &svg, Recolor::Fill("#ffffff"), &png, size);
+        render(&manifest_dir, &out_dir, &svg, Recolor::Fill("#ffffff"), &png, size, Fit::Fill);
     }
 
-    // The macOS app icon: the ten iconset rasters next to (not inside) OUT_DIR,
-    // where `packaging/make-app.sh` picks them up for `iconutil`.
-    let iconset_dir = target_dir_from_out_dir(&out_dir).join(APPICON_ICONSET_DIR);
-    if iconset_dir.is_dir() {
-        std::fs::remove_dir_all(&iconset_dir).unwrap_or_else(|e| {
-            panic!(
-                "Prime Photos build.rs: altes iconset-Verzeichnis konnte nicht entfernt werden: {} ({e})",
-                iconset_dir.display()
-            )
-        });
-    }
-    std::fs::create_dir_all(&iconset_dir).unwrap_or_else(|e| {
-        panic!(
-            "Prime Photos build.rs: iconset-Verzeichnis konnte nicht angelegt werden: {} ({e})",
-            iconset_dir.display()
-        )
-    });
-    for (png, size) in APPICON_ICONSET {
-        render(&manifest_dir, &iconset_dir, "logo.svg", Recolor::AsIs, png, size);
+    // The app icons: two directories next to (not inside) OUT_DIR, where the
+    // packaging scripts pick them up. Same ten `iconutil` names and sizes, only
+    // the fit differs (see the header contract).
+    let macos_fit = Fit::Centred { fraction: APPICON_MOTIF_FRACTION, corner_radius: APPICON_CORNER_RADIUS_FRACTION };
+    let target_dir = target_dir_from_out_dir(&out_dir);
+    for (dir, fit) in [(BASE_ICONSET_DIR, Fit::Fill), (MACOS_ICONSET_DIR, macos_fit)] {
+        let dir = reset_dir(&target_dir.join(dir));
+        for (png, size) in APPICON_ICONSET {
+            render(&manifest_dir, &dir, "logo.svg", Recolor::AsIs, png, size, fit);
+        }
     }
 
     // Best-effort build-time commit id for the About window (`src/about.rs`),
@@ -270,10 +286,31 @@ fn target_dir_from_out_dir(out_dir: &Path) -> PathBuf {
     );
 }
 
+/// Empty `dir` and recreate it; panics on failure (a half-written iconset must
+/// fail the build, the packaging scripts rely on it).
+fn reset_dir(dir: &Path) -> PathBuf {
+    if dir.is_dir() {
+        std::fs::remove_dir_all(dir).unwrap_or_else(|e| {
+            panic!(
+                "Prime Photos build.rs: altes iconset-Verzeichnis konnte nicht entfernt werden: {} ({e})",
+                dir.display()
+            )
+        });
+    }
+    std::fs::create_dir_all(dir).unwrap_or_else(|e| {
+        panic!(
+            "Prime Photos build.rs: iconset-Verzeichnis konnte nicht angelegt werden: {} ({e})",
+            dir.display()
+        )
+    });
+    dir.to_path_buf()
+}
+
 /// Raster `assets/<svg_name>` into `$OUT_DIR/<png_name>` at `size` px wide
-/// (the height follows the source aspect ratio). Panics with the file name on
-/// any missing source, parse or write error — a broken asset must fail the
-/// build, never silently drop an icon.
+/// (the height follows the source aspect ratio). `fit` decides whether the
+/// motif fills the raster or is scaled down and centred on it (macOS app-icon
+/// grid). Panics with the file name on any missing source, parse or write
+/// error — a broken asset must fail the build, never silently drop an icon.
 fn render(
     manifest_dir: &Path,
     out_dir: &Path,
@@ -281,6 +318,7 @@ fn render(
     recolor: Recolor,
     png_name: &str,
     size: u32,
+    fit: Fit,
 ) {
     let svg_path = manifest_dir.join("assets").join(svg_name);
     // Emitted before reading so a *deleted* asset also re-runs the build.
@@ -292,16 +330,10 @@ fn render(
             svg_path.display()
         )
     });
-    // The recolour path is chosen by what the source actually paints with:
-    //
-    // * The tray glyphs and the UI icons (Material Symbols, Apache-2.0 — see
-    //   docs/dev/THIRD_PARTY.md) carry **no** paint at all (a bare
-    //   `<path d="…"/>` defaults to black), so a `path { fill: … }` rule is
-    //   injected before parsing. That is the only way the requested colour
-    //   lands in the raster; there are no per-colour SVG files. The white
-    //   result for the UI icons is asserted by
-    //   `src/icons.rs::icon_rasters_are_white_and_covered`.
-    // * The logos keep their own colours (`Recolor::AsIs`).
+    // Tray glyphs and UI icons (Material Symbols) carry **no** paint at all (a
+    // bare `<path>` defaults to black), so a `path { fill: … }` rule is injected
+    // before parsing — there are no per-colour SVG files. The logos keep their
+    // own colours (`Recolor::AsIs`).
     let source = match recolor {
         Recolor::AsIs => source,
         Recolor::Fill(hex) => inject_fill_override(&source, hex, &svg_path),
@@ -321,17 +353,50 @@ fn render(
             svg_path.display()
         );
     }
-    let scale = size as f32 / src.width();
-    let height = (src.height() * scale).round().max(1.0) as u32;
+    let height = (src.height() * (size as f32 / src.width())).round().max(1.0) as u32;
+
+    // `Fill` is the historic behaviour: motif width = raster width, height from
+    // the source aspect ratio. `Centred` shrinks the motif to whole pixels and
+    // centres it; at 16/32 px the even split does not exist (16 − 13 = 3), so
+    // one side gets the spare pixel instead of a half-covered edge.
+    let (scale, offset_x, offset_y, corner_mask) = match fit {
+        Fit::Fill => (size as f32 / src.width(), 0.0, 0.0, None),
+        Fit::Centred {
+            fraction,
+            corner_radius,
+        } => {
+            let motif_w = (size as f32 * fraction).round().max(1.0);
+            let motif_h = (height as f32 * (motif_w / size as f32)).round().max(1.0);
+            let offset_x = ((size as f32 - motif_w) / 2.0).round();
+            let offset_y = ((height as f32 - motif_h) / 2.0).round();
+            (
+                motif_w / src.width(),
+                offset_x,
+                offset_y,
+                Some(CornerMask {
+                    x: offset_x,
+                    y: offset_y,
+                    width: motif_w,
+                    height: motif_h,
+                    radius: motif_w * corner_radius,
+                }),
+            )
+        }
+    };
 
     let mut pixmap = resvg::tiny_skia::Pixmap::new(size, height).unwrap_or_else(|| {
         panic!("Prime Photos build.rs: Pixmap {size}×{height} konnte nicht angelegt werden")
     });
     resvg::render(
         &tree,
-        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        // x' = scale·x + offset_x, y' = scale·y + offset_y
+        resvg::tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, offset_x, offset_y),
         &mut pixmap.as_mut(),
     );
+
+    if let Some(mask) = corner_mask {
+        round_corners(&mut pixmap, &mask);
+    }
 
     let out_path = out_dir.join(png_name);
     pixmap.save_png(&out_path).unwrap_or_else(|e| {
@@ -340,6 +405,67 @@ fn render(
             out_path.display()
         )
     });
+}
+
+/// Rounded rectangle (pixels) the macOS app-icon mask is cut from.
+struct CornerMask {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    radius: f32,
+}
+
+/// Re-round the motif's corners to `mask.radius`: `logo.svg` draws 19.8 %,
+/// Apple's grid wants ~22.5 %, so the mask cuts deeper. Along the straight
+/// sides it coincides with the motif edge, at the corners it cuts *inside* the
+/// opaque tile — the mask edge is the only edge, no second outline appears.
+fn round_corners(pixmap: &mut resvg::tiny_skia::Pixmap, mask: &CornerMask) {
+    let mut alpha = resvg::tiny_skia::Pixmap::new(pixmap.width(), pixmap.height())
+        .unwrap_or_else(|| panic!("Prime Photos build.rs: Masken-Pixmap fehlgeschlagen"));
+    let mut paint = resvg::tiny_skia::Paint::default();
+    paint.set_color_rgba8(255, 255, 255, 255);
+    paint.anti_alias = true;
+    let path = rounded_rect(mask);
+    alpha.fill_path(
+        &path,
+        &paint,
+        resvg::tiny_skia::FillRule::Winding,
+        resvg::tiny_skia::Transform::identity(),
+        None,
+    );
+
+    // `DestinationIn`: keep the destination where the mask is opaque, multiply
+    // its alpha everywhere else.
+    let mask_paint = resvg::tiny_skia::PixmapPaint {
+        blend_mode: resvg::tiny_skia::BlendMode::DestinationIn,
+        ..resvg::tiny_skia::PixmapPaint::default()
+    };
+    pixmap.draw_pixmap(0, 0, alpha.as_ref(), &mask_paint, resvg::tiny_skia::Transform::identity(), None);
+}
+
+/// Path of `mask`'s rounded rectangle: quarter circles as cubic Béziers
+/// (circle constant 0.5523 · r).
+fn rounded_rect(mask: &CornerMask) -> resvg::tiny_skia::Path {
+    let r = mask.radius.min(mask.width / 2.0).min(mask.height / 2.0);
+    let k = 0.552_284_8 * r;
+    let (left, top) = (mask.x, mask.y);
+    let (right, bottom) = (mask.x + mask.width, mask.y + mask.height);
+
+    let mut builder = resvg::tiny_skia::PathBuilder::new();
+    builder.move_to(left + r, top);
+    builder.line_to(right - r, top);
+    builder.cubic_to(right - r + k, top, right, top + r - k, right, top + r);
+    builder.line_to(right, bottom - r);
+    builder.cubic_to(right, bottom - r + k, right - r + k, bottom, right - r, bottom);
+    builder.line_to(left + r, bottom);
+    builder.cubic_to(left + r - k, bottom, left, bottom - r + k, left, bottom - r);
+    builder.line_to(left, top + r);
+    builder.cubic_to(left, top + r - k, left + r - k, top, left + r, top);
+    builder.close();
+    builder.finish().unwrap_or_else(|| {
+        panic!("Prime Photos build.rs: Pfad der App-Icon-Maske konnte nicht gebaut werden")
+    })
 }
 
 /// Insert a `path { fill: <hex> }` rule right after the opening `<svg …>` tag.

@@ -7,8 +7,11 @@
 #   2. target/dist/Prime Photos.app/ assemblieren (Contents/MacOS + Contents/Resources)
 #   3. target/release/prime-photos -> Contents/MacOS/prime-photos
 #   4. Contents/Info.plist aus packaging/Info.plist schreiben (__VERSION__/__BUILD__ ersetzt)
-#   5. Contents/Resources/AppIcon.icns aus target/pp-appicon.iconset bauen (iconutil);
-#      das iconset rastert build.rs aus assets/logo.svg, es ist nicht eingecheckt
+#   5. Contents/Resources/AppIcon.icns aus target/pp-macos.iconset bauen (iconutil);
+#      das iconset rastert build.rs aus assets/logo.svg, es ist nicht eingecheckt.
+#      Es ist auf Apples Icon-Raster eingerückt (Motiv 824/1024 der Kante, Ecken
+#      auf ~22,5 % gerundet); das vollflächige Pendant für das .deb ist
+#      target/pp-appicon.iconset.
 #   6. codesign --force --options runtime --sign "$CODESIGN_IDENTITY"
 #      (Standard: "-" = ad-hoc; eine andere Identität nur explizit über CODESIGN_IDENTITY)
 #      und anschließendes codesign --verify --verbose=2
@@ -36,7 +39,7 @@
 # Idempotent: ein erneuter Lauf entfernt das Bundle und baut es sauber neu.
 # Hinweis: bindet keine neuen Abhängigkeiten und braucht kein Netz. Nur macOS.
 # Hinweis: CARGO_TARGET_DIR wird nicht berücksichtigt — das iconset legt build.rs in
-# `<target>/pp-appicon.iconset` ab, dieses Skript liest es aus `target/pp-appicon.iconset`.
+# `<target>/pp-macos.iconset` ab, dieses Skript liest es aus `target/pp-macos.iconset`.
 
 set -euo pipefail
 
@@ -64,8 +67,9 @@ DIST_DIR="${DIST_DIR:-target/dist}"
 APP_DIR="${DIST_DIR}/${APP_NAME}.app"
 CONTENTS="${APP_DIR}/Contents"
 
-# Von build.rs aus assets/logo.svg erzeugt (siehe build.rs, kein eingechecktes Icon).
-ICONSET_DIR="${REPO_ROOT}/target/pp-appicon.iconset"
+# Von build.rs aus assets/logo.svg erzeugt (siehe build.rs, kein eingechecktes Icon);
+# die macOS-Variante mit Apple-Raster, nicht die vollflächige .deb-Variante.
+ICONSET_DIR="${REPO_ROOT}/target/pp-macos.iconset"
 
 # --- 1) Build -----------------------------------------------------------------
 if [[ "${SKIP_BUILD:-0}" == "1" ]]; then

@@ -40,6 +40,19 @@ and the "Mit Amazon anmelden" wording where a sign-in genuinely happens.
 
 ## Decisions
 
+- **App-Icon-Raster vs. In-App-Logos (#34, 2026-11-04).** Das macOS-App-Icon sitzt
+  auf Apples 1024er-Raster (Motiv 824 px, zentriert, Rest transparent, Ecken auf
+  ~22,5 % der Motivkante nachgerundet), das Linux-`.deb` behält einen vollflächigen
+  Rastersatz, und die In-App-Logos (Fenster, Sidebar, About, Login) bleiben randlos.
+  **Grund:** Im Dock vergleicht macOS die Motivfläche mit den System-Icons — eine
+  randlose Kachel wirkt dort zu groß; im eigenen Fenster soll dasselbe Motiv dagegen
+  als quadratische Kachel sitzen. Skaliert wird deshalb nur beim Rastern des
+  App-Icons in `build.rs` (`Fit::Centred`); `assets/logo.svg` bleibt die **eine**
+  Quelle für alles (Entscheidung gegen eine zweite SVG-Datei, die optisch
+  auseinanderlaufen würde). Das Linux-Icon bleibt vollflächig, weil Linux kein
+  solches System-Raster erzwingt und es sonst ~19,6 % kleiner wirkte als das
+  Fenster-Icon `logo.png`, das die App zur Laufzeit zeigt.
+
 - **Name & Branding (Projektregel, 2026-10-13):** Projekt und git-Repo
   heißen **„Prime Photos"**. Nichts im Projekt darf den Eindruck erwecken,
   es sei eine offizielle App von Amazon: kein „Amazon Photos" als *unsere*
