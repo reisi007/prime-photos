@@ -49,6 +49,55 @@ class ConfigUpdateTests(unittest.TestCase):
 
             self.assertIn("backup_queue_ratio = 0.35", path.read_text())
 
+    def test_toml_scalar_keeps_types_and_containers(self):
+        self.assertEqual(config_update.toml_scalar(True), "true")
+        self.assertEqual(config_update.toml_scalar(False), "false")
+        self.assertEqual(config_update.toml_scalar(3), "3")
+        self.assertEqual(config_update.toml_scalar(0.5), "0.5")
+        self.assertEqual(config_update.toml_scalar('a"b\\c'), '"a\\"b\\\\c"')
+        self.assertEqual(config_update.toml_scalar([1, "x"]), '[1, "x"]')
+        self.assertEqual(config_update.toml_scalar({"a": 1}), '{ "a" = 1 }')
+        self.assertEqual(config_update.toml_scalar([]), "[]")
+        self.assertEqual(config_update.toml_scalar({}), "{}")
+
+    def test_save_keeps_bool_int_and_list_types(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.toml"
+            with patch.object(config_update, "get_config_path", return_value=path):
+                config_update.save_config(
+                    {
+                        "country": "de",
+                        "paused": True,
+                        "concurrency": 4,
+                        "tags": ["a", "b"],
+                    }
+                )
+
+            content = path.read_text()
+            self.assertIn("paused = true", content)
+            self.assertIn("concurrency = 4", content)
+            self.assertIn('tags = ["a", "b"]', content)
+            self.assertIn('country = "de"', content)
+
+    def test_initial_setup_serializes_scalar_types(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.toml"
+            with patch.object(config_setup, "get_config_path", return_value=path):
+                config_setup.save_config(
+                    {
+                        "country": "de",
+                        "enabled": True,
+                        "workers": 3,
+                        "ratio": 0.35,
+                    }
+                )
+
+            content = path.read_text()
+            self.assertIn("enabled = true", content)
+            self.assertIn("workers = 3", content)
+            self.assertIn("ratio = 0.35", content)
+            self.assertIn('country = "de"', content)
+
 
 if __name__ == "__main__":
     unittest.main()

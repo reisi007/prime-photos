@@ -60,7 +60,8 @@ outcome.
   and below it. The handle is keyboard-focusable (Up/Down adjust the split;
   Shift changes in 10 % steps instead of 3 %), shows the vertical-resize cursor
   and a localized accessibility label/tooltip. Both sections are **open by
-  default**; the egui disclosure controls remain as a supplemental accordion.
+  default**; the disclosure triangle and the section label share one focusable
+  toggle and remain as a supplemental accordion.
 - **Persistent split ratio:** `Config::backup_queue_ratio` stores the queue's
   share of the splittable height in `config.toml` (serde default **0.35**,
   clamped to **0.20–0.80**; legacy files without the key get 0.35). It is saved
@@ -68,7 +69,10 @@ outcome.
   once per frame — through the ordinary `save_config()` path (demo fixtures are
   skipped). The ratio is used **only while both sections are open**. If exactly
   one section is collapsed, it receives all free viewport height and the saved
-  ratio is neither read nor overwritten, so reopening restores it unchanged.
+  ratio is **not applied** and never overwritten, so reopening restores it
+  unchanged. The folder list follows a disclosure toggle one frame later: the
+  transition frame keeps the previous layout budget (so the footer never
+  overruns), and the next frame applies the new split.
 - **At least one section stays open:** the disclosure controls enforce a hard
   invariant. A section may only close while the other one is open; if both
   persisted states are somehow closed, the queue header reopens itself before
@@ -292,7 +296,8 @@ outcome.
   gilt nicht mehr, weil das Verhältnis jetzt persistiert wird.
 
 - **Ziehbarer, persistierter Splitter (Issue #33, 2026-11-03).** Beide Bereiche
-  starten offen; die Disclosure-Knöpfe bleiben als ergänzendes Accordion. Der
+  starten offen; Disclosure-Dreieck und Bereichslabel teilen sich einen
+  fokussierbaren Toggle und bleiben als ergänzendes Accordion. Der
   **10-px-Griff** (mit je 3 px Luft) verändert das Höhenverhältnis der Queue- und
   Ordner-Scrollbereiche. Default ist **35 %** Queue, begrenzt auf **20–80 %**
   (NaN/unendlich fallen auf den Default zurück). Gespeichert wird beim Loslassen
@@ -300,8 +305,11 @@ outcome.
   Frame; ältere Konfigurationen ohne Schlüssel erhalten 35 %. Bei ausreichend
   Platz gelten **72/96 px** Mindesthöhen für Queue und Ordnerliste. Ist genau ein
   Bereich geschlossen, bekommt der offene den gesamten freien Viewport; das
-  gespeicherte Verhältnis wird weder gelesen noch verändert und gilt beim
-  Wiederöffnen beider Bereiche unverändert. Der letzte offene Bereich kann nicht
+  gespeicherte Verhältnis wird **nicht angewendet** und nicht verändert und gilt
+  beim Wiederöffnen beider Bereiche unverändert. Die Ordnerliste folgt einem
+  Disclosure-Toggle einen Frame später: Der Übergangs-Frame behält das bisherige
+  Layout-Budget (damit die Fußzeile nie überläuft), und der nächste Frame wendet
+  die neue Aufteilung an. Der letzte offene Bereich kann nicht
   geschlossen werden; sind beide gespeicherten Zustände geschlossen, öffnet der
   Queue-Kopf sich selbst. Fortschrittszusammenfassung und Ergebnisfußzeile
   bleiben sichtbar, die Ordnerliste scrollt bei ihrem natürlichen Kartenmaß.

@@ -51,8 +51,9 @@ with fixed row heights, and measured chrome dimensions.
 - **Heights (Issue #33):** `page_heights_for_sections` is the single source for
   both scroll viewports. With **both sections open**, `Config::backup_queue_ratio`
   (default 0.35, clamped 0.20–0.80) splits the height left after the fixed chrome:
-  `QUEUE_HEADER_TOTAL_H` = **40 px** (measured header row + spacing + 1 px
-  divider + spacing), and `QUEUE_BELOW_H` = **145 px** = table trailing 8 +
+  `QUEUE_HEADER_TOTAL_H` = **40 px** (measured 31 px header row — the 20 px
+  cells centre in the 26 px interaction row — + 1 px divider + 8 px spacing),
+  and `QUEUE_BELOW_H` = **145 px** = table trailing 8 +
   progress zone 40 (6 px gap + 26 px row + 8 px spacing) + splitter zone 24
   (3 + 10 + 8 + 3) + folder heading zone 34 (26 + 8) + heading/list gap 6 +
   footer area 33 (table trailing 8 + post-list 6 + footer gap 6 + 13 px line).
@@ -62,7 +63,9 @@ with fixed row heights, and measured chrome dimensions.
   With enough room the queue keeps 72 px and the folder list 96 px. Tiny windows
   degrade to zero-height viewports without negative sizes; the allocation itself
   never overruns its budget, but a window smaller than the fixed chrome cannot
-  show every control.
+  show every control. The folder list follows a disclosure toggle one frame
+  later: the transition frame keeps the previous layout budget (so the footer
+  never overruns), and the next frame applies the new split.
 - **Scroll-bug fix:** two `ScrollArea::vertical()` in the same parent `Ui`
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea
@@ -226,7 +229,9 @@ with fixed row heights, and measured chrome dimensions.
   6 px vor dem Ergebnis + 13 px Zeilenbox). `QUEUE_BELOW_H` ist **145 px**
   (8 + 40 + 24 + 34 + 6 + 33), `QUEUE_ONLY_BELOW_H` **107 px** (8 + 40 + 6 +
   34 + 6 + 13) und `FOLDER_ONLY_BELOW_H` **119 px** (40 + 6 + 34 + 6 + 33);
-  `QUEUE_HEADER_TOTAL_H` ist **40 px**. Karten haben 3 px äußeren Vertikalrand
+  `QUEUE_HEADER_TOTAL_H` ist **40 px** (gemessene 31 px Kopfzeile — die 20-px-
+  Zellen zentrieren in der 26-px-Interaktionszeile — + 1 px Trennlinie +
+  8 px Abstand). Karten haben 3 px äußeren Vertikalrand
   und 6 px Listenabstand.
 
 - **Persistierter Backup-Splitter (Issue #33).** Beide Bereiche starten offen;
@@ -244,8 +249,11 @@ with fixed row heights, and measured chrome dimensions.
   negative Größen. Die Allokation selbst überschreitet ihr Budget nicht, ein
   Fenster kleiner als das feste Chrome kann aber nicht alle Bedienelemente
   zeigen. Ist einer eingeklappt, belegt der andere den gesamten flexiblen Raum;
-  das gespeicherte Verhältnis bleibt unverändert und gilt wieder, wenn beide
-  geöffnet sind. Der letzte offene Bereich kann nicht eingeklappt werden.
+  das gespeicherte Verhältnis wird **nicht angewendet** und nicht verändert und
+  gilt wieder, wenn beide geöffnet sind. Die Ordnerliste folgt einem
+  Disclosure-Toggle einen Frame später: Der Übergangs-Frame behält das bisherige
+  Layout-Budget (damit die Fußzeile nie überläuft), und der nächste Frame wendet
+  die neue Aufteilung an. Der letzte offene Bereich kann nicht eingeklappt werden.
 
 - **Scrollbalken-Reserve ist jetzt dauerhaft (Issue #30, ersetzt den Stand
   2026-10-17).** Die in `src/theme.rs` reservierte Breite für den schwebenden

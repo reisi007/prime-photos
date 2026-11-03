@@ -614,6 +614,15 @@ fn section_is_open(ui: &egui::Ui, id: egui::Id, default_open: bool) -> bool {
         .is_open()
 }
 
+/// Whether the folder list may draw in this frame. The folder header toggles
+/// *after* the split was computed, so the first frame of an open transition
+/// must keep the closed layout (no heading gap, no ScrollArea): otherwise the
+/// scroll area's trailing item spacing pushes the footer off the bottom. The
+/// list follows one frame later, when the layout state has caught up.
+fn folder_list_draws(expanded: bool, expanded_for_layout: bool) -> bool {
+    expanded && expanded_for_layout
+}
+
 /// Draw a standard egui disclosure control and persist its open state. The
 /// toggle is keyboard-focusable and announces its localized action and section.
 ///
@@ -3620,13 +3629,18 @@ impl PrimePhotoApp {
             },
         );
 
+        // The header toggled *after* the split was computed. On the first frame
+        // of an open transition, keep the closed layout so the footer cannot be
+        // pushed off the bottom; the list follows one frame later.
+        let draw_folders = folder_list_draws(folders_expanded, folders_expanded_for_layout);
+
         // Air between the heading above and the card list below. The heading
         // zone and this gap are part of `QUEUE_BELOW_H`.
-        ui.add_space(if folders_expanded { FOLDER_HEADING_GAP } else { 0.0 });
+        ui.add_space(if draw_folders { FOLDER_HEADING_GAP } else { 0.0 });
 
         // Do not draw the folder ScrollArea while collapsed: even
         // `max_height(0)` consumes the trailing item spacing.
-        if folders_expanded {
+        if draw_folders {
             // Cap against the actual remaining space as a guard if preceding
             // page chrome consumes more than the planned list viewport.
             let list_h = list_h.min((ui.available_height() - QUEUE_FOOTER_H).max(0.0));
@@ -4135,6 +4149,46 @@ mod tests {
             page_heights_for_sections(free, false, false, 0.5),
             (0.0, 0.0)
         );
+    }
+
+    #[test]
+    fn page_heights_at_900_px_match_the_literal_budget() {
+        // 900 - QUEUE_HEADER_TOTAL_H(40) - QUEUE_BELOW_H(145) = 715; 35 % = 250.25.
+        let (queue_h, list_h) = page_heights_for_sections(900.0, true, true, 0.35);
+        assert!((queue_h - 250.25).abs() < 0.001, "queue {queue_h}");
+        assert!((list_h - 464.75).abs() < 0.001, "list {list_h}");
+        // 900 - 40 - QUEUE_ONLY_BELOW_H(107) = 753.
+        assert_eq!(
+            page_heights_for_sections(900.0, true, false, 0.35),
+            (753.0, 0.0)
+        );
+        // 900 - FOLDER_ONLY_BELOW_H(119) = 781.
+        assert_eq!(
+            page_heights_for_sections(900.0, false, true, 0.35),
+            (0.0, 781.0)
+        );
+    }
+
+    #[test]
+    fn folder_list_draw_waits_for_the_layout_state() {
+        assert!(folder_list_draws(true, true));
+        assert!(!folder_list_draws(true, false)); // opening transition
+        assert!(!folder_list_draws(false, true)); // closing transition
+        assert!(!folder_list_draws(false, false));
+    }
+
+    #[test]
+    fn backup_queue_ratio_serializes_as_a_short_decimal() {
+        let mut config = crate::config::Config::default();
+        config.backup_queue_ratio = 0.35;
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(serialized
+            .lines()
+            .any(|line| line == "backup_queue_ratio = 0.35"));
+        assert!(!serialized.contains("0.349999"));
+        let back: crate::config::Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(back.backup_queue_ratio(), 0.35);
     }
 
     #[test]

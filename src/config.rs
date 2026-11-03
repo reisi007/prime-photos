@@ -44,6 +44,16 @@ fn default_backup_queue_ratio() -> f32 {
     crate::backup::BACKUP_QUEUE_RATIO_DEFAULT
 }
 
+/// Serialize the split ratio as a short decimal. `toml` widens the `f32` to
+/// `f64` (`0.35` becomes `0.3499999940395355`); four decimals keep it readable.
+fn serialize_backup_queue_ratio<S>(ratio: &f32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let ratio = crate::backup::sanitize_backup_queue_ratio(*ratio);
+    serializer.serialize_f64((f64::from(ratio) * 10_000.0).round() / 10_000.0)
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub country: String,
@@ -149,7 +159,10 @@ pub struct Config {
     /// splitter position survives a restart; `#[serde(default = ...)]` keeps
     /// existing `config.toml` files on the 35 % default. Read through
     /// [`Self::backup_queue_ratio`], which clamps hand-written values.
-    #[serde(default = "default_backup_queue_ratio")]
+    #[serde(
+        default = "default_backup_queue_ratio",
+        serialize_with = "serialize_backup_queue_ratio"
+    )]
     pub backup_queue_ratio: f32,
 }
 
@@ -425,7 +438,9 @@ limit_kbps = 500
         config.backup_queue_ratio = 0.6;
 
         let serialized = toml::to_string_pretty(&config).unwrap();
-        assert!(serialized.contains("backup_queue_ratio = 0.6"));
+        assert!(serialized
+            .lines()
+            .any(|line| line == "backup_queue_ratio = 0.6"));
         let back: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(back.backup_queue_ratio(), 0.6);
     }

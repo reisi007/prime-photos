@@ -176,6 +176,14 @@ def toml_scalar(value) -> str:
     if isinstance(value, str):
         escaped = value.replace('\\', '\\\\').replace('"', '\\"')
         return f'"{escaped}"'
+    if isinstance(value, (list, tuple)):
+        return '[' + ', '.join(toml_scalar(item) for item in value) + ']'
+    if isinstance(value, dict):
+        entries = ', '.join(
+            f'{toml_scalar(str(key))} = {toml_scalar(item)}'
+            for key, item in value.items()
+        )
+        return '{ ' + entries + ' }' if entries else '{}'
     raise TypeError(f'Unsupported TOML config value: {type(value).__name__}')
 
 

@@ -73,8 +73,9 @@ Die ersten sieben Zustände sind die Backup-Seite, dazu `settings`/
 - [ ] **Ordnerkarte**: rechter Rahmen sichtbar; Status und Aktionssymbole enden
   16 px vor dem Kartenrand; kein Text läuft unter die Symbole.
 - [ ] **Umbrechende Karte (760)**: in `failures-760x700` ist die zweite Karte
-  samt unterem Rahmen und letzter Meta-Zeile vollständig sichtbar (die Höhe wird
-  aus den tatsächlichen Zeilenumbrüchen reserviert). In `failures-760x520` darf
+  samt unterem Rahmen und letzter Meta-Zeile vollständig sichtbar (die Karte
+  zeichnet in natürlicher Höhe im scrollenden Split-Viewport; es gibt keine
+  Höhenreservierung aus Zeilenumbrüchen mehr). In `failures-760x520` darf
   sie nur als Teil des **scrollenden** Listen-Viewports angeschnitten sein.
 - [ ] **Gesamtbalken** liegt vollständig innerhalb des Seitenrands.
 - [ ] **Kontoblock**: Marktplatz, Kontoname und „Abmelden“ sind vollständig

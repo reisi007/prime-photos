@@ -4,6 +4,7 @@ Script to perform initial configuration setup for Prime Photos.
 Infers country from cookie names and provides default values.
 """
 
+import math
 import os
 import re
 import sys
@@ -135,19 +136,39 @@ def save_config(config: dict) -> None:
     # Generate TOML content
     toml_content = []
     for key, value in config.items():
-        if isinstance(value, str):
-            # Escape quotes in string values.
-            escaped_value = value.replace('"', '\\"')
-            toml_content.append(f'{key} = "{escaped_value}"')
-        else:
-            # Numeric settings such as `backup_queue_ratio` must remain TOML
-            # numbers rather than being written as quoted strings.
-            toml_content.append(f'{key} = {value}')
+        toml_content.append(f'{key} = {toml_scalar(value)}')
 
     with open(config_path, 'w') as f:
         f.write('\n'.join(toml_content))
 
     return config_path
+
+
+def toml_scalar(value) -> str:
+    """Serialize the scalar TOML values used by config.toml without changing types."""
+    # Keep in sync with config_update.py.
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return 'nan'
+        if math.isinf(value):
+            return 'inf' if value > 0 else '-inf'
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{escaped}"'
+    if isinstance(value, (list, tuple)):
+        return '[' + ', '.join(toml_scalar(item) for item in value) + ']'
+    if isinstance(value, dict):
+        entries = ', '.join(
+            f'{toml_scalar(str(key))} = {toml_scalar(item)}'
+            for key, item in value.items()
+        )
+        return '{ ' + entries + ' }' if entries else '{}'
+    raise TypeError(f'Unsupported TOML config value: {type(value).__name__}')
 
 
 def print_setup_summary(config_path: Path, country: str, zone: str):
