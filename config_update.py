@@ -3,6 +3,7 @@
 Script to ingest cookies from browser session and update the config.toml file.
 """
 
+import math
 import os
 import re
 import sys
@@ -97,6 +98,7 @@ def load_config() -> dict:
         'cookie_at_acb': '',
         'cookie_ubid_acb': '',
         'cookie_x_amz_access_token': '',
+        'backup_queue_ratio': 0.35,
     }
 
     if config_path.exists():
@@ -110,12 +112,7 @@ def load_config() -> dict:
                 print("Warning: tomli/tomllib not available, using regex parsing", file=sys.stderr)
                 # Simple regex-based TOML parsing for basic key=value pairs
                 with open(config_path, 'r') as f:
-                    content = f.read()
-                    for key in config.keys():
-                        pattern = rf'{key}\s*=\s*["\']([^"\']*)["\']'
-                        match = re.search(pattern, content)
-                        if match:
-                            config[key] = match.group(1)
+                    config = parse_config_without_toml(f.read(), config)
                 return config
 
         try:
@@ -136,14 +133,50 @@ def save_config(config: dict) -> None:
     # Generate TOML content
     toml_content = []
     for key, value in config.items():
-        # Escape quotes in values
-        escaped_value = value.replace('"', '\\"')
-        toml_content.append(f'{key} = "{escaped_value}"')
+        toml_content.append(f'{key} = {toml_scalar(value)}')
 
     with open(config_path, 'w') as f:
         f.write('\n'.join(toml_content))
 
     print(f"Configuration saved to {config_path}")
+
+
+def parse_config_without_toml(content: str, defaults: dict) -> dict:
+    """Read supported scalar fields without Python's TOML parser modules."""
+    config = defaults.copy()
+    for key, default in config.items():
+        if key == 'backup_queue_ratio':
+            pattern = rf'^\s*{re.escape(key)}\s*=\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*(?:#.*)?$'
+            match = re.search(pattern, content, re.MULTILINE)
+            if match:
+                try:
+                    config[key] = float(match.group(1))
+                except ValueError:
+                    pass
+        elif isinstance(default, str):
+            pattern = rf'^{re.escape(key)}\s*=\s*["\']([^"\']*)["\']'
+            match = re.search(pattern, content, re.MULTILINE)
+            if match:
+                config[key] = match.group(1)
+    return config
+
+
+def toml_scalar(value) -> str:
+    """Serialize the scalar TOML values used by config.toml without changing types."""
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return 'nan'
+        if math.isinf(value):
+            return 'inf' if value > 0 else '-inf'
+        return str(value)
+    if isinstance(value, str):
+        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{escaped}"'
+    raise TypeError(f'Unsupported TOML config value: {type(value).__name__}')
 
 
 def main():

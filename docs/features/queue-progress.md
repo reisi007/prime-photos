@@ -55,11 +55,47 @@ outcome.
   `ui.horizontal`, give the bar an explicit `desired_width` (without spinner
   = line width, with spinner = width − spinner width − `item_spacing.x`);
   the spinner width is `interact_size.y` = 26 in the theme.
-- **Responsive heights:** `page_heights` as **one** source; the **folder
-  list is content-aware** (as many cards as fit), the **queue** keeps at
-  least `QUEUE_MIN_FRAC` (20 %) and at most `QUEUE_MAX_FRAC` (50 %) of the
-  free height. Only the measured chrome (`QUEUE_BELOW_H`,
-  `QUEUE_HEADER_H`, `QUEUE_FOOTER_H`) remains absolute.
+- **Real draggable splitter (Issue #33):** the queue/progress pane and the
+  folder pane are separated by a **10 px drag handle** with 3 px of air above
+  and below it. The handle is keyboard-focusable (Up/Down adjust the split;
+  Shift changes in 10 % steps instead of 3 %), shows the vertical-resize cursor
+  and a localized accessibility label/tooltip. Both sections are **open by
+  default**; the egui disclosure controls remain as a supplemental accordion.
+- **Persistent split ratio:** `Config::backup_queue_ratio` stores the queue's
+  share of the splittable height in `config.toml` (serde default **0.35**,
+  clamped to **0.20–0.80**; legacy files without the key get 0.35). It is saved
+  when the drag handle is released or when a keyboard step changes it — never
+  once per frame — through the ordinary `save_config()` path (demo fixtures are
+  skipped). The ratio is used **only while both sections are open**. If exactly
+  one section is collapsed, it receives all free viewport height and the saved
+  ratio is neither read nor overwritten, so reopening restores it unchanged.
+- **At least one section stays open:** the disclosure controls enforce a hard
+  invariant. A section may only close while the other one is open; if both
+  persisted states are somehow closed, the queue header reopens itself before
+  painting. The aggregate progress summary and the folder-result footer stay
+  reachable in either state.
+- **Viewport floors:** with enough height the queue keeps **72 px** and the
+  folder list **96 px**. Tiny windows degrade to zero-height viewports without
+  negative sizes; the viewport allocation itself never overruns its budget, but
+  a window smaller than the fixed chrome cannot show every control. The folder
+  list scrolls at its natural card height and the empty-folder hint lives inside
+  that scroll area.
+- **Compact backup-page spacing (Issue #33):** the queue progress zone consumes
+  **40 px** in every branch (6 px gap + fixed 26 px row + 8 px trailing item
+  spacing; the bar itself is 20 px high), even when no progress row is shown.
+  The splitter zone is **24 px** (3 px + 10 px handle + 8 px trailing spacing
+  + 3 px), the folder heading zone **34 px** (26 px row + 8 px spacing), and the
+  heading/list gap **6 px**. Cards use 3 px outer vertical margins with a 6 px
+  list gap. The aggregate outcome footer and bottom-panel “Letzter Upload”
+  summary use dark theme ink at 11 pt; folder-card meta/outcome lines stay
+  muted at 11 pt. The progress-bar label keeps its theme color
+  (`visuals.selection.stroke`). The footer area is **33 px** (8 px table
+  trailing spacing + 6 px post-list gap + 6 px footer gap + 13 px line box).
+  Both-open chrome is `QUEUE_BELOW_H` = **145 px** = 8 + 40 + 24 + 34 + 6 + 33.
+  With only the queue open, `QUEUE_ONLY_BELOW_H` = **107 px** = 8 + 40 + 6 + 34
+  + 6 + 13. With only the folder list open, `FOLDER_ONLY_BELOW_H` = **119 px**
+  = 40 + 6 + 34 + 6 + 33. The table header chrome `QUEUE_HEADER_TOTAL_H` is
+  **40 px**.
 - **Scroll-bug fix:** two `ScrollArea::vertical()` in the same parent `Ui`
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea
@@ -247,14 +283,28 @@ outcome.
   Ordner bleiben **unberührt**. Bei 100 % lautet der Wortlaut
   **„Vollständig"** (Original-Wortlaut), nicht „100% hochgeladen".
 
-- **Responsive Höhen (F8/F11, Welle 5.8).** `page_heights` als **eine**
-  Quelle; die **Ordnerliste inhaltbewusst** (so viele Karten, wie passen), die
-  **Warteschlange** mindestens `QUEUE_MIN_FRAC` (20 %) und höchstens
-  `QUEUE_MAX_FRAC` (50 %) der freien Höhe. Nur das gemessene Chrome
-  (`QUEUE_BELOW_H`, `QUEUE_HEADER_H`, `QUEUE_FOOTER_H`) bleibt absolut.
-  **Verworfen:** ziehbare Trennlinie (Position überlebt den Neustart nicht);
-  eigener Reiter für die Warteschlange (widerspricht „Warteschlange et
-  Fortschrittsleiste gehören zusammen", Welle 3a).
+- **Responsive Höhen (früher F8/F11, Welle 5.8; durch #33 ersetzt).** Früher
+  war die Ordnerliste inhaltsbewusst und die Warteschlange auf 20–50 % der
+  freien Höhe begrenzt. Issue #33 ersetzt diese feste Verteilung durch ein in
+  `config.toml` gespeichertes Verhältnis (`Config::backup_queue_ratio`) und
+  einen echten ziehbaren Trenner. Der separate Warteschlangen-Reiter bleibt
+  verworfen; die frühere Begründung „die Position überlebt den Neustart nicht"
+  gilt nicht mehr, weil das Verhältnis jetzt persistiert wird.
+
+- **Ziehbarer, persistierter Splitter (Issue #33, 2026-11-03).** Beide Bereiche
+  starten offen; die Disclosure-Knöpfe bleiben als ergänzendes Accordion. Der
+  **10-px-Griff** (mit je 3 px Luft) verändert das Höhenverhältnis der Queue- und
+  Ordner-Scrollbereiche. Default ist **35 %** Queue, begrenzt auf **20–80 %**
+  (NaN/unendlich fallen auf den Default zurück). Gespeichert wird beim Loslassen
+  des Griffs bzw. nach einem Tastatur-Schritt (Up/Down, Shift = 10 %), nicht pro
+  Frame; ältere Konfigurationen ohne Schlüssel erhalten 35 %. Bei ausreichend
+  Platz gelten **72/96 px** Mindesthöhen für Queue und Ordnerliste. Ist genau ein
+  Bereich geschlossen, bekommt der offene den gesamten freien Viewport; das
+  gespeicherte Verhältnis wird weder gelesen noch verändert und gilt beim
+  Wiederöffnen beider Bereiche unverändert. Der letzte offene Bereich kann nicht
+  geschlossen werden; sind beide gespeicherten Zustände geschlossen, öffnet der
+  Queue-Kopf sich selbst. Fortschrittszusammenfassung und Ergebnisfußzeile
+  bleiben sichtbar, die Ordnerliste scrollt bei ihrem natürlichen Kartenmaß.
 
 - **Scroll-Bug (F12, Welle 5.8).** Zwei `ScrollArea::vertical()` im selben
   Eltern-`Ui` teilten sich den Scroll-Zustand: egui setzt ohne `id_salt` die

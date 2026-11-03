@@ -497,6 +497,24 @@ const EN: &[(&str, &str)] = &[
     ("UEBERSPRUNGEN {}: bereits hochgeladen", "SKIPPED {}: already uploaded"),
     ("Übersprungen", "Skipped"),
     ("Warteschlange ({})", "Queue ({})"),
+    ("Warteschlange ausklappen", "Show queue"),
+    ("Warteschlange einklappen", "Hide queue"),
+    (
+        "Automatisch gesicherte Ordner ausklappen",
+        "Show automatic backup folders",
+    ),
+    (
+        "Automatisch gesicherte Ordner einklappen",
+        "Hide automatic backup folders",
+    ),
+    (
+        "Höhe von Warteschlange und Ordnern anpassen",
+        "Adjust the height of the queue and folders",
+    ),
+    (
+        "Mit den Pfeiltasten nach oben oder unten anpassen",
+        "Adjust with the up or down arrow keys",
+    ),
     // Queue-table headers and empty state (Welle 3.1/3.5,
     // docs/original/SPEC_UPLOAD_PROGRESS.md §7.8).
     ("Größe", "Size"),

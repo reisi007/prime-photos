@@ -24,9 +24,9 @@ with fixed row heights, and measured chrome dimensions.
 - **Folder cards:** the card frame uses the page gutter as inner margin, a 6 px
   corner radius and the table width; the status/action block is measured in an
   invisible probe so the left text column wraps before it can paint under the
-  icons. The same probe feeds the card-height reservation: name/meta/outcome
-  are laid out at the card's real column width, and each extra wrapped line
-  raises the reserved height (see the F1 decision below).
+  icons. The probe now only bounds the text column: folder cards draw at their
+  natural height inside the folder scroll area (`auto_shrink(false)` keeps the
+  split-assigned viewport), so wrapped names never need a content-height budget.
 - **Sidebar account block:** measured with an invisible probe, then placed by
   consuming the free space above it — no fixed height that can clip the logout
   button.
@@ -48,12 +48,21 @@ with fixed row heights, and measured chrome dimensions.
   for **every** row type — then the stride is exactly `row_h +
   item_spacing.y` (in the queue 28 = 20 + 8) and the declared height
   matches the actual height (before: Δ 252 px ⇒ last row cut off).
-- **Heights (`page_heights`):** `page_heights` as **one** source; the
-  **folder list is content-aware** (as many cards as fit), the **queue**
-  keeps at least `QUEUE_MIN_FRAC` (20 %) and at most `QUEUE_MAX_FRAC` (50 %)
-  of the free height. Only the measured chrome (`QUEUE_HEADER_TOTAL_H`,
-  `QUEUE_BELOW_H`, `QUEUE_FOOTER_H`) remains absolute; the header total
-  includes both item spacings and the 1 px divider.
+- **Heights (Issue #33):** `page_heights_for_sections` is the single source for
+  both scroll viewports. With **both sections open**, `Config::backup_queue_ratio`
+  (default 0.35, clamped 0.20–0.80) splits the height left after the fixed chrome:
+  `QUEUE_HEADER_TOTAL_H` = **40 px** (measured header row + spacing + 1 px
+  divider + spacing), and `QUEUE_BELOW_H` = **145 px** = table trailing 8 +
+  progress zone 40 (6 px gap + 26 px row + 8 px spacing) + splitter zone 24
+  (3 + 10 + 8 + 3) + folder heading zone 34 (26 + 8) + heading/list gap 6 +
+  footer area 33 (table trailing 8 + post-list 6 + footer gap 6 + 13 px line).
+  With **only the queue** open, `QUEUE_ONLY_BELOW_H` = **107 px** = 8 + 40 + 6 +
+  34 + 6 + 13; with **only the folder list** open, `FOLDER_ONLY_BELOW_H` =
+  **119 px** = 40 + 6 + 34 + 6 + 33. Both sections can never be closed at once.
+  With enough room the queue keeps 72 px and the folder list 96 px. Tiny windows
+  degrade to zero-height viewports without negative sizes; the allocation itself
+  never overruns its budget, but a window smaller than the fixed chrome cannot
+  show every control.
 - **Scroll-bug fix:** two `ScrollArea::vertical()` in the same parent `Ui`
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea
@@ -65,11 +74,9 @@ with fixed row heights, and measured chrome dimensions.
   `FolderStatus` values with word and color (Paused → AMBER). The left text
   column is bounded by the measured status/action block, so a long row 2 wraps
   inside the card instead of running under the icons.
-- **Folder list gets all remaining height:** the bottom card was cut off
-  because `page_heights` capped the list at `FOLDER_LIST_MAX_FRAC = 0.45`
-  of the free height. Now: the list gets all space except the **queue
-  lower bound** (`QUEUE_MIN_FRAC`) and the chrome — the queue keeps its
-  minimum, the cards are fully visible.
+- **Folder list used the remaining height (historical, superseded by #33):**
+  Earlier layout iterations reserved a queue lower bound and gave the remainder
+  to the cards. Today both scroll viewports follow the user-adjustable split.
 - **Progress bar never > 100 %:** the blue aggregate bar ("Alles aktuell")
   visibly exceeded the right edge during a run. Fix: remember the line width
   **before** the `ui.horizontal`, give the bar an explicit `desired_width`
@@ -118,15 +125,16 @@ with fixed row heights, and measured chrome dimensions.
   (in der Warteschlange 28 = 20 + 8) und die deklarierte Höhe stimmt mit der
   Ist-Höhe überein (vorher Δ 252 px ⇒ letzte Zeile abgeschnitten).
 
-- **Responsive Höhen (F8/F11, Welle 5.8).** `page_heights` als **eine**
-  Quelle; die **Ordnerliste inhaltbewusst** (so viele Karten, wie passen), die
-  **Warteschlange** mindestens `QUEUE_MIN_FRAC` (20 %) und höchstens
-  `QUEUE_MAX_FRAC` (50 %) der freien Höhe. Nur das gemessene Chrome
-  (`QUEUE_HEADER_TOTAL_H`, `QUEUE_BELOW_H`, `QUEUE_FOOTER_H`) bleibt absolut;
-  die Header-Summe enthält beide `item_spacing`-Abstände und die 1-px-Linie.
-  **Verworfen:** ziehbare Trennlinie (Position überlebt den Neustart nicht);
-  eigener Reiter für die Warteschlange (widerspricht „Warteschlange et
-  Fortschrittsleiste gehören zusammen", Welle 3a).
+- **Responsive Höhen (frühere Version, durch Issue #33 ersetzt).** Früher waren
+  die Ordnerliste inhaltbewusst und die Warteschlange auf 20–50 % der freien
+  Höhe begrenzt. Jetzt teilt `Config::backup_queue_ratio` (Default **0.35**,
+  geklemmt auf **0.20–0.80**) die beiden Viewports, solange beide Bereiche offen
+  sind; bei genau einem offenen Bereich bekommt dieser die gesamte Resthöhe und
+  das gespeicherte Verhältnis bleibt unangetastet. Das fixe Chrome ist
+  vollständig im Budget berücksichtigt: `QUEUE_HEADER_TOTAL_H` = **40**,
+  `QUEUE_BELOW_H` = **145**, `QUEUE_ONLY_BELOW_H` = **107** und
+  `FOLDER_ONLY_BELOW_H` = **119**. Der separate Warteschlangen-Reiter bleibt
+  verworfen.
 
 - **Scroll-Bug (F12, Welle 5.8).** Zwei `ScrollArea::vertical()` im selben
   Eltern-`Ui` teilten sich den Scroll-Zustand: egui setzt ohne `id_salt` die
@@ -151,13 +159,9 @@ with fixed row heights, and measured chrome dimensions.
   Mehrdeutigkeit); Variant C (nur die Dopplung entfernen, Pfad in die graue
   Zeile).
 
-- **Ordnerliste bekommt die ganze Resthöhe (User-Entscheidung 2026-10-16).**
-  Die unterste Karte war angeschnitten, weil `page_heights` die Liste auf
-  `FOLDER_LIST_MAX_FRAC = 0.45` der freien Höhe kappte. Neu: die Liste bekommt
-  allen Platz außer der **Queue-Untergrenze** (`QUEUE_MIN_FRAC`) und dem
-  Chrome — die Queue behält ihr Minimum, die Karten sind vollständig
-  sichtbar. **Verworfen:** die Listen-Höhe auf ganze Karten zu runden; es so
-  zu lassen („scrollt halt").
+- **Ordnerliste bekam die Resthöhe (historisch, durch #33 ersetzt).** Frühere
+  Layoutversionen reservierten eine Queue-Untergrenze und gaben den übrigen
+  Platz den Karten. Beide Scroll-Viewports folgen jetzt dem einstellbaren Split.
 
 - **Fortschrittsbalken nie > 100 % (Welle 5.15).** Der blaue Aggregat-Balken
   („Alles aktuell") lief während eines Laufs sichtbar über den rechten Rand
@@ -202,13 +206,46 @@ with fixed row heights, and measured chrome dimensions.
   zurückkorrigieren:** die 16 px zwischen Gruppen sind die Entscheidung — und
   die engen Werte innerhalb eines Blocks ebenso.
 
-- **Überschrift → Ordnerliste: 8 px (Befund 2026-10-17, UI-Review F1).** Auf
-  der Seite „Datensicherung" steht vor der Ordner-Karten-`ScrollArea` jetzt
-  `ui.add_space(8.0)`. Ohne diese Luft klebte die Überschrift „Automatisch
-  gesicherte Ordner:" mit 0 px an der Liste, und im gescrollten Zustand klebte
-  eine halb sichtbare Karte daran. Die Luft ist Teil des gemessenen
-  Layout-Puffers `QUEUE_BELOW_H` (`src/backup.rs`), der deshalb von **88.0 auf
-  96.0** ging (gemessen: Abstand Überschrift → erste Karte +8 px).
+- **Überschrift → Ordnerliste: 6 px (Befund 2026-10-17, Issue #33).** Zwischen
+  dem Ordnerkopf und der Karten-`ScrollArea` liegen 6 px. Ist genau ein Bereich
+  offen, kommen vor dem Ordnerkopf weitere 6 px (`SECTION_GAP`) hinzu; sind
+  beide offen, ersetzt der Splitter mit 3 px Luft, 10 px Griff und 3 px Luft
+  diesen Abstand. Alle Anteile stecken im Höhenbudget (`QUEUE_BELOW_H`,
+  `QUEUE_ONLY_BELOW_H` bzw. `FOLDER_ONLY_BELOW_H`), sodass die Liste weder
+  Überschrift noch Splitter berührt.
+
+- **Kompaktere Backup-Abstände (Issue #33, 2026-11-03).** Die Fortschrittszone
+  verbraucht in jedem Zweig **40 px** (6 px Abstand + feste 26 px Zeile + 8 px
+  `item_spacing`; der Balken selbst ist 20 px hoch), auch wenn keine
+  Fortschrittszeile gezeichnet wird. Die Splitterzone ist **24 px** (3 + 10 +
+  8 + 3), die Ordnerkopfzone **34 px** (26 px Zeile + 8 px Abstand), der
+  Überschrift/Listen-Abstand **6 px**. Die aggregierte Zähler-/Ergebniszeile
+  und der Log-Kopf „Letzter Upload“ stehen in dunkler Tinte bei 11 pt; die
+  Karten-Meta-/Ergebniszeilen bleiben bei 11 pt und `theme::muted`. Der
+  Footer-Bereich ist **33 px** (8 px Tabellen-Nachlauf + 6 px nach der Liste +
+  6 px vor dem Ergebnis + 13 px Zeilenbox). `QUEUE_BELOW_H` ist **145 px**
+  (8 + 40 + 24 + 34 + 6 + 33), `QUEUE_ONLY_BELOW_H` **107 px** (8 + 40 + 6 +
+  34 + 6 + 13) und `FOLDER_ONLY_BELOW_H` **119 px** (40 + 6 + 34 + 6 + 33);
+  `QUEUE_HEADER_TOTAL_H` ist **40 px**. Karten haben 3 px äußeren Vertikalrand
+  und 6 px Listenabstand.
+
+- **Persistierter Backup-Splitter (Issue #33).** Beide Bereiche starten offen;
+  Disclosure-Dreieck und Bereichslabel aktivieren denselben fokussierbaren,
+  barrierefrei beschrifteten Toggle; der letzte offene Bereich bleibt auch per
+  Label deaktiviert. Die Disclosure-Knöpfe bleiben als ergänzendes Accordion.
+  Das in `config.toml`
+  gespeicherte Queue-Verhältnis (`Config::backup_queue_ratio`) ist standardmäßig
+  **35 %** und auf **20–80 %** begrenzt; ältere Konfigurationen ohne Schlüssel
+  erhalten 35 %, NaN/unendlich fallen ebenfalls darauf zurück. Der **10-px-Griff**
+  ist per Drag und per Up/Down-Tasten bedienbar (Shift = 10 % statt 3 %);
+  gespeichert wird beim Loslassen bzw. bei einer Tastaturänderung, nicht pro
+  Frame. Bei ausreichend Höhe haben Queue- und Ordner-Viewport Mindestgrößen von
+  **72 und 96 px**; kleinere Fenster degradieren zu 0 hohen Viewports ohne
+  negative Größen. Die Allokation selbst überschreitet ihr Budget nicht, ein
+  Fenster kleiner als das feste Chrome kann aber nicht alle Bedienelemente
+  zeigen. Ist einer eingeklappt, belegt der andere den gesamten flexiblen Raum;
+  das gespeicherte Verhältnis bleibt unverändert und gilt wieder, wenn beide
+  geöffnet sind. Der letzte offene Bereich kann nicht eingeklappt werden.
 
 - **Scrollbalken-Reserve ist jetzt dauerhaft (Issue #30, ersetzt den Stand
   2026-10-17).** Die in `src/theme.rs` reservierte Breite für den schwebenden
@@ -265,30 +302,15 @@ with fixed row heights, and measured chrome dimensions.
   Gesamtbalken und der Leerzustand der Warteschlange verwenden die
   Tabellenbreite, nicht die volle Seitenbreite.
 
-- **Ordnerkarte (Issue #30).** Innenabstand `symmetric(16, 10)`, Außenabstand
-  `(0, 4)`, Eckenradius 6, Breite `cols.table_w` (nicht die animierte
+- **Ordnerkarte (Issue #30, spacing update #33).** Innenabstand
+  `symmetric(16, 10)`, Außenabstand `(0, 3)`, Listenabstand 6 px, Eckenradius 6,
+  Breite `cols.table_w` (nicht die animierte
   ScrollArea-Breite), damit die rechte Rahmenlinie sichtbar ist und beide Listen
   auf derselben Kante enden. Der Status-/Aktionsblock wird unsichtbar vermessen;
   die linke Textspalte bricht innerhalb der Restbreite um und kann nicht unter
-  die Symbole laufen.
-  **Nachtrag F1/R1 (Review-Runden 2–3):** Die frühere Konstante
-  `FOLDER_CARD_H = 88` gilt nur für einzeilige Texte und wurde für gewrappte
-  Namen sogar um ~4.2 pt pro Zeile unterschätzt (13 statt der echten 15-pt-Zeile
-  mit 17 pt). Deshalb gibt es **keine Zeilenkonstante mehr**: `backup_ui` misst
-  vor der Höhenbudgetierung je Karte den Status-/Aktionsblock mit derselben
-  unsichtbaren Probe wie im Draw und legt die **genau dieselben Labels** (Name
-  15 pt, Meta 11 pt, Outcome 11 pt) mit `fonts.layout(...)` bei der echten
-  Spaltenbreite aus. Die Reservierung ist
-  `Galley-Höhe(Name) + Galley-Höhe(Meta) + [Galley-Höhe(Outcome)]`
-  `+ 8 px je Blockabstand + 30 px festes Chrome` (Innenrand 10/10, 1-px-Rahmen
-  und Außenrand 4/4, dieselben Konstanten wie der Frame); der Inhalt ist das
-  Maximum aus Textspalte und gemessenem Aktionsblock. Das **Outcome zählt nur,
-  wenn die Karte es wirklich zeichnet**. Eine gewrappte 15-pt-Namenszeile
-  addiert damit real 17 pt, eine 11-pt-Meta-Zeile 13 pt. Diese Höhen fließen in
-  `page_heights` ein, sodass die Liste exakt die Karten reserviert, die sie
-  zeichnet. Bei 760×700 ist die zweite Karte vollständig sichtbar; bei 760×520
-  ist der Viewport (148.5 pt) kleiner als zwei Karten (~199–223 pt) — dort
-  bleibt die Liste bewusst scrollbar.
+  die Symbole laufen. Die Ordner-ScrollArea erhält ihre Höhe vom Splitter und
+  scrollt, sobald Karteninhalte den Viewport übersteigen; `auto_shrink(false)`
+  hält die zugeteilte Split-Höhe auch bei wenigen oder keinen Karten ein.
 
 - **Anmeldebildschirm zentriert (Issue #30, F2).** `ui.horizontal` innerhalb
   von `ui.vertical_centered` nimmt die volle Breite ein und beginnt am linken

@@ -1559,7 +1559,9 @@ impl eframe::App for PrimePhotoApp {
                     } else {
                         tr("Bereit").to_string()
                     };
-                    egui::CollapsingHeader::new(summary)
+                    egui::CollapsingHeader::new(
+                        RichText::new(summary).color(theme::INK).size(11.0),
+                    )
                         // Fixed id: `summary` changes with every counter / file / ETA
                         // update, so an id derived from the label would lose the
                         // open state on each update (docs/dev/DEV_NOTES.md §3).

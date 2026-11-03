@@ -312,11 +312,12 @@ fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<
 /// row height is fixed. The header uses the same widths, so both line up.
 const QUEUE_ROW_H: f32 = 20.0;
 const QUEUE_HEADER_H: f32 = 20.0;
-/// Vertical space above the table's first row: the header row, the item
-/// spacing after it, the 1 px divider and the item spacing before the rows.
-/// `page_heights` must reserve all of it, otherwise the added divider pushes
-/// the folder list (and its last card) off the bottom (Issue #30).
-const QUEUE_HEADER_TOTAL_H: f32 = QUEUE_HEADER_H + 8.0 + 1.0 + 8.0;
+/// **Measured** vertical consumption above the table's first row with the
+/// theme (`item_spacing.y = 8`, `interact_size.y = 26`): the horizontal header
+/// row, its trailing item spacing, the 1 px divider and the spacing before the
+/// rows add up to 40 px. The split layout reserves all of it, otherwise the
+/// divider pushes the folder list off the bottom (Issue #30).
+const QUEUE_HEADER_TOTAL_H: f32 = 40.0;
 /// Compact column carrying the backup folder of each queue row (user decision
 /// 2026-10-16): without it the files of several targets are indistinguishable.
 const QUEUE_FOLDER_W: f32 = 120.0;
@@ -326,58 +327,80 @@ const QUEUE_SIZE_W: f32 = 80.0;
 /// longer.
 const QUEUE_STATUS_W: f32 = 140.0;
 const QUEUE_MIN_NAME_W: f32 = 80.0;
-/// Height of the centred empty-state block while the queue is empty.
-const QUEUE_EMPTY_H: f32 = 72.0;
-/// Floor of the queue table's height as a fraction of the page's free height
-/// (user decision 2026-10-16: no absolute heights — the queue is the
-/// secondary column and shrinks with the window).
-const QUEUE_MIN_FRAC: f32 = 0.20;
-/// Ceiling of the queue table's height as a fraction of the free height: the
-/// queue never takes more than half of the page — the folders matter more.
-const QUEUE_MAX_FRAC: f32 = 0.50;
-/// **Measured** chrome the queue table must leave **below itself** so the rest
-/// of the page stays reachable (headless with egui 0.31.1): the aggregate
-/// progress bar with its 6 px gap (56 px to the folder heading, i.e. the bar,
-/// a 12 px gap and the "Automatisch gesicherte Ordner:" heading), the 8 px air
-/// between that heading and the folder list (UI review 0.1.1) plus the folder
-/// list's own footer room ([`QUEUE_FOOTER_H`]). That is 80 px measured plus the
-/// 8 px air = 88 px, 96 px with a small margin. This is measured content, not a
-/// panel share — it stays absolute on purpose; only the *range caps/floors* of
-/// the two scroll areas are relative. The Backup page has no scroll area of its
-/// own, so the table may never eat this space; the list below then gets what is
-/// left. The space **above** the first table row (header, both item spacings,
-/// the 1 px divider) is [`QUEUE_HEADER_TOTAL_H`].
-const QUEUE_BELOW_H: f32 = 96.0;
-/// Height the folder list must leave for the footer below it (8 px gap + line).
-const QUEUE_FOOTER_H: f32 = 30.0;
-/// Vertical inner margin of a folder card (top and bottom). Shared by the
-/// drawn frame and the height reservation below, so they cannot drift.
+/// Item spacing egui adds after the queue `ScrollArea`.
+const QUEUE_TABLE_TRAILING_H: f32 = 8.0;
+/// Fixed height of the aggregate progress row (spinner / progress bar).
+const QUEUE_PROGRESS_ROW_H: f32 = 26.0;
+/// Height of the aggregate progress zone under the queue table: the 6 px gap,
+/// the fixed 26 px row and the 8 px trailing item spacing. The row is reserved
+/// in every branch, so the splitter and folder heading keep a deterministic y.
+const QUEUE_PROGRESS_ZONE_H: f32 = 6.0 + QUEUE_PROGRESS_ROW_H + 8.0;
+/// Hit area of the draggable horizontal splitter and the air above/below it.
+const SPLITTER_H: f32 = 10.0;
+const SPLITTER_GAP: f32 = 3.0;
+/// Splitter zone including the trailing item spacing: 3 + 10 + 8 + 3 = 24 px.
+const SPLITTER_ZONE_H: f32 = 2.0 * SPLITTER_GAP + SPLITTER_H + 8.0;
+/// Folder heading horizontal row (`interact_size.y`) plus its trailing spacing:
+/// 26 + 8 = 34 px.
+const FOLDER_HEADING_ZONE_H: f32 = 26.0 + 8.0;
+/// Air between the folder heading and the card list.
+const FOLDER_HEADING_GAP: f32 = 6.0;
+/// Air after the folder `ScrollArea` before the result footer.
+const POST_LIST_GAP: f32 = 6.0;
+/// Air between the post-list gap and the footer line.
+const FOOTER_GAP: f32 = 6.0;
+/// Line box of the 11 pt result footer.
+const FOOTER_LINE_H: f32 = 13.0;
+/// Gap between two page sections when no splitter separates them.
+const SECTION_GAP: f32 = 6.0;
+/// Height the folder list must leave for the result footer below it:
+/// table trailing 8 + post-list 6 + footer gap 6 + line 13 = 33 px.
+const QUEUE_FOOTER_H: f32 =
+    QUEUE_TABLE_TRAILING_H + POST_LIST_GAP + FOOTER_GAP + FOOTER_LINE_H;
+/// Floor of the queue-table viewport when the window has room for both floors.
+const QUEUE_MIN_VIEWPORT_H: f32 = 72.0;
+/// Floor of the folder-list viewport when the window has room for both floors.
+const FOLDER_MIN_VIEWPORT_H: f32 = 96.0;
+/// Default share of the splittable height taken by the queue while both
+/// sections are open (Issue #33, user wish 2026-11-03).
+pub(crate) const BACKUP_QUEUE_RATIO_DEFAULT: f32 = 0.35;
+/// Smallest supported queue share; the splitter cannot make the queue smaller.
+pub(crate) const BACKUP_QUEUE_RATIO_MIN: f32 = 0.20;
+/// Largest supported queue share; the folder list keeps the rest.
+pub(crate) const BACKUP_QUEUE_RATIO_MAX: f32 = 0.80;
+/// Chrome below the table while **both** sections are open: table trailing,
+/// progress zone, splitter zone, folder heading zone and the footer area.
+/// 8 + 40 + 24 + 34 + 6 + 33 = 145 px.
+const QUEUE_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
+    + QUEUE_PROGRESS_ZONE_H
+    + SPLITTER_ZONE_H
+    + FOLDER_HEADING_ZONE_H
+    + FOLDER_HEADING_GAP
+    + QUEUE_FOOTER_H;
+/// Chrome below the table when only the queue is open: table trailing, progress,
+/// section gap, folder heading, footer gap and line. 8 + 40 + 6 + 34 + 6 + 13
+/// = 107 px.
+const QUEUE_ONLY_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
+    + QUEUE_PROGRESS_ZONE_H
+    + SECTION_GAP
+    + FOLDER_HEADING_ZONE_H
+    + FOOTER_GAP
+    + FOOTER_LINE_H;
+/// Chrome below the queue section when only the folder list is open: progress,
+/// section gap, folder heading, heading/list gap and the footer area.
+/// 40 + 6 + 34 + 6 + 33 = 119 px.
+const FOLDER_ONLY_BELOW_H: f32 = QUEUE_PROGRESS_ZONE_H
+    + SECTION_GAP
+    + FOLDER_HEADING_ZONE_H
+    + FOLDER_HEADING_GAP
+    + QUEUE_FOOTER_H;
+/// Vertical inner margin of a folder card (top and bottom).
 const FOLDER_CARD_INNER_Y: i8 = 10;
 /// Vertical outer margin of a folder card (top and bottom).
-const FOLDER_CARD_OUTER_Y: i8 = 4;
-/// Fixed vertical chrome of one folder card: inner margin + 1 px stroke + outer
-/// margin, on both sides. The margin values are the very constants the frame at
-/// the draw site uses (Issue #30, R1).
-const FOLDER_CARD_CHROME_H: f32 =
-    2.0 * (FOLDER_CARD_INNER_Y as f32 + 1.0 + FOLDER_CARD_OUTER_Y as f32);
-/// Vertical gap between two folder cards: egui's `item_spacing.y` between the
-/// two frames (the frame's own outer margin is part of
-/// [`FOLDER_CARD_CHROME_H`]).
-const FOLDER_CARD_GAP: f32 = 8.0;
-
-/// Height of one folder card from the **actual galley heights** of the labels
-/// it draws, the item spacing between them and the fixed frame chrome.
-///
-/// The status/action block on the right is a single row; its buttons are
-/// `interact_size.y` high, so `row_h` (the theme's `interact_size.y`) covers it
-/// and the content is the taller of the text column and that row floor. No
-/// per-line constant is involved: a wrapped 15 pt name contributes its real
-/// 17 pt line, an 11 pt meta line its real 13 pt (Issue #30, R1).
-fn folder_card_height(label_heights: &[f32], spacing: f32, row_h: f32) -> f32 {
-    let text_h =
-        label_heights.iter().sum::<f32>() + spacing * label_heights.len().saturating_sub(1) as f32;
-    FOLDER_CARD_CHROME_H + text_h.max(row_h)
-}
+const FOLDER_CARD_OUTER_Y: i8 = 3;
+/// Vertical gap between two folder cards, applied as the folder list's
+/// `item_spacing.y`. The cards draw at their natural height in the scroll area.
+const FOLDER_CARD_GAP: f32 = 6.0;
 
 /// Column geometry of the queue table, derived once per frame and reused by the
 /// header and **every** row (Issue #30: both used to recompute the name width,
@@ -435,8 +458,7 @@ fn table_cell(
 }
 
 /// The card's small meta line: path · progress · last updated (each present part
-/// exactly once, empty parts omitted). Shared by the card draw and by the
-/// height reservation, so both measure exactly the same string (Issue #30, F1).
+/// exactly once, empty parts omitted). Shared by the card draw and its labels.
 fn folder_card_meta(r: &Row) -> String {
     let mut line = crate::text::nfc(&r.path.display().to_string());
     let progress = folder_progress_text(r.status, r.done, r.total);
@@ -460,9 +482,7 @@ struct CardLabel {
 }
 
 /// The left column of a folder card: name, meta line and — **only when the run
-/// produced a result for it** — the outcome line. The draw and the height
-/// reservation both iterate this list, so the reserved height always includes
-/// exactly the blocks the card draws (Issue #30, R1).
+/// produced a result for it** — the outcome line.
 fn folder_card_labels(r: &Row) -> Vec<CardLabel> {
     let mut labels = vec![
         CardLabel {
@@ -487,46 +507,256 @@ fn folder_card_labels(r: &Row) -> Vec<CardLabel> {
     labels
 }
 
-/// Vertical budget of the Backup page's two scroll areas for a given free
-/// height — the single source both draw sites use, so the queue (drawn first)
-/// leaves exactly what the folder list was promised.
+/// Clamp a persisted or runtime split ratio into the supported range. A
+/// non-finite value (hand-written `nan`/`inf`) falls back to the default rather
+/// than poisoning the layout (Issue #33).
+pub(crate) fn sanitize_backup_queue_ratio(ratio: f32) -> f32 {
+    if ratio.is_finite() {
+        ratio.clamp(BACKUP_QUEUE_RATIO_MIN, BACKUP_QUEUE_RATIO_MAX)
+    } else {
+        BACKUP_QUEUE_RATIO_DEFAULT
+    }
+}
+
+/// Apply one frame's vertical drag delta (pixels) to the queue ratio. The delta
+/// is normalised by the splittable height, so the same drag feels the same at
+/// every window size. A non-finite or empty splittable height leaves the ratio
+/// usable instead of producing `NaN`.
+fn adjusted_backup_queue_ratio(ratio: f32, delta_y: f32, splittable_h: f32) -> f32 {
+    if !delta_y.is_finite() || !splittable_h.is_finite() || splittable_h <= 0.0 {
+        return sanitize_backup_queue_ratio(ratio);
+    }
+    sanitize_backup_queue_ratio(ratio + delta_y / splittable_h)
+}
+
+/// Hard layout invariant: the two backup sections can never be closed at the
+/// same time. A section may only close while the other one is open.
+fn keep_one_section_open(open: bool, other_open: bool) -> bool {
+    open || !other_open
+}
+
+/// A section can be toggled only while its sibling is open and its parent UI
+/// is enabled.
+fn section_toggle_enabled(ui_enabled: bool, other_open: bool) -> bool {
+    ui_enabled && other_open
+}
+
+/// A section-header click changes state only when the header may be toggled.
+fn section_toggle_after_click(
+    clicked: bool,
+    can_toggle: bool,
+    is_open: bool,
+    other_open: bool,
+) -> Option<bool> {
+    if !clicked || !can_toggle {
+        return None;
+    }
+    let next = keep_one_section_open(!is_open, other_open);
+    (next != is_open).then_some(next)
+}
+
+/// Split the splittable height by the queue ratio, respecting both viewport
+/// floors when the height has room for them. In a tiny window the split
+/// degrades proportionally; sizes never become negative.
+fn split_viewports(total: f32, ratio: f32) -> (f32, f32) {
+    let total = if total.is_finite() {
+        total.max(0.0)
+    } else {
+        0.0
+    };
+    if total == 0.0 {
+        return (0.0, 0.0);
+    }
+    let ratio = sanitize_backup_queue_ratio(ratio);
+    let desired = total * ratio;
+    if total >= QUEUE_MIN_VIEWPORT_H + FOLDER_MIN_VIEWPORT_H {
+        let queue = desired.clamp(QUEUE_MIN_VIEWPORT_H, total - FOLDER_MIN_VIEWPORT_H);
+        (queue, total - queue)
+    } else {
+        let queue = desired.clamp(0.0, total);
+        (queue, total - queue)
+    }
+}
+
+/// Height the splitter can actually distribute below the table column header
+/// and above the fixed chrome.
+fn backup_split_splittable(free: f32) -> f32 {
+    (free - QUEUE_HEADER_TOTAL_H - QUEUE_BELOW_H).max(0.0)
+}
+
+/// Allocate the queue-table and folder-list viewports for the current
+/// disclosure and splitter state. The saved ratio is only read while **both**
+/// sections are open; with exactly one open, that section receives every free
+/// pixel and the ratio stays untouched.
+fn page_heights_for_sections(
+    free: f32,
+    queue_open: bool,
+    folders_open: bool,
+    ratio: f32,
+) -> (f32, f32) {
+    let free = if free.is_finite() { free.max(0.0) } else { 0.0 };
+    match (queue_open, folders_open) {
+        (true, true) => split_viewports(
+            (free - QUEUE_HEADER_TOTAL_H - QUEUE_BELOW_H).max(0.0),
+            ratio,
+        ),
+        (true, false) => (
+            (free - QUEUE_HEADER_TOTAL_H - QUEUE_ONLY_BELOW_H).max(0.0),
+            0.0,
+        ),
+        (false, true) => (0.0, (free - FOLDER_ONLY_BELOW_H).max(0.0)),
+        (false, false) => (0.0, 0.0),
+    }
+}
+
+fn section_is_open(ui: &egui::Ui, id: egui::Id, default_open: bool) -> bool {
+    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open)
+        .is_open()
+}
+
+/// Draw a standard egui disclosure control and persist its open state. The
+/// toggle is keyboard-focusable and announces its localized action and section.
 ///
-/// Priority (user decision 2026-10-16, Welle 5.17): the **folder list takes
-/// what its content needs** — the sum of the passed per-card heights plus the
-/// gaps between them (0 cards ⇒ 0) — but never so much that the queue falls
-/// below its floor or the chrome is eaten; the queue then takes the rest,
-/// capped at half of the free height. All caps and floors are fractions of
-/// `free` except the measured chrome ([`QUEUE_HEADER_TOTAL_H`],
-/// [`QUEUE_BELOW_H`], [`QUEUE_FOOTER_H`]) and the card metrics, which stay
-/// absolute. The card heights come from [`folder_card_height`] with the actual
-/// galley heights of the labels the card draws (the outcome only when it is
-/// present), so a card whose name or meta line wraps is reserved at its real
-/// height (Issue #30, F1/R1).
-///
-/// Guarantees for every `free >= 0`:
-/// - `queue_h + list_h + QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H <= free` —
-///   nothing runs off the bottom edge;
-/// - `queue_h <= QUEUE_MAX_FRAC * free` — the queue stays at or below 50 %;
-/// - `list_h` never spends the queue's floor reservation — the queue keeps
-///   at least `QUEUE_MIN_FRAC * free` whenever the chrome fits at all.
-fn page_heights(free: f32, card_heights: &[f32]) -> (f32, f32) {
-    // The queue's fixed chrome: everything above its first row (header, both
-    // item spacings and the 1 px divider) plus everything below the table
-    // (aggregate bar zone + footer room).
-    let chrome = QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H;
-    // 1) The folder list first: exactly its content's need — the passed card
-    //    heights plus the gaps between them (0 cards ⇒ 0) — capped so the queue
-    //    keeps its floor and the chrome is never eaten.
-    let content_h = card_heights.iter().sum::<f32>()
-        + card_heights.len().saturating_sub(1) as f32 * FOLDER_CARD_GAP;
-    let list_h = content_h.min((free - chrome - QUEUE_MIN_FRAC * free).max(0.0));
-    // 2) The queue takes what is left, capped at half the free height; its
-    //    floor only applies when it actually fits.
-    let rest = (free - chrome - list_h).max(0.0);
-    let queue_h = rest
-        .min(QUEUE_MAX_FRAC * free)
-        .max((QUEUE_MIN_FRAC * free).min(rest));
-    (queue_h, list_h)
+/// `other_open` enforces the hard invariant: a section may only be closed while
+/// the other one is open. If both persisted states are closed, this header
+/// reopens itself before painting, so the icon and the announced action always
+/// match the real state.
+fn show_section_header(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    default_open: bool,
+    other_open: bool,
+    show_label: &str,
+    hide_label: &str,
+    add_header: impl FnOnce(&mut egui::Ui) -> egui::Response,
+) -> bool {
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        default_open,
+    );
+    let corrected = keep_one_section_open(state.is_open(), other_open);
+    if corrected != state.is_open() {
+        state.set_open(corrected);
+        state.store(ui.ctx());
+    }
+    // The only open section cannot be collapsed. Expose that as disabled to
+    // assistive technology and remove click semantics instead of swallowing an
+    // apparently enabled action.
+    let can_toggle = section_toggle_enabled(ui.is_enabled(), other_open);
+    ui.horizontal(|ui| {
+        let item_spacing = ui.spacing().item_spacing;
+        ui.spacing_mut().item_spacing.x = 0.0;
+        // A custom toggle (not `show_toggle_button`) keeps the localized action
+        // label and supports a genuinely disabled state for the last section.
+        let size = egui::vec2(ui.spacing().indent, ui.spacing().icon_width);
+        let (_auto_id, disclosure_rect) = ui.allocate_space(size);
+        ui.spacing_mut().item_spacing = item_spacing;
+        let label_response = add_header(ui);
+        // One interaction and one id cover both icon and label, keeping a
+        // single keyboard focus target, accessibility action and focus ring.
+        let header_rect = disclosure_rect.union(label_response.rect);
+        let sense = if can_toggle {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        };
+        let toggle = ui.interact(header_rect, id, sense);
+        let toggle = if can_toggle {
+            toggle.on_hover_cursor(egui::CursorIcon::PointingHand)
+        } else {
+            toggle
+        };
+        if let Some(next) = section_toggle_after_click(
+            toggle.clicked(),
+            can_toggle,
+            state.is_open(),
+            other_open,
+        ) {
+            state.set_open(next);
+            state.store(ui.ctx());
+            ui.ctx().request_repaint();
+        }
+        let accessible_label = if state.is_open() {
+            hide_label
+        } else {
+            show_label
+        };
+        toggle.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, can_toggle, accessible_label)
+        });
+        let openness = state.openness(ui.ctx());
+        let (mut icon_rect, _) = ui.spacing().icon_rectangles(disclosure_rect);
+        icon_rect.set_center(egui::pos2(
+            disclosure_rect.left() + ui.spacing().indent / 2.0,
+            disclosure_rect.center().y,
+        ));
+        let icon_response = toggle.clone().with_new_rect(icon_rect);
+        egui::collapsing_header::paint_default_icon(ui, openness, &icon_response);
+    });
+    state.store(ui.ctx());
+    state.is_open()
+}
+
+/// Draw the accessible drag handle between the two open scroll panes.
+/// Up/down arrows adjust the same ratio for keyboard users.
+fn show_backup_splitter(ui: &mut egui::Ui, ratio: f32, splittable_h: f32) -> (f32, bool) {
+    ui.add_space(SPLITTER_GAP);
+    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), SPLITTER_H));
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id("backup-layout-splitter"),
+        egui::Sense::click_and_drag(),
+    );
+    if response.clicked() || response.drag_started() || response.is_pointer_button_down_on() {
+        response.request_focus();
+    }
+    let ratio = sanitize_backup_queue_ratio(ratio);
+    let enabled = ui.is_enabled();
+    let accessible_label = tr("Höhe von Warteschlange und Ordnern anpassen");
+    response.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(ratio), accessible_label));
+    let response = response.on_hover_text(tr(
+        "Mit den Pfeiltasten nach oben oder unten anpassen",
+    ));
+
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    let grip_color = if response.dragged() || response.has_focus() {
+        theme::TEAL
+    } else if response.hovered() {
+        theme::MUTED
+    } else {
+        theme::BORDER
+    };
+    let grip = egui::Rect::from_center_size(rect.center(), egui::vec2(48.0, 2.0));
+    ui.painter().rect_filled(grip, 1.0, grip_color);
+
+    let mut next_ratio = adjusted_backup_queue_ratio(ratio, response.drag_delta().y, splittable_h);
+    let keyboard_delta = if response.has_focus() {
+        let step = if ui.input(|input| input.modifiers.shift) {
+            0.10
+        } else {
+            0.03
+        };
+        ui.input(|input| {
+            if input.key_pressed(egui::Key::ArrowUp) {
+                -step
+            } else if input.key_pressed(egui::Key::ArrowDown) {
+                step
+            } else {
+                0.0
+            }
+        })
+    } else {
+        0.0
+    };
+    if keyboard_delta != 0.0 {
+        next_ratio = sanitize_backup_queue_ratio(next_ratio + keyboard_delta);
+    }
+    ui.add_space(SPLITTER_GAP);
+    let should_save = response.drag_stopped() || keyboard_delta != 0.0;
+    (next_ratio, should_save)
 }
 
 /// Status bucket of the live queue's flat ordering: **our own** order, decided
@@ -3031,7 +3261,24 @@ impl PrimePhotoApp {
         let ambiguous = ambiguous_folder_names_for_paths(&folder_paths);
 
         ui.add_space(12.0);
-        ui.label(RichText::new(tr1("Warteschlange ({})", remaining)).strong().size(14.0));
+        let queue_section_id = ui.make_persistent_id("backup-queue-section");
+        let folders_section_id = ui.make_persistent_id("backup-folders-section");
+        let queue_expanded = show_section_header(
+            ui,
+            queue_section_id,
+            true,
+            section_is_open(ui, folders_section_id, true),
+            tr("Warteschlange ausklappen"),
+            tr("Warteschlange einklappen"),
+            |ui| {
+                ui.label(
+                    RichText::new(tr1("Warteschlange ({})", remaining))
+                        .strong()
+                        .size(14.0),
+                )
+            },
+        );
+        let folders_expanded_for_layout = section_is_open(ui, folders_section_id, true);
 
         // Shared geometry: header and rows use the same `QueueColumns`, so the
         // four columns line up exactly (Issue #30). The scroll-bar strip is
@@ -3044,21 +3291,12 @@ impl PrimePhotoApp {
         let bar_w = ui.spacing().scroll.allocated_width();
         let cols = queue_columns(content_w, spacing_x, bar_w);
 
-        // Per-card heights for the folder list's reservation (Issue #30,
-        // F1/R1). The list is a plain ScrollArea, so its viewport must be as
-        // tall as the cards it draws. For every card we measure the status/action
-        // block with the same probe the card uses, then lay out the very labels
-        // the card draws (same texts, fonts and column width) and use their
-        // **galley heights** — never a per-line constant. This covers a wrapped
-        // 15 pt name with its real ~17.22 pt line as well as wrapped 11 pt meta
-        // or outcome lines, and it includes the outcome only when the card draws
-        // it.
+        // Measure the action block once per row so the left text column never
+        // runs underneath its controls. The cards scroll inside the user-sized
+        // viewport, so their content height no longer constrains the split.
         let running = self.upload.lock().unwrap().active;
-        let card_content_w =
-            (cols.table_w - 2.0 * f32::from(theme::PAGE_MARGIN_X) - 2.0).max(1.0);
-        let spacing_y = ui.spacing().item_spacing.y;
-        let row_h = ui.spacing().interact_size.y;
-        let (side_ws, card_heights): (Vec<f32>, Vec<f32>) = rows
+        let card_content_w = (cols.table_w - 2.0 * f32::from(theme::PAGE_MARGIN_X) - 2.0).max(1.0);
+        let side_ws: Vec<f32> = rows
             .iter()
             .map(|r| {
                 let (status_txt, status_col) = status_text(r.status, r.total);
@@ -3088,50 +3326,34 @@ impl PrimePhotoApp {
                     );
                     side.response.rect.width()
                 };
-                let column_w = (card_content_w - side_w - spacing_x).max(1.0);
-                let label_heights: Vec<f32> = folder_card_labels(r)
-                    .iter()
-                    .map(|label| {
-                        ui.fonts(|f| {
-                            f.layout(
-                                label.text.clone(),
-                                label.font.clone(),
-                                egui::Color32::WHITE,
-                                column_w,
-                            )
-                            .size()
-                            .y
-                        })
-                    })
-                    .collect();
-                (
-                    side_w,
-                    folder_card_height(&label_heights, spacing_y, row_h),
-                )
+                side_w
             })
-            .unzip();
+            .collect();
 
-        // The page's vertical budget, decided **before** the queue is drawn: the
-        // folder list takes what its measured cards need, capped so the queue
-        // keeps its floor; the queue takes the rest, never more than half of the
-        // free height (user decision 2026-10-16, Welle 5.17). `list_h` is used
-        // again at the folder list's own draw time; the function is pure, so
-        // both sites agree.
+        // Decide both viewport sizes before drawing either scroll area. With
+        // both sections open, the saved ratio splits the flexible height; with
+        // one closed, the open section receives all of it.
         let free = ui.available_height();
-        let (table_h, list_h) = page_heights(free, &card_heights);
+        let mut ratio = self.config.backup_queue_ratio();
+        let (table_h, list_h) = page_heights_for_sections(
+            free,
+            queue_expanded,
+            folders_expanded_for_layout,
+            ratio,
+        );
 
-        if layout.is_empty() {
+        if queue_expanded && layout.is_empty() {
             // Centred empty state (Welle 3.1) instead of an empty table. The
             // block may not be taller than the table it replaces (plus the
             // header it saves), or it would eat the list's promised height in a
             // very small window.
-            let empty_h = QUEUE_EMPTY_H.min(QUEUE_HEADER_H + table_h + 2.0);
+            let empty_h = (QUEUE_HEADER_TOTAL_H + table_h).min(free);
             ui.allocate_ui(egui::vec2(cols.table_w, empty_h), |ui| {
                 ui.centered_and_justified(|ui| {
                     ui.label(theme::muted(tr("Keine Uploads in der Warteschlange")));
                 });
             });
-        } else {
+        } else if queue_expanded {
             // Fixed column header (Ordner · Name · Größe · Status), above the
             // scroll area so it never scrolls away. Every cell is allocated at
             // exactly its column width; folder/name/status are left-aligned,
@@ -3161,9 +3383,9 @@ impl PrimePhotoApp {
                 egui::Stroke::new(1.0_f32, theme::BORDER),
             );
             // A page that has no scroll area of its own: the table gets exactly
-            // the height `page_heights` reserved for it — never more than what
-            // is free, so at the minimum window size nothing runs off the
-            // bottom. The list below keeps whatever was promised to it.
+            // the height `page_heights_for_sections` reserved for it — never
+            // more than what is free, so at the minimum window size nothing
+            // runs off the bottom. The list below keeps its own allocation.
             egui::ScrollArea::vertical()
                 // Own scroll state (user decision 2026-10-16): egui keys a
                 // ScrollArea's offset by `make_persistent_id("scroll_area")`
@@ -3172,6 +3394,7 @@ impl PrimePhotoApp {
                 // wheel scroll would move both at once.
                 .id_salt("queue")
                 .max_height(table_h)
+                .auto_shrink(false)
                 // Honor the cap even when it is tiny: the default
                 // `min_scrolled_height` (64 px) would otherwise overrule a
                 // smaller `max_height` and push the list below off the edge.
@@ -3305,90 +3528,117 @@ impl PrimePhotoApp {
             }
         };
         let (sum_done, sum_total) = displayed_progress(running, run_done, run_total, &rows);
-        if running && sum_total == 0 {
-            // An all-current scan is active only while its no-op run is being
-            // finalized. Show the same completion wording as the idle state,
-            // without a meaningless 0/0 bar or spinner.
-            ui.add_space(6.0);
-            ui.label(progress_text);
-        } else if running || sum_total > 0 {
-            ui.add_space(6.0);
-            let frac = if sum_total > 0 {
-                (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            // The row width must be remembered **before** the `horizontal`:
-            // while a run is live the spinner in front of the bar already
-            // consumes part of it, and a `ProgressBar` without `desired_width`
-            // takes the whole row regardless — so it visibly overflowed the
-            // right edge (~105 %). The bar now gets an explicit width: the full
-            // row without a spinner, the row minus the spinner and the item
-            // spacing with one (clamped at 0).
-            // The bar spans exactly the table width (not the full page), so it
-            // ends on the same right edge as the header, rows and cards.
-            let row_w = cols.table_w;
-            ui.horizontal(|ui| {
-                // A spinner belongs to this one display and only while a run is
-                // active — never a second, separate indicator.
-                if running {
-                    ui.spinner();
+        // Reserve the complete progress zone in every branch: 6 px gap + the
+        // fixed 26 px row + egui's 8 px trailing item spacing (40 px total).
+        ui.add_space(6.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(cols.table_w, QUEUE_PROGRESS_ROW_H),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                // An empty `allocate_ui_with_layout` shrinks to ~13 px; the
+                // explicit minimum keeps the row at exactly 26 px, so the zone
+                // stays deterministic even without a progress display.
+                ui.set_min_size(egui::vec2(cols.table_w, QUEUE_PROGRESS_ROW_H));
+                if running && sum_total == 0 {
+                    // An all-current scan is active only while its no-op run is
+                    // being finalized. Show the same completion wording as the
+                    // idle state, without a meaningless 0/0 bar or spinner.
+                    ui.label(progress_text);
+                } else if running || sum_total > 0 {
+                    let frac = if sum_total > 0 {
+                        (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    // The bar gets an explicit width: the full row without a
+                    // spinner, the row minus the spinner and the item spacing
+                    // with one (clamped at 0). It spans the table width, not
+                    // the full page, so it ends on the same right edge as the
+                    // header, rows and cards.
+                    let row_w = cols.table_w;
+                    // A spinner belongs to this one display and only while a
+                    // run is active — never a second, separate indicator.
+                    if running {
+                        ui.spinner();
+                    }
+                    let text = if running {
+                        // The run's file counts plus its byte/ETA detail from
+                        // `upload_progress_text` (kept verbatim).
+                        tr3(
+                            "Gesamt: {} von {} Dateien · {}",
+                            sum_done,
+                            sum_total,
+                            progress_text,
+                        )
+                    } else if sum_total > 0 && sum_done >= sum_total {
+                        tr("Alles aktuell").to_string()
+                    } else {
+                        tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
+                    };
+                    // The spinner is a square of `interact_size.y` (26 px,
+                    // theme); the layout adds `item_spacing.x` between them.
+                    let bar_w = if running {
+                        (row_w
+                            - ui.spacing().item_spacing.x
+                            - ui.style().spacing.interact_size.y)
+                            .max(0.0)
+                    } else {
+                        row_w
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(frac)
+                            .desired_width(bar_w)
+                            .desired_height(20.0)
+                            .text(text),
+                    );
                 }
-                let text = if running {
-                    // The run's file counts plus its byte/ETA detail from
-                    // `upload_progress_text` (kept verbatim).
-                    tr3(
-                        "Gesamt: {} von {} Dateien · {}",
-                        sum_done,
-                        sum_total,
-                        progress_text,
-                    )
-                } else if sum_total > 0 && sum_done >= sum_total {
-                    tr("Alles aktuell").to_string()
-                } else {
-                    tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
-                };
-                // The spinner is a square of `interact_size.y` (26 px, theme);
-                // the layout adds `item_spacing.x` between the two widgets.
-                let bar_w = if running {
-                    (row_w - ui.spacing().item_spacing.x - ui.style().spacing.interact_size.y)
-                        .max(0.0)
-                } else {
-                    row_w
-                };
-                ui.add(egui::ProgressBar::new(frac).desired_width(bar_w).text(text));
-            });
+            },
+        );
+
+        if queue_expanded && folders_expanded_for_layout {
+            let (next_ratio, should_save) =
+                show_backup_splitter(ui, ratio, backup_split_splittable(free));
+            ratio = next_ratio;
+            // Only the both-open state owns the saved ratio; a collapsed section
+            // leaves it untouched so reopening restores the previous split.
+            self.config.backup_queue_ratio = ratio;
+            if should_save {
+                self.save_config();
+            }
+        } else {
+            ui.add_space(SECTION_GAP);
         }
+        let folders_expanded = show_section_header(
+            ui,
+            folders_section_id,
+            true,
+            queue_expanded,
+            tr("Automatisch gesicherte Ordner ausklappen"),
+            tr("Automatisch gesicherte Ordner einklappen"),
+            |ui| {
+                ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")).size(14.0))
+            },
+        );
 
-        ui.add_space(12.0);
-        ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")));
+        // Air between the heading above and the card list below. The heading
+        // zone and this gap are part of `QUEUE_BELOW_H`.
+        ui.add_space(if folders_expanded { FOLDER_HEADING_GAP } else { 0.0 });
 
-        if self.store.folders.is_empty() {
-            ui.add_space(8.0);
-            ui.label(tr("Wählen Sie einen Ordner aus, um die Sicherung zu starten."));
-            ui.add_space(6.0);
-            ui.label(theme::muted(tr(
-                "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
-            )));
-        }
-
-        // 8 px air between the heading above and the card list below (UI review
-        // 0.1.1): without it the list touched the "Automatisch gesicherte
-        // Ordner:" heading, and a scrolled half-visible card stuck to it. The
-        // gap is part of the chrome `QUEUE_BELOW_H` reserves.
-        ui.add_space(8.0);
-
-        // The folder list gets exactly the height `page_heights` promised it
-        // before the queue was drawn (user decision 2026-10-16: the folders
-        // matter more than the queue). The draw-time clamp keeps the footer
-        // reachable even if the queue section consumed more than its
-        // reservation (the empty-queue block in a very small window).
-        let list_h = list_h.min((ui.available_height() - QUEUE_FOOTER_H).max(0.0));
-        egui::ScrollArea::vertical()
+        // Do not draw the folder ScrollArea while collapsed: even
+        // `max_height(0)` consumes the trailing item spacing.
+        if folders_expanded {
+            // Cap against the actual remaining space as a guard if preceding
+            // page chrome consumes more than the planned list viewport.
+            let list_h = list_h.min((ui.available_height() - QUEUE_FOOTER_H).max(0.0));
+            // The card labels keep the theme's vertical spacing; only the gap
+            // *between* cards is compacted to `FOLDER_CARD_GAP` inside the list.
+            let label_spacing_y = ui.spacing().item_spacing.y;
+            egui::ScrollArea::vertical()
             // Own scroll state, for the same reason as the queue's salt above:
             // without it both areas share one offset and scroll together.
             .id_salt("folders")
             .max_height(list_h)
+            .auto_shrink(false)
             // Honor a shrinking cap: `ScrollArea`'s default `min_scrolled_height`
             // (64 px) would otherwise override a smaller `max_height` and push the
             // footer below off the bottom edge in a very small window.
@@ -3403,10 +3653,22 @@ impl PrimePhotoApp {
                 // animated content width — so their right edge is constant and
                 // matches the queue table above.
                 ui.set_width(cols.table_w);
+                // The documented 6 px gap between cards (Issue #33).
+                ui.spacing_mut().item_spacing.y = FOLDER_CARD_GAP;
                 // While a file drag hovers the window, the backup page keeps
                 // its hands off: no clicks out from under the overlay.
                 if self.dropping_files {
                     ui.disable();
+                }
+                if self.store.folders.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(tr(
+                        "Wählen Sie einen Ordner aus, um die Sicherung zu starten.",
+                    ));
+                    ui.add_space(6.0);
+                    ui.label(theme::muted(tr(
+                        "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
+                    )));
                 }
                 for (i, r) in rows.iter().enumerate() {
                     let (status_txt, status_col) = status_text(r.status, r.total);
@@ -3424,10 +3686,8 @@ impl PrimePhotoApp {
                                 // The left column wraps inside what the right
                                 // block leaves, so no line can run under the
                                 // icons at the card's right edge. `side_ws[i]`
-                                // was measured with the same probe that fed the
-                                // card-height reservation above, and both use
-                                // `card_content_w`, so the draw and the
-                                // reservation use exactly the same column width.
+                                // was measured with the same probe and card
+                                // width, so labels never overlap the controls.
                                 // `allocate_new_ui` (not `allocate_ui_with_layout`
                                 // with height 0): the latter would center the
                                 // zero-height frame in the row and push the
@@ -3443,11 +3703,12 @@ impl PrimePhotoApp {
                                         .layout(egui::Layout::top_down(egui::Align::Min)),
                                     |ui| {
                                         ui.set_min_width(left_w);
-                                        // The very list the height reservation
-                                        // measured: name (strong 15 pt), meta
-                                        // (muted 11 pt) and the outcome only
-                                        // when the run produced one for this
-                                        // target (user decision 2026-10-14).
+                                        // Keep the card's internal label gap at
+                                        // the theme spacing; the list gap above
+                                        // is the compacted one.
+                                        ui.spacing_mut().item_spacing.y = label_spacing_y;
+                                        // Name (strong 15 pt), meta (muted 11 pt) and the outcome only
+                                        // when the run produced one for this target (user decision 2026-10-14).
                                         for label in folder_card_labels(r) {
                                             let rich = if label.muted {
                                                 theme::muted(label.text).size(label.font.size)
@@ -3478,8 +3739,8 @@ impl PrimePhotoApp {
                         });
                 }
             });
-
-        ui.add_space(8.0);
+            ui.add_space(POST_LIST_GAP);
+        }
 
         for a in actions {
             self.apply_action(a);
@@ -3492,8 +3753,11 @@ impl PrimePhotoApp {
         // reset) and while there is no live run and no real total — no empty or
         // misleading line.
         if (running || sum_total > 0) && !outcome.is_empty() {
-            ui.add_space(8.0);
-            ui.label(theme::muted(outcome).size(11.0));
+            // With an expanded list, `POST_LIST_GAP` precedes this gap; the
+            // reserved footer area is `QUEUE_TABLE_TRAILING_H` +
+            // `POST_LIST_GAP` + `FOOTER_GAP` + `FOOTER_LINE_H`.
+            ui.add_space(FOOTER_GAP);
+            ui.label(RichText::new(outcome).color(theme::INK).size(11.0));
         }
     }
 }
@@ -3736,169 +4000,180 @@ mod tests {
         assert_eq!(capped_done(3, 0), 0);
     }
 
-    /// The list's content height: the passed per-card heights plus the gaps
-    /// between them — the same formula `page_heights` uses, stated once here so
-    /// the tests can assert against the content, not against a bare number.
-    fn list_content_h(heights: &[f32]) -> f32 {
-        heights.iter().sum::<f32>() + heights.len().saturating_sub(1) as f32 * FOLDER_CARD_GAP
-    }
-
-    /// A representative single-line card height from the measured font row
-    /// heights (15 pt name + 11 pt meta + 11 pt outcome, two 8 pt gaps, 30 pt
-    /// frame chrome). Only used as input for the pure budget tests.
-    fn single_line_card_h() -> f32 {
-        // Galley heights are pixel-rounded: 15 pt → 17, 11 pt → 13.
-        folder_card_height(&[17.0, 13.0, 13.0], 8.0, 26.0)
+    #[test]
+    fn backup_layout_chrome_constants_match() {
+        assert_eq!(QUEUE_HEADER_TOTAL_H, 40.0);
+        assert_eq!(QUEUE_PROGRESS_ZONE_H, 40.0);
+        assert_eq!(SPLITTER_ZONE_H, 24.0);
+        assert_eq!(FOLDER_HEADING_ZONE_H, 34.0);
+        assert_eq!(QUEUE_FOOTER_H, 33.0);
+        assert_eq!(QUEUE_BELOW_H, 145.0);
+        assert_eq!(QUEUE_ONLY_BELOW_H, 107.0);
+        assert_eq!(FOLDER_ONLY_BELOW_H, 119.0);
     }
 
     #[test]
-    fn page_heights_three_cards_fit_when_tight() {
-        // A window with 600 px free: the list claims exactly its content —
-        // three single-line cards (~283 px incl. gaps) — and the cap
-        // (600 − 133 chrome − 120 queue floor = 347) leaves room for all of it.
-        let heights = [single_line_card_h(); 3];
-        let (queue_h, list_h) = page_heights(600.0, &heights);
-        assert_eq!(list_h, list_content_h(&heights));
-        // The queue still gets more than its floor.
-        assert!(queue_h >= QUEUE_MIN_FRAC * 600.0);
-    }
-
-    #[test]
-    fn page_heights_ten_cards_keep_the_queue_floor() {
-        // Ten single-line cards (~962 px of content) in a 500 px window: the
-        // list is capped at exactly the point where the queue keeps its floor
-        // (500 − 133 − 100 = 267) — never below `QUEUE_MIN_FRAC * free`.
-        let heights = [single_line_card_h(); 10];
-        let (queue_h, list_h) = page_heights(500.0, &heights);
+    fn backup_layout_chrome_sums_match_their_parts() {
         assert_eq!(
-            list_h,
-            500.0 - (QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H) - QUEUE_MIN_FRAC * 500.0
+            QUEUE_BELOW_H,
+            QUEUE_TABLE_TRAILING_H
+                + QUEUE_PROGRESS_ZONE_H
+                + SPLITTER_ZONE_H
+                + FOLDER_HEADING_ZONE_H
+                + FOLDER_HEADING_GAP
+                + QUEUE_FOOTER_H
         );
-        assert!(queue_h >= QUEUE_MIN_FRAC * 500.0);
-        // The queue also never exceeds its ceiling.
-        assert!(queue_h <= QUEUE_MAX_FRAC * 500.0);
+        assert_eq!(
+            QUEUE_ONLY_BELOW_H,
+            QUEUE_TABLE_TRAILING_H
+                + QUEUE_PROGRESS_ZONE_H
+                + SECTION_GAP
+                + FOLDER_HEADING_ZONE_H
+                + FOOTER_GAP
+                + FOOTER_LINE_H
+        );
+        assert_eq!(
+            FOLDER_ONLY_BELOW_H,
+            QUEUE_PROGRESS_ZONE_H
+                + SECTION_GAP
+                + FOLDER_HEADING_ZONE_H
+                + FOLDER_HEADING_GAP
+                + QUEUE_FOOTER_H
+        );
     }
 
     #[test]
-    fn page_heights_zero_cards_give_the_room_to_the_queue() {
-        // No cards: the list collapses to zero and the queue takes the rest —
-        // here capped at half the free height, well above its floor.
-        let (queue_h, list_h) = page_heights(500.0, &[]);
-        assert_eq!(list_h, 0.0);
-        assert_eq!(queue_h, QUEUE_MAX_FRAC * 500.0);
+    fn backup_queue_ratio_sanitizes_clamps_and_handles_non_finite() {
+        assert_eq!(sanitize_backup_queue_ratio(0.5), 0.5);
+        assert_eq!(sanitize_backup_queue_ratio(-1.0), BACKUP_QUEUE_RATIO_MIN);
+        assert_eq!(sanitize_backup_queue_ratio(1.0), BACKUP_QUEUE_RATIO_MAX);
+        for ratio in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(
+                sanitize_backup_queue_ratio(ratio),
+                BACKUP_QUEUE_RATIO_DEFAULT
+            );
+        }
     }
 
     #[test]
-    fn page_heights_tiny_window_never_overflows() {
-        // Below the chrome (133 px) both areas collapse to zero — nothing may
-        // run off the bottom edge.
-        let (queue_h, list_h) = page_heights(50.0, &[single_line_card_h(); 5]);
-        assert_eq!(queue_h, 0.0);
-        assert_eq!(list_h, 0.0);
+    fn splitter_drag_maps_pixels_to_ratio_and_clamps() {
+        let splittable = 400.0;
+        assert!((adjusted_backup_queue_ratio(0.35, 40.0, splittable) - 0.45).abs() < 0.001);
+        assert_eq!(
+            adjusted_backup_queue_ratio(0.35, 1000.0, splittable),
+            BACKUP_QUEUE_RATIO_MAX
+        );
+        assert_eq!(
+            adjusted_backup_queue_ratio(0.35, -1000.0, splittable),
+            BACKUP_QUEUE_RATIO_MIN
+        );
+        for invalid in [0.0, -10.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(
+                adjusted_backup_queue_ratio(0.35, 10.0, invalid),
+                0.35,
+                "splittable {invalid}"
+            );
+        }
+        assert_eq!(adjusted_backup_queue_ratio(0.35, f32::NAN, 400.0), 0.35);
     }
 
     #[test]
-    fn page_heights_reserve_the_wrapped_card_height() {
-        // R1: a 2-line 15 pt name adds the real 15 pt row height (17.22), not
-        // an 11 pt line step. The reservation must carry that extra height.
-        let single = single_line_card_h();
-        let two_line_name = folder_card_height(&[34.0, 13.0, 13.0], 8.0, 26.0);
-        assert!((two_line_name - single - 17.0).abs() < 0.001);
-        let heights = [single, two_line_name];
-        let (_, list_h) = page_heights(1000.0, &heights);
-        assert_eq!(list_h, list_content_h(&heights));
+    fn both_open_split_fills_the_free_height_and_respects_minimums() {
+        let free = 800.0;
+        let (queue_h, list_h) = page_heights_for_sections(free, true, true, 0.35);
+        assert!((queue_h + list_h + QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H - free).abs() < 0.001);
+        assert!(queue_h >= QUEUE_MIN_VIEWPORT_H);
+        assert!(list_h >= FOLDER_MIN_VIEWPORT_H);
+
+        // At exactly the two floors, neither side can be pushed below its
+        // minimum — regardless of how hard the ratio pulls.
+        let min_total = QUEUE_MIN_VIEWPORT_H + FOLDER_MIN_VIEWPORT_H;
+        assert_eq!(
+            split_viewports(min_total, BACKUP_QUEUE_RATIO_MIN),
+            (QUEUE_MIN_VIEWPORT_H, FOLDER_MIN_VIEWPORT_H)
+        );
+        assert_eq!(
+            split_viewports(min_total, BACKUP_QUEUE_RATIO_MAX),
+            (QUEUE_MIN_VIEWPORT_H, FOLDER_MIN_VIEWPORT_H)
+        );
     }
 
-    /// Build a text whose galley needs exactly `lines` lines at `column_w` by
-    /// appending one word at a time. Returns `(text, galley_height, lines)`.
-    /// Used to exercise the 15 pt name and 11 pt meta line heights for real.
-    fn text_with_lines(
-        ui: &egui::Ui,
-        column_w: f32,
-        size: f32,
-        lines: usize,
-    ) -> (String, f32, usize) {
-        let mut text = String::new();
-        loop {
-            if !text.is_empty() {
-                text.push(' ');
-            }
-            text.push_str("Ordner");
-            let galley = ui.fonts(|f| {
-                f.layout(
-                    text.clone(),
-                    egui::FontId::proportional(size),
-                    egui::Color32::WHITE,
-                    column_w,
-                )
-            });
-            let got = galley.rows.len();
-            if got >= lines {
-                return (text, galley.size().y, got);
+    #[test]
+    fn both_open_split_never_goes_negative_or_overflows_in_tiny_windows() {
+        let chrome = QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H;
+        for free in [0.0, 10.0, 50.0, 100.0, chrome + 40.0] {
+            for ratio in [0.0, 0.2, 0.5, 0.9, f32::NAN] {
+                let (queue_h, list_h) = page_heights_for_sections(free, true, true, ratio);
+                assert!(
+                    queue_h >= 0.0 && list_h >= 0.0,
+                    "free {free}, ratio {ratio}"
+                );
+                assert!(
+                    queue_h + list_h <= (free - chrome).max(0.0) + 0.001,
+                    "free {free}, ratio {ratio}"
+                );
             }
         }
     }
 
     #[test]
-    fn folder_card_height_uses_the_real_galley_heights() {
-        // R1/R3: the text-column widths measured by the runtime probe —
-        // `failures` at 760: 341.5 (Fehler) and 210.66 (Datensicherung
-        // abgeschlossen); `mixed` at 760: 260.34; at 1400: 981.5 / 850.66 /
-        // 900.34. 208/306 are the verifier's rounded minimum-window cases. For
-        // name/meta 1–3 lines and with/without outcome the reserved height must
-        // be exactly the galley heights plus spacing and chrome, and a list
-        // reserved with it must fit the full cards.
-        let ctx = egui::Context::default();
-        let mut checked = 0;
-        let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                let spacing = 8.0;
-                let row_h = ui.spacing().interact_size.y;
-                for column in [
-                    208.0_f32, 306.0, 210.66, 260.34, 341.5, 850.66, 900.34, 981.5,
-                ] {
-                    for name_lines in 1..=3 {
-                        for meta_lines in 1..=3 {
-                            let (name, name_h, got_name) =
-                                text_with_lines(ui, column, 15.0, name_lines);
-                            assert_eq!(got_name, name_lines, "name at {column}: {name:?}");
-                            let (meta, meta_h, got_meta) =
-                                text_with_lines(ui, column, 11.0, meta_lines);
-                            assert_eq!(got_meta, meta_lines, "meta at {column}: {meta:?}");
-                            let (_, outcome_h, _) = text_with_lines(ui, column, 11.0, 1);
-                            let with_outcome =
-                                folder_card_height(&[name_h, meta_h, outcome_h], spacing, row_h);
-                            assert_eq!(
-                                with_outcome,
-                                FOLDER_CARD_CHROME_H + name_h + meta_h + outcome_h + 2.0 * spacing,
-                                "column {column}, name {name_lines}, meta {meta_lines}"
-                            );
-                            let without_outcome =
-                                folder_card_height(&[name_h, meta_h], spacing, row_h);
-                            assert_eq!(
-                                without_outcome,
-                                FOLDER_CARD_CHROME_H + name_h + meta_h + spacing
-                            );
-                            assert!(with_outcome > without_outcome);
-                            let (_, list_h) = page_heights(1000.0, &[with_outcome, with_outcome]);
-                            assert_eq!(list_h, 2.0 * with_outcome + FOLDER_CARD_GAP);
-                            checked += 1;
-                        }
-                    }
-                }
-                // The per-line delta is the real row height of the block, not a
-                // shared constant: 15 pt name ≈ 17.22, 11 pt meta ≈ 12.66.
-                let (_, name1, _) = text_with_lines(ui, 208.0, 15.0, 1);
-                let (_, name2, _) = text_with_lines(ui, 208.0, 15.0, 2);
-                // Galley heights are pixel-rounded: 15 pt → 17, 11 pt → 13.
-                assert!((name2 - name1 - 17.0).abs() < 0.01);
-                assert!(name2 - name1 > 13.0, "name lines must not use the 11 pt step");
-                let (_, meta1, _) = text_with_lines(ui, 208.0, 11.0, 1);
-                let (_, meta2, _) = text_with_lines(ui, 208.0, 11.0, 2);
-                assert!((meta2 - meta1 - 13.0).abs() < 0.01);
-            });
-        });
-        assert_eq!(checked, 8 * 3 * 3);
+    fn one_open_section_ignores_the_ratio_and_gets_all_free_space() {
+        let free = 600.0;
+        let expected_queue = free - QUEUE_HEADER_TOTAL_H - QUEUE_ONLY_BELOW_H;
+        let expected_list = free - FOLDER_ONLY_BELOW_H;
+        for ratio in [0.2, 0.8] {
+            assert_eq!(
+                page_heights_for_sections(free, true, false, ratio),
+                (expected_queue, 0.0)
+            );
+            assert_eq!(
+                page_heights_for_sections(free, false, true, ratio),
+                (0.0, expected_list)
+            );
+        }
+        assert_eq!(
+            page_heights_for_sections(free, false, false, 0.5),
+            (0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn keep_one_section_open_enforces_the_invariant() {
+        assert!(keep_one_section_open(false, false));
+        assert!(!keep_one_section_open(false, true));
+        assert!(keep_one_section_open(true, false));
+        assert!(keep_one_section_open(true, true));
+    }
+
+    #[test]
+    fn last_open_section_toggle_is_disabled() {
+        assert!(!section_toggle_enabled(true, false));
+        assert!(section_toggle_enabled(true, true));
+        assert!(!section_toggle_enabled(false, true));
+    }
+
+    #[test]
+    fn section_header_click_toggles_only_when_allowed() {
+        assert_eq!(section_toggle_after_click(true, true, true, true), Some(false));
+        assert_eq!(section_toggle_after_click(true, true, false, true), Some(true));
+        assert_eq!(section_toggle_after_click(true, false, true, false), None);
+        assert_eq!(section_toggle_after_click(false, true, true, true), None);
+        assert_eq!(section_toggle_after_click(true, true, true, false), None);
+    }
+
+    #[test]
+    fn collapsed_allocation_preserves_the_saved_ratio() {
+        let free = 900.0;
+        let saved = 0.7;
+        let collapsed = page_heights_for_sections(free, false, true, saved);
+        assert_eq!(collapsed, (0.0, free - FOLDER_ONLY_BELOW_H));
+        // The helper is pure: the collapsed frame neither reads nor rewrites
+        // the saved ratio, so reopening lands on exactly the same split.
+        assert_eq!(saved, 0.7);
+        assert_eq!(
+            page_heights_for_sections(free, true, true, saved),
+            split_viewports(backup_split_splittable(free), saved)
+        );
     }
 
     #[test]

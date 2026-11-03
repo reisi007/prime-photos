@@ -123,6 +123,7 @@ def create_default_config(country: str) -> dict:
         'cookie_at_acb': '',
         'cookie_ubid_acb': '',
         'cookie_x_amz_access_token': '',
+        'backup_queue_ratio': 0.35,
     }
 
 
@@ -134,9 +135,14 @@ def save_config(config: dict) -> None:
     # Generate TOML content
     toml_content = []
     for key, value in config.items():
-        # Escape quotes in values
-        escaped_value = str(value).replace('"', '\\"')
-        toml_content.append(f'{key} = "{escaped_value}"')
+        if isinstance(value, str):
+            # Escape quotes in string values.
+            escaped_value = value.replace('"', '\\"')
+            toml_content.append(f'{key} = "{escaped_value}"')
+        else:
+            # Numeric settings such as `backup_queue_ratio` must remain TOML
+            # numbers rather than being written as quoted strings.
+            toml_content.append(f'{key} = {value}')
 
     with open(config_path, 'w') as f:
         f.write('\n'.join(toml_content))

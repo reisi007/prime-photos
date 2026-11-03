@@ -38,6 +38,12 @@ fn default_limit_kbps() -> u32 {
     100
 }
 
+/// Serde default of `Config::backup_queue_ratio`: the queue takes 35 % of the
+/// splittable height while both backup sections are open (Issue #33).
+fn default_backup_queue_ratio() -> f32 {
+    crate::backup::BACKUP_QUEUE_RATIO_DEFAULT
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     pub country: String,
@@ -138,6 +144,13 @@ pub struct Config {
     /// value means "not generated yet" and is filled in when the flow is wired.
     #[serde(default)]
     pub device_serial: String,
+    /// Share of the splittable height taken by the queue while both backup
+    /// sections are open (Issue #33, user wish 2026-11-03). Persisted so the
+    /// splitter position survives a restart; `#[serde(default = ...)]` keeps
+    /// existing `config.toml` files on the 35 % default. Read through
+    /// [`Self::backup_queue_ratio`], which clamps hand-written values.
+    #[serde(default = "default_backup_queue_ratio")]
+    pub backup_queue_ratio: f32,
 }
 
 impl Config {
@@ -174,6 +187,12 @@ impl Config {
     /// site, so every upload path is covered.
     pub fn concurrency(&self) -> usize {
         self.concurrency.clamp(1, 8)
+    }
+
+    /// The queue's share of the splittable height, clamped to 0.20..=0.80; a
+    /// non-finite hand-written value falls back to the default (Issue #33).
+    pub fn backup_queue_ratio(&self) -> f32 {
+        crate::backup::sanitize_backup_queue_ratio(self.backup_queue_ratio)
     }
 
     /// Save the configuration to the file system.
@@ -223,6 +242,7 @@ impl Config {
             limit_kbps: 100,
             // Empty = "not generated yet"; the device login flow fills it once.
             device_serial: String::new(),
+            backup_queue_ratio: crate::backup::BACKUP_QUEUE_RATIO_DEFAULT,
         }
     }
 }
@@ -372,6 +392,42 @@ limit_kbps = 500
         assert_eq!(back.concurrency(), 5);
         assert!(back.limit_enabled);
         assert_eq!(back.limit_kbps, 250);
+    }
+
+    #[test]
+    fn config_without_backup_queue_ratio_loads_the_default() {
+        let config: Config = toml::from_str(LEGACY_TOML).unwrap();
+        assert_eq!(
+            config.backup_queue_ratio(),
+            crate::backup::BACKUP_QUEUE_RATIO_DEFAULT
+        );
+        assert_eq!(config.backup_queue_ratio, 0.35);
+    }
+
+    #[test]
+    fn backup_queue_ratio_clamps_out_of_range_and_non_finite_values() {
+        for (value, expected) in [
+            ("9.0", crate::backup::BACKUP_QUEUE_RATIO_MAX),
+            ("-3.0", crate::backup::BACKUP_QUEUE_RATIO_MIN),
+            ("nan", crate::backup::BACKUP_QUEUE_RATIO_DEFAULT),
+            ("inf", crate::backup::BACKUP_QUEUE_RATIO_DEFAULT),
+            ("-inf", crate::backup::BACKUP_QUEUE_RATIO_DEFAULT),
+        ] {
+            let config: Config =
+                toml::from_str(&format!("{LEGACY_TOML}\nbackup_queue_ratio = {value}\n")).unwrap();
+            assert_eq!(config.backup_queue_ratio(), expected, "value {value}");
+        }
+    }
+
+    #[test]
+    fn backup_queue_ratio_roundtrips_as_a_numeric_toml_key() {
+        let mut config = Config::default();
+        config.backup_queue_ratio = 0.6;
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(serialized.contains("backup_queue_ratio = 0.6"));
+        let back: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(back.backup_queue_ratio(), 0.6);
     }
 
     #[test]
