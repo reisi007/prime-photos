@@ -1032,6 +1032,51 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   erzeugte einen visuell geprüften Screenshot. Dieser Demo-Modus führt keinen echten Upload aus und
   erzeugt keine Tray-Animation; ein Live-Upload zu Amazon wurde nicht durchgeführt.
 
+**Durch den elften echten Lauf belegt (2026-11-04):**
+
+- **Release ausgelöst:** Lightweight-Tag `v0.1.10` auf Commit
+  `83faa2f2855f328884e1070eb6ebadaf3bbd3d61`; GitHub-Release `v0.1.10`, veröffentlicht
+  `2026-11-04T07:33:28Z`, **nicht** Draft, **nicht** Pre-Release —
+  [GitHub Release v0.1.10](https://github.com/reisi007/prime-photos/releases/tag/v0.1.10).
+  Paketversion `0.1.10`, macOS-Build `10`.
+- **Release-CI:** [Workflow-Lauf `41792040005`](https://github.com/reisi007/prime-photos/actions/runs/41792040005)
+  erfolgreich — `Build windows-x64` (8m44s), `Build linux-x64` (6m10s),
+  `Publish GitHub Release` (18s). `Attest build provenance` war erfolgreich. Die Windows-
+  SignPath-Schritte und `Sign Linux release artifacts (GPG)` wurden übersprungen. Die reguläre
+  [CI `41792021226`](https://github.com/reisi007/prime-photos/actions/runs/41792021226) war ebenfalls
+  erfolgreich. Die automatisch erzeugten Release-Notes verweisen auf den Full Changelog
+  `v0.1.9...v0.1.10`.
+- **Assets** (Name — Bytes — SHA-256-Digest laut GitHub-API):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 10.475.454 | `1b7f949682f5b645b0ed075feafa9b91d7847412cef4add8c7634bfb7e0638f2` |
+  | `Prime-Photos-linux-x64.tar.gz` | 14.209.173 | `d7dcebf203fe1fe5d41c8a6111773532796fd6f552bf48c2df0bc1282f3098c0` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.766.054 | `28f7c6e2a5b61519f96f7ac794d7c4562e083764ae4b71371464bde30caed5c9` |
+  | `Prime-Photos-windows-x64.zip` | 8.793.838 | `5cfcbdca394dc93a751dcae2ae953213ec9443ea4b0901947ffd5528ce872ce1` |
+
+  Die Release enthält vier Assets. Der lokale `shasum -a 256`-Digest des DMG stimmt mit dem
+  GitHub-API-Digest überein; das manuell angehängte macOS-DMG ist nicht workflow-attestiert.
+- **macOS-Bundle und DMG (lokal aus dem Tag-Commit gebaut, §4):** Nach `touch build.rs` lief
+  `./packaging/make-app.sh` mit den Standardwerten `VERSION=0.1.10`, `BUILD=10` und ad-hoc
+  Signatur. Das Bundle ist `arm64`, `Signature=adhoc`, `TeamIdentifier=not set`; `codesign --verify
+  --strict --verbose=2` war erfolgreich. `Info.plist` nennt Version `0.1.10`, Build `10`,
+  `CFBundleIdentifier de.reisinger.prime-photos`, `CFBundleIconFile AppIcon`; der Commit-Stempel
+  `83faa2f` wurde im Binary gefunden. SHA-256 des Bundle-Binarys:
+  `7af56b6286fca8d79bb21c8cba6ffc102e91ddde062624a00feadfb169e8c3f8`.
+  Das DMG wurde aus `target/dist/Prime Photos.app` mit Volume-Namen `Prime Photos` erstellt;
+  `hdiutil verify` meldete **checksum VALID**. SHA-256:
+  `28f7c6e2a5b61519f96f7ac794d7c4562e083764ae4b71371464bde30caed5c9`. Read-only gemountet
+  enthielt das Volume genau `Prime Photos.app`; Plist, `codesign`-Prüfung und Binary-Hash stimmten
+  mit dem Bundle überein, danach wurde es ausgeworfen.
+- **Lokale Gates und Screenshot-Smoke:** `cargo build --release --locked` erfolgreich,
+  `cargo test` **315 passed**, `ratchet check` **COHERENT — 8 of 8 gates passed**,
+  `git diff --check` erfolgreich; zusätzlich 6 Python-Tests bestanden. Der Demo-Screenshot
+  `target/dist/Prime-Photos-v0.1.10-smoke.png` wurde erstellt und visuell geprüft
+  (SHA-256 `be5bccec598f4351b0058f9a4d57fdf920ebc2166a9490c516cb0a53e21650ce`). Es gab keinen
+  normalen Installations-/UI-Test des finalen Release-Bundles und keinen Live-Upload zu Amazon.
+  Ad-hoc-Signatur und fehlende Notarisierung bleiben die in §4–§6 dokumentierten Grenzen.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
