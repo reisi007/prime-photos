@@ -22,14 +22,13 @@ use std::path::{Path, PathBuf};
 // ---------------------------------------------------------------------------
 //
 // `src/tray.rs` embeds exactly the names built below, keyed by state in its
-// `BLACK_PNGS_64` / `BLACK_PNGS_32` / `WHITE_PNGS_32` tables and by animation
-// frame in the corresponding `ACTIVE_FRAME_*` tables. If a name, colour or
-// size changes here it must change there too — and vice versa. Keep this block
-// and those tables in sync.
+// `BLACK_PNGS_64` / `BLACK_PNGS_32` / `WHITE_PNGS_32` tables. If a name, colour
+// or size changes here it must change there too — and vice versa. Keep this
+// block and those tables in sync.
 //
 //   Tray glyphs:  assets/<stem>.svg  ⇒  $OUT_DIR/<stem>-<colour>-<size>.png
 //     stems:  "tray" (idle), "tray-active", "tray-paused", "tray-done",
-//             "tray-error", plus "tray-active-90/-180/-270" rotation frames
+//             "tray-error"
 //     colours: "black" (#000000), "white" (#ffffff)
 //     sizes:  32 and 64 px (square 24×24 Material Symbols sources, viewBox
 //             "0 -960 960 960"; user decision 2026-10-17)
@@ -72,14 +71,6 @@ const TRAY_STEMS: [&str; 5] = [
     "tray-paused",
     "tray-done",
     "tray-error",
-];
-
-/// Additional Active animation frames; the existing `tray-active.svg` is
-/// frame zero. Render these with the same colour/size variants as state glyphs.
-const ACTIVE_FRAME_STEMS: [&str; 3] = [
-    "tray-active-90",
-    "tray-active-180",
-    "tray-active-270",
 ];
 
 /// Colour name (used in the file name) plus the hex value injected as a
@@ -175,16 +166,6 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is set"));
 
     for stem in TRAY_STEMS {
-        let svg = format!("{stem}.svg");
-        for (color_name, color_hex) in TRAY_COLORS {
-            for size in TRAY_SIZES {
-                let png = format!("{stem}-{color_name}-{size}.png");
-                render(&manifest_dir, &out_dir, &svg, Recolor::Fill(color_hex), &png, size, Fit::Fill);
-            }
-        }
-    }
-
-    for stem in ACTIVE_FRAME_STEMS {
         let svg = format!("{stem}.svg");
         for (color_name, color_hex) in TRAY_COLORS {
             for size in TRAY_SIZES {

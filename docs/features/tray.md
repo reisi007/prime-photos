@@ -6,11 +6,9 @@ closing the window quits the app.
 
 ## How it works
 
-- Glyphs follow the state: idle, active, paused, done, error. While an upload
-  is active, its tray glyph rotates through four frames (the existing glyph plus
-  90°/180°/270° rotations) at roughly 200 ms per frame. The animation starts on
-  entry into Active, keeps its timing across theme changes, and stops when the
-  state leaves Active; all other state glyphs remain static.
+- Glyphs follow the state: idle, active, paused, done, error. Active uses one
+  static, neutral outlined Material Symbols `cloud_upload` glyph; it does not
+  rotate or schedule animation repaints. All other state glyphs remain static.
 - **Error means failures remaining after the retry pass:** "Mit Fehlern
   abgeschlossen" is shown only when at least one file still failed after its
   one extra file-level retry (see [upload.md](upload.md)). A file that succeeds
@@ -39,10 +37,11 @@ closing the window quits the app.
   gradient correct). **Theme without new dependency:**
   `egui::Context::system_theme()` (available in 0.31) — dark ⇒ white tray
   variants, light ⇒ black; `None` (unknown) ⇒ the coloured logo, which is
-  visible on every background. macOS keeps the black template set. The three
-  additional Active SVG frames use the same `build.rs` → `OUT_DIR` raster
-  pipeline and theme variants; animation repaints are scheduled only while an
-  upload is active.
+  visible on every background. macOS keeps the black template set. The static
+  `cloud_upload` Active glyph uses the same `build.rs` → `OUT_DIR` raster
+  pipeline and theme variants as the other tray states. This is the chosen
+  generic upload glyph rather than the original app's `sync_mac_blk` Processing
+  glyph (`../original/SPEC_NOTIFICATIONS.md` §2.4).
 - **No fallback:** if an SVG is missing, `build.rs` breaks the build
   (compile error) — no `Option`, no `exists()` check, no fallback to a drawn
   variant. Decode errors at runtime = fail fast.
@@ -113,6 +112,12 @@ closing the window quits the app.
   mechanics are Prime Photos' implementation, not facts about the original.
 
 ## Decisions
+
+- **Active tray glyph (Issue #41):** use the static, neutral outlined Material
+  Symbols `cloud_upload` glyph. The original uses `sync_mac_blk` for Processing
+  (`../original/SPEC_NOTIFICATIONS.md` §2.4), but the chosen Prime Photos glyph
+  is intentionally generic and does not animate; no Active frame state,
+  rendering, or repaint scheduling remains.
 
 - **Dock-Kachel bleibt trotz Accessory hängen (User-Entscheidung 2026-10-25):**
   Original-Parität — `LSUIElement` im Bundle + Policy-only ohne `hide`. Der

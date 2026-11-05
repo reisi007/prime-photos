@@ -72,14 +72,14 @@ Konvention je Eintrag: **Name**, **Urheber**, **Lizenz**, **Quell-URL**,
   Die Einfärbung (schwarz/weiß) passiert erst im Build (`build.rs`), die
   Quelle selbst bleibt unangetastet.
 
-### Material Symbols — `progress_activity` (Tray „Aktiv", Welle 5.32)
+### Material Symbols — `cloud_upload` (Tray „Aktiv", Issue #41)
 
-- **Name:** Material Symbols (Outlined), Symbol `progress_activity`, 24 px
+- **Name:** Material Symbols (Outlined), Symbol `cloud_upload`, 24 px
 - **Urheber:** Google LLC
 - **Lizenz:** Apache-2.0
-- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/progress_activity/materialsymbolsoutlined/progress_activity_24px.svg>
-- **Abrufdatum:** 2026-10-17
-- **sha256:** `d1f14e2e4001181fa6671d99b0720282901d6eb029b1cf04a4d137d7a43c197e`
+- **Quell-URL:** <https://raw.githubusercontent.com/google/material-design-icons/master/symbols/web/cloud_upload/materialsymbolsoutlined/cloud_upload_24px.svg>
+- **Abrufdatum:** 2026-11-05
+- **sha256:** `397dddd8bac8711d39ed7f21f26593659404ca4cba1f7a0d67f845b248f5836f`
 - **Verändert:** nein — Datei unverändert als `assets/tray-active.svg`
   übernommen. Die Einfärbung (schwarz/weiß) passiert erst im Build
   (`build.rs`), die Quelle selbst bleibt unangetastet.

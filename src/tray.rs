@@ -45,8 +45,7 @@ pub struct Tray {
     pub pause_item: tray_icon::menu::MenuItem,
     pub about_item: tray_icon::menu::MenuItem,
     pub quit_item: tray_icon::menu::MenuItem,
-    /// Decoded build-time glyphs, keyed by [`TrayState::index`] plus Active
-    /// animation frames.
+    /// Decoded build-time glyphs, keyed by [`TrayState::index`].
     icons: TrayIcons,
     /// Last state applied via [`Tray::set_state`]; `set_labels` refreshes the
     /// tooltip from it after a language change.
@@ -115,7 +114,7 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
         state: TrayState::Idle,
     };
     // Show the idle glyph right away; later frames re-apply only on change.
-    tray.set_state(TrayState::Idle, theme, 0);
+    tray.set_state(TrayState::Idle, theme);
     Some(tray)
 }
 
@@ -157,20 +156,13 @@ impl Tray {
         &mut self,
         state: TrayState,
         theme: Option<egui::Theme>,
-        active_frame: usize,
     ) {
-        self.set_icon(self.icons.icon(state, theme, active_frame));
+        self.set_icon(self.icons.icon(state, theme));
         if self.state != state {
             // The tooltip follows the state (original: "Amazon Photos - {Status}").
             let _ = self._tray.set_tooltip(Some(tray_tooltip(state)));
         }
         self.state = state;
-    }
-
-    /// Change only the Active glyph; animation frames must not re-set the
-    /// tooltip, whose text depends on state rather than frame.
-    pub(crate) fn set_active_frame(&self, frame: usize, theme: Option<egui::Theme>) {
-        self.set_icon(self.icons.icon(TrayState::Active, theme, frame));
     }
 
     fn set_icon(&self, icon: tray_icon::Icon) {
@@ -189,9 +181,9 @@ impl Tray {
 // exactly one place per side and must be changed together:
 //   assets/<stem>.svg  ⇒  $OUT_DIR/<stem>-<colour>-<size>.png
 //   state stems, in `TrayState::index()` order: tray, tray-active, tray-paused,
-//     tray-done, tray-error; Active additionally has 90°/180°/270° rotation
-//     frames   (all Material Symbols, so black/white is a `path { fill: … }`
-//     raster override the build injects — there are no coloured SVG files)
+//     tray-done, tray-error (all Material Symbols, so black/white is a
+//     `path { fill: … }` raster override the build injects — there are no
+//     coloured SVG files)
 //   colours: black (#000000) / white (#ffffff)
 //   sizes:   32 (1×) / 64 ("@2x") — macOS takes the 64-px source, the other
 //     platforms the 32-px one (the tray scales to the menu-bar height).
@@ -211,28 +203,6 @@ pub(crate) enum TrayState {
     Done,
     /// The last run finished with at least one failure.
     Error,
-}
-
-/// Number of frames in the Active tray animation (frame zero is
-/// `assets/tray-active.svg`).
-pub(crate) const ACTIVE_FRAME_COUNT: usize = 4;
-
-/// Time each Active frame is shown before rotating to the next one.
-pub(crate) const ACTIVE_FRAME_DURATION: Duration = Duration::from_millis(200);
-
-/// Active animation frame for an elapsed time since entering the Active state.
-pub(crate) fn active_frame_index(elapsed: Duration) -> usize {
-    let frame_duration = ACTIVE_FRAME_DURATION.as_nanos();
-    ((elapsed.as_nanos() / frame_duration) % ACTIVE_FRAME_COUNT as u128) as usize
-}
-
-/// Time remaining until the next Active frame boundary. At a boundary the next
-/// frame is already selected, so the following boundary is one full interval
-/// away rather than an immediate repaint.
-pub(crate) fn active_frame_remaining(elapsed: Duration) -> Duration {
-    let frame_duration = ACTIVE_FRAME_DURATION.as_nanos();
-    let elapsed_in_frame = elapsed.as_nanos() % frame_duration;
-    Duration::from_nanos((frame_duration - elapsed_in_frame) as u64)
 }
 
 impl TrayState {
@@ -302,13 +272,6 @@ const BLACK_PNGS_64: [&[u8]; 5] = [
     include_bytes!(concat!(env!("OUT_DIR"), "/tray-error-black-64.png")),
 ];
 
-#[cfg(target_os = "macos")]
-const ACTIVE_FRAME_PNGS_64: [&[u8]; 3] = [
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-90-black-64.png")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-180-black-64.png")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-270-black-64.png")),
-];
-
 /// Non-macOS black + white 32-px rasters, `TrayState`-ordered. `cfg`-gated (as
 /// is the coloured logo below) so the macOS build has no unused items.
 #[cfg(not(target_os = "macos"))]
@@ -330,30 +293,13 @@ const WHITE_PNGS_32: [&[u8]; 5] = [
 ];
 
 #[cfg(not(target_os = "macos"))]
-const ACTIVE_FRAME_BLACK_PNGS_32: [&[u8]; 3] = [
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-90-black-32.png")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-180-black-32.png")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-270-black-32.png")),
-];
-
-#[cfg(not(target_os = "macos"))]
-const ACTIVE_FRAME_WHITE_PNGS_32: [&[u8]; 3] = [
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-90-white-32.png")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-180-white-32.png")),
-    include_bytes!(concat!(env!("OUT_DIR"), "/tray-active-270-white-32.png")),
-];
-
-#[cfg(not(target_os = "macos"))]
 const LOGO_SMALL_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo-small.png"));
 
-/// Decoded state glyphs plus the rotated Active frames.
+/// Decoded static state glyphs.
 struct TrayIcons {
     black: [tray_icon::Icon; 5],
-    active_frames_black: [tray_icon::Icon; 3],
     #[cfg(not(target_os = "macos"))]
     white: [tray_icon::Icon; 5],
-    #[cfg(not(target_os = "macos"))]
-    active_frames_white: [tray_icon::Icon; 3],
     #[cfg(not(target_os = "macos"))]
     logo: tray_icon::Icon,
 }
@@ -362,60 +308,33 @@ impl TrayIcons {
     fn build() -> Self {
         #[cfg(target_os = "macos")]
         let black = BLACK_PNGS_64.map(decode_icon);
-        #[cfg(target_os = "macos")]
-        let active_frames_black = ACTIVE_FRAME_PNGS_64.map(decode_icon);
         #[cfg(not(target_os = "macos"))]
         let black = BLACK_PNGS_32.map(decode_icon);
-        #[cfg(not(target_os = "macos"))]
-        let active_frames_black = ACTIVE_FRAME_BLACK_PNGS_32.map(decode_icon);
         #[cfg(target_os = "macos")]
-        let icons = Self {
-            black,
-            active_frames_black,
-        };
+        let icons = Self { black };
         #[cfg(not(target_os = "macos"))]
         let icons = Self {
             black,
-            active_frames_black,
             white: WHITE_PNGS_32.map(decode_icon),
-            active_frames_white: ACTIVE_FRAME_WHITE_PNGS_32.map(decode_icon),
             logo: decode_icon(LOGO_SMALL_PNG),
         };
         icons
     }
 
-    fn icon(&self, state: TrayState, theme: Option<egui::Theme>, frame: usize) -> tray_icon::Icon {
-        let frame = frame % ACTIVE_FRAME_COUNT;
+    fn icon(&self, state: TrayState, theme: Option<egui::Theme>) -> tray_icon::Icon {
         #[cfg(target_os = "macos")]
         {
             let _ = theme;
-            active_frame_icon(state, frame, &self.black, &self.active_frames_black)
+            self.black[state.index()].clone()
         }
         #[cfg(not(target_os = "macos"))]
         {
             match theme {
-                Some(egui::Theme::Dark) => {
-                    active_frame_icon(state, frame, &self.white, &self.active_frames_white)
-                }
-                Some(egui::Theme::Light) => {
-                    active_frame_icon(state, frame, &self.black, &self.active_frames_black)
-                }
+                Some(egui::Theme::Dark) => self.white[state.index()].clone(),
+                Some(egui::Theme::Light) => self.black[state.index()].clone(),
                 None => self.logo.clone(),
             }
         }
-    }
-}
-
-fn active_frame_icon(
-    state: TrayState,
-    frame: usize,
-    state_icons: &[tray_icon::Icon; 5],
-    rotated_frames: &[tray_icon::Icon; 3],
-) -> tray_icon::Icon {
-    if state == TrayState::Active && frame > 0 {
-        rotated_frames[frame - 1].clone()
-    } else {
-        state_icons[state.index()].clone()
     }
 }
 
@@ -506,43 +425,6 @@ mod tests {
         assert_eq!(tray_state(false, false, false, None), TrayState::Idle);
     }
 
-    #[test]
-    fn active_frame_index_rotates_four_frames_every_200_milliseconds() {
-        assert_eq!(ACTIVE_FRAME_COUNT, 4);
-        assert_eq!(active_frame_index(Duration::ZERO), 0);
-        assert_eq!(active_frame_index(Duration::from_millis(199)), 0);
-        assert_eq!(active_frame_index(Duration::from_millis(200)), 1);
-        assert_eq!(active_frame_index(Duration::from_millis(399)), 1);
-        assert_eq!(active_frame_index(Duration::from_millis(400)), 2);
-        assert_eq!(active_frame_index(Duration::from_millis(600)), 3);
-        assert_eq!(active_frame_index(Duration::from_millis(800)), 0);
-        assert_eq!(active_frame_index(Duration::from_secs(2)), 2);
-    }
-
-    #[test]
-    fn active_frame_remaining_targets_the_next_200_millisecond_boundary() {
-        assert_eq!(
-            active_frame_remaining(Duration::ZERO),
-            Duration::from_millis(200)
-        );
-        assert_eq!(
-            active_frame_remaining(Duration::from_millis(50)),
-            Duration::from_millis(150)
-        );
-        assert_eq!(
-            active_frame_remaining(Duration::from_millis(199)),
-            Duration::from_millis(1)
-        );
-        assert_eq!(
-            active_frame_remaining(Duration::from_millis(200)),
-            Duration::from_millis(200)
-        );
-        assert_eq!(
-            active_frame_remaining(Duration::from_millis(1_250)),
-            Duration::from_millis(150)
-        );
-    }
-
     /// The tooltip carries the brand plus the status — except when idle, where
     /// the original shows the brand alone. The English half also pins the EN
     /// rows: a missing table entry would silently fall back to German.
@@ -584,16 +466,45 @@ mod tests {
             strongest_pixel_rgb(&read_out_png("tray-black-32.png")),
             [0, 0, 0]
         );
-        for angle in [90, 180, 270] {
-            assert_eq!(
-                strongest_pixel_rgb(&read_out_png(&format!("tray-active-{angle}-white-32.png"))),
-                [255, 255, 255]
-            );
-            assert_eq!(
-                strongest_pixel_rgb(&read_out_png(&format!("tray-active-{angle}-black-32.png"))),
-                [0, 0, 0]
-            );
-        }
+        assert_eq!(
+            strongest_pixel_rgb(&read_out_png("tray-active-white-32.png")),
+            [255, 255, 255]
+        );
+        assert_eq!(
+            strongest_pixel_rgb(&read_out_png("tray-active-black-32.png")),
+            [0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn active_state_uses_the_static_active_raster_distinct_from_idle() {
+        assert_eq!(TrayState::Active.index(), 1);
+
+        #[cfg(target_os = "macos")]
+        let (black_pngs, active_name, idle_name) = (
+            &BLACK_PNGS_64,
+            "tray-active-black-64.png",
+            "tray-black-64.png",
+        );
+        #[cfg(not(target_os = "macos"))]
+        let (black_pngs, active_name, idle_name) = (
+            &BLACK_PNGS_32,
+            "tray-active-black-32.png",
+            "tray-black-32.png",
+        );
+
+        // The same state-ordered raster table feeds TrayIcons::icon in
+        // production; pin Active to its one static build output, not a frame.
+        let active = black_pngs[TrayState::Active.index()];
+        let idle = black_pngs[TrayState::Idle.index()];
+        assert_eq!(active, read_out_png(active_name));
+        assert_eq!(idle, read_out_png(idle_name));
+
+        let active = image::load_from_memory(active).unwrap().to_rgba8();
+        let idle = image::load_from_memory(idle).unwrap().to_rgba8();
+        assert!(active.pixels().any(|pixel| pixel.0[3] > 0));
+        assert!(idle.pixels().any(|pixel| pixel.0[3] > 0));
+        assert_ne!(active.as_raw(), idle.as_raw());
     }
 
     fn read_out_png(name: &str) -> Vec<u8> {
@@ -615,15 +526,12 @@ mod tests {
         best.0
     }
 
-    /// The five macOS 64-px state glyphs and three rotated Active frames are
-    /// non-empty and pairwise distinct. Only the macOS 64-px rasters are
-    /// checked; the `#[cfg(not(target_os = "macos"))]` 32-px set is not.
+    /// The five macOS 64-px state glyphs are non-empty and pairwise distinct.
+    /// The static Active raster is covered by the state mapping test above.
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_tray_glyphs_are_distinct_and_covered() {
-        let mut pngs = BLACK_PNGS_64.to_vec();
-        pngs.extend(ACTIVE_FRAME_PNGS_64);
-        let decoded: Vec<image::RgbaImage> = pngs
+        let decoded: Vec<image::RgbaImage> = BLACK_PNGS_64
             .iter()
             .map(|png| image::load_from_memory(png).unwrap().to_rgba8())
             .collect();
