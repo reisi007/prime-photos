@@ -51,11 +51,16 @@ with fixed row heights, and measured chrome dimensions.
 - **Heights (Issue #33):** `page_heights_for_sections` is the single source for
   both scroll viewports. With **both sections open**, `Config::backup_queue_ratio`
   (default 0.35, clamped 0.20–0.80) splits the height left after the fixed chrome:
-  `QUEUE_HEADER_TOTAL_H` = **40 px** (measured 31 px header row — the 20 px
-  cells centre in the 26 px interaction row — + 1 px divider + 8 px spacing),
-  and `QUEUE_BELOW_H` = **145 px** = table trailing 8 +
+  `QUEUE_HEADER_TOTAL_H` = **40 px**, headlessly measured through the production
+  table path: the 20 px header-cell response begins 3 px below the layout cursor,
+  followed by 8 px before the 1 px divider and 8 px before the first `show_rows`
+  row. That makes 31 px from the cursor to the divider, then 1 + 8 px to the
+  first row; the 31 px figure is not the height of the cell response. Below the
+  header, `QUEUE_BELOW_H` = **145 px** = table trailing 8 +
   progress zone 40 (6 px gap + 26 px row + 8 px spacing) + splitter zone 24
-  (3 + 10 + 8 + 3) + folder heading zone 34 (26 + 8) + heading/list gap 6 +
+  (3 + 10 + 8 + 3) + folder heading zone 34 (the horizontal layout row is
+  26 px, although the label response is 16 px, + 8 px spacing) + heading/list
+  gap 6 +
   footer area 33 (table trailing 8 + post-list 6 + footer gap 6 + 13 px line).
   With **only the queue** open, `QUEUE_ONLY_BELOW_H` = **107 px** = 8 + 40 + 6 +
   34 + 6 + 13; with **only the folder list** open, `FOLDER_ONLY_BELOW_H` =
@@ -233,10 +238,13 @@ with fixed row heights, and measured chrome dimensions.
   6 px vor dem Ergebnis + 13 px Zeilenbox). `QUEUE_BELOW_H` ist **145 px**
   (8 + 40 + 24 + 34 + 6 + 33), `QUEUE_ONLY_BELOW_H` **107 px** (8 + 40 + 6 +
   34 + 6 + 13) und `FOLDER_ONLY_BELOW_H` **119 px** (40 + 6 + 34 + 6 + 33);
-  `QUEUE_HEADER_TOTAL_H` ist **40 px** (gemessene 31 px Kopfzeile — die 20-px-
-  Zellen zentrieren in der 26-px-Interaktionszeile — + 1 px Trennlinie +
-  8 px Abstand). Karten haben 3 px äußeren Vertikalrand
-  und 6 px Listenabstand.
+  `QUEUE_HEADER_TOTAL_H` ist **40 px** (headless am Produktionspfad gemessen:
+  Die 20-px-Zellen-Response beginnt 3 px unter dem Layout-Cursor; es folgen
+  8 px bis zur 1-px-Trennlinie und 8 px bis zur ersten virtuellen Zeile). Die
+  31 px bis zur Trennlinie sind nicht die Höhe der Zellen-Response. Beim
+  Ordnerkopf misst die Text-Label-Response 16 px, die umschließende egui-
+  Layoutzeile aber 26 px; mit 8 px Abstand bleibt die Zone daher **34 px** —
+  nicht 25 px. Karten haben 3 px äußeren Vertikalrand und 6 px Listenabstand.
 
 - **Persistierter Backup-Splitter (Issue #33, #36).** Beide Bereiche starten offen;
   Disclosure-Dreieck und Bereichslabel aktivieren denselben fokussierbaren,

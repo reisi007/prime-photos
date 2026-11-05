@@ -90,10 +90,11 @@ outcome.
   **40 px** in every branch (6 px gap + fixed 26 px row + 8 px trailing item
   spacing; the bar itself is 20 px high), even when no progress row is shown.
   The splitter zone is **24 px** (3 px + 10 px handle + 8 px trailing spacing
-  + 3 px), the folder heading zone **34 px** (26 px row + 8 px spacing), and the
-  heading/list gap **6 px**. Cards use 3 px outer vertical margins with a 6 px
-  list gap. The aggregate outcome footer and bottom-panel “Letzter Upload”
-  summary use dark theme ink at 11 pt; folder-card meta/outcome lines stay
+  + 3 px), the folder heading zone **34 px** (the production horizontal layout
+  row measures 26 px, although its text label response is 16 px, plus 8 px
+  spacing), and the heading/list gap **6 px**. Cards use 3 px outer vertical
+  margins with a 6 px list gap. The aggregate outcome footer and bottom-panel
+  “Letzter Upload” summary use dark theme ink at 11 pt; folder-card meta/outcome lines stay
   muted at 11 pt. The progress-bar label keeps its theme color
   (`visuals.selection.stroke`). The footer area is **33 px** (8 px table
   trailing spacing + 6 px post-list gap + 6 px footer gap + 13 px line box).
@@ -101,7 +102,11 @@ outcome.
   With only the queue open, `QUEUE_ONLY_BELOW_H` = **107 px** = 8 + 40 + 6 + 34
   + 6 + 13. With only the folder list open, `FOLDER_ONLY_BELOW_H` = **119 px**
   = 40 + 6 + 34 + 6 + 33. The table header chrome `QUEUE_HEADER_TOTAL_H` is
-  **40 px**.
+  **40 px**, measured headlessly through the production table: a 20 px cell row
+  beginning 3 px below the layout cursor, 8 px before the 1 px divider, then 8
+  px before the first virtual row. This is distinct from the folder heading: its
+  text label response bounds are 16 px, but the production horizontal layout
+  row is 26 px and the consumed zone is 34 px with trailing spacing.
 - **Scroll-bug fix:** two `ScrollArea::vertical()` in the same parent `Ui`
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea

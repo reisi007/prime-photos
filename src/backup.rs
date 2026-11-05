@@ -312,11 +312,9 @@ fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<
 /// row height is fixed. The header uses the same widths, so both line up.
 const QUEUE_ROW_H: f32 = 20.0;
 const QUEUE_HEADER_H: f32 = 20.0;
-/// **Measured** vertical consumption above the table's first row with the
-/// theme (`item_spacing.y = 8`, `interact_size.y = 26`): the horizontal header
-/// row, its trailing item spacing, the 1 px divider and the spacing before the
-/// rows add up to 40 px. The split layout reserves all of it, otherwise the
-/// divider pushes the folder list off the bottom (Issue #30).
+/// Headless-measured production consumption above the table's first row with
+/// the theme: a 20 px header-cell response at a 3 px top inset, 8 px to the
+/// 1 px divider, then 8 px to the first row. The split reserves all 40 px.
 const QUEUE_HEADER_TOTAL_H: f32 = 40.0;
 /// Compact column carrying the backup folder of each queue row (user decision
 /// 2026-10-16): without it the files of several targets are indistinguishable.
@@ -340,8 +338,8 @@ const SPLITTER_H: f32 = 10.0;
 const SPLITTER_GAP: f32 = 3.0;
 /// Splitter zone including the trailing item spacing: 3 + 10 + 8 + 3 = 24 px.
 const SPLITTER_ZONE_H: f32 = 2.0 * SPLITTER_GAP + SPLITTER_H + 8.0;
-/// Folder heading horizontal row (`interact_size.y`) plus its trailing spacing:
-/// 26 + 8 = 34 px.
+/// Headless-measured folder disclosure layout row (26 px, even though its text
+/// label response is 16 px) plus the trailing item spacing: 26 + 8 = 34 px.
 const FOLDER_HEADING_ZONE_H: f32 = 26.0 + 8.0;
 /// Air between the folder heading and the card list.
 const FOLDER_HEADING_GAP: f32 = 6.0;
@@ -455,6 +453,67 @@ fn table_cell(
         ui.set_min_size(egui::vec2(width, height));
         add_contents(ui);
     });
+}
+
+/// Draw the fixed queue-table header and divider. Kept on the production path
+/// so its actual egui allocation can be measured by the headless layout test.
+fn draw_queue_table_header(ui: &mut egui::Ui, cols: QueueColumns) -> (egui::Rect, egui::Rect) {
+    let header_row = ui.horizontal(|ui| {
+        table_cell(ui, cols.folder_w, QUEUE_HEADER_H, false, |ui| {
+            ui.label(RichText::new(tr("Ordner")).strong().size(11.0));
+        });
+        table_cell(ui, cols.name_w, QUEUE_HEADER_H, false, |ui| {
+            ui.label(RichText::new(tr("Name")).strong().size(11.0));
+        });
+        table_cell(ui, cols.size_w, QUEUE_HEADER_H, true, |ui| {
+            ui.label(RichText::new(tr("Größe")).strong().size(11.0));
+        });
+        table_cell(ui, cols.status_w, QUEUE_HEADER_H, false, |ui| {
+            ui.label(RichText::new(tr("Status")).strong().size(11.0));
+        });
+    });
+
+    // 1 px divider under the header, spanning exactly the table width (never
+    // the reserved scroll-bar strip). The following ScrollArea supplies the
+    // actual trailing item spacing before the first queue row.
+    let (divider, _) =
+        ui.allocate_exact_size(egui::vec2(cols.table_w, 1.0), egui::Sense::hover());
+    ui.painter().hline(
+        divider.x_range(),
+        divider.center().y,
+        egui::Stroke::new(1.0_f32, theme::BORDER),
+    );
+    (header_row.response.rect, divider)
+}
+
+/// Draw the queue header and its production virtualized row area together, so
+/// header height tests observe the same spacing and first-row position as the
+/// live table.
+fn show_queue_table(
+    ui: &mut egui::Ui,
+    cols: QueueColumns,
+    table_h: f32,
+    row_count: usize,
+    add_rows: impl FnOnce(&mut egui::Ui, std::ops::Range<usize>),
+) -> (egui::Rect, egui::Rect) {
+    let header_geometry = draw_queue_table_header(ui, cols);
+    egui::ScrollArea::vertical()
+        // Own scroll state (user decision 2026-10-16): egui keys a ScrollArea's
+        // offset by `make_persistent_id("scroll_area")` when no `id_salt` is
+        // given, so the queue and folder list would share one offset.
+        .id_salt("queue")
+        .max_height(table_h)
+        .auto_shrink(false)
+        // Honor the cap even when tiny: the default `min_scrolled_height`
+        // (64 px) would otherwise overrule a smaller `max_height`.
+        .min_scrolled_height(0.0)
+        // Reserve the 18 px strip on every frame, not only while hovered; the
+        // floating handle stays dormant until hover.
+        .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible)
+        // Every row is allocated at exactly `QUEUE_ROW_H`, so `show_rows`
+        // advances by the same row height plus the theme's item spacing.
+        .show_rows(ui, QUEUE_ROW_H, row_count, add_rows);
+    header_geometry
 }
 
 /// The card's small meta line: path · progress · last updated (each present part
@@ -638,7 +697,7 @@ fn show_section_header(
     show_label: &str,
     hide_label: &str,
     add_header: impl FnOnce(&mut egui::Ui) -> egui::Response,
-) -> bool {
+) -> (bool, f32) {
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
         id,
@@ -653,7 +712,7 @@ fn show_section_header(
     // assistive technology and remove click semantics instead of swallowing an
     // apparently enabled action.
     let can_toggle = section_toggle_enabled(ui.is_enabled(), other_open);
-    ui.horizontal(|ui| {
+    let header = ui.horizontal(|ui| {
         let item_spacing = ui.spacing().item_spacing;
         ui.spacing_mut().item_spacing.x = 0.0;
         // A custom toggle (not `show_toggle_button`) keeps the localized action
@@ -715,7 +774,32 @@ fn show_section_header(
         }
     });
     state.store(ui.ctx());
-    state.is_open()
+    (state.is_open(), header.response.rect.height())
+}
+
+/// The production folder disclosure heading, including its exact localized
+/// label and toggle action. Sharing this helper lets the headless geometry test
+/// measure the same rendered row rather than a stand-in.
+fn show_folder_section_header(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    queue_open: bool,
+) -> (bool, f32, f32) {
+    let mut label_h = 0.0;
+    let (is_open, row_h) = show_section_header(
+        ui,
+        id,
+        true,
+        queue_open,
+        tr("Automatisch gesicherte Ordner ausklappen"),
+        tr("Automatisch gesicherte Ordner einklappen"),
+        |ui| {
+            let label = ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")).size(14.0));
+            label_h = label.rect.height();
+            label
+        },
+    );
+    (is_open, row_h, label_h)
 }
 
 /// Draw the accessible drag handle between the two open scroll panes.
@@ -3283,7 +3367,7 @@ impl PrimePhotoApp {
         ui.add_space(12.0);
         let queue_section_id = ui.make_persistent_id("backup-queue-section");
         let folders_section_id = ui.make_persistent_id("backup-folders-section");
-        let queue_expanded = show_section_header(
+        let (queue_expanded, _) = show_section_header(
             ui,
             queue_section_id,
             true,
@@ -3374,152 +3458,99 @@ impl PrimePhotoApp {
                 });
             });
         } else if queue_expanded {
-            // Fixed column header (Ordner · Name · Größe · Status), above the
-            // scroll area so it never scrolls away. Every cell is allocated at
-            // exactly its column width; folder/name/status are left-aligned,
-            // the size is right-aligned — the values below use the same cells.
-            ui.horizontal(|ui| {
-                table_cell(ui, cols.folder_w, QUEUE_HEADER_H, false, |ui| {
-                    ui.label(RichText::new(tr("Ordner")).strong().size(11.0));
-                });
-                table_cell(ui, cols.name_w, QUEUE_HEADER_H, false, |ui| {
-                    ui.label(RichText::new(tr("Name")).strong().size(11.0));
-                });
-                table_cell(ui, cols.size_w, QUEUE_HEADER_H, true, |ui| {
-                    ui.label(RichText::new(tr("Größe")).strong().size(11.0));
-                });
-                table_cell(ui, cols.status_w, QUEUE_HEADER_H, false, |ui| {
-                    ui.label(RichText::new(tr("Status")).strong().size(11.0));
-                });
-            });
-            // 1 px divider under the header, spanning exactly the table width
-            // (never the reserved scroll-bar strip). The item spacing below it
-            // is the 8 px air before the first row.
-            let (divider, _) =
-                ui.allocate_exact_size(egui::vec2(cols.table_w, 1.0), egui::Sense::hover());
-            ui.painter().hline(
-                divider.x_range(),
-                divider.center().y,
-                egui::Stroke::new(1.0_f32, theme::BORDER),
-            );
-            // A page that has no scroll area of its own: the table gets exactly
-            // the height `page_heights_for_sections` reserved for it — never
-            // more than what is free, so at the minimum window size nothing
-            // runs off the bottom. The list below keeps its own allocation.
-            egui::ScrollArea::vertical()
-                // Own scroll state (user decision 2026-10-16): egui keys a
-                // ScrollArea's offset by `make_persistent_id("scroll_area")`
-                // when no `id_salt` is given, so the queue and the folder list
-                // — both drawn on this page — would share one offset and any
-                // wheel scroll would move both at once.
-                .id_salt("queue")
-                .max_height(table_h)
-                .auto_shrink(false)
-                // Honor the cap even when it is tiny: the default
-                // `min_scrolled_height` (64 px) would otherwise overrule a
-                // smaller `max_height` and push the list below off the edge.
-                .min_scrolled_height(0.0)
-                // Reserve the 18 px strip on every frame, not only while the
-                // pointer hovers the area: the table's right edge must never
-                // jump (Issue #30). The floating handle stays dormant (alpha 0)
-                // until hover, so the strip is invisible at rest.
-                .scroll_bar_visibility(
-                    egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible,
-                )
-                // `QUEUE_ROW_H` is the *measured* row height without spacing:
-                // every row below is allocated at exactly that height, so it
-                // advances by `QUEUE_ROW_H + item_spacing.y` (20 + 8 = 28 px),
-                // which is precisely what `show_rows` derives internally.
-                .show_rows(ui, QUEUE_ROW_H, layout.len(), |ui, range| {
-                    // Keep the content at the table width even while the
-                    // scroll-bar animation has not reserved its full strip yet;
-                    // the columns below are fixed widths anyway.
-                    ui.set_width(cols.table_w);
-                    // Lock the shared state once per frame for the visible slice.
-                    let s = self.upload.lock().unwrap();
-                    for &queue_idx in &layout[range] {
-                        let Some(e) = s.queue.get(queue_idx) else {
-                            continue;
-                        };
-                        // Befund 11c: an `Uploading` row additionally shows
-                        // the real per-file percentage once bytes have gone
-                        // out, so progress is visible per file and not only
-                        // as the coarse state. The whole visible string is
-                        // one i18n key — never assembled from two parts.
-                        let (txt, col): (String, egui::Color32) = match e.state {
-                            FileState::Waiting => (tr("Warten").to_string(), theme::MUTED),
-                            FileState::Uploading => {
-                                let pct = calculate_pct(e.size, e.bytes_sent);
-                                if pct > 0 {
-                                    (tr1("In Bearbeitung · {}%", pct), theme::TEAL)
-                                } else {
-                                    (tr("In Bearbeitung").to_string(), theme::TEAL)
-                                }
+            // The production helper keeps the fixed header above the row area's
+            // virtualized viewport and shares that exact path with its geometry
+            // regression test.
+            show_queue_table(ui, cols, table_h, layout.len(), |ui, range| {
+                // Keep the content at the table width even while the
+                // scroll-bar animation has not reserved its full strip yet;
+                // the columns below are fixed widths anyway.
+                ui.set_width(cols.table_w);
+                // Lock the shared state once per frame for the visible slice.
+                let s = self.upload.lock().unwrap();
+                for &queue_idx in &layout[range] {
+                    let Some(e) = s.queue.get(queue_idx) else {
+                        continue;
+                    };
+                    // Befund 11c: an `Uploading` row additionally shows
+                    // the real per-file percentage once bytes have gone
+                    // out, so progress is visible per file and not only
+                    // as the coarse state. The whole visible string is
+                    // one i18n key — never assembled from two parts.
+                    let (txt, col): (String, egui::Color32) = match e.state {
+                        FileState::Waiting => (tr("Warten").to_string(), theme::MUTED),
+                        FileState::Uploading => {
+                            let pct = calculate_pct(e.size, e.bytes_sent);
+                            if pct > 0 {
+                                (tr1("In Bearbeitung · {}%", pct), theme::TEAL)
+                            } else {
+                                (tr("In Bearbeitung").to_string(), theme::TEAL)
                             }
-                            FileState::Done => (tr("Abgeschlossen").to_string(), theme::GREEN),
-                            FileState::Failed => (tr("Fehlgeschlagen").to_string(), theme::RED),
-                            FileState::Skipped => (tr("Übersprungen").to_string(), theme::MUTED),
-                        };
-                        // A long name is truncated in the cell; the full
-                        // path shows on hover (§7.3).
-                        let full = e.path.display().to_string();
-                        // The row's backup folder (disambiguated when the
-                        // active run holds the name twice).
-                        let (folder_label, folder_tip) = if e.folder == ONE_TIME_IDX {
-                            (tr("Einmalige Sicherung").to_string(), String::new())
-                        } else {
-                            queue_folder_display(&folder_paths, e.folder, &ambiguous)
-                                .unwrap_or_default()
-                        };
-                        // Allocated at exactly `QUEUE_ROW_H` so the row
-                        // advances by `QUEUE_ROW_H + item_spacing.y`,
-                        // matching what `show_rows` derives.
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(cols.table_w, QUEUE_ROW_H),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                table_cell(ui, cols.folder_w, QUEUE_ROW_H, false, |ui| {
-                                    ui.add(
-                                        egui::Label::new(RichText::new(folder_label).size(12.0))
-                                            .truncate(),
-                                    )
-                                    .on_hover_text(folder_tip);
-                                });
-                                table_cell(ui, cols.name_w, QUEUE_ROW_H, false, |ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(crate::text::nfc(&e.name)).size(12.0),
-                                        )
+                        }
+                        FileState::Done => (tr("Abgeschlossen").to_string(), theme::GREEN),
+                        FileState::Failed => (tr("Fehlgeschlagen").to_string(), theme::RED),
+                        FileState::Skipped => (tr("Übersprungen").to_string(), theme::MUTED),
+                    };
+                    // A long name is truncated in the cell; the full
+                    // path shows on hover (§7.3).
+                    let full = e.path.display().to_string();
+                    // The row's backup folder (disambiguated when the
+                    // active run holds the name twice).
+                    let (folder_label, folder_tip) = if e.folder == ONE_TIME_IDX {
+                        (tr("Einmalige Sicherung").to_string(), String::new())
+                    } else {
+                        queue_folder_display(&folder_paths, e.folder, &ambiguous)
+                            .unwrap_or_default()
+                    };
+                    // Allocated at exactly `QUEUE_ROW_H` so the row
+                    // advances by `QUEUE_ROW_H + item_spacing.y`,
+                    // matching what `show_rows` derives.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(cols.table_w, QUEUE_ROW_H),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            table_cell(ui, cols.folder_w, QUEUE_ROW_H, false, |ui| {
+                                ui.add(
+                                    egui::Label::new(RichText::new(folder_label).size(12.0))
                                         .truncate(),
+                                )
+                                .on_hover_text(folder_tip);
+                            });
+                            table_cell(ui, cols.name_w, QUEUE_ROW_H, false, |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(crate::text::nfc(&e.name)).size(12.0),
                                     )
-                                    .on_hover_text(full);
-                                });
-                                table_cell(ui, cols.size_w, QUEUE_ROW_H, true, |ui| {
-                                    ui.label(
-                                        RichText::new(crate::text::format_size(e.size)).size(12.0),
-                                    );
-                                });
-                                table_cell(ui, cols.status_w, QUEUE_ROW_H, false, |ui| {
-                                    // Truncated as well: a longer translation
-                                    // must never paint over the page edge.
-                                    let status = ui.add(
-                                        egui::Label::new(RichText::new(txt).color(col).size(12.0))
-                                            .truncate(),
-                                    );
-                                    // Optional byte detail while a transfer is
-                                    // live (Befund 11c).
-                                    if e.state == FileState::Uploading && e.size > 0 {
-                                        status.on_hover_text(tr2(
-                                            "{} von {}",
-                                            crate::text::format_size(e.bytes_sent),
-                                            crate::text::format_size(e.size),
-                                        ));
-                                    }
-                                });
-                            },
-                        );
-                    }
-                });
+                                    .truncate(),
+                                )
+                                .on_hover_text(full);
+                            });
+                            table_cell(ui, cols.size_w, QUEUE_ROW_H, true, |ui| {
+                                ui.label(
+                                    RichText::new(crate::text::format_size(e.size)).size(12.0),
+                                );
+                            });
+                            table_cell(ui, cols.status_w, QUEUE_ROW_H, false, |ui| {
+                                // Truncated as well: a longer translation
+                                // must never paint over the page edge.
+                                let status = ui.add(
+                                    egui::Label::new(RichText::new(txt).color(col).size(12.0))
+                                        .truncate(),
+                                );
+                                // Optional byte detail while a transfer is
+                                // live (Befund 11c).
+                                if e.state == FileState::Uploading && e.size > 0 {
+                                    status.on_hover_text(tr2(
+                                        "{} von {}",
+                                        crate::text::format_size(e.bytes_sent),
+                                        crate::text::format_size(e.size),
+                                    ));
+                                }
+                            });
+                        },
+                    );
+                }
+            });
         }
 
         // Aggregate progress: **one** display under the queue. While a run is
@@ -3628,17 +3659,8 @@ impl PrimePhotoApp {
         } else {
             ui.add_space(SECTION_GAP);
         }
-        let folders_expanded = show_section_header(
-            ui,
-            folders_section_id,
-            true,
-            queue_expanded,
-            tr("Automatisch gesicherte Ordner ausklappen"),
-            tr("Automatisch gesicherte Ordner einklappen"),
-            |ui| {
-                ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")).size(14.0))
-            },
-        );
+        let (folders_expanded, _, _) =
+            show_folder_section_header(ui, folders_section_id, queue_expanded);
 
         // The header toggled *after* the split was computed. On the first frame
         // of an open transition, keep the closed layout so the footer cannot be
@@ -4035,6 +4057,114 @@ mod tests {
         assert_eq!(QUEUE_BELOW_H, 145.0);
         assert_eq!(QUEUE_ONLY_BELOW_H, 107.0);
         assert_eq!(FOLDER_ONLY_BELOW_H, 119.0);
+    }
+
+    #[test]
+    fn backup_layout_header_chrome_matches_headless_egui_measurements() {
+        fn measure_themed_ui(draw: impl FnOnce(&mut egui::Ui) -> f32) -> f32 {
+            let ctx = egui::Context::default();
+            let mut draw = Some(draw);
+            theme::apply(&ctx);
+            let mut measured = None;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 900.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    measured = Some(
+                        draw.take()
+                            .expect("headless UI draw closure runs once")(ui),
+                    );
+                });
+            });
+            measured.expect("headless CentralPanel rendered")
+        }
+
+        let queue_geometry = std::cell::Cell::new(None);
+        let first_queue_row_top = std::cell::Cell::new(None);
+        let queue_header_start = std::cell::Cell::new(None);
+        let queue_header_h = measure_themed_ui(|ui| {
+            let header_top = ui.cursor().min.y;
+            queue_header_start.set(Some(header_top));
+            let cols = queue_columns(
+                ui.available_width(),
+                ui.spacing().item_spacing.x,
+                ui.spacing().scroll.allocated_width(),
+            );
+            let geometry = show_queue_table(ui, cols, 100.0, 1, |ui, range| {
+                assert_eq!(range, 0..1, "the headless table contains one visible row");
+                first_queue_row_top.set(Some(ui.cursor().min.y));
+            });
+            queue_geometry.set(Some(geometry));
+            first_queue_row_top
+                .get()
+                .expect("the production queue row renderer ran")
+                - header_top
+        });
+        let folder_row_h = std::cell::Cell::new(0.0);
+        let folder_label_h = std::cell::Cell::new(0.0);
+        let folder_heading_h = measure_themed_ui(|ui| {
+            let heading_top = ui.cursor().min.y;
+            let id = ui.make_persistent_id("headless-folder-section");
+            let (is_open, rendered_row_h, rendered_label_h) =
+                show_folder_section_header(ui, id, true);
+            assert!(is_open);
+            folder_row_h.set(rendered_row_h);
+            folder_label_h.set(rendered_label_h);
+            // Measure where the next production-layout item would begin. This
+            // captures egui's trailing item spacing instead of adding 8 px as
+            // a formula or copying the disclosure's drawing code into a test.
+            let next_item = ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover());
+            next_item.rect.top() - heading_top
+        });
+
+        let (header_rect, divider_rect) = queue_geometry
+            .get()
+            .expect("the production queue header rendered");
+        let queue_header_start = queue_header_start
+            .get()
+            .expect("the production queue header has a starting cursor");
+        let first_queue_row_top = first_queue_row_top
+            .get()
+            .expect("the production queue row renderer ran");
+        assert!((header_rect.height() - 20.0).abs() < 0.01);
+        assert!((header_rect.top() - queue_header_start - 3.0).abs() < 0.01);
+        assert!((divider_rect.top() - queue_header_start - 31.0).abs() < 0.01);
+        assert!((divider_rect.height() - 1.0).abs() < 0.01);
+        assert!((divider_rect.top() - header_rect.bottom() - 8.0).abs() < 0.01);
+        assert!(
+            (first_queue_row_top - divider_rect.bottom() - 8.0).abs() < 0.01,
+            "first row top {first_queue_row_top}, divider bottom {}",
+            divider_rect.bottom()
+        );
+        assert!(
+            (queue_header_h - 40.0).abs() < 0.01,
+            "headless queue header geometry includes its 3 px top inset, 20 px row, two 8 px gaps, and divider, measured {queue_header_h}px"
+        );
+        assert!(
+            (queue_header_h - QUEUE_HEADER_TOTAL_H).abs() < 0.01,
+            "production queue header + divider + row spacing measured {queue_header_h}px, budget is {QUEUE_HEADER_TOTAL_H}px"
+        );
+        assert!(
+            (folder_label_h.get() - 16.0).abs() < 0.01,
+            "folder label response measured {}px",
+            folder_label_h.get()
+        );
+        assert!(
+            (folder_row_h.get() - 26.0).abs() < 0.01,
+            "folder horizontal layout row measured {}px",
+            folder_row_h.get()
+        );
+        assert!((folder_heading_h - 34.0).abs() < 0.01);
+        assert!(
+            (folder_heading_h - FOLDER_HEADING_ZONE_H).abs() < 0.01,
+            "production folder disclosure + trailing spacing measured {folder_heading_h}px, budget is {FOLDER_HEADING_ZONE_H}px"
+        );
+        assert!((folder_heading_h - folder_row_h.get() - 8.0).abs() < 0.01);
     }
 
     #[test]
