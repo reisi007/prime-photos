@@ -24,6 +24,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: python3 -m unittest test_config_update.py
+        run: python3 -m unittest test_config_update.py
+
       # Prüft die konfigurierten Qualitätsgrenzen ohne Build-Schritt.
       - name: Ratchet quality gates
         uses: all-the-rest/ratchet-cli@4cace52ac7731985130292ead6ae81d44b4d72d6
