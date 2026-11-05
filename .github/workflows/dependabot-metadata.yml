@@ -15,7 +15,10 @@ permissions:
 jobs:
   label:
     name: Label Dependabot PR
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # Dependabot PRs can use either the legacy bot login or the current app login.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' ||
+      github.event.pull_request.user.login == 'app/dependabot'
     runs-on: ubuntu-latest
     env:
       PR_URL: ${{ github.event.pull_request.html_url }}

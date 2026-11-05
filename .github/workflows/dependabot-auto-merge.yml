@@ -40,7 +40,8 @@ jobs:
 
           number="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$HEAD_BRANCH" \
             --state open --label automerge --json number,author \
-            --jq '.[] | select(.author.login == "dependabot[bot]") | .number' | head -n1)"
+            --jq '.[] | select(.author.login == "dependabot[bot]" or
+              .author.login == "app/dependabot") | .number' | head -n1)"
 
           if [ -n "$number" ]; then
             echo "number=$number" >>"$GITHUB_OUTPUT"
