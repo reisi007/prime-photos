@@ -1077,6 +1077,55 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   normalen Installations-/UI-Test des finalen Release-Bundles und keinen Live-Upload zu Amazon.
   Ad-hoc-Signatur und fehlende Notarisierung bleiben die in §4–§6 dokumentierten Grenzen.
 
+**Durch den zwölften echten Lauf belegt (2026-11-05):**
+
+- **Release ausgelöst:** Lightweight-Tag `v0.1.11` auf Commit
+  `8f8f13938ad9bfd9203e37bc25112c169588b460`; GitHub-Release `v0.1.11`, veröffentlicht
+  `2026-11-05T16:52:28Z`, **nicht** Draft, **nicht** Pre-Release —
+  [GitHub Release v0.1.11](https://github.com/reisi007/prime-photos/releases/tag/v0.1.11).
+  Paketversion `0.1.11`, macOS-Build `11`.
+- **Release-CI:** [Workflow-Lauf `42067029432`](https://github.com/reisi007/prime-photos/actions/runs/42067029432)
+  erfolgreich — `Build windows-x64` (10m37s), `Build linux-x64` (5m49s),
+  `Publish GitHub Release` (16s). `Attest build provenance` war erfolgreich. Die Windows-
+  SignPath-Schritte und `Sign Linux release artifacts (GPG)` wurden übersprungen. Die reguläre
+  [CI `42066568918`](https://github.com/reisi007/prime-photos/actions/runs/42066568918) und die
+  [Agent gates `42066568883`](https://github.com/reisi007/prime-photos/actions/runs/42066568883)
+  waren ebenfalls erfolgreich.
+- **Assets** (Name — Bytes — SHA-256-Digest laut GitHub-API):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 10.536.762 | `f07ffc5d900aa04ce290156a06ff0765a759d2a5c2d186bb01c854929dc774fb` |
+  | `Prime-Photos-linux-x64.tar.gz` | 14.278.507 | `df12060381c6af5e465312b19ac65bf099471fbe4e164d5710bf8805b0b1da9a` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.817.423 | `a84d3f1bc84d66e27f3e19500cac71e30a43b5c6b4d9e84ed0b984fd827e4a3b` |
+  | `Prime-Photos-windows-x64.zip` | 8.815.270 | `02681913d993e9247ee413673f78430ae060e77904736cef2a5219fe34f26958` |
+
+  Die Release enthält vier Assets. Der lokale `shasum -a 256`-Digest des DMG stimmt mit dem
+  GitHub-API-Digest überein; das manuell angehängte macOS-DMG ist nicht workflow-attestiert.
+- **Attestations live geprüft:** `gh attestation verify <asset> --repo reisi007/prime-photos`
+  war für alle drei workflow-gebauten Assets erfolgreich (`Prime-Photos-linux-x64.tar.gz`,
+  `Prime-Photos-linux-x64.deb`, `Prime-Photos-windows-x64.zip`, je Exit 0).
+- **macOS-Bundle und DMG (lokal aus dem Tag-Commit gebaut, §4):** Nach `touch build.rs` lief
+  `DIST_DIR=target/dist-v0.1.11 VERSION=0.1.11 BUILD=11 ./packaging/make-app.sh` mit ad-hoc
+  Signatur. Das Bundle ist `arm64`, `Signature=adhoc`, `TeamIdentifier=not set`; `codesign --verify
+  --strict --verbose=2` war erfolgreich. `Info.plist` nennt Version `0.1.11`, Build `11`,
+  `CFBundleIdentifier de.reisinger.prime-photos`, `CFBundleIconFile AppIcon`. SHA-256 des
+  Bundle-Binarys: `810f6705135d8f37c7a442bc2650f957e96cae487efcb6951f8968ee786e0219`.
+  Das DMG wurde aus `target/dist-v0.1.11/Prime Photos.app` mit Volume-Namen `Prime Photos`
+  erstellt; `hdiutil verify` meldete **checksum VALID**. Read-only gemountet enthielt das Volume
+  genau `Prime Photos.app`; Plist (`0.1.11`/`11`), `codesign`-Prüfung und Signaturstatus
+  (`adhoc`) stimmten mit dem Bundle überein, danach wurde es ausgeworfen.
+- **Installation und Screenshot-Smoke:** Die laufende Vorversion (`0.1.9`, PID 865) wurde vom
+  Benutzer normal beendet; es gab keinen Force-Quit. Das bestehende Bundle wurde nach
+  `target/Prime Photos.app.previous-0.1.9` gesichert, `0.1.11` per `ditto` nach
+  `/Applications/Prime Photos.app` kopiert und dort geprüft: `plutil -lint` OK, Version `0.1.11`,
+  Build `11`, `codesign --verify --strict --verbose=2` erfolgreich, `Signature=adhoc`.
+  Der Demo-Screenshot `target/dist-v0.1.11/Prime-Photos-v0.1.11-smoke.png` wurde aus dem
+  installierten Bundle erzeugt und visuell geprüft (SHA-256
+  `bb6979a4cf27c4d3ea68c754966c1758e59cdbfacc00f793bc893a9a381aff19`). Es gab keinen
+  Live-Upload zu Amazon. Ad-hoc-Signatur und fehlende Notarisierung bleiben die in §4–§6
+  dokumentierten Grenzen.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)

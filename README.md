@@ -15,6 +15,26 @@ Prime Photos is **not** an official Amazon product and is **not** affiliated wit
 
 See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
 
+## Screenshots
+
+All screenshots come from the built-in demo fixtures (`--demo`), not from a real account; the folder paths and file names are synthetic.
+
+**Backup page** — running upload with a per-file queue, aggregate progress and the backup targets below:
+
+![Backup page with a running upload](docs/images/backup.png)
+
+**Errors and partial runs** — failed files, a folder with errors and the result breakdown:
+
+![Backup page showing failed files and a folder with errors](docs/images/backup-failures.png)
+
+**Settings** — language, album, notifications, background sync, start-at-login and slow mode:
+
+![Settings page](docs/images/settings.png)
+
+**Sign-in** — pick your Amazon marketplace once, then sign in through the embedded web view:
+
+![Sign-in screen with marketplace selection](docs/images/sign-in.png)
+
 ## Code signing policy
 
 Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
