@@ -43,7 +43,7 @@ unicode-normalization = "0.1.25"
 # challenge, `rand` supplies the verifier / device-serial entropy, `keyring`
 # keeps the refresh token in the OS credential store.
 sha2 = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.10"
 # `default-features = false` + explicit per-OS stores keeps the **blocking** API
 # on every target: macOS Keychain (`apple-native`), Windows Credential Manager
