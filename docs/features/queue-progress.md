@@ -60,8 +60,9 @@ outcome.
   and below it. The handle is keyboard-focusable (Up/Down adjust the split;
   Shift changes in 10 % steps instead of 3 %), shows the vertical-resize cursor
   and a localized accessibility label/tooltip. Both sections are **open by
-  default**; the disclosure triangle and the section label share one focusable
-  toggle and remain as a supplemental accordion.
+  default**; the disclosure triangle and section label share one focusable
+  toggle and remain as a supplemental accordion. Keyboard focus on the shared
+  toggle is shown with a small rounded theme-teal outline (not on hover alone).
 - **Persistent split ratio:** `Config::backup_queue_ratio` stores the queue's
   share of the splittable height in `config.toml` (serde default **0.35**,
   clamped to **0.20–0.80**; legacy files without the key get 0.35). It is saved
@@ -77,7 +78,8 @@ outcome.
   invariant. A section may only close while the other one is open; if both
   persisted states are somehow closed, the queue header reopens itself before
   painting. The aggregate progress summary and the folder-result footer stay
-  reachable in either state.
+  reachable in either state. The sole open section's toggle is disabled and
+  cannot receive keyboard focus.
 - **Viewport floors:** with enough height the queue keeps **72 px** and the
   folder list **96 px**. Tiny windows degrade to zero-height viewports without
   negative sizes; the viewport allocation itself never overruns its budget, but
@@ -297,7 +299,9 @@ outcome.
 
 - **Ziehbarer, persistierter Splitter (Issue #33, 2026-11-03).** Beide Bereiche
   starten offen; Disclosure-Dreieck und Bereichslabel teilen sich einen
-  fokussierbaren Toggle und bleiben als ergänzendes Accordion. Der
+  fokussierbaren Toggle und bleiben als ergänzendes Accordion. Bei
+  Tastaturfokus wird der gemeinsame Toggle mit einem abgerundeten Rahmen in
+  Theme-Türkis hervorgehoben (nicht bei bloßem Hover). Der
   **10-px-Griff** (mit je 3 px Luft) verändert das Höhenverhältnis der Queue- und
   Ordner-Scrollbereiche. Default ist **35 %** Queue, begrenzt auf **20–80 %**
   (NaN/unendlich fallen auf den Default zurück). Gespeichert wird beim Loslassen
@@ -309,9 +313,10 @@ outcome.
   beim Wiederöffnen beider Bereiche unverändert. Die Ordnerliste folgt einem
   Disclosure-Toggle einen Frame später: Der Übergangs-Frame behält das bisherige
   Layout-Budget (damit die Fußzeile nie überläuft), und der nächste Frame wendet
-  die neue Aufteilung an. Der letzte offene Bereich kann nicht
-  geschlossen werden; sind beide gespeicherten Zustände geschlossen, öffnet der
-  Queue-Kopf sich selbst. Fortschrittszusammenfassung und Ergebnisfußzeile
+  die neue Aufteilung an. Der letzte offene Bereich kann nicht geschlossen
+  werden; sein Toggle ist deaktiviert und nicht tastaturfokussierbar. Sind beide
+  gespeicherten Zustände geschlossen, öffnet der Queue-Kopf sich selbst.
+  Fortschrittszusammenfassung und Ergebnisfußzeile
   bleiben sichtbar, die Ordnerliste scrollt bei ihrem natürlichen Kartenmaß.
 
 - **Scroll-Bug (F12, Welle 5.8).** Zwei `ScrollArea::vertical()` im selben

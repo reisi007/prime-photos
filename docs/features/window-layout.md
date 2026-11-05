@@ -70,6 +70,10 @@ with fixed row heights, and measured chrome dimensions.
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea
   gets its own `id_salt` (`"queue"`, `"folders"`).
+- **Backup-section toggle focus (Issue #36):** the disclosure triangle and
+  section label share one keyboard focus target. When focused, it has a small,
+  rounded outline in `theme::TEAL`; hover alone does not show the outline. The
+  sole open section remains disabled and cannot receive keyboard focus.
 - **Folder card Variant A:** row 1 = name left, **status word** right
   (colored, per `BackupStatusAlertLevel`) + the three row symbols; row 2
   small = **path · progress · last updated**. Each element appears **once**
@@ -234,14 +238,16 @@ with fixed row heights, and measured chrome dimensions.
   8 px Abstand). Karten haben 3 px äußeren Vertikalrand
   und 6 px Listenabstand.
 
-- **Persistierter Backup-Splitter (Issue #33).** Beide Bereiche starten offen;
+- **Persistierter Backup-Splitter (Issue #33, #36).** Beide Bereiche starten offen;
   Disclosure-Dreieck und Bereichslabel aktivieren denselben fokussierbaren,
-  barrierefrei beschrifteten Toggle; der letzte offene Bereich bleibt auch per
-  Label deaktiviert. Die Disclosure-Knöpfe bleiben als ergänzendes Accordion.
-  Das in `config.toml`
-  gespeicherte Queue-Verhältnis (`Config::backup_queue_ratio`) ist standardmäßig
-  **35 %** und auf **20–80 %** begrenzt; ältere Konfigurationen ohne Schlüssel
-  erhalten 35 %, NaN/unendlich fallen ebenfalls darauf zurück. Der **10-px-Griff**
+  barrierefrei beschrifteten Toggle; bei Tastaturfokus wird er mit einem
+  abgerundeten Rahmen in `theme::TEAL` sichtbar, bloßes Hover zeigt keinen
+  Rahmen. Der letzte offene Bereich bleibt auch per Label deaktiviert und
+  erhält keinen Tastaturfokus. Die Disclosure-Knöpfe bleiben als ergänzendes
+  Accordion. In `config.toml` wird das Queue-Verhältnis
+  (`Config::backup_queue_ratio`) gespeichert: standardmäßig **35 %**, begrenzt
+  auf **20–80 %**; ältere Konfigurationen ohne Schlüssel erhalten 35 %,
+  NaN/unendlich fallen ebenfalls darauf zurück. Der **10-px-Griff**
   ist per Drag und per Up/Down-Tasten bedienbar (Shift = 10 % statt 3 %);
   gespeichert wird beim Loslassen bzw. bei einer Tastaturänderung, nicht pro
   Frame. Bei ausreichend Höhe haben Queue- und Ordner-Viewport Mindestgrößen von

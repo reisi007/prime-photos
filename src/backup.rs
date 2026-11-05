@@ -702,6 +702,17 @@ fn show_section_header(
         ));
         let icon_response = toggle.clone().with_new_rect(icon_rect);
         egui::collapsing_header::paint_default_icon(ui, openness, &icon_response);
+        // `Sense::click` makes this shared control keyboard-focusable, but the
+        // custom interaction does not paint egui's usual focus outline.
+        // Expand outside the icon and label so the ring cannot cover either.
+        if can_toggle && toggle.has_focus() {
+            ui.painter().rect_stroke(
+                header_rect.expand(2.0),
+                egui::CornerRadius::same(3),
+                egui::Stroke::new(1.5_f32, crate::theme::TEAL),
+                egui::StrokeKind::Outside,
+            );
+        }
     });
     state.store(ui.ctx());
     state.is_open()
