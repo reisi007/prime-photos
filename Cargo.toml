@@ -58,7 +58,7 @@ keyring = { version = "3", default-features = false, features = ["apple-native",
 # = false` drops the text/font and raster-image stacks (the sources have no
 # text and no embedded images). Build-time only — the shipped binary carries no
 # resvg code and no SVG parsing, just the embedded PNG bytes.
-resvg = { version = "0.48", default-features = false }
+resvg = { version = "0.49", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3"
