@@ -10,21 +10,21 @@ use crate::upload::FileState;
 pub(super) fn mixed() -> Fixture {
     let folders = vec![
         folder(
-            &format!("{PICTURES}/Fotos 2024"),
+            &format!("{PICTURES}/Photos 2024"),
             1240,
             1240,
             FolderStatus::Done,
             "26.10.2026 18:12",
         ),
         folder(
-            &format!("{PICTURES}/Reisen"),
+            &format!("{PICTURES}/Travel"),
             486,
             486,
             FolderStatus::Done,
             "25.10.2026 09:41",
         ),
         folder(
-            &format!("{PICTURES}/Familie"),
+            &format!("{PICTURES}/Family"),
             2380,
             2380,
             FolderStatus::Done,
@@ -33,20 +33,20 @@ pub(super) fn mixed() -> Fixture {
         // Missing sources: the folder cards must show "Ordner nicht gefunden"
         // without any drive being mounted.
         folder(
-            "/Volumes/Archiv/Fotos 2019",
+            "/Volumes/Archive/Photos 2019",
             918,
             918,
             FolderStatus::NotFound,
             "20.10.2026 11:30",
         ),
         folder(
-            "/Volumes/Fotos-2021",
+            "/Volumes/External Photos 2021",
             2043,
             2043,
             FolderStatus::NotFound,
             "18.10.2026 16:04",
         ),
-        folder("/Volumes/Bilder-NAS/2022", 0, 0, FolderStatus::NotFound, ""),
+        folder("/Volumes/Network Photos/2022", 0, 0, FolderStatus::NotFound, ""),
     ];
 
     // 187 queue rows: 37 finished, 9 transferring, 141 waiting. The visible
@@ -84,7 +84,7 @@ pub(super) fn mixed() -> Fixture {
         paused: false,
         page: Page::Backup,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: None,
         source_exists: vec![true, true, true, false, false, false],
     }
@@ -96,21 +96,21 @@ pub(super) fn mixed() -> Fixture {
 pub(super) fn uploading(paused: bool) -> Fixture {
     let folders = vec![
         folder(
-            &format!("{PICTURES}/Fotos 2025"),
+            &format!("{PICTURES}/Photos 2025"),
             640,
             615,
             FolderStatus::Idle,
             "31.10.2026 09:12",
         ),
         folder(
-            &format!("{PICTURES}/Kamera-Import"),
+            &format!("{PICTURES}/Camera Imports"),
             128,
             120,
             FolderStatus::Idle,
             "31.10.2026 09:12",
         ),
         folder(
-            &format!("{PICTURES}/Export"),
+            &format!("{PICTURES}/Exports"),
             42,
             42,
             FolderStatus::Idle,
@@ -146,7 +146,7 @@ pub(super) fn uploading(paused: bool) -> Fixture {
         paused,
         page: Page::Backup,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: None,
         source_exists: vec![true, true, true],
     }
@@ -155,28 +155,28 @@ pub(super) fn uploading(paused: bool) -> Fixture {
 pub(super) fn many_folders() -> Fixture {
     let folders = vec![
         folder(
-            &format!("{PICTURES}/Fotos 2024"),
+            &format!("{PICTURES}/Photos 2024"),
             1240,
             1240,
             FolderStatus::Done,
             "26.10.2026 18:12",
         ),
         folder(
-            &format!("{PICTURES}/Reisen"),
+            &format!("{PICTURES}/Travel"),
             486,
             486,
             FolderStatus::Done,
             "25.10.2026 09:41",
         ),
         folder(
-            &format!("{PICTURES}/Familie"),
+            &format!("{PICTURES}/Family"),
             2380,
             2380,
             FolderStatus::Done,
             "24.10.2026 20:05",
         ),
         folder(
-            &format!("{PICTURES}/Kamera-Import"),
+            &format!("{PICTURES}/Camera Imports"),
             128,
             128,
             FolderStatus::Done,
@@ -198,7 +198,7 @@ pub(super) fn many_folders() -> Fixture {
             "21.10.2026 12:44",
         ),
         folder(
-            &format!("{PICTURES}/Alte Kamera"),
+            &format!("{PICTURES}/Old Camera"),
             2018,
             1990,
             FolderStatus::Idle,
@@ -215,20 +215,20 @@ pub(super) fn many_folders() -> Fixture {
         folder(&format!("{PICTURES}/Neu"), 0, 0, FolderStatus::Idle, ""),
         // Missing sources.
         folder(
-            "/Volumes/Archiv/Fotos 2019",
+            "/Volumes/Archive/Photos 2019",
             918,
             918,
             FolderStatus::NotFound,
             "20.10.2026 11:30",
         ),
         folder(
-            "/Volumes/Fotos-2021",
+            "/Volumes/External Photos 2021",
             2043,
             2043,
             FolderStatus::NotFound,
             "18.10.2026 16:04",
         ),
-        folder("/Volumes/Bilder-NAS/2022", 0, 0, FolderStatus::NotFound, ""),
+        folder("/Volumes/Network Photos/2022", 0, 0, FolderStatus::NotFound, ""),
     ];
 
     // Only the present folders 0–5 carry rows, so only they join the run and
@@ -257,7 +257,7 @@ pub(super) fn many_folders() -> Fixture {
         paused: false,
         page: Page::Backup,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: None,
         source_exists: vec![
             true, true, true, true, true, true, true, true, true, false, false, false,

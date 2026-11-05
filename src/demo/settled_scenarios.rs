@@ -11,21 +11,21 @@ use crate::upload::{FileState, UploadShared};
 pub(super) fn all_done() -> Fixture {
     let folders = vec![
         folder(
-            &format!("{PICTURES}/Fotos 2024"),
+            &format!("{PICTURES}/Photos 2024"),
             1240,
             1240,
             FolderStatus::Done,
             "30.10.2026 22:10",
         ),
         folder(
-            &format!("{PICTURES}/Reisen"),
+            &format!("{PICTURES}/Travel"),
             486,
             486,
             FolderStatus::Done,
             "30.10.2026 22:10",
         ),
         folder(
-            &format!("{PICTURES}/Familie"),
+            &format!("{PICTURES}/Family"),
             2380,
             2380,
             FolderStatus::Done,
@@ -43,7 +43,7 @@ pub(super) fn all_done() -> Fixture {
         paused: false,
         page: Page::Backup,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: None,
         source_exists: vec![true, true, true],
     }
@@ -52,14 +52,14 @@ pub(super) fn all_done() -> Fixture {
 pub(super) fn failures() -> Fixture {
     let folders = vec![
         folder(
-            &format!("{PICTURES}/Fotos 2023"),
+            &format!("{PICTURES}/Photos 2023"),
             320,
             317,
             FolderStatus::Error,
             "27.10.2026 07:55",
         ),
         folder(
-            &format!("{PICTURES}/Fotos 2022"),
+            &format!("{PICTURES}/Photos 2022"),
             1450,
             1450,
             FolderStatus::Done,
@@ -91,7 +91,7 @@ pub(super) fn failures() -> Fixture {
         paused: false,
         page: Page::Backup,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: Some("Die Einstellungen konnten nicht geladen werden.".to_string()),
         source_exists: vec![true, true],
     }
@@ -106,7 +106,7 @@ pub(super) fn empty() -> Fixture {
         paused: false,
         page: Page::Backup,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: None,
         source_exists: Vec::new(),
     }
@@ -115,21 +115,21 @@ pub(super) fn empty() -> Fixture {
 pub(super) fn settings() -> Fixture {
     let folders = vec![
         folder(
-            &format!("{PICTURES}/Fotos 2024"),
+            &format!("{PICTURES}/Photos 2024"),
             1240,
             1240,
             FolderStatus::Done,
             "26.10.2026 18:12",
         ),
         folder(
-            &format!("{PICTURES}/Reisen"),
+            &format!("{PICTURES}/Travel"),
             486,
             486,
             FolderStatus::Done,
             "25.10.2026 09:41",
         ),
         folder(
-            &format!("{PICTURES}/Familie"),
+            &format!("{PICTURES}/Family"),
             2380,
             2380,
             FolderStatus::Done,
@@ -150,7 +150,7 @@ pub(super) fn settings() -> Fixture {
         paused: false,
         page: Page::Settings,
         settings_tab: SettingsTab::General,
-        account_name: Some("Alex Beispiel".to_string()),
+        account_name: Some("Alex Example".to_string()),
         config_error: None,
         source_exists: vec![true, true, true],
     }

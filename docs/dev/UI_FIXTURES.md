@@ -1,8 +1,9 @@
-# UI-Fixtures und Screenshot-Harness (Issue #29)
+# UI-Fixtures und Screenshot-Harness (Debug-only, Issue #29)
 
 Die Demo-Datenquelle rendert zehn ausgewählte UI-Zustände ohne echte
-Amazon-Sitzung und ohne echte Fotordner. Sie ist ausschließlich für Entwicklung
-und Sichtprüfung gedacht; die normale Anwendung ändert sich nicht. Die
+Amazon-Sitzung und ohne echte Fotordner. Sie wird ausschließlich in Builds mit
+`debug_assertions` kompiliert und ist für Entwicklung und Sichtprüfung gedacht;
+Release-Builds enthalten weder Szenarien noch Fixtures. Die normale Anwendung ändert sich nicht. Die
 zustandsbezogene Prüfliste steht in [`UI_REVIEW.md`](UI_REVIEW.md).
 
 ## Zweck
@@ -10,7 +11,8 @@ zustandsbezogene Prüfliste steht in [`UI_REVIEW.md`](UI_REVIEW.md).
 - Sichtprüfung von Zuständen, die sonst nur mit Konto, laufendem Upload oder
   abgezogener Festplatte entstehen.
 - Reproduzierbare Screenshots für Reviews und Bugreports: dieselben Fixtures,
-  dieselbe Fenstergröße, dieselbe Sprache (Deutsch).
+  dieselbe Fenstergröße und dieselbe Sprache (standardmäßig Deutsch; optional
+  Englisch mit `--demo-language=en`).
 - Die Demo rendert über die **bestehenden** Pfade (`PrimePhotoApp::update`,
   `backup_ui`, `settings_ui`, `login_ui`). Es gibt keinen zweiten
   Rendering-Weg — ein Screenshot zeigt, was ein echter Frame zeigt.
@@ -23,24 +25,34 @@ das Über-/Lizenzfenster.
 ## Benutzung
 
 ```bash
-# Interaktive Demo, Szenario "mixed", 1200×800
-target/release/prime-photos --demo
+# Debug-Binary bauen; Demo-Flags funktionieren nicht in Release-Builds.
+cargo build --locked
+
+# Interaktive Demo, Szenario "mixed", 1200×800 (Standard: Deutsch)
+target/debug/prime-photos --demo
 
 # Interaktive Demo eines bestimmten Szenarios
-target/release/prime-photos --demo=uploading
-target/release/prime-photos --demo all-done
+target/debug/prime-photos --demo=uploading
+target/debug/prime-photos --demo all-done
 
 # Alle Szenarien mit ID und Beschreibung ausgeben (Exit 0)
-target/release/prime-photos --demo-list
+target/debug/prime-photos --demo-list
 
 # Screenshot: fester Frame-Ablauf, PNG schreiben, selbst beenden
-target/release/prime-photos --screenshot=/tmp/prime-demo-mixed.png
-target/release/prime-photos --demo=failures --screenshot=/tmp/prime-demo-failures.png
+target/debug/prime-photos --demo-language=en \
+    --screenshot="$PWD/target/prime-demo-mixed.png"
+target/debug/prime-photos --demo=failures --demo-language=en \
+    --screenshot="$PWD/target/prime-demo-failures.png"
 
 # Screenshot in einer bestimmten Fenstergröße (Punkte, Minimum 760×520)
-target/release/prime-photos --demo=mixed --size 760x520 \
-    --screenshot=/tmp/prime-demo-mixed-760.png
+target/debug/prime-photos --demo=mixed --demo-language=en --size 760x520 \
+    --screenshot="$PWD/target/prime-demo-mixed-760.png"
 ```
+
+`--demo-language=en` (oder `de`) betrifft nur diesen Debug-Lauf; ohne Angabe
+bleibt das bisherige deutsche Demo-Default erhalten. Release-Binaries weisen
+jede Option aus `--demo*`, `--screenshot*` oder `--size*` vor dem Fensterstart
+mit einer lokalisierten Meldung und Exit-Code 2 zurück.
 
 `--size WxH` gilt nur für Demo-/Screenshot-Läufe und akzeptiert `760x520` wie
 `760X520`; alles unter dem App-Minimum **760×520**, über **8192×8192** oder in
@@ -121,26 +133,24 @@ Pausenzustand sichtbar ist.
 
 Zwei Wege, bewusst getrennt:
 
-- **Automatisierte Screenshots** (Reviews, CI, dieser Harness) laufen mit der
-  Release-Binary `target/release/prime-photos`. Das Bild entsteht im Renderer
-  über egui (`ViewportCommand::Screenshot`) und hat auf einem 1×-Bildschirm
-  exakt die Fenstergröße in Pixeln.
-- **Visuelle Retina-Prüfungen** gehen über das gebaute `.app`-Bundle
-  (`packaging/make-app.sh`), siehe `docs/dev/DEV_NOTES.md` §7 — der nackten
-  Binary fehlt `Info.plist`/`NSHighResolutionCapable`, das Bild ist dort unscharf.
+- **Automatisierte Screenshots** (Reviews und dieser Harness) laufen mit der
+  Debug-Binary `target/debug/prime-photos`; nur dort ist der Harness enthalten.
+  Das Bild entsteht im Renderer über egui (`ViewportCommand::Screenshot`) und
+  hat auf einem 1×-Bildschirm exakt die Fenstergröße in Pixeln.
+- Das Release-`.app` aus `packaging/make-app.sh` enthält absichtlich keinen
+  Harness; Demo-Flags werden auch dort abgelehnt. Retina-Prüfungen am Release
+  prüfen die normale UI, nicht Fixture-Screenshots. Die Debug-Binary hat keine
+  `Info.plist`/`NSHighResolutionCapable`; Details siehe `docs/dev/DEV_NOTES.md` §7.
 
 ```bash
-# Automatisiert (1×): 1400×900 PNG
-target/release/prime-photos --demo=mixed --screenshot=/tmp/prime-demo-mixed.png
+# Automatisiert aus dem Debug-Binary (1×): 1400×900 PNG
+cargo build --locked
+target/debug/prime-photos --demo=mixed --demo-language=en \
+    --screenshot="$PWD/target/prime-demo-mixed.png"
 
 # Minimum-Fenster für die Rand-/Clip-Prüfung (Issue #30)
-target/release/prime-photos --demo=mixed --size 760x520 \
-    --screenshot=/tmp/prime-demo-mixed-760.png
-
-# Retina-Sichtprüfung über das Bundle (2× → 2800×1800 PNG)
-packaging/make-app.sh
-"target/dist/Prime Photos.app/Contents/MacOS/prime-photos" \
-    --demo=mixed --screenshot=/tmp/prime-demo-mixed@2x.png
+target/debug/prime-photos --demo=mixed --demo-language=en --size 760x520 \
+    --screenshot="$PWD/target/prime-demo-mixed-760.png"
 ```
 
 Die Fenstergröße wird in **Punkten** angefordert: 1400×900 im Screenshot-Modus,
@@ -162,11 +172,12 @@ damit ein späterer Frame den Erfolg nicht in einen Timeout umdeutet.
 
 ## Tests
 
-`cargo test` deckt die Demo ohne Fenster ab (`src/demo/tests.rs`):
+`cargo test --locked` deckt die Demo ohne Fenster ab (`src/demo/tests.rs`):
 
 - Argumente: alle Formen (`--demo`, `--demo=<id>`, `--demo <id>`,
   `--screenshot <Pfad>`, `--screenshot=<Pfad>`, `--size WxH`/
-  `--size=WxH`, Kombination, Reihenfolge), Off ohne Argumente, `--demo-list`
+  `--size=WxH`, Kombination, Reihenfolge), optionale Demo-Sprache
+  (`--demo-language=de|en`), Off ohne Argumente, `--demo-list`
   (eigener Modus; zusätzliche oder kombinierte Argumente sind ein Fehler),
   Injektionen wie `-psn_0_…` (Normalstart bleibt möglich), relative
   Screenshot-Pfade, unbekannte Argumente und Szenarien (Fehler enthalten die

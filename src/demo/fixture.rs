@@ -54,16 +54,16 @@ pub(crate) fn fixture(scenario: Scenario) -> Fixture {
 
 /// Plausible macOS photo locations. Nothing here is ever created or probed —
 /// existence comes from [`Fixture::source_exists`].
-pub(super) const PICTURES: &str = "/Users/beispiel/Bilder";
+pub(super) const PICTURES: &str = "/Users/example/Pictures";
 
 /// Sub-directories a scan would have descended into; they make the queue's
 /// name column and hover tooltip look like a real folder tree.
 const SUBDIRS: &[&str] = &[
     "2024-07",
     "2024-08",
-    "Reisen/Island",
-    "Familie/2023",
-    "Kamera-Import",
+    "Travel/Iceland",
+    "Family/2023",
+    "Camera Imports",
 ];
 
 /// Queue percentages of the actively transferring rows, including the exact

@@ -8,12 +8,12 @@ Textabbrüchen. Die Zustände kommen aus der Demo-Datenquelle
 ## Bauen
 
 ```bash
-cargo build --release
+cargo build --locked
 ```
 
-Für eine **Retina-Sichtprüfung** zusätzlich das Bundle bauen
-([`DEV_NOTES.md`](DEV_NOTES.md) §7): die nackte Binary hat keine `Info.plist` und
-kann je nach Startweg unscharf sein.
+Das Release-Bundle kann separat für eine **Retina-Sichtprüfung der normalen
+UI** gebaut werden ([`DEV_NOTES.md`](DEV_NOTES.md) §7). Es enthält keinen
+Demo-Harness; Fixture-Screenshots müssen aus der Debug-Binary kommen.
 
 ```bash
 packaging/make-app.sh
@@ -26,9 +26,9 @@ PNG-Datei enthält **physische Pixel**: auf einem 2×-Display ist ein
 1400×900-Fenster 2800×1800 Pixel groß, ein 760×520-Fenster 1520×1040.
 
 ```bash
-OUT=/tmp/prime-ui-review
+OUT="$PWD/target/prime-ui-review"
 mkdir -p "$OUT"
-BIN=target/release/prime-photos
+BIN=target/debug/prime-photos
 
 # Zehn Zustände bei 1400×900
 for s in mixed uploading paused all-done failures empty many-folders \
@@ -100,7 +100,7 @@ Matrix:
 python3 - <<'PY'
 from PIL import Image
 from pathlib import Path
-OUT = Path("/tmp/prime-ui-review")
+OUT = Path("target/prime-ui-review")
 BG = (0xF7, 0xF8, 0xF8)          # theme::PAGE_BG
 for png in sorted(OUT.glob("*.png")):
     im = Image.open(png).convert("RGB")

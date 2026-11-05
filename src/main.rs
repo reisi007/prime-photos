@@ -6,6 +6,7 @@ mod auth;
 mod config;
 mod countries;
 mod dedup;
+#[cfg(debug_assertions)]
 mod demo;
 mod destination;
 mod folders;
@@ -58,6 +59,11 @@ fn main() -> eframe::Result<()> {
         .skip(1)
         .filter_map(|arg| arg.into_string().ok())
         .collect();
+
+    #[cfg(not(debug_assertions))]
+    reject_release_demo_args(&args);
+
+    #[cfg(debug_assertions)]
     let mode = match demo::parse_args(&args) {
         Ok(mode) => mode,
         Err(message) => {
@@ -67,6 +73,8 @@ fn main() -> eframe::Result<()> {
             std::process::exit(2);
         }
     };
+
+    #[cfg(debug_assertions)]
     if mode == demo::Mode::List {
         for scenario in demo::Scenario::ALL {
             println!("{:<18} {}", scenario.id(), scenario.description());
@@ -74,10 +82,15 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    #[cfg(debug_assertions)]
+    let is_demo = mode.is_demo();
+    #[cfg(not(debug_assertions))]
+    let is_demo = false;
+
     // A demo run never takes the single-instance slot (a running real instance
     // would swallow it) and never replaces that instance's notification
     // binding — it has no tray and never uploads in the background.
-    if mode.is_demo() {
+    if is_demo {
         log::info!("Prime Photos startet im Demo-Modus (keine echten Daten)");
     } else {
         // Only one instance at a time: a second start asks the running instance
@@ -100,20 +113,20 @@ fn main() -> eframe::Result<()> {
     // developer's screen; `--size WxH` picks a different one (Issue #30),
     // defaulting to the historical values. The normal app keeps its preferred
     // start size.
+    #[cfg(debug_assertions)]
     let inner_size = match &mode {
         demo::Mode::Screenshot { size, .. } | demo::Mode::Demo { size, .. } => size.points(),
         // `List` already returned above; keep the normal start size for it so
         // the match stays exhaustive without a wildcard.
         demo::Mode::Off | demo::Mode::List => [1000.0, 700.0],
     };
+    #[cfg(not(debug_assertions))]
+    let inner_size = [1000.0, 700.0];
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size(inner_size)
-        .with_min_inner_size([
-            demo::DemoSize::MIN_WIDTH as f32,
-            demo::DemoSize::MIN_HEIGHT as f32,
-        ])
+        .with_min_inner_size([760.0, 520.0])
         .with_icon(window_icon());
-    let viewport = if mode.is_demo() {
+    let viewport = if is_demo {
         // A demo run is meant to be looked at (and captured) — no hidden start.
         viewport.with_visible(true)
     } else {
@@ -130,9 +143,39 @@ fn main() -> eframe::Result<()> {
         viewport,
         ..Default::default()
     };
+    #[cfg(debug_assertions)]
+    {
+        eframe::run_native(
+            "Prime Photos",
+            options,
+            Box::new(|cc| Ok(Box::new(PrimePhotoApp::new_with_mode(cc, mode)))),
+        )
+    }
+    #[cfg(not(debug_assertions))]
     eframe::run_native(
         "Prime Photos",
         options,
-        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc, mode)))),
+        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
     )
+}
+
+#[cfg(not(debug_assertions))]
+fn reject_release_demo_args(args: &[String]) {
+    let Some(arg) = args.iter().find(|arg| {
+        arg.starts_with("--demo")
+            || arg.starts_with("--screenshot")
+            || arg.starts_with("--size")
+    }) else {
+        return;
+    };
+
+    i18n::set_lang(i18n::system_lang());
+    eprintln!(
+        "{}",
+        i18n::tr1(
+            "Demo- und Screenshot-Argumente sind in Release-Builds nicht verfügbar: {}",
+            arg
+        )
+    );
+    std::process::exit(2);
 }

@@ -387,6 +387,46 @@ gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
   korrekt benennen, dann das falsch benannte Asset löschen und neu hochladen:
   `gh release delete-asset <tag> <falscher-name> --yes`.
 
+### Demo-/Screenshot-Smoke (Debug-only, Issue #45)
+
+`src/demo` wird nur mit `debug_assertions` kompiliert. Daher entstehen
+Fixture-Screenshots ausschließlich aus der Debug-Binary; das für ein Release
+gebaute `.app` und `target/release/prime-photos` enthalten keine Fixtures.
+Historische Smoke-Belege in §9 (bis einschließlich v0.1.11) bleiben unverändert
+und beschreiben den damaligen Build-Stand; für neue Releases gilt dieses Verfahren:
+
+```sh
+# Visuelle Fixture-Prüfung mit sicheren, synthetischen Daten (kein echtes Konto).
+cargo build --locked
+target/debug/prime-photos --demo=uploading --demo-language=en \
+  --screenshot="$PWD/target/Prime-Photos-release-smoke.png"
+
+# Im Release-Build muss jede Demo-Namespace-Option vor dem Fensterstart scheitern.
+cargo build --release --locked
+for flag in --demo --demo-list --demo-language=en \
+            --screenshot="$PWD/target/release-smoke.png" --size=760x520; do
+  if target/release/prime-photos "$flag" >/dev/null 2>target/release-cli-smoke.err; then
+    echo "Release accepted demo-only argument: $flag" >&2
+    exit 1
+  else
+    status=$?
+    test "$status" -eq 2 || exit "$status"
+  fi
+done
+
+# Fixture-specific strings must not be linked into the release executable.
+if strings target/release/prime-photos | \
+   grep -E 'Gemischter Alltag|/Users/example/Pictures|Alex Example'; then
+  echo "Demo fixture content found in release binary" >&2
+  exit 1
+fi
+```
+
+Die Release-Fehlermeldung wird vor dem Fensterstart anhand der Systemsprache
+lokalisiert. Bei manueller Prüfung `target/release-cli-smoke.err` kontrollieren;
+`strings` muss ohne Treffer enden. Der Screenshot wird visuell geprüft, der
+Release-Prozess aber nicht mit Demo-Flags gestartet.
+
 ### Ablauf beim Release (genau diese Reihenfolge)
 
 Zuerst die `.app` bauen, **dann** das DMG — es entsteht aus **demselben** Bundle. Alle erzeugten

@@ -6,6 +6,7 @@ use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 use crate::countries::system_country;
 use crate::dedup::DedupIndex;
+#[cfg(debug_assertions)]
 use crate::demo;
 use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
@@ -345,25 +346,40 @@ pub(crate) struct PrimePhotoApp {
     /// Shared slot written by the background folder picker, polled in `update`
     /// (Welle 5.1: the native dialog runs off the UI thread).
     pub(crate) folder_picker: Arc<Mutex<FolderPicker>>,
-    /// Developer demo/screenshot runtime (issue #29); `None` in the normal app.
+    /// Developer demo/screenshot runtime (issue #29); debug builds only.
     /// While it is `Some`, every real side effect (config/keychain/SQLite/
     /// network/notifications) is guarded off — see [`Self::is_demo`].
+    #[cfg(debug_assertions)]
     pub(crate) demo: Option<demo::DemoRuntime>,
 }
 
 impl PrimePhotoApp {
-    pub(crate) fn new(cc: &eframe::CreationContext<'_>, mode: demo::Mode) -> Self {
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        Self::prepare(cc);
+        Self::new_normal(cc)
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn new_with_mode(
+        cc: &eframe::CreationContext<'_>,
+        mode: demo::Mode,
+    ) -> Self {
+        if let Some((scenario, screenshot, language)) = mode.into_demo() {
+            Self::prepare(cc);
+            return Self::new_demo(cc, scenario, screenshot, language);
+        }
+        Self::new(cc)
+    }
+
+    fn prepare(cc: &eframe::CreationContext<'_>) {
         theme::apply(&cc.egui_ctx);
         // App activation (relaunch / switch-back) and the single-instance
         // handshake both only flag + wake the UI, so they get the context here
         // (see `src/app_activation.rs`, `src/single_instance.rs`).
         app_activation::install(&cc.egui_ctx);
-        // Demo/screenshot runs branch off **before** any real IO: no
-        // `Config::load`, no `folders.toml`, no SQLite, no keychain, no
-        // autostart registration and no config write.
-        if let Some((scenario, screenshot)) = mode.into_demo() {
-            return Self::new_demo(cc, scenario, screenshot);
-        }
+    }
+
+    fn new_normal(cc: &eframe::CreationContext<'_>) -> Self {
         single_instance::attach_ctx(&cc.egui_ctx);
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         // `config_loaded_ok` is derived directly from the `Config::load()`
@@ -559,6 +575,7 @@ impl PrimePhotoApp {
             avatar_texture: None,
             avatar_fetch: Arc::new(Mutex::new(AvatarFetch::default())),
             folder_picker: Arc::new(Mutex::new(FolderPicker::default())),
+            #[cfg(debug_assertions)]
             demo: None,
         };
         // Session (S-C): only the **refresh token** is persisted, and it lives in
@@ -618,15 +635,23 @@ impl PrimePhotoApp {
     /// dedup queue, keychain, autostart, first-run country) — not merely
     /// overwrite its result. Everything here is in-memory fixture data; the
     /// side-effect guards in the rest of the app key on [`Self::is_demo`].
+    #[cfg(debug_assertions)]
     fn new_demo(
         cc: &eframe::CreationContext<'_>,
         scenario: demo::Scenario,
         screenshot: Option<PathBuf>,
+        language: Option<i18n::Lang>,
     ) -> Self {
-        let fixture = demo::fixture(scenario);
-        // Fixtures are German by contract: their texts and the screenshots are
-        // the reference language, independent of the developer's system locale.
-        i18n::set_lang(i18n::Lang::De);
+        let lang = language.unwrap_or(i18n::Lang::De);
+        i18n::set_lang(lang);
+        let mut fixture = demo::fixture(scenario);
+        if language.is_some() {
+            fixture.config.language = Some(lang.code().to_string());
+        }
+        if fixture.config_error.is_some() {
+            fixture.config_error =
+                Some(tr("Die Einstellungen konnten nicht geladen werden.").to_string());
+        }
         // Same menu as the real start (⌘C/⌘V/About); it only wires labels and
         // flags, no IO.
         app_menu::install(&cc.egui_ctx);
@@ -710,8 +735,14 @@ impl PrimePhotoApp {
     }
 
     /// Whether this session runs on the demo fixtures.
+    #[cfg(debug_assertions)]
     pub(crate) fn is_demo(&self) -> bool {
         self.demo.is_some()
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn is_demo(&self) -> bool {
+        false
     }
 
     /// Note a side effect the demo mode deliberately suppresses.
@@ -729,9 +760,15 @@ impl PrimePhotoApp {
     /// Inside the demo an index without a fixture flag answers `false` (fail
     /// closed): the UI must never probe a real path for a folder the fixture
     /// does not describe.
+    #[cfg(debug_assertions)]
     pub(crate) fn demo_source_exists(&self, idx: usize) -> Option<bool> {
         let demo = self.demo.as_ref()?;
         Some(demo.source_exists.get(idx).copied().unwrap_or(false))
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn demo_source_exists(&self, _idx: usize) -> Option<bool> {
+        None
     }
 
     pub(crate) fn log(&self, msg: impl Into<String>) {
@@ -1216,6 +1253,7 @@ impl eframe::App for PrimePhotoApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Demo/screenshot step first: it consumes a screenshot answer and, in a
         // screenshot run, requests one after the UI has settled.
+        #[cfg(debug_assertions)]
         if let Some(demo) = self.demo.as_mut() {
             demo.handle_ui(ctx);
         }

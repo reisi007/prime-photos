@@ -76,17 +76,21 @@ nutzt nur `Sense::hover()`. Jeder Pfad, der einen Finder/Dialog öffnet, hängt 
 einem **Widget** (Kebab-Popup, Buttons), nie an einer leeren Fläche. Keinen solchen
 Handler also „der Vollständigkeit halber" ergänzen.
 
-## 7. Für Sichtprüfungen und Screenshots immer das Bundle bauen
+## 7. Bundle- und Fixture-Screenshots unterscheiden
 
 Das nackte, aus dem Terminal gestartete Binary hat **keine** `Info.plist` — es
 fehlt `NSHighResolutionCapable`, die Darstellung erscheint pixelig. Das gebaute
 `.app` (`packaging/make-app.sh`) ist retina-scharf.
 
-**Konsequenz:** UI-Sichtprüfungen und Screenshots **immer** über das Bundle, nie
-über die nackte Binary — sonst misst man Artefakte der Startmethode.
+Das `.app` aus `packaging/make-app.sh` ist für Retina-Sichtprüfungen der normalen
+Release-UI gedacht. Es wird als Release-Build erstellt und enthält deshalb den
+Demo-/Screenshot-Harness nicht.
 
-Für reproduzierbare Sichten ohne echte Sitzung/Fotordner gibt es die
-Demo-Datenquelle mit Screenshot-Harness: `docs/dev/UI_FIXTURES.md`.
+Reproduzierbare Fixture-Screenshots ohne echte Sitzung/Fotordner laufen dagegen
+mit `target/debug/prime-photos`. Die nackte Debug-Binary hat keine `Info.plist`
+und kann je nach Startweg unscharf sein; ihre Bilder sind kein Retina-Beleg für
+das Release-Bundle. Release-Binaries weisen Demo-Flags mit Exit-Code 2 ab.
+Anleitung: `docs/dev/UI_FIXTURES.md`.
 
 ## 8. Zwei Gates, die es (bewusst) nicht gibt
 

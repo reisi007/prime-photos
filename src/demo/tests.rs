@@ -13,6 +13,7 @@ fn demo(scenario: Scenario) -> Mode {
     Mode::Demo {
         scenario,
         size: DemoSize::INTERACTIVE,
+        language: None,
     }
 }
 
@@ -22,6 +23,7 @@ fn shot(scenario: Scenario, path: &str) -> Mode {
         scenario,
         path: PathBuf::from(path),
         size: DemoSize::SCREENSHOT,
+        language: None,
     }
 }
 
@@ -89,6 +91,7 @@ fn size_accepts_both_forms_and_both_defaults() {
         Ok(Mode::Demo {
             scenario: Scenario::Mixed,
             size,
+            language: None,
         })
     );
     // Attached form, uppercase separator and every combination order.
@@ -97,6 +100,7 @@ fn size_accepts_both_forms_and_both_defaults() {
         Ok(Mode::Demo {
             scenario: Scenario::Failures,
             size,
+            language: None,
         })
     );
     assert_eq!(
@@ -114,6 +118,7 @@ fn size_accepts_both_forms_and_both_defaults() {
                 width: 1000,
                 height: 700,
             },
+            language: None,
         })
     );
     // A `--demo` followed by `--size` must not consume the flag as a scenario.
@@ -125,8 +130,46 @@ fn size_accepts_both_forms_and_both_defaults() {
                 width: 800,
                 height: 600,
             },
+            language: None,
         })
     );
+}
+
+#[test]
+fn demo_language_is_optional_and_accepts_german_or_english() {
+    assert_eq!(
+        parse_args(&args(&["--demo", "--demo-language=en"])),
+        Ok(Mode::Demo {
+            scenario: Scenario::Mixed,
+            size: DemoSize::INTERACTIVE,
+            language: Some(crate::i18n::Lang::En),
+        })
+    );
+    assert_eq!(
+        parse_args(&args(&[
+            "--demo-language",
+            "DE",
+            "--screenshot=/tmp/de.png",
+        ])),
+        Ok(Mode::Screenshot {
+            scenario: Scenario::Mixed,
+            path: PathBuf::from("/tmp/de.png"),
+            size: DemoSize::SCREENSHOT,
+            language: Some(crate::i18n::Lang::De),
+        })
+    );
+
+    for invalid in ["fr", "en-US", ""] {
+        let err = parse_args(&args(&["--demo", "--demo-language", invalid]))
+            .expect_err("unsupported demo language");
+        assert!(err.contains("erwartet de oder en"), "{err}");
+    }
+    let err = parse_args(&args(&["--demo-language=en"]))
+        .expect_err("language without demo or screenshot");
+    assert!(err.contains("nur mit --demo oder --screenshot"), "{err}");
+    let err = parse_args(&args(&["--demo-list", "--demo-language=en"]))
+        .expect_err("list cannot select a demo language");
+    assert!(err.contains("--demo-list"), "{err}");
 }
 
 #[test]
@@ -163,6 +206,7 @@ fn size_is_validated_and_only_valid_for_demo_runs() {
                 width: 8192,
                 height: 8192,
             },
+            language: None,
         })
     );
     // A missing value is a usage error too, not a panic.

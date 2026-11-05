@@ -177,7 +177,7 @@ fn signed_in_scenarios_have_dummy_session_material() {
         );
         assert_eq!(fixture.config.country, "de");
         assert_eq!(fixture.config.language.as_deref(), Some("de"));
-        assert_eq!(fixture.account_name.as_deref(), Some("Alex Beispiel"));
+        assert_eq!(fixture.account_name.as_deref(), Some("Alex Example"));
     }
 }
 

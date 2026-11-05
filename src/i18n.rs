@@ -565,6 +565,11 @@ const EN: &[(&str, &str)] = &[
     ("© {} Prime Photos", "© {} Prime Photos"),
     ("Komponenten und Lizenztexte", "Components and license texts"),
     ("Icons und Grafiken", "Icons and graphics"),
+    // -- release CLI errors ----------------------------------------------
+    (
+        "Demo- und Screenshot-Argumente sind in Release-Builds nicht verfügbar: {}",
+        "Demo and screenshot arguments are unavailable in release builds: {}",
+    ),
 ];
 
 /// Context-qualified English entries for German keys that collide across
@@ -580,9 +585,9 @@ const EN_CONTEXT: &[(&str, &str, &str)] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{EN, Lang, lang_from_env_value, lang_from_locale_id};
+    use super::{EN, Lang, lang_from_env_value, lang_from_locale_id, tr_for};
     #[cfg(target_os = "macos")]
-    use super::{CONTEXT_NATIVE_MENU, EN_CONTEXT, tr_ctx_for, tr_for};
+    use super::{CONTEXT_NATIVE_MENU, EN_CONTEXT, tr_ctx_for};
     use std::collections::HashSet;
 
     /// Every German key must appear exactly once. The table is a linear lookup
@@ -597,6 +602,17 @@ mod tests {
                 "duplicate German key in EN table: {de:?}"
             );
         }
+    }
+
+    #[test]
+    fn release_demo_argument_error_is_localized() {
+        let key =
+            "Demo- und Screenshot-Argumente sind in Release-Builds nicht verfügbar: {}";
+        assert_eq!(tr_for(Lang::De, key), key);
+        assert_eq!(
+            tr_for(Lang::En, key),
+            "Demo and screenshot arguments are unavailable in release builds: {}"
+        );
     }
 
     /// Context entries are looked up linearly too, so `(context, key)` must be

@@ -17,7 +17,7 @@ See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
 
 ## Screenshots
 
-All screenshots come from the built-in demo fixtures (`--demo`), not from a real account; the folder paths and file names are synthetic.
+All screenshots use the debug-only demo fixtures with the English UI (`--demo-language=en`), not a real account; folder paths, names, and file names are synthetic.
 
 **Backup page** — running upload with a per-file queue, aggregate progress and the backup targets below:
 
@@ -79,7 +79,7 @@ Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §
 
 ## Build & run
 
-Requires Rust (edition 2024 ⇒ rustc ≥ 1.85). No CLI flags.
+Requires Rust (edition 2024 ⇒ rustc ≥ 1.85). Release builds have no CLI options; the debug-only demo harness is documented in [`docs/dev/UI_FIXTURES.md`](docs/dev/UI_FIXTURES.md).
 
 ```sh
 cargo build              # debug binary: target/debug/prime-photos
