@@ -68,9 +68,15 @@ with fixed row heights, and measured chrome dimensions.
   With enough room the queue keeps 72 px and the folder list 96 px. Tiny windows
   degrade to zero-height viewports without negative sizes; the allocation itself
   never overruns its budget, but a window smaller than the fixed chrome cannot
-  show every control. The folder list follows a disclosure toggle one frame
-  later: the transition frame keeps the previous layout budget (so the footer
-  never overruns), and the next frame applies the new split.
+  show every control. The folder header toggles after the frame's layout
+  snapshot. On opening, the queue uses its queue-only allocation and the cards
+  wait until the next frame applies the both-open split; drawing them sooner
+  would exceed that frame's budget and could push the footer down. On closing,
+  the folder list remains visible for the final frame in its existing both-open
+  viewport; the next frame applies the queue-only layout. The list height is
+  capped to actual remaining space minus the footer and its scroll area can
+  shrink to zero, preventing list overflow in tiny windows even though fixed
+  chrome may not all fit.
 - **Scroll-bug fix:** two `ScrollArea::vertical()` in the same parent `Ui`
   shared the scroll state: egui sets without `id_salt` the **constant**
   `Id::new("scroll_area")` (`scroll_area.rs:534`). Fix: **every** ScrollArea
@@ -264,10 +270,16 @@ with fixed row heights, and measured chrome dimensions.
   Fenster kleiner als das feste Chrome kann aber nicht alle Bedienelemente
   zeigen. Ist einer eingeklappt, belegt der andere den gesamten flexiblen Raum;
   das gespeicherte Verhältnis wird **nicht angewendet** und nicht verändert und
-  gilt wieder, wenn beide geöffnet sind. Die Ordnerliste folgt einem
-  Disclosure-Toggle einen Frame später: Der Übergangs-Frame behält das bisherige
-  Layout-Budget (damit die Fußzeile nie überläuft), und der nächste Frame wendet
-  die neue Aufteilung an. Der letzte offene Bereich kann nicht eingeklappt werden.
+  gilt wieder, wenn beide geöffnet sind. Der Ordnerkopf schaltet nach dem
+  Layout-Snapshot des Frames um. Beim Öffnen nutzt die Queue zunächst ihr
+  Queue-only-Budget; die Karten warten bis zum nächsten Frame mit der neuen
+  Aufteilung, damit sie nicht außerhalb des aktuellen Budgets liegen und die
+  Fußzeile nach unten drücken. Beim Schließen bleiben die Karten im letzten
+  Frame noch im bereits zugeteilten Beide-offen-Viewport sichtbar; im nächsten
+  Frame gilt das Queue-only-Layout. Die Listenhöhe wird auf den tatsächlichen
+  Platz abzüglich Fußzeile begrenzt und darf bis auf null sinken, damit die Liste
+  auch in winzigen Fenstern nicht überläuft, selbst wenn das feste Chrome dort
+  nicht vollständig sichtbar ist. Der letzte offene Bereich kann nicht eingeklappt werden.
 
 - **Scrollbalken-Reserve ist jetzt dauerhaft (Issue #30, ersetzt den Stand
   2026-10-17).** Die in `src/theme.rs` reservierte Breite für den schwebenden

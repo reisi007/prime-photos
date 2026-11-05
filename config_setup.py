@@ -4,11 +4,12 @@ Script to perform initial configuration setup for Prime Photos.
 Infers country from cookie names and provides default values.
 """
 
-import math
 import os
 import re
 import sys
 from pathlib import Path
+
+from config_toml import toml_scalar
 
 
 def get_config_path() -> Path:
@@ -142,33 +143,6 @@ def save_config(config: dict) -> None:
         f.write('\n'.join(toml_content))
 
     return config_path
-
-
-def toml_scalar(value) -> str:
-    """Serialize the scalar TOML values used by config.toml without changing types."""
-    # Keep in sync with config_update.py.
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if math.isnan(value):
-            return 'nan'
-        if math.isinf(value):
-            return 'inf' if value > 0 else '-inf'
-        return str(value)
-    if isinstance(value, str):
-        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
-        return f'"{escaped}"'
-    if isinstance(value, (list, tuple)):
-        return '[' + ', '.join(toml_scalar(item) for item in value) + ']'
-    if isinstance(value, dict):
-        entries = ', '.join(
-            f'{toml_scalar(str(key))} = {toml_scalar(item)}'
-            for key, item in value.items()
-        )
-        return '{ ' + entries + ' }' if entries else '{}'
-    raise TypeError(f'Unsupported TOML config value: {type(value).__name__}')
 
 
 def print_setup_summary(config_path: Path, country: str, zone: str):

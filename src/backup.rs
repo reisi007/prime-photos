@@ -674,12 +674,17 @@ fn section_is_open(ui: &egui::Ui, id: egui::Id, default_open: bool) -> bool {
 }
 
 /// Whether the folder list may draw in this frame. The folder header toggles
-/// *after* the split was computed, so the first frame of an open transition
-/// must keep the closed layout (no heading gap, no ScrollArea): otherwise the
-/// scroll area's trailing item spacing pushes the footer off the bottom. The
-/// list follows one frame later, when the layout state has caught up.
+/// *after* the split was computed: opening waits for the next frame's both-open
+/// split, while closing keeps the list for one final frame in its existing
+/// viewport. Drawing from the layout snapshot preserves that allocation; the
+/// actual-height cap below keeps the footer safe even in a tiny window.
 fn folder_list_draws(expanded: bool, expanded_for_layout: bool) -> bool {
-    expanded && expanded_for_layout
+    match (expanded, expanded_for_layout) {
+        (true, true) => true,   // stable open
+        (true, false) => false, // opening: wait for the new split
+        (false, true) => true,  // closing: draw in the old split for this frame
+        (false, false) => false, // stable closed
+    }
 }
 
 /// Draw a standard egui disclosure control and persist its open state. The
@@ -3436,7 +3441,9 @@ impl PrimePhotoApp {
 
         // Decide both viewport sizes before drawing either scroll area. With
         // both sections open, the saved ratio splits the flexible height; with
-        // one closed, the open section receives all of it.
+        // one closed, the open section receives all of it. The folder value is
+        // intentionally this pre-header snapshot: on close, its old viewport
+        // remains allocated for the folder list's final visible frame.
         let free = ui.available_height();
         let mut ratio = self.config.backup_queue_ratio();
         let (table_h, list_h) = page_heights_for_sections(
@@ -3662,20 +3669,24 @@ impl PrimePhotoApp {
         let (folders_expanded, _, _) =
             show_folder_section_header(ui, folders_section_id, queue_expanded);
 
-        // The header toggled *after* the split was computed. On the first frame
-        // of an open transition, keep the closed layout so the footer cannot be
-        // pushed off the bottom; the list follows one frame later.
+        // The header toggled *after* the split was computed. On open, defer the
+        // list until the next frame applies the both-open split, avoiding
+        // content outside this frame's queue-only allocation. On close, retain
+        // the list for this final frame in the old both-open allocation.
         let draw_folders = folder_list_draws(folders_expanded, folders_expanded_for_layout);
 
         // Air between the heading above and the card list below. The heading
         // zone and this gap are part of `QUEUE_BELOW_H`.
         ui.add_space(if draw_folders { FOLDER_HEADING_GAP } else { 0.0 });
 
-        // Do not draw the folder ScrollArea while collapsed: even
+        // Omit the folder ScrollArea when no folder viewport is allocated
+        // (stable collapsed or opening transition). Keep it for the final
+        // closing frame to consume its already allocated height. Even
         // `max_height(0)` consumes the trailing item spacing.
         if draw_folders {
-            // Cap against the actual remaining space as a guard if preceding
-            // page chrome consumes more than the planned list viewport.
+            // Cap against the actual remaining space, including on the final
+            // closing frame, so the footer cannot be pushed past the bottom if
+            // preceding chrome leaves less than the planned list viewport.
             let list_h = list_h.min((ui.available_height() - QUEUE_FOOTER_H).max(0.0));
             // The card labels keep the theme's vertical spacing; only the gap
             // *between* cards is compacted to `FOLDER_CARD_GAP` inside the list.
@@ -4311,10 +4322,10 @@ mod tests {
     }
 
     #[test]
-    fn folder_list_draw_waits_for_the_layout_state() {
+    fn folder_list_draws_the_previous_viewport_for_each_transition() {
         assert!(folder_list_draws(true, true));
-        assert!(!folder_list_draws(true, false)); // opening transition
-        assert!(!folder_list_draws(false, true)); // closing transition
+        assert!(!folder_list_draws(true, false)); // opening waits for the split
+        assert!(folder_list_draws(false, true)); // closing draws its final frame
         assert!(!folder_list_draws(false, false));
     }
 
@@ -4357,17 +4368,24 @@ mod tests {
     }
 
     #[test]
-    fn collapsed_allocation_preserves_the_saved_ratio() {
+    fn collapsed_allocation_ignores_ratio_and_reopening_applies_it() {
         let free = 900.0;
-        let saved = 0.7;
-        let collapsed = page_heights_for_sections(free, false, true, saved);
-        assert_eq!(collapsed, (0.0, free - FOLDER_ONLY_BELOW_H));
-        // The helper is pure: the collapsed frame neither reads nor rewrites
-        // the saved ratio, so reopening lands on exactly the same split.
-        assert_eq!(saved, 0.7);
+        let collapsed_at_min_ratio = page_heights_for_sections(free, false, true, 0.2);
+        let collapsed_at_max_ratio = page_heights_for_sections(free, false, true, 0.8);
         assert_eq!(
-            page_heights_for_sections(free, true, true, saved),
-            split_viewports(backup_split_splittable(free), saved)
+            collapsed_at_min_ratio,
+            (0.0, free - FOLDER_ONLY_BELOW_H)
+        );
+        assert_eq!(collapsed_at_min_ratio, collapsed_at_max_ratio);
+
+        // The collapsed allocator ignores the ratio; when both sections reopen,
+        // it applies whichever saved value the caller supplies.
+        let reopened_at_min_ratio = page_heights_for_sections(free, true, true, 0.2);
+        let reopened_at_saved_ratio = page_heights_for_sections(free, true, true, 0.7);
+        assert_ne!(reopened_at_min_ratio, reopened_at_saved_ratio);
+        assert_eq!(
+            reopened_at_saved_ratio,
+            split_viewports(backup_split_splittable(free), 0.7)
         );
     }
 

@@ -3,11 +3,12 @@
 Script to ingest cookies from browser session and update the config.toml file.
 """
 
-import math
 import os
 import re
 import sys
 from pathlib import Path
+
+from config_toml import toml_scalar
 
 
 def get_config_path() -> Path:
@@ -159,32 +160,6 @@ def parse_config_without_toml(content: str, defaults: dict) -> dict:
             if match:
                 config[key] = match.group(1)
     return config
-
-
-def toml_scalar(value) -> str:
-    """Serialize the scalar TOML values used by config.toml without changing types."""
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if math.isnan(value):
-            return 'nan'
-        if math.isinf(value):
-            return 'inf' if value > 0 else '-inf'
-        return str(value)
-    if isinstance(value, str):
-        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
-        return f'"{escaped}"'
-    if isinstance(value, (list, tuple)):
-        return '[' + ', '.join(toml_scalar(item) for item in value) + ']'
-    if isinstance(value, dict):
-        entries = ', '.join(
-            f'{toml_scalar(str(key))} = {toml_scalar(item)}'
-            for key, item in value.items()
-        )
-        return '{ ' + entries + ' }' if entries else '{}'
-    raise TypeError(f'Unsupported TOML config value: {type(value).__name__}')
 
 
 def main():

@@ -71,9 +71,16 @@ outcome.
   skipped). The ratio is used **only while both sections are open**. If exactly
   one section is collapsed, it receives all free viewport height and the saved
   ratio is **not applied** and never overwritten, so reopening restores it
-  unchanged. The folder list follows a disclosure toggle one frame later: the
-  transition frame keeps the previous layout budget (so the footer never
-  overruns), and the next frame applies the new split.
+  unchanged. The folder header toggles after that frame's layout snapshot. On
+  opening, the queue gets its queue-only allocation and the folder cards wait
+  until the next frame applies the both-open split; drawing them early would add
+  content outside that frame's budget and could push the footer down. On
+  closing, the cards remain visible for one final frame in their already
+  allocated both-open viewport, then disappear when the queue-only layout is
+  applied on the next frame. The list is capped to actual remaining space minus
+  the footer and permits a zero-height scroll viewport, so a tiny window cannot
+  make the list itself overflow; fixed chrome can still exceed what such a
+  window can show.
 - **At least one section stays open:** the disclosure controls enforce a hard
   invariant. A section may only close while the other one is open; if both
   persisted states are somehow closed, the queue header reopens itself before
@@ -315,10 +322,16 @@ outcome.
   Platz gelten **72/96 px** Mindesthöhen für Queue und Ordnerliste. Ist genau ein
   Bereich geschlossen, bekommt der offene den gesamten freien Viewport; das
   gespeicherte Verhältnis wird **nicht angewendet** und nicht verändert und gilt
-  beim Wiederöffnen beider Bereiche unverändert. Die Ordnerliste folgt einem
-  Disclosure-Toggle einen Frame später: Der Übergangs-Frame behält das bisherige
-  Layout-Budget (damit die Fußzeile nie überläuft), und der nächste Frame wendet
-  die neue Aufteilung an. Der letzte offene Bereich kann nicht geschlossen
+  beim Wiederöffnen beider Bereiche unverändert. Der Ordnerkopf schaltet erst
+  nach dem Layout-Snapshot des Frames um. Beim Öffnen erhält die Queue zunächst
+  das Queue-only-Budget; die Ordnerkarten warten bis zum nächsten Frame mit der
+  neuen Aufteilung, damit sie nicht außerhalb des aktuellen Budgets liegen und
+  die Fußzeile nach unten drücken. Beim Schließen bleiben die Karten im letzten
+  Frame noch im bereits zugeteilten Beide-offen-Viewport sichtbar; im nächsten
+  Frame gilt das Queue-only-Layout. Die Listenhöhe wird zusätzlich auf den
+  tatsächlichen Platz abzüglich Fußzeile begrenzt und darf bis auf null sinken:
+  so kann die Liste in winzigen Fenstern nicht überlaufen, auch wenn das feste
+  Chrome dort nicht vollständig sichtbar ist. Der letzte offene Bereich kann nicht geschlossen
   werden; sein Toggle ist deaktiviert und nicht tastaturfokussierbar. Sind beide
   gespeicherten Zustände geschlossen, öffnet der Queue-Kopf sich selbst.
   Fortschrittszusammenfassung und Ergebnisfußzeile

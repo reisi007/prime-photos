@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,6 +7,12 @@ from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).with_name("config_update.py")
+SCRIPT_DIR = str(MODULE_PATH.resolve().parent)
+if SCRIPT_DIR not in sys.path:
+    # These scripts are loaded by path below, so add their sibling-module
+    # directory explicitly for the shared serializer import.
+    sys.path.insert(0, SCRIPT_DIR)
+
 SPEC = importlib.util.spec_from_file_location("config_update", MODULE_PATH)
 config_update = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(config_update)
@@ -49,16 +56,30 @@ class ConfigUpdateTests(unittest.TestCase):
 
             self.assertIn("backup_queue_ratio = 0.35", path.read_text())
 
-    def test_toml_scalar_keeps_types_and_containers(self):
+    def test_both_scripts_use_the_same_toml_scalar_helper(self):
+        self.assertIs(config_update.toml_scalar, config_setup.toml_scalar)
+        self.assertEqual(config_update.toml_scalar.__module__, "config_toml")
+
+    def test_toml_scalar_keeps_types_and_nested_containers(self):
         self.assertEqual(config_update.toml_scalar(True), "true")
         self.assertEqual(config_update.toml_scalar(False), "false")
         self.assertEqual(config_update.toml_scalar(3), "3")
         self.assertEqual(config_update.toml_scalar(0.5), "0.5")
+        self.assertEqual(config_update.toml_scalar(float("nan")), "nan")
+        self.assertEqual(config_update.toml_scalar(float("inf")), "inf")
+        self.assertEqual(config_update.toml_scalar(float("-inf")), "-inf")
         self.assertEqual(config_update.toml_scalar('a"b\\c'), '"a\\"b\\\\c"')
         self.assertEqual(config_update.toml_scalar([1, "x"]), '[1, "x"]')
-        self.assertEqual(config_update.toml_scalar({"a": 1}), '{ "a" = 1 }')
+        self.assertEqual(config_update.toml_scalar((1, "x")), '[1, "x"]')
+        self.assertEqual(
+            config_update.toml_scalar({"a\"b\\c": (1, {"inner": ["x", True]})}),
+            '{ "a\\"b\\\\c" = [1, { "inner" = ["x", true] }] }',
+        )
         self.assertEqual(config_update.toml_scalar([]), "[]")
+        self.assertEqual(config_update.toml_scalar(()), "[]")
         self.assertEqual(config_update.toml_scalar({}), "{}")
+        with self.assertRaisesRegex(TypeError, "Unsupported TOML config value: set"):
+            config_update.toml_scalar({1, 2})
 
     def test_save_keeps_bool_int_and_list_types(self):
         with tempfile.TemporaryDirectory() as temp_dir:
