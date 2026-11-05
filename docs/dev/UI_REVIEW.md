@@ -105,9 +105,11 @@ BG = (0xF7, 0xF8, 0xF8)          # theme::PAGE_BG
 for png in sorted(OUT.glob("*.png")):
     im = Image.open(png).convert("RGB")
     w, h = im.size
-    # Rechte Kante: 1400 - 16 (Gutter) - 18 (Scrollbar) = 1366 Punkte
-    limit = w - 2 * (16 + 18) if "1400x900" in png.name else None
-    if limit:
+    if "1400x900" in png.name:
+        scale = w / 1400
+        # Einstellungen haben keine Scrollbar; andere Seiten reservieren 18 px.
+        reserve = 16 if png.name.startswith("settings-") else 16 + 18
+        limit = round(w - reserve * scale)
         right = max(x for y in range(h - 80) for x in range(w - 1, 440, -1)
                     if im.getpixel((x, y)) != BG)
         assert right <= limit, (png.name, right, limit)
@@ -115,8 +117,9 @@ for png in sorted(OUT.glob("*.png")):
 PY
 ```
 
-Die logische Grenze für 1400×900 ist **1366 Punkte** (= 2732 physische Pixel bei
-2×): 1400 minus 16 px Seitenrand minus 18 px Scrollbar-Reserve. Die
-Einstellungsseite hat keine Scrollbar und endet deshalb an der Seitenkante
-1384 (2768 Pixel). Der Trennstrich der Log-Leiste ist Panel-Chrome und wird
-nicht mitgemessen.
+Die PNG-Breite bestimmt die Skala (`Breite / 1400`): Bei 1× liegen die Grenzen
+für Queue-Seiten bei **1366 px** und für Einstellungen bei **1384 px**; bei 2×
+sind es **2732** bzw. **2768 physische Pixel**. Queue-Seiten reservieren 16
+logische Pixel Seitenrand plus 18 für die Scrollbar; Einstellungen haben keine
+Scrollbar und enden daher an der Seitenkante. Der Trennstrich der Log-Leiste ist
+Panel-Chrome und wird nicht mitgemessen.
