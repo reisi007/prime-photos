@@ -3,7 +3,9 @@ use crate::app_activation;
 use crate::app_menu;
 use crate::auth::TokenStore;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
-use crate::config::{Appearance, Config};
+use crate::config::Config;
+#[cfg(debug_assertions)]
+use crate::config::Appearance;
 use crate::countries::system_country;
 use crate::dedup::DedupIndex;
 #[cfg(debug_assertions)]
