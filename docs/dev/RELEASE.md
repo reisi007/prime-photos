@@ -443,19 +443,22 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (`VERSION=0.1.11`, `BUILD=11`, ad-hoc signiert
+2. **Bundle bauen** (`VERSION=0.2.0`, `BUILD=2`, ad-hoc signiert
    (`codesign --sign -`); eine andere Identität nur explizit über `CODESIGN_IDENTITY`):
 
    ```sh
-   VERSION=0.1.11 BUILD=11 ./packaging/make-app.sh
+   VERSION=0.2.0 BUILD=2 ./packaging/make-app.sh
    # Ergebnis: target/dist/Prime Photos.app
    ```
 
-3. **DMG** — im `target/dist/`, Volname `Prime Photos`:
+3. **DMG** — aus demselben Bundle, Volname `Prime Photos`; Quelle und Ergebnis liegen unter
+   `target/dist/`:
 
    ```sh
-   hdiutil create -volname "Prime Photos" -srcfolder "Prime Photos.app" -ov -format UDZO Prime-Photos-macos-arm64.dmg
-   hdiutil verify Prime-Photos-macos-arm64.dmg
+   hdiutil create -volname "Prime Photos" \
+     -srcfolder "target/dist/Prime Photos.app" -ov -format UDZO \
+     "target/dist/Prime-Photos-macos-arm64.dmg"
+   hdiutil verify "target/dist/Prime-Photos-macos-arm64.dmg"
    ```
 
    `hdiutil` meldet sich inzwischen selbst als veraltet und verweist auf einen Nachfolger —
@@ -1165,6 +1168,16 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   `bb6979a4cf27c4d3ea68c754966c1758e59cdbfacc00f793bc893a9a381aff19`). Es gab keinen
   Live-Upload zu Amazon. Ad-hoc-Signatur und fehlende Notarisierung bleiben die in §4–§6
   dokumentierten Grenzen.
+
+**Vorläufiger Stand v0.2.0 (2026-11-06; finale Release-Verifikation ausstehend):**
+
+- Die manuelle Release-Freigabe wurde erteilt. Der Debug-Screenshot
+  `target/Prime-Photos-0.2.0-smoke.png` wurde visuell geprüft.
+- Das initiale Bundle trug `0.2.0`; seine Ad-hoc-Signatur war gültig und es wurde lokal gestartet.
+  Das enthaltene Binary stammte zu diesem Zeitpunkt noch aus Cargo `0.1.11`.
+- Der finale Rebuild und die Prüfung des finalen Bundles, DMG-Erstellung/-Prüfung, Installation
+  sowie Veröffentlichung stehen noch aus. Entsprechende finale Belege werden erst nach ihrer
+  Durchführung ergänzt.
 
 ---
 
