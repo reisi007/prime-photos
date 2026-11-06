@@ -1169,7 +1169,7 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   Live-Upload zu Amazon. Ad-hoc-Signatur und fehlende Notarisierung bleiben die in §4–§6
   dokumentierten Grenzen.
 
-**Lokale macOS-Prüfung v0.2.0 (finale Veröffentlichung ausstehend):**
+**Release v0.2.0 (veröffentlicht):**
 
 - Die manuelle Freigabe durch den User in der UI wurde erteilt. Der Debug-Upload-Screenshot
   `target/Prime-Photos-0.2.0-smoke.png` wurde visuell geprüft.
@@ -1186,7 +1186,21 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 - **Binary-Identität:** SHA-256 des Binaries
   `5ccaf35b42047f718311479e352786adb97968645b870803d6682f4928419edc`; identisch im finalen
   Bundle.
-- Das GitHub-Release ist noch nicht veröffentlicht.
+- **GitHub-Release:** [v0.2.0](https://github.com/reisi007/prime-photos/releases/tag/v0.2.0),
+  veröffentlicht, **nicht** Draft und **nicht** Pre-Release.
+- **Release-CI:** [Actions-Lauf `42314387407`](https://github.com/reisi007/prime-photos/actions/runs/42314387407)
+  erfolgreich — `Build linux-x64`, `Build windows-x64` und `Publish GitHub Release`. Die SignPath-
+  und GPG-Schritte wurden übersprungen; es wurden keine SignPath- bzw. GPG-Signaturen erzeugt.
+- **Assets** (Name — Bytes — SHA-256-Digest laut GitHub):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 9.462.716 | `1a55a6af120b5edbccf496f2067ca48fc376b434368322c9d4123e7dafc2539e` |
+  | `Prime-Photos-linux-x64.tar.gz` | 12.602.574 | `a96cc358879378069544096d66adee0e987b038408058f76d7ccfbc08efab20b` |
+  | `Prime-Photos-macos-arm64.dmg` | 9.616.581 | `4b3352b2569ff70c90c4fcc4407b226ec94041c7b5b8f151d16cb83e2a7ac838` |
+  | `Prime-Photos-windows-x64.zip` | 8.720.631 | `1eb1520b91a2473aa5ecc3f434123f1abb8e05d0c2b5cbdda318f8adb83aa3c2` |
+
+  Der GitHub-Digest des macOS-DMG stimmt mit dem lokalen SHA-256 aus der obigen Prüfung überein.
 
 ---
 
