@@ -3,7 +3,7 @@ use crate::app_activation;
 use crate::app_menu;
 use crate::auth::TokenStore;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
-use crate::config::Config;
+use crate::config::{Appearance, Config};
 use crate::countries::system_country;
 use crate::dedup::DedupIndex;
 #[cfg(debug_assertions)]
@@ -364,15 +364,14 @@ impl PrimePhotoApp {
         cc: &eframe::CreationContext<'_>,
         mode: demo::Mode,
     ) -> Self {
-        if let Some((scenario, screenshot, language)) = mode.into_demo() {
+        if let Some((scenario, screenshot, language, theme_override)) = mode.into_demo() {
             Self::prepare(cc);
-            return Self::new_demo(cc, scenario, screenshot, language);
+            return Self::new_demo(cc, scenario, screenshot, language, theme_override);
         }
         Self::new(cc)
     }
 
     fn prepare(cc: &eframe::CreationContext<'_>) {
-        theme::apply(&cc.egui_ctx);
         // App activation (relaunch / switch-back) and the single-instance
         // handshake both only flag + wake the UI, so they get the context here
         // (see `src/app_activation.rs`, `src/single_instance.rs`).
@@ -390,6 +389,9 @@ impl PrimePhotoApp {
             Ok(c) => (c, None, true),
             Err(e) => (Config::default(), Some(e.to_string()), false),
         };
+        // Install the persisted appearance only after Config is loaded, before
+        // the first app frame can render.
+        theme::apply(&cc.egui_ctx, config.appearance);
         // Set the UI language before anything renders (or builds the tray).
         // `None` means "automatic": follow the system locale.
         let lang = config
@@ -641,10 +643,17 @@ impl PrimePhotoApp {
         scenario: demo::Scenario,
         screenshot: Option<PathBuf>,
         language: Option<i18n::Lang>,
+        theme_override: Option<Appearance>,
     ) -> Self {
         let lang = language.unwrap_or(i18n::Lang::De);
         i18n::set_lang(lang);
         let mut fixture = demo::fixture(scenario);
+        // Demo appearance is deterministic by default and never comes from the
+        // developer's persisted config. `system` is explicit in the CLI.
+        theme::apply(
+            &cc.egui_ctx,
+            theme_override.unwrap_or(Appearance::Light),
+        );
         if language.is_some() {
             fixture.config.language = Some(lang.code().to_string());
         }
@@ -1050,19 +1059,20 @@ impl PrimePhotoApp {
         icon: fn(&egui::Ui) -> egui::Image<'static>,
     ) {
         let selected = *current == value;
+        let colors = theme::palette(ui.visuals().dark_mode);
         let (rect, resp) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::click());
         let hovered = resp.hovered();
         let color = if selected || hovered {
-            theme::TEAL
+            colors.teal
         } else {
-            theme::MUTED
+            colors.muted
         };
         let painter = ui.painter();
         if selected {
-            painter.rect_filled(rect, 6.0, Color32::from_rgb(0xD6, 0xEC, 0xF0));
+            painter.rect_filled(rect, 6.0, colors.control_active_bg);
         } else if hovered {
-            painter.rect_filled(rect, 6.0, Color32::from_rgb(0xEF, 0xF3, 0xF3));
+            painter.rect_filled(rect, 6.0, colors.control_hover_bg);
         }
         // Fixed icon column so every label starts at the same x.
         let icon_rect = egui::Rect::from_center_size(
@@ -1076,7 +1086,7 @@ impl PrimePhotoApp {
             egui::Align2::LEFT_CENTER,
             label,
             egui::FontId::proportional(15.0),
-            theme::INK,
+            colors.ink,
         );
         // Report the hand-drawn row as a selectable button (Welle 5.2c): without
         // this the row has no accessibility role and no label. Purely semantic —
@@ -1109,7 +1119,10 @@ impl PrimePhotoApp {
                     screen,
                     8.0_f32,
                     Color32::from_rgba_unmultiplied(0, 0, 0, 110),
-                    egui::Stroke::new(2.0_f32, theme::TEAL),
+                    egui::Stroke::new(
+                        2.0_f32,
+                        theme::palette(ui.visuals().dark_mode).focus,
+                    ),
                     egui::StrokeKind::Inside,
                 );
                 painter.text(
@@ -1187,8 +1200,9 @@ impl PrimePhotoApp {
     /// logout button. Drawn once per frame (see the measured placement in
     /// [`Self::sidebar`]).
     fn sidebar_account(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::palette(ui.visuals().dark_mode);
         if let Some(e) = &self.config_error {
-            ui.label(RichText::new(e).color(theme::RED).size(11.0));
+            ui.label(RichText::new(e).color(colors.red).size(11.0));
             ui.add_space(4.0);
         }
         let logged_in = self.is_logged_in();
@@ -1212,20 +1226,12 @@ impl PrimePhotoApp {
             ui.add_space(10.0);
             ui.vertical(|ui| {
                 if logged_in {
-                    ui.label(
-                        RichText::new(tr("Angemeldet als:"))
-                            .size(11.0)
-                            .color(theme::MUTED),
-                    );
+                    ui.label(theme::muted(tr("Angemeldet als:")).size(11.0));
                     if let Some(name) = &self.avatar_name {
                         ui.label(RichText::new(name).size(13.0).strong());
                     }
                 }
-                ui.label(
-                    RichText::new(tr("Marktplatz"))
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
+                ui.label(theme::muted(tr("Marktplatz")).size(11.0));
                 ui.label(
                     RichText::new(format!(
                         "amazon.{}",
@@ -1240,7 +1246,10 @@ impl PrimePhotoApp {
         if logged_in {
             let w = ui.available_width();
             if ui
-                .add_sized([w, 26.0], theme::secondary_button(tr("Abmelden")))
+                .add_sized(
+                    [w, 26.0],
+                    theme::secondary_button(tr("Abmelden"), ui.visuals().dark_mode),
+                )
                 .clicked()
             {
                 self.logout();
@@ -1513,12 +1522,13 @@ impl eframe::App for PrimePhotoApp {
             // the page's last pixels. Shown first, it reserves its strip and the
             // page ends above it. The side panel stays first of all so the log
             // panel keeps its horizontal extent (right of the sidebar).
+            let colors = theme::palette(ctx.style().visuals.dark_mode);
             egui::SidePanel::left("nav")
                 .exact_width(220.0)
                 .resizable(false)
                 .frame(
                     egui::Frame::new()
-                        .fill(theme::SIDEBAR_BG)
+                        .fill(colors.sidebar_bg)
                         .inner_margin(egui::Margin::symmetric(
                             theme::SIDEBAR_MARGIN_X,
                             theme::SIDEBAR_MARGIN_Y,
@@ -1536,7 +1546,7 @@ impl eframe::App for PrimePhotoApp {
                 .min_height(24.0)
                 .frame(
                     egui::Frame::new()
-                        .fill(theme::PAGE_BG)
+                        .fill(colors.page_bg)
                         .inner_margin(egui::Margin::symmetric(theme::PAGE_MARGIN_X, 2)),
                 )
                 .show(ctx, |ui| {
@@ -1559,7 +1569,7 @@ impl eframe::App for PrimePhotoApp {
                         tr("Bereit").to_string()
                     };
                     egui::CollapsingHeader::new(
-                        RichText::new(summary).color(theme::INK).size(11.0),
+                        RichText::new(summary).color(colors.ink).size(11.0),
                     )
                         // Fixed id: `summary` changes with every counter / file / ETA
                         // update, so an id derived from the label would lose the
@@ -1591,7 +1601,7 @@ impl eframe::App for PrimePhotoApp {
             egui::CentralPanel::default()
                 .frame(
                     egui::Frame::new()
-                        .fill(theme::PAGE_BG)
+                        .fill(colors.page_bg)
                         .inner_margin(egui::Margin::symmetric(
                             theme::PAGE_MARGIN_X,
                             theme::PAGE_MARGIN_Y,
@@ -1759,8 +1769,12 @@ fn draw_avatar_image(ui: &mut egui::Ui, diameter: f32, tex: &egui::TextureHandle
     let dot = diameter * 0.17;
     let c = egui::pos2(rect.right() - dot * 0.9, rect.bottom() - dot * 0.9);
     let painter = ui.painter();
-    painter.circle_filled(c, dot + 1.6, Color32::WHITE);
-    painter.circle_filled(c, dot, theme::GREEN);
+    painter.circle_filled(
+        c,
+        dot + 1.6,
+        theme::palette(ui.visuals().dark_mode).panel_bg,
+    );
+    painter.circle_filled(c, dot, theme::palette(ui.visuals().dark_mode).green);
 }
 
 /// Decode avatar JPEG/PNG bytes into an egui texture. `None` on any decode

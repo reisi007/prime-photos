@@ -234,30 +234,36 @@ pub(crate) fn draw_flag_badge(
     tooltip: &str,
 ) {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(diameter, diameter), egui::Sense::hover());
-    paint_flag(ui.painter(), rect, country);
+    let colors = theme::palette(ui.visuals().dark_mode);
+    paint_flag(ui.painter(), rect, country, colors);
     // Presence dot, flipped to the lower-right like a status badge.
     let dot = diameter * 0.17;
     let c = egui::pos2(
         rect.right() - dot * 0.9,
         rect.bottom() - dot * 0.9,
     );
-    ui.painter().circle_filled(c, dot + 1.6, Color32::WHITE);
+    ui.painter().circle_filled(c, dot + 1.6, colors.panel_bg);
     ui.painter().circle_filled(
         c,
         dot,
-        if online { theme::GREEN } else { theme::RED },
+        if online { colors.green } else { colors.red },
     );
     resp.on_hover_text(tooltip);
 }
 
 /// Paint the marketplace flag into `rect` (round, or a country-code badge when
 /// the real flag needs an emblem we cannot honestly simplify).
-fn paint_flag(painter: &egui::Painter, rect: egui::Rect, country: &str) {
+fn paint_flag(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    country: &str,
+    colors: theme::Palette,
+) {
     let c = rect.center();
     let r = rect.width().min(rect.height()) / 2.0;
     let diameter = r * 2.0;
     let Some((bands, motifs)) = flag_for(country) else {
-        draw_code_badge(painter, c, r, country);
+        draw_code_badge(painter, c, r, country, colors);
         return;
     };
 
@@ -371,14 +377,20 @@ fn draw_flag_motif(painter: &egui::Painter, c: egui::Pos2, r: f32, m: &FlagMotif
 }
 
 /// Neutral badge with the uppercase country code (flags we do not approximate).
-fn draw_code_badge(painter: &egui::Painter, c: egui::Pos2, r: f32, country: &str) {
-    painter.circle_filled(c, r, theme::MUTED);
+fn draw_code_badge(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    r: f32,
+    country: &str,
+    colors: theme::Palette,
+) {
+    painter.circle_filled(c, r, colors.primary_bg);
     painter.text(
         c,
         egui::Align2::CENTER_CENTER,
         country.to_uppercase(),
         egui::FontId::proportional(r * 0.85),
-        Color32::WHITE,
+        colors.primary_fg,
     );
 }
 

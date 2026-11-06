@@ -17,11 +17,15 @@ See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
 
 ## Screenshots
 
-All screenshots use the debug-only demo fixtures with the English UI (`--demo-language=en`), not a real account; folder paths, names, and file names are synthetic.
+All screenshots use the debug-only demo fixtures with the English UI (`--demo-language=en`), not a real account; folder paths, names, and file names are synthetic. Light and dark captures use the deterministic `--demo-theme` override.
 
 **Backup page** — running upload with a per-file queue, aggregate progress and the backup targets below:
 
 ![Backup page with a running upload](docs/images/backup.png)
+
+**Backup page — dark mode:**
+
+![Backup page in dark mode with a running upload and backup targets](docs/images/backup-dark-en.png)
 
 **Errors and partial runs** — failed files, a folder with errors and the result breakdown:
 
@@ -30,6 +34,10 @@ All screenshots use the debug-only demo fixtures with the English UI (`--demo-la
 **Settings** — language, album, notifications, background sync, start-at-login and slow mode:
 
 ![Settings page](docs/images/settings.png)
+
+**Settings — dark mode:**
+
+![English General settings page in dark mode with appearance and upload options](docs/images/settings-dark-en.png)
 
 **Sign-in** — pick your Amazon marketplace once, then sign in through the embedded web view:
 
@@ -75,7 +83,7 @@ Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §
 - **One-off queue via drag & drop** (persisted so a restart resumes it).
 - **Tray icon**, **desktop notifications**, and an **About window with third-party licenses**.
 - **Background app**: closing the window hides it and keeps the app running, and the Dock icon follows the window — there while a window is open, gone while the app sits in the tray. Started at login it runs silently (no window, tray only). Bring the window back from the tray, by relaunching the app, or by a second launch. Only one instance runs at a time — a second launch shows the running window instead of opening a new one.
-- **UI language: German** (German/English i18n layer; the OS locale is the default).
+- **UI language and appearance:** German/English (OS locale by default) and System/Light/Dark themes (System follows OS appearance).
 
 ## Build & run
 

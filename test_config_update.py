@@ -1,3 +1,4 @@
+import builtins
 import importlib.util
 import sys
 import tempfile
@@ -32,6 +33,28 @@ class ConfigUpdateTests(unittest.TestCase):
 
         self.assertEqual(config["country"], "de")
         self.assertEqual(config["backup_queue_ratio"], 0.63)
+
+    def test_cookie_update_fallback_preserves_appearance_without_toml_modules(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "config.toml"
+            path.write_text(' appearance = "dark"\n')
+            original_import = builtins.__import__
+
+            def import_without_toml(name, *args, **kwargs):
+                if name in ("tomllib", "tomli"):
+                    raise ImportError("TOML parser deliberately unavailable")
+                return original_import(name, *args, **kwargs)
+
+            with patch.object(config_update, "get_config_path", return_value=path):
+                with patch("builtins.__import__", side_effect=import_without_toml):
+                    config = config_update.load_config()
+
+                config.update({"cookie_x_acb": "updated-cookie"})
+                config_update.save_config(config)
+
+            saved = path.read_text()
+            self.assertIn('appearance = "dark"', saved)
+            self.assertIn('cookie_x_acb = "updated-cookie"', saved)
 
     def test_save_keeps_queue_ratio_numeric_in_toml(self):
         with tempfile.TemporaryDirectory() as temp_dir:

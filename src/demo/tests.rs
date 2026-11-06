@@ -14,6 +14,7 @@ fn demo(scenario: Scenario) -> Mode {
         scenario,
         size: DemoSize::INTERACTIVE,
         language: None,
+        theme: None,
     }
 }
 
@@ -24,6 +25,7 @@ fn shot(scenario: Scenario, path: &str) -> Mode {
         path: PathBuf::from(path),
         size: DemoSize::SCREENSHOT,
         language: None,
+        theme: None,
     }
 }
 
@@ -92,6 +94,7 @@ fn size_accepts_both_forms_and_both_defaults() {
             scenario: Scenario::Mixed,
             size,
             language: None,
+            theme: None,
         })
     );
     // Attached form, uppercase separator and every combination order.
@@ -101,6 +104,7 @@ fn size_accepts_both_forms_and_both_defaults() {
             scenario: Scenario::Failures,
             size,
             language: None,
+            theme: None,
         })
     );
     assert_eq!(
@@ -119,6 +123,7 @@ fn size_accepts_both_forms_and_both_defaults() {
                 height: 700,
             },
             language: None,
+            theme: None,
         })
     );
     // A `--demo` followed by `--size` must not consume the flag as a scenario.
@@ -131,6 +136,7 @@ fn size_accepts_both_forms_and_both_defaults() {
                 height: 600,
             },
             language: None,
+            theme: None,
         })
     );
 }
@@ -143,6 +149,7 @@ fn demo_language_is_optional_and_accepts_german_or_english() {
             scenario: Scenario::Mixed,
             size: DemoSize::INTERACTIVE,
             language: Some(crate::i18n::Lang::En),
+            theme: None,
         })
     );
     assert_eq!(
@@ -156,6 +163,7 @@ fn demo_language_is_optional_and_accepts_german_or_english() {
             path: PathBuf::from("/tmp/de.png"),
             size: DemoSize::SCREENSHOT,
             language: Some(crate::i18n::Lang::De),
+            theme: None,
         })
     );
 
@@ -207,6 +215,7 @@ fn size_is_validated_and_only_valid_for_demo_runs() {
                 height: 8192,
             },
             language: None,
+            theme: None,
         })
     );
     // A missing value is a usage error too, not a panic.
@@ -220,6 +229,49 @@ fn size_is_validated_and_only_valid_for_demo_runs() {
     assert!(err.contains("nur mit --demo oder --screenshot"), "{err}");
     // `--demo-list` takes no size.
     let err = parse_args(&args(&["--demo-list", "--size=760x520"])).expect_err("list + size");
+    assert!(err.contains("--demo-list"), "{err}");
+}
+
+#[test]
+fn demo_theme_is_optional_and_accepts_system_light_or_dark() {
+    for (name, appearance) in [
+        ("system", crate::config::Appearance::System),
+        ("light", crate::config::Appearance::Light),
+        ("dark", crate::config::Appearance::Dark),
+    ] {
+        assert_eq!(
+            parse_args(&args(&["--demo", "--demo-theme", name])),
+            Ok(Mode::Demo {
+                scenario: Scenario::Mixed,
+                size: DemoSize::INTERACTIVE,
+                language: None,
+                theme: Some(appearance),
+            })
+        );
+    }
+    assert_eq!(
+        parse_args(&args(&["--demo-theme=dark", "--screenshot=/tmp/dark.png"])),
+        Ok(Mode::Screenshot {
+            scenario: Scenario::Mixed,
+            path: PathBuf::from("/tmp/dark.png"),
+            size: DemoSize::SCREENSHOT,
+            language: None,
+            theme: Some(crate::config::Appearance::Dark),
+        })
+    );
+
+    for invalid in ["", "auto", "Dark mode"] {
+        let err = parse_args(&args(&["--demo", "--demo-theme", invalid]))
+            .expect_err("unsupported demo theme");
+        assert!(err.contains("erwartet system, light oder dark"), "{err}");
+    }
+    let err = parse_args(&args(&["--demo-theme"])).expect_err("missing theme");
+    assert!(err.contains("erwartet system, light oder dark"), "{err}");
+    let err = parse_args(&args(&["--demo-theme=dark"]))
+        .expect_err("theme without demo or screenshot");
+    assert!(err.contains("nur mit --demo oder --screenshot"), "{err}");
+    let err = parse_args(&args(&["--demo-list", "--demo-theme=dark"]))
+        .expect_err("theme cannot be combined with list");
     assert!(err.contains("--demo-list"), "{err}");
 }
 

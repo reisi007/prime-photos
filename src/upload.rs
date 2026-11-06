@@ -242,16 +242,26 @@ pub(crate) fn should_reload_store(active: bool, dirty: bool) -> bool {
 /// state. The percentage lives in the card's second line
 /// ([`folder_progress_text`]), not here — the original's primary status carries
 /// no number either.
-pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, Color32) {
+#[cfg(test)]
+fn status_text(status: FolderStatus, total: usize) -> (String, Color32) {
+    status_text_for_theme(status, total, false)
+}
+
+pub(crate) fn status_text_for_theme(
+    status: FolderStatus,
+    total: usize,
+    dark: bool,
+) -> (String, Color32) {
+    let colors = theme::palette(dark);
     match status {
-        FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), theme::TEAL),
-        FolderStatus::Done => (tr("Datensicherung abgeschlossen").to_string(), theme::GREEN),
-        FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), theme::AMBER),
-        FolderStatus::NotFound => (tr("Ordner nicht gefunden").to_string(), theme::AMBER),
-        FolderStatus::Error => (tr("Fehler").to_string(), theme::RED),
-        FolderStatus::Scanning => (tr("Konfiguration wird durchgeführt").to_string(), theme::TEAL),
-        FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), theme::TEAL),
-        FolderStatus::Idle => (String::new(), theme::MUTED),
+        FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), colors.teal),
+        FolderStatus::Done => (tr("Datensicherung abgeschlossen").to_string(), colors.green),
+        FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), colors.amber),
+        FolderStatus::NotFound => (tr("Ordner nicht gefunden").to_string(), colors.amber),
+        FolderStatus::Error => (tr("Fehler").to_string(), colors.red),
+        FolderStatus::Scanning => (tr("Konfiguration wird durchgeführt").to_string(), colors.teal),
+        FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), colors.teal),
+        FolderStatus::Idle => (String::new(), colors.muted),
     }
 }
 
@@ -2477,13 +2487,22 @@ mod tests {
 
     #[test]
     fn status_colours_follow_the_alert_levels() {
-        use theme::{AMBER, GREEN, RED, TEAL};
-        assert_eq!(status_text(FolderStatus::Uploading, 0).1, TEAL);
-        assert_eq!(status_text(FolderStatus::Done, 0).1, GREEN);
-        assert_eq!(status_text(FolderStatus::Paused, 0).1, AMBER);
-        assert_eq!(status_text(FolderStatus::NotFound, 0).1, AMBER);
-        assert_eq!(status_text(FolderStatus::Error, 0).1, RED);
-        assert_eq!(status_text(FolderStatus::Scanning, 0).1, TEAL);
+        let light = theme::palette(false);
+        let dark = theme::palette(true);
+        assert_eq!(status_text(FolderStatus::Uploading, 0).1, light.teal);
+        assert_eq!(status_text(FolderStatus::Done, 0).1, light.green);
+        assert_eq!(status_text(FolderStatus::Paused, 0).1, light.amber);
+        assert_eq!(status_text(FolderStatus::NotFound, 0).1, light.amber);
+        assert_eq!(status_text(FolderStatus::Error, 0).1, light.red);
+        assert_eq!(status_text(FolderStatus::Scanning, 0).1, light.teal);
+        assert_eq!(
+            status_text_for_theme(FolderStatus::Uploading, 0, true).1,
+            dark.teal
+        );
+        assert_eq!(
+            status_text_for_theme(FolderStatus::Error, 0, true).1,
+            dark.red
+        );
     }
 
     #[test]

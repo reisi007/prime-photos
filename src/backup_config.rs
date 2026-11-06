@@ -61,7 +61,10 @@ impl PrimePhotoApp {
         ui.label(tr("Gesicherter Ordner:"));
         ui.horizontal(|ui| {
             ui.label(theme::muted(crate::text::nfc(&form.path.display().to_string())));
-            let change = ui.add_enabled(!editing, theme::secondary_button(tr("Ändern …")));
+            let change = ui.add_enabled(
+                !editing,
+                theme::secondary_button(tr("Ändern …"), ui.visuals().dark_mode),
+            );
             if change.clicked() {
                 // Do not block the UI with the native dialog (Welle 5.1): the
                 // app opens it asynchronously and writes the picked folder back
@@ -136,16 +139,28 @@ impl PrimePhotoApp {
 
         if let Some(err) = &form.error {
             ui.add_space(6.0);
-            ui.colored_label(theme::RED, err);
+            ui.colored_label(theme::palette(ui.visuals().dark_mode).red, err);
         }
 
         ui.add_space(12.0);
         ui.separator();
         ui.horizontal(|ui| {
-            if ui.add(theme::primary_button(tr("Speichern"))).clicked() {
+            if ui
+                .add(theme::primary_button(
+                    tr("Speichern"),
+                    ui.visuals().dark_mode,
+                ))
+                .clicked()
+            {
                 action = Some(ConfigFormAction::Save);
             }
-            if ui.add(theme::secondary_button(tr("Abbrechen"))).clicked() {
+            if ui
+                .add(theme::secondary_button(
+                    tr("Abbrechen"),
+                    ui.visuals().dark_mode,
+                ))
+                .clicked()
+            {
                 action = Some(ConfigFormAction::Cancel);
             }
         });

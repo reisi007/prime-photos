@@ -926,7 +926,7 @@ impl PrimePhotoApp {
                 .exact_height(HEADER_H)
                 .frame(
                     egui::Frame::new()
-                        .fill(theme::SIDEBAR_BG)
+                        .fill(theme::palette(ctx.style().visuals.dark_mode).sidebar_bg)
                         .inner_margin(egui::Margin::symmetric(16, 8)),
                 )
                 .show(ctx, |ui| {
@@ -940,11 +940,20 @@ impl PrimePhotoApp {
                         ui.with_layout(
                             egui::Layout::right_to_left(egui::Align::Center),
                             |ui| {
-                                if ui.add(theme::secondary_button(tr("Abbrechen"))).clicked() {
+                                if ui
+                                    .add(theme::secondary_button(
+                                        tr("Abbrechen"),
+                                        ui.visuals().dark_mode,
+                                    ))
+                                    .clicked()
+                                {
                                     cancel = true;
                                 }
                                 if let Some(e) = &self.login.error {
-                                    ui.colored_label(theme::RED, e);
+                                    ui.colored_label(
+                                        theme::palette(ui.visuals().dark_mode).red,
+                                        e,
+                                    );
                                 } else {
                                     ui.spinner();
                                 }
@@ -969,7 +978,7 @@ impl PrimePhotoApp {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::new()
-                    .fill(theme::PAGE_BG)
+                    .fill(theme::palette(ctx.style().visuals.dark_mode).page_bg)
                     .inner_margin(egui::Margin::symmetric(
                         theme::PAGE_MARGIN_X,
                         theme::PAGE_MARGIN_Y,
@@ -1032,19 +1041,25 @@ impl PrimePhotoApp {
             );
             ui.add_space(14.0);
 
-            if ui.add(theme::primary_button(tr("Mit Amazon anmelden"))).clicked() {
+            if ui
+                .add(theme::primary_button(
+                    tr("Mit Amazon anmelden"),
+                    ui.visuals().dark_mode,
+                ))
+                .clicked()
+            {
                 self.pending_login = true;
             }
             if let Some(e) = &self.login.error {
                 ui.add_space(6.0);
-                ui.colored_label(theme::RED, e);
+                ui.colored_label(theme::palette(ui.visuals().dark_mode).red, e);
             }
             // A failed config save (e.g. right after signing out) must stay
             // visible on the sign-in screen — the sidebar that normally shows
             // `config_error` is not rendered here (user decision 2026-10-16).
             if let Some(e) = &self.config_error {
                 ui.add_space(6.0);
-                ui.colored_label(theme::RED, e);
+                ui.colored_label(theme::palette(ui.visuals().dark_mode).red, e);
             }
         });
     }

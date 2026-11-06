@@ -31,6 +31,9 @@ cargo build --locked
 # Interaktive Demo, Szenario "mixed", 1200×800 (Standard: Deutsch)
 target/debug/prime-photos --demo
 
+# Reproduzierbar hell (Demo- und Screenshot-Standard, unabhängig vom Host-Theme)
+target/debug/prime-photos --demo --demo-theme=light
+
 # Interaktive Demo eines bestimmten Szenarios
 target/debug/prime-photos --demo=uploading
 target/debug/prime-photos --demo all-done
@@ -44,13 +47,21 @@ target/debug/prime-photos --demo-language=en \
 target/debug/prime-photos --demo=failures --demo-language=en \
     --screenshot="$PWD/target/prime-demo-failures.png"
 
+# Dark-mode screenshot; `--demo-theme=system` uses native eframe/winit input
+target/debug/prime-photos --demo=settings --demo-language=en --demo-theme=dark \
+    --screenshot="$PWD/target/prime-demo-settings-dark.png"
+
 # Screenshot in einer bestimmten Fenstergröße (Punkte, Minimum 760×520)
 target/debug/prime-photos --demo=mixed --demo-language=en --size 760x520 \
     --screenshot="$PWD/target/prime-demo-mixed-760.png"
 ```
 
 `--demo-language=en` (oder `de`) betrifft nur diesen Debug-Lauf; ohne Angabe
-bleibt das bisherige deutsche Demo-Default erhalten. Release-Binaries weisen
+bleibt das bisherige deutsche Demo-Default erhalten. `--demo-theme=light|dark|system`
+setzt das Erscheinungsbild nur für diesen Lauf. Ohne Angabe ist das Demo-Theme
+Light, damit Screenshots unabhängig vom Entwicklerrechner reproduzierbar sind;
+`system` folgt dem nativen Theme aus eframe/winit. Kein Theme-Wert wird aus
+`config.toml` gelesen oder dorthin geschrieben. Release-Binaries weisen
 jede Option aus `--demo*`, `--screenshot*` oder `--size*` vor dem Fensterstart
 mit einer lokalisierten Meldung und Exit-Code 2 zurück.
 
@@ -115,6 +126,7 @@ Ein Demo-Lauf ist **nicht** destruktiv und hat keine Außenwirkung:
 | Bereich | Verhalten |
 |---|---|
 | `config.toml` | wird weder gelesen noch geschrieben (`save_config`, Anmelde-Start und Logout sind No-Ops). |
+| Theme-Präferenz | der Demo-Override kommt nur aus `--demo-theme`; die Präferenz der echten Installation wird weder gelesen noch geändert. |
 | `folders.toml` | wird nicht geladen; die Fixtures ersetzen den Store, ein Reload im `update` ist abgeschaltet. |
 | Keychain | kein Lesezugriff, kein Löschen (`poll_session`/`logout` sind gesperrt). |
 | SQLite (`dedup.sqlite3`) | wird nicht geöffnet — auch nicht für eine wiederhergestellte Einmal-Sicherung (`resume_one_time` gesperrt). |
@@ -177,7 +189,8 @@ damit ein späterer Frame den Erfolg nicht in einen Timeout umdeutet.
 - Argumente: alle Formen (`--demo`, `--demo=<id>`, `--demo <id>`,
   `--screenshot <Pfad>`, `--screenshot=<Pfad>`, `--size WxH`/
   `--size=WxH`, Kombination, Reihenfolge), optionale Demo-Sprache
-  (`--demo-language=de|en`), Off ohne Argumente, `--demo-list`
+  (`--demo-language=de|en`), Demo-Theme (`--demo-theme=system|light|dark`),
+  Off ohne Argumente, `--demo-list`
   (eigener Modus; zusätzliche oder kombinierte Argumente sind ein Fehler),
   Injektionen wie `-psn_0_…` (Normalstart bleibt möglich), relative
   Screenshot-Pfade, unbekannte Argumente und Szenarien (Fehler enthalten die

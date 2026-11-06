@@ -111,18 +111,27 @@ pub(crate) fn about_window(ctx: &egui::Context, open: &mut bool, license_open: &
                     Some(sha) => format!("{} ({sha})", env!("CARGO_PKG_VERSION")),
                     None => env!("CARGO_PKG_VERSION").to_string(),
                 };
-                ui.label(RichText::new(tr1("Version: {}", version)).color(theme::MUTED));
+                ui.label(theme::muted(tr1("Version: {}", version)));
             });
             ui.add_space(8.0);
             ui.vertical_centered(|ui| {
                 if ui
-                    .add(theme::secondary_button(tr("Drittanbieterlizenzen")))
+                    .add(theme::secondary_button(
+                        tr("Drittanbieterlizenzen"),
+                        ui.visuals().dark_mode,
+                    ))
                     .clicked()
                 {
                     show_licenses = true;
                 }
                 ui.add_space(6.0);
-                if ui.add(theme::primary_button(tr("Schließen"))).clicked() {
+                if ui
+                    .add(theme::primary_button(
+                        tr("Schließen"),
+                        ui.visuals().dark_mode,
+                    ))
+                    .clicked()
+                {
                     close = true;
                 }
             });
@@ -131,7 +140,7 @@ pub(crate) fn about_window(ctx: &egui::Context, open: &mut bool, license_open: &
                 ui.label(
                     RichText::new(tr1("© {} Prime Photos", current_year()))
                         .size(11.0)
-                        .color(theme::MUTED),
+                        .weak(),
                 );
             });
         });

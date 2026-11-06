@@ -9,7 +9,7 @@ use crate::login::Session;
 use crate::theme;
 use crate::upload::{
     FileState, QueueEntry, UploadShared, calculate_pct, folder_progress_text, outcome_text,
-    run_upload, status_text, upload_progress_text,
+    run_upload, status_text_for_theme, upload_progress_text,
 };
 use eframe::egui::{self, RichText};
 // NOTE: `notify` is the filesystem-event crate — not `crate::notify`, the
@@ -481,7 +481,7 @@ fn draw_queue_table_header(ui: &mut egui::Ui, cols: QueueColumns) -> (egui::Rect
     ui.painter().hline(
         divider.x_range(),
         divider.center().y,
-        egui::Stroke::new(1.0_f32, theme::BORDER),
+        egui::Stroke::new(1.0_f32, theme::palette(ui.visuals().dark_mode).border),
     );
     (header_row.response.rect, divider)
 }
@@ -773,7 +773,10 @@ fn show_section_header(
             ui.painter().rect_stroke(
                 header_rect.expand(2.0),
                 egui::CornerRadius::same(3),
-                egui::Stroke::new(1.5_f32, crate::theme::TEAL),
+                egui::Stroke::new(
+                    1.5_f32,
+                    crate::theme::palette(ui.visuals().dark_mode).focus,
+                ),
                 egui::StrokeKind::Outside,
             );
         }
@@ -831,12 +834,13 @@ fn show_backup_splitter(ui: &mut egui::Ui, ratio: f32, splittable_h: f32) -> (f3
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
+    let colors = theme::palette(ui.visuals().dark_mode);
     let grip_color = if response.dragged() || response.has_focus() {
-        theme::TEAL
+        colors.focus
     } else if response.hovered() {
-        theme::MUTED
+        colors.muted
     } else {
-        theme::BORDER
+        colors.border
     };
     let grip = egui::Rect::from_center_size(rect.center(), egui::vec2(48.0, 2.0));
     ui.painter().rect_filled(grip, 1.0, grip_color);
@@ -2900,7 +2904,13 @@ impl PrimePhotoApp {
                 ui.checkbox(&mut remember, remember_label.as_str());
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.add(theme::primary_button(tr("Ignorieren"))).clicked() {
+                    if ui
+                        .add(theme::primary_button(
+                            tr("Ignorieren"),
+                            ui.visuals().dark_mode,
+                        ))
+                        .clicked()
+                    {
                         answer = Some(ConflictResolution::Ignore);
                     }
                     if ui.button(tr("Als neue Datei speichern")).clicked() {
@@ -3186,13 +3196,17 @@ impl PrimePhotoApp {
     }
 
     pub(crate) fn backup_ui(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::palette(ui.visuals().dark_mode);
         // Background sync (PORT-5): starts the supervising timer once we are
         // signed in; from then on this is a cheap no-op.
         self.ensure_background_sync();
 
         ui.horizontal(|ui| {
             if ui
-                .add(theme::primary_button(tr("Datensicherung hinzufügen …")))
+                .add(theme::primary_button(
+                    tr("Datensicherung hinzufügen …"),
+                    ui.visuals().dark_mode,
+                ))
                 .clicked()
             {
                 self.add_backup_folder(ui.ctx());
@@ -3213,7 +3227,7 @@ impl PrimePhotoApp {
                     // with no run active it blocks the background sync, and a
                     // pure drag & drop run has no persisted folders either.
                     !self.store.folders.is_empty() || running,
-                    theme::secondary_button(label),
+                    theme::secondary_button(label, ui.visuals().dark_mode),
                 )
                 .clicked()
             {
@@ -3408,7 +3422,8 @@ impl PrimePhotoApp {
         let side_ws: Vec<f32> = rows
             .iter()
             .map(|r| {
-                let (status_txt, status_col) = status_text(r.status, r.total);
+                let (status_txt, status_col) =
+                    status_text_for_theme(r.status, r.total, ui.visuals().dark_mode);
                 let mut ignored = Vec::new();
                 let side_w = {
                     let mut probe = ui.new_child(
@@ -3485,18 +3500,18 @@ impl PrimePhotoApp {
                     // as the coarse state. The whole visible string is
                     // one i18n key — never assembled from two parts.
                     let (txt, col): (String, egui::Color32) = match e.state {
-                        FileState::Waiting => (tr("Warten").to_string(), theme::MUTED),
+                        FileState::Waiting => (tr("Warten").to_string(), colors.muted),
                         FileState::Uploading => {
                             let pct = calculate_pct(e.size, e.bytes_sent);
                             if pct > 0 {
-                                (tr1("In Bearbeitung · {}%", pct), theme::TEAL)
+                                (tr1("In Bearbeitung · {}%", pct), colors.teal)
                             } else {
-                                (tr("In Bearbeitung").to_string(), theme::TEAL)
+                                (tr("In Bearbeitung").to_string(), colors.teal)
                             }
                         }
-                        FileState::Done => (tr("Abgeschlossen").to_string(), theme::GREEN),
-                        FileState::Failed => (tr("Fehlgeschlagen").to_string(), theme::RED),
-                        FileState::Skipped => (tr("Übersprungen").to_string(), theme::MUTED),
+                        FileState::Done => (tr("Abgeschlossen").to_string(), colors.green),
+                        FileState::Failed => (tr("Fehlgeschlagen").to_string(), colors.red),
+                        FileState::Skipped => (tr("Übersprungen").to_string(), colors.muted),
                     };
                     // A long name is truncated in the cell; the full
                     // path shows on hover (§7.3).
@@ -3729,10 +3744,11 @@ impl PrimePhotoApp {
                     )));
                 }
                 for (i, r) in rows.iter().enumerate() {
-                    let (status_txt, status_col) = status_text(r.status, r.total);
+                    let (status_txt, status_col) =
+                        status_text_for_theme(r.status, r.total, ui.visuals().dark_mode);
                     egui::Frame::new()
-                        .fill(theme::CARD_BG)
-                        .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
+                        .fill(colors.card_bg)
+                        .stroke(egui::Stroke::new(1.0_f32, colors.border))
                         .corner_radius(6.0)
                         .inner_margin(egui::Margin::symmetric(
                             theme::PAGE_MARGIN_X,
@@ -3815,7 +3831,7 @@ impl PrimePhotoApp {
             // reserved footer area is `QUEUE_TABLE_TRAILING_H` +
             // `POST_LIST_GAP` + `FOOTER_GAP` + `FOOTER_LINE_H`.
             ui.add_space(FOOTER_GAP);
-            ui.label(RichText::new(outcome).color(theme::INK).size(11.0));
+            ui.label(RichText::new(outcome).color(colors.ink).size(11.0));
         }
     }
 }
@@ -4075,7 +4091,7 @@ mod tests {
         fn measure_themed_ui(draw: impl FnOnce(&mut egui::Ui) -> f32) -> f32 {
             let ctx = egui::Context::default();
             let mut draw = Some(draw);
-            theme::apply(&ctx);
+            theme::apply(&ctx, crate::config::Appearance::System);
             let mut measured = None;
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(

@@ -359,6 +359,8 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Fehler", "Error"),
     ("Downloads", "Downloads"),
+    ("Darstellung", "Appearance"),
+    ("Dunkel", "Dark"),
     (
         "Downloads sind in diesem Port noch nicht implementiert.",
         "Downloads are not implemented in this port yet.",
@@ -368,6 +370,7 @@ const EN: &[(&str, &str)] = &[
         "Applies to new upload targets and to drag & drop.",
     ),
     ("Gleichzeitige Uploads", "Concurrent uploads"),
+    ("Hell", "Light"),
     (
         "Hinweis: Die Begrenzung wird pro Datei nach dem Upload angewendet.",
         "Note: the limit is applied per file after the upload.",
@@ -398,6 +401,7 @@ const EN: &[(&str, &str)] = &[
         "Starts Prime Photos automatically when you sign in to your system.",
     ),
     ("Sprache", "Language"),
+    ("System (automatisch)", "System (automatic)"),
     ("Upload", "Upload"),
     ("Upload-Rate pro Datei", "Upload rate per file"),
     ("Uploads", "Uploads"),
@@ -613,6 +617,19 @@ mod tests {
             tr_for(Lang::En, key),
             "Demo and screenshot arguments are unavailable in release builds: {}"
         );
+    }
+
+    #[test]
+    fn appearance_settings_are_translated() {
+        for (source, expected) in [
+            ("Darstellung", "Appearance"),
+            ("System (automatisch)", "System (automatic)"),
+            ("Hell", "Light"),
+            ("Dunkel", "Dark"),
+        ] {
+            assert_eq!(tr_for(Lang::De, source), source);
+            assert_eq!(tr_for(Lang::En, source), expected);
+        }
     }
 
     /// Context entries are looked up linearly too, so `(context, key)` must be

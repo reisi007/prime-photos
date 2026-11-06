@@ -100,6 +100,7 @@ def load_config() -> dict:
         'cookie_ubid_acb': '',
         'cookie_x_amz_access_token': '',
         'backup_queue_ratio': 0.35,
+        'appearance': 'system',
     }
 
     if config_path.exists():
@@ -155,7 +156,7 @@ def parse_config_without_toml(content: str, defaults: dict) -> dict:
                 except ValueError:
                     pass
         elif isinstance(default, str):
-            pattern = rf'^{re.escape(key)}\s*=\s*["\']([^"\']*)["\']'
+            pattern = rf'^[ \t]*{re.escape(key)}[ \t]*=[ \t]*["\']([^"\']*)["\']'
             match = re.search(pattern, content, re.MULTILINE)
             if match:
                 config[key] = match.group(1)

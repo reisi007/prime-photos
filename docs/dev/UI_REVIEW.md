@@ -42,6 +42,14 @@ done
 "$BIN" --demo=failures --size 760x520  --screenshot="$OUT/failures-760x520.png"
 "$BIN" --demo=failures --size 760x700  --screenshot="$OUT/failures-760x700.png"
 "$BIN" --demo=signed-out --size 760x520 --screenshot="$OUT/signed-out-760x520.png"
+
+# Theme-Abnahme: beide Seiten in beiden Themes, English and deterministic
+for theme in light dark; do
+  "$BIN" --demo=settings --demo-language=en --demo-theme="$theme" \
+      --size 1400x900 --screenshot="$OUT/settings-${theme}-1400x900.png"
+  "$BIN" --demo=mixed --demo-language=en --demo-theme="$theme" \
+      --size 1400x900 --screenshot="$OUT/mixed-${theme}-1400x900.png"
+done
 ```
 
 | Zustand | Größe |
@@ -50,6 +58,7 @@ done
 | `mixed` | 760×520 und 1000×700 |
 | `failures` | 760×520 und 760×700 |
 | `signed-out` | 760×520 |
+| `settings` and `mixed` | 1400×900 in both `light` and `dark` (`--demo-theme`) |
 
 ## Prüfung pro Zustand
 
@@ -90,6 +99,19 @@ Die ersten sieben Zustände sind die Backup-Seite, dazu `settings`/
   die Seite hat den Hintergrund `#F7F8F8`, Karten bleiben weiß.
 - [ ] **Einstellungen**: Tab-Zeile und Trennlinien beginnen am Seitenrand
   (x = 236) und enden an der Seitenkante (x = 1384); kein Redesign.
+- [ ] **Beide Themes**: Settings, Backup, Dialoge und Statusanzeigen haben
+  passende dunkle/helle Flächen; keine alten hellen Karten oder dunklen Texte
+  auf dunklen Oberflächen.
+- [ ] **Kontrast**: normaler Text einschließlich gedämpfter und semantischer
+  Statusfarben erreicht mindestens **4.5:1**; bedeutungsvolle Control-Ränder,
+  Slider-Schienen und Fokusindikatoren mindestens **3:1**. Die Palette-Tests
+  berechnen die WCAG-Kontrastwerte für Hell und Dunkel; die Screenshots prüfen
+  zusätzlich sichtbare Hover-/Fokuszustände. Die geprüften Palettenfarben sind
+  opak; bei einem künftigen Alpha-Farbwert muss zuerst die tatsächliche
+  Compositing-Farbe über der jeweiligen Oberfläche berechnet werden.
+- [ ] **Slider**: die 1–8 Upload-Parallelität lässt sich per Maus ziehen,
+  aktive und inaktive Schiene sind klar unterscheidbar, und der exakte
+  ganzzahlige Wert bleibt sichtbar.
 
 ## Automatisierte Randprüfung
 

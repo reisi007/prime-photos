@@ -39,6 +39,8 @@ pub(crate) use scenario::Scenario;
 
 use std::path::PathBuf;
 
+use crate::config::Appearance;
+
 // ---------------------------------------------------------------------------
 // Command line
 // ---------------------------------------------------------------------------
@@ -55,6 +57,7 @@ pub(crate) enum Mode {
         scenario: Scenario,
         size: DemoSize,
         language: Option<crate::i18n::Lang>,
+        theme: Option<Appearance>,
     },
     /// Fixtures, one captured frame, then exit. The path must be absolute so
     /// the process can write it regardless of its working directory.
@@ -63,6 +66,7 @@ pub(crate) enum Mode {
         path: PathBuf,
         size: DemoSize,
         language: Option<crate::i18n::Lang>,
+        theme: Option<Appearance>,
     },
 }
 
@@ -145,20 +149,27 @@ impl Mode {
     /// optional screenshot target. `None` means "do not start the app".
     pub(crate) fn into_demo(
         self,
-    ) -> Option<(Scenario, Option<PathBuf>, Option<crate::i18n::Lang>)> {
+    ) -> Option<(
+        Scenario,
+        Option<PathBuf>,
+        Option<crate::i18n::Lang>,
+        Option<Appearance>,
+    )> {
         match self {
             Mode::Off | Mode::List => None,
             Mode::Demo {
                 scenario,
                 language,
+                theme,
                 ..
-            } => Some((scenario, None, language)),
+            } => Some((scenario, None, language, theme)),
             Mode::Screenshot {
                 scenario,
                 path,
                 language,
+                theme,
                 ..
-            } => Some((scenario, Some(path), language)),
+            } => Some((scenario, Some(path), language, theme)),
         }
     }
 }
@@ -177,6 +188,7 @@ pub(crate) fn usage() -> &'static str {
                                         Demo in einer bestimmten Fenstergröße (760x520…8192x8192)
   prime-photos --demo --demo-language en
                                         Demo-Sprache wählen (de oder en; Standard: de)
+  prime-photos --demo-theme=dark       Darstellung wählen (system, light oder dark)
 
 Der Screenshot-Pfad muss absolut sein. Die Demo liest und schreibt weder
 config.toml noch Keychain, SQLite oder Netzwerk.
@@ -195,6 +207,8 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
     let mut size: Option<DemoSize> = None;
     let mut demo_language: Option<crate::i18n::Lang> = None;
     let mut demo_language_requested = false;
+    let mut demo_theme: Option<Appearance> = None;
+    let mut demo_theme_requested = false;
     let mut demo_requested = false;
     let mut list_requested = false;
     // Tokens that are not ours at all. Launchers inject such arguments (macOS
@@ -231,6 +245,19 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
             demo_language = Some(parse_demo_language(value)?);
             demo_language_requested = true;
             i += 1;
+        } else if let Some(value) = arg.strip_prefix("--demo-theme=") {
+            demo_theme = Some(parse_demo_theme(value)?);
+            demo_theme_requested = true;
+        } else if arg == "--demo-theme" {
+            let value = args
+                .get(i + 1)
+                .filter(|next| !next.starts_with('-'))
+                .ok_or_else(|| {
+                    arg_error("--demo-theme erwartet system, light oder dark".to_string())
+                })?;
+            demo_theme = Some(parse_demo_theme(value)?);
+            demo_theme_requested = true;
+            i += 1;
         } else if let Some(value) = arg.strip_prefix("--screenshot=") {
             screenshot = Some(absolute_screenshot_path(value)?);
         } else if arg == "--screenshot" {
@@ -261,9 +288,14 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
     }
 
     if list_requested {
-        if demo_requested || screenshot.is_some() || size.is_some() || demo_language_requested {
+        if demo_requested
+            || screenshot.is_some()
+            || size.is_some()
+            || demo_language_requested
+            || demo_theme_requested
+        {
             return Err(arg_error(
-                "--demo-list kann nicht mit --demo/--demo-language/--screenshot/--size kombiniert werden"
+                "--demo-list kann nicht mit --demo/--demo-language/--demo-theme/--screenshot/--size kombiniert werden"
                     .to_string(),
             ));
         }
@@ -292,6 +324,10 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
         return Err(arg_error(
             "--demo-language ist nur mit --demo oder --screenshot gültig".to_string(),
         ));
+    } else if demo_theme_requested {
+        return Err(arg_error(
+            "--demo-theme ist nur mit --demo oder --screenshot gültig".to_string(),
+        ));
     }
 
     match screenshot {
@@ -302,11 +338,13 @@ pub(crate) fn parse_args(args: &[String]) -> Result<Mode, String> {
             path,
             size: size.unwrap_or(DemoSize::SCREENSHOT),
             language: demo_language,
+            theme: demo_theme,
         }),
         None if demo_requested => Ok(Mode::Demo {
             scenario: scenario.unwrap_or(Scenario::Mixed),
             size: size.unwrap_or(DemoSize::INTERACTIVE),
             language: demo_language,
+            theme: demo_theme,
         }),
         // `Mode::Off` with foreign arguments: the normal app ignores them.
         None => Ok(Mode::Off),
@@ -317,6 +355,14 @@ fn parse_demo_language(value: &str) -> Result<crate::i18n::Lang, String> {
     crate::i18n::Lang::from_code(value).ok_or_else(|| {
         arg_error(format!(
             "Unbekannte Demo-Sprache: {value} (erwartet de oder en)"
+        ))
+    })
+}
+
+fn parse_demo_theme(value: &str) -> Result<Appearance, String> {
+    Appearance::from_code(value).ok_or_else(|| {
+        arg_error(format!(
+            "Unbekanntes Demo-Theme: {value} (erwartet system, light oder dark)"
         ))
     })
 }
