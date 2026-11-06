@@ -1169,15 +1169,24 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   Live-Upload zu Amazon. Ad-hoc-Signatur und fehlende Notarisierung bleiben die in §4–§6
   dokumentierten Grenzen.
 
-**Vorläufiger Stand v0.2.0 (2026-11-06; finale Release-Verifikation ausstehend):**
+**Lokale macOS-Prüfung v0.2.0 (finale Veröffentlichung ausstehend):**
 
-- Die manuelle Release-Freigabe wurde erteilt. Der Debug-Screenshot
+- Die manuelle Freigabe durch den User in der UI wurde erteilt. Der Debug-Upload-Screenshot
   `target/Prime-Photos-0.2.0-smoke.png` wurde visuell geprüft.
-- Das initiale Bundle trug `0.2.0`; seine Ad-hoc-Signatur war gültig und es wurde lokal gestartet.
-  Das enthaltene Binary stammte zu diesem Zeitpunkt noch aus Cargo `0.1.11`.
-- Der finale Rebuild und die Prüfung des finalen Bundles, DMG-Erstellung/-Prüfung, Installation
-  sowie Veröffentlichung stehen noch aus. Entsprechende finale Belege werden erst nach ihrer
-  Durchführung ergänzt.
+- **Finaler Quellstand:** Commit `6407bb3`. Der Cargo-Build meldete `prime-photos v0.2.0`.
+- **Finales Bundle:** erstellt unter
+  `target/dist-0.2.0-final/Prime Photos.app`; Version `0.2.0`, Build `2`, ad-hoc signiert,
+  Codesignatur gültig.
+- **DMG:** `target/dist-0.2.0-final/Prime-Photos-macos-arm64.dmg`; `hdiutil verify` meldete
+  **VALID**. SHA-256:
+  `4b3352b2569ff70c90c4fcc4407b226ec94041c7b5b8f151d16cb83e2a7ac838`.
+- **Installation und Start:** Die finale App wurde nach `/Applications/Prime Photos.app`
+  installiert. `codesign --verify --strict` war erfolgreich; die installierte App meldete Version
+  `0.2.0`, Build `2`. Der Prozess mit PID `36380` wurde gestartet.
+- **Binary-Identität:** SHA-256 des Binaries
+  `5ccaf35b42047f718311479e352786adb97968645b870803d6682f4928419edc`; identisch im finalen
+  Bundle.
+- Das GitHub-Release ist noch nicht veröffentlicht.
 
 ---
 
