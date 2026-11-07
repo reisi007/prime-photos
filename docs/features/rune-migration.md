@@ -9,13 +9,26 @@ settings-only Rune fixture is not an app cutover.
 
 - Rune is pinned to `53c7f60f51ce12bd5da53145d9d86ce1552324e4`.
 - Rune is an optional dependency behind `rune-ui-spike` and is not enabled by
-  default. The source module and argument routing are debug-only; Rune runs
-  only when headless `--snap`, `--tree`, or `--script` tooling is requested. It
-  starts with fixture defaults and does not read or write the user's config,
-  keychain, folders, or account data.
-- No Rune interactive window is exposed. A normal debug or release launch
-  remains the existing Prime Photos app, including the login, backup, tray,
-  single-instance, and activation paths.
+  default. The source module and argument routing are debug-only. Headless
+  fixtures start with fixture defaults and do not read or write the user's
+  config, keychain, folders, or account data.
+- The default launch is still the existing eframe Prime Photos app, including
+  login, backup, tray, single-instance, and activation paths. No cutover or
+  second end-user UI mode has been made.
+- Two explicit interactive developer routes are available only in debug builds
+  with `rune-ui-spike`: `--rune-login` and `--rune-wry-smoke`. The production
+  login route reads the existing config only after the explicit route is
+  selected, and it does not access the keychain or make auth requests until the
+  user clicks its production sign-in action. It uses the existing
+  `WebviewLogin` navigation handler, PKCE portal URL, authorization-code
+  redemption, token/keyring write, and in-memory session install. Closing or
+  cancelling releases its Wry child.
+- `--rune-wry-smoke` is a separate local-only Wry route. Its page is embedded
+  HTML with synthetic text, no external assets or HTTP(S) URLs, and it does not
+  load app config/keychain state or perform authentication/network requests.
+  Both Rune routes use the same child-WebView owner, Rune logical bounds and
+  teardown path. Rune's standard native Edit menu supplies Copy/Paste where the
+  platform supports that menu path.
 - The settings fixture covers only General and Bandwidth settings. It is
   useful for component experiments and is not production persistence or UI
   parity.
@@ -60,11 +73,19 @@ same app:
    backup empty/uploading/failure, and both settings tabs. Existing eframe demo
    screenshots are not Rune parity evidence.
 
-The current macOS Wry child-view spike proves only that a child can be created;
-visible rendering, resize/DPI, focus, keyboard, clipboard and lifecycle remain
-unverified. Rune's macOS tray is not used here; retain the app's existing
-`tray-icon` integration and prove it against Rune's app lifecycle before
-cutover. Do not claim Windows or Linux runtime parity from macOS-only testing.
+The integrated local-only `--rune-wry-smoke` route was manually verified on
+macOS: the Rune window rendered its embedded page at 960×680 and after resizing
+to 1050×760; focus and keyboard input were visible, and the native Edit menu's
+Copy/Paste worked with the page's synthetic sample. The screenshot evidence is
+local under `target/rune-wry-integration-*.png`. No production sign-in action
+was clicked and no authentication request or real account data was used. This
+verifies the shared Rune/Wry child host, not the production login portal or
+full auth lifecycle. The earlier standalone probe's bounds change from
+720×472 to 900×632 likewise does not establish production-login or
+cross-platform parity. Rune's macOS tray is not used here; retain the app's
+existing `tray-icon` integration and prove it against Rune's app lifecycle
+before cutover. Do not claim Windows or Linux runtime parity from macOS-only
+testing.
 
 ## Rune feature choices and tradeoffs
 
@@ -90,4 +111,5 @@ the intended desktop replacement / integration checks:
   rasterizes SVG assets with `build.rs`; audio features are not needed.
 
 The feature stays opt-in until the full direct replacement is ready. Do not add
-a `--rune-settings` flag or another interactive preview mode.
+a `--rune-settings` flag or another production-like interactive mode; the two
+routes above remain developer-only verification tools.

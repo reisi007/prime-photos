@@ -6,8 +6,9 @@ license = "MIT OR Apache-2.0"
 
 [features]
 default = []
-# Temporary, headless-only Rune migration spike. It is compiled only into debug
-# builds and is not the application UI or a user-selectable preview mode.
+# Opt-in Rune migration spike. Interactive login and local Wry verification
+# routes are dispatched only in debug builds with this feature enabled; eframe
+# remains the normal application UI pending full Rune parity.
 rune-ui-spike = ["dep:rune"]
 
 [dependencies]

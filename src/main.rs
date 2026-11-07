@@ -32,7 +32,12 @@ mod rune_settings;
 mod rune_login;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 mod rune_backup;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+mod rune_production_login;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+mod rune_wry_smoke;
 mod rune_fixture;
+mod wry_host;
 
 use app::PrimePhotoApp;
 use eframe::egui;
@@ -41,8 +46,9 @@ use rune_fixture::is_rune_fixture_or_tooling_arg;
 
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 use rune_fixture::{
-    RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, is_malformed_rune_fixture_arg,
-    rune_backup_fixture_args, rune_settings_fixture_args, strip_rune_login_fixture_arg,
+    RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG,
+    RUNE_WRY_SMOKE_FLAG, is_malformed_rune_fixture_arg, rune_backup_fixture_args,
+    rune_interactive_route_args, rune_settings_fixture_args, strip_rune_login_fixture_arg,
 };
 
 /// Window/dock icon, from the build-time 1024-px raster of `assets/logo.svg`
@@ -92,6 +98,45 @@ fn main() -> eframe::Result<()> {
     }
 
     #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+    {
+        let login_args = match rune_interactive_route_args(&args, RUNE_PRODUCTION_LOGIN_FLAG) {
+            Ok(args) => args,
+            Err(message) => {
+                eprintln!("Prime Photos Rune login route: {message}");
+                std::process::exit(2);
+            }
+        };
+        let smoke_args = match rune_interactive_route_args(&args, RUNE_WRY_SMOKE_FLAG) {
+            Ok(args) => args,
+            Err(message) => {
+                eprintln!("Prime Photos Wry smoke route: {message}");
+                std::process::exit(2);
+            }
+        };
+        match (login_args, smoke_args) {
+            (Some(_), Some(_)) => {
+                eprintln!("Rune interactive routes cannot be combined.");
+                std::process::exit(2);
+            }
+            (Some(route_args), None) => {
+                if let Err(message) = rune_production_login::run(route_args) {
+                    eprintln!("Prime Photos Rune login route: {message}");
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            (None, Some(route_args)) => {
+                if let Err(message) = rune_wry_smoke::run(route_args) {
+                    eprintln!("Prime Photos Wry smoke route: {message}");
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            (None, None) => {}
+        }
+    }
+
+    #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
     match rune_backup_fixture_args(args.clone()) {
         Ok(Some(rune_args)) => {
             if let Err(message) = rune_backup::run(rune_args) {
@@ -123,16 +168,16 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
-    #[cfg(all(debug_assertions, not(feature = "rune-ui-spike")))]
+    #[cfg(not(all(debug_assertions, feature = "rune-ui-spike")))]
     if let Some(arg) = args.iter().find(|arg| is_rune_fixture_or_tooling_arg(arg)) {
         eprintln!(
-            "Rune fixture/tooling options are unavailable without a debug build with `--features rune-ui-spike`: {arg}"
+            "Rune routes, fixtures, and tooling are unavailable without a debug build with `--features rune-ui-spike`: {arg}"
         );
         std::process::exit(2);
     }
 
-    // Rune remains a headless-only migration fixture; it is not an
-    // interactive preview or an application start mode.
+    // This remaining Rune Settings migration fixture is headless-only;
+    // interactive login and Wry verification routes are dispatched above.
     #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
     match rune_settings_fixture_args(args.clone()) {
         Ok(Some(rune_args)) => {

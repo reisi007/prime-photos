@@ -34,6 +34,25 @@ the app** in an embedded web view — same window, no external browser, no CDP.
 - An invalidated session clears the tokens and returns to the sign-in screen —
   no app restart required.
 
+## Rune verification route (Issue #49)
+
+The normal app continues to use eframe. In a debug build with
+`--features rune-ui-spike`, the explicit `--rune-login` route presents the
+branded sign-in chrome in a Rune window and hosts the same production Wry child
+login flow. It reuses the existing PKCE URL construction, navigation-code
+capture, `/auth/register` redemption, keyring refresh-token write, and in-memory
+session/cookie handling; it is not a second auth implementation. Opening the
+route loads the existing config, but the keychain and auth/network path are not
+used until the user explicitly clicks “Mit Amazon anmelden”. Closing or
+cancelling releases the child WebView. This developer route does not change the
+default launcher or establish Rune parity/cutover.
+
+The separate `--rune-wry-smoke` route loads embedded synthetic HTML only. It
+does not read config or keychain data and does not make network requests. It is
+for local verification of WebKit rendering, resize, keyboard focus/input, and
+the native Edit menu's Copy/Paste path where supported; it contains no
+production sign-in action.
+
 ## Decisions
 
 - **Name/Rename (user decision 2026-10-13):** Project, git repo and app are
@@ -43,7 +62,9 @@ the app** in an embedded web view — same window, no external browser, no CDP.
   the project directory is renamed to `prime-photos`. The old config folder
   is migrated **once, locally, by hand** (no migration code in the app).
 
-- **GUI framework:** egui/eframe (native ARM, single binary).
+- **GUI framework:** egui/eframe (native ARM, single binary) remains the normal
+  app host. The explicit debug-only Rune routes above are verification tools,
+  not an alternate end-user mode or a cutover.
 
 - **Auth (GUI):** Embedded WKWebView login, **in the same window as the app**
   (like the original). egui's window hosts a wry `WKWebView` child view; no

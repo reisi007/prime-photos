@@ -15,13 +15,12 @@
 //! `WebView::cookies` is synchronous and blocks the macOS main thread, so it
 //! cannot be read from egui's `update` — the device path never needs it.
 
-use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
-use wry::{Rect, WebView, WebViewBuilder};
+use wry::{Rect, WebViewBuilder};
 
 use crate::app::{PrimePhotoApp, HEADER_H};
 use crate::auth::{self, Pkce, TokenStore};
@@ -30,11 +29,6 @@ use crate::i18n::tr;
 use crate::login;
 use crate::theme;
 use eframe::egui::{self, RichText};
-
-thread_local! {
-    /// The login webview lives on the main thread only (a WebKit requirement).
-    static WEBVIEW: RefCell<Option<WebView>> = const { RefCell::new(None) };
-}
 
 /// The **sign-in completion signal** of the device flow: the authorization code
 /// carried as `openid.oa2.authorization_code` on a `/ap/` navigation (original
@@ -88,6 +82,8 @@ pub struct WebviewLogin {
     /// Result of the device redemption, written by the background task,
     /// together with the generation it belongs to.
     device_result: Arc<Mutex<Option<(u64, Result<DeviceLogin, String>)>>>,
+    /// Optional Rune wakeup; eframe already drives its own frame loop.
+    wakeup: Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>,
     /// Incremented on every new login attempt; guards against a stale
     /// redemption result landing in a newer attempt.
     login_generation: u64,
@@ -107,8 +103,14 @@ impl WebviewLogin {
             pkce: None,
             auth_code: Arc::new(Mutex::new(None)),
             device_result: Arc::new(Mutex::new(None)),
+            wakeup: Arc::new(Mutex::new(None)),
             login_generation: 0,
         }
+    }
+
+    #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+    pub(crate) fn set_wakeup(&mut self, wakeup: Arc<dyn Fn() + Send + Sync>) {
+        *self.wakeup.lock().unwrap() = Some(wakeup);
     }
 
     /// Create the webview as a child of `window`, filling `bounds`.
@@ -127,11 +129,15 @@ impl WebviewLogin {
         *self.device_result.lock().unwrap() = None;
         self.login_generation += 1;
         let auth_code = Arc::clone(&self.auth_code);
+        let wakeup = Arc::clone(&self.wakeup);
         match WebViewBuilder::new()
             .with_bounds(bounds)
             .with_navigation_handler(move |url: String| match extract_authorization_code(&url) {
                 Some(code) => {
                     *auth_code.lock().unwrap() = Some(code);
+                    if let Some(wakeup) = wakeup.lock().unwrap().clone() {
+                        wakeup();
+                    }
                     false
                 }
                 None => true,
@@ -147,9 +153,18 @@ impl WebviewLogin {
                 }
                 match wv.load_url(url) {
                     Ok(()) => {
-                        WEBVIEW.with(|slot| *slot.borrow_mut() = Some(wv));
-                        self.running = true;
-                        self.error = None;
+                        match crate::wry_host::install(wv) {
+                            Ok(()) => {
+                                self.running = true;
+                                self.error = None;
+                            }
+                            Err(e) => {
+                                log::warn!("Anmelde-WebView konnte nicht gehostet werden: {e}");
+                                self.error = Some(
+                                    tr("Anmeldeseite konnte nicht geöffnet werden.").to_string(),
+                                );
+                            }
+                        }
                     }
                     Err(e) => {
                         log::warn!("Anmeldeseite konnte nicht geladen werden: {e}");
@@ -167,17 +182,11 @@ impl WebviewLogin {
 
     /// Keep the webview aligned with the area the UI reserved for it.
     pub fn set_bounds(&self, bounds: Rect) {
-        WEBVIEW.with(|slot| {
-            if let Some(wv) = slot.borrow().as_ref() {
-                let _ = wv.set_bounds(bounds);
-            }
-        });
+        crate::wry_host::set_bounds(bounds);
     }
 
     pub fn cancel(&mut self) {
-        WEBVIEW.with(|slot| {
-            slot.borrow_mut().take();
-        });
+        crate::wry_host::close();
         self.running = false;
     }
 
@@ -515,6 +524,188 @@ pub(crate) async fn session_worker(
 
 // -- login --------------------------------------------------------------
 
+pub(crate) enum LoginPoll {
+    Idle,
+    Redeeming,
+    Succeeded,
+    Failed,
+}
+
+/// Start the production PKCE portal against whichever native window owns it.
+/// Both eframe and the developer-only Rune host use this exact URL builder and
+/// `WebviewLogin` navigation handler.
+pub(crate) fn start_device_login<W: HasWindowHandle>(
+    login: &mut WebviewLogin,
+    config: &mut crate::config::Config,
+    window: &W,
+    bounds: Rect,
+) {
+    if login.running {
+        return;
+    }
+    if config.device_serial.is_empty() {
+        config.device_serial = auth::new_device_serial();
+    }
+    let pkce = Pkce::generate();
+    let client_id = auth::client_id(&config.device_serial, auth::DEVICE_TYPE);
+    let url = crate::urls::auth_portal_url(
+        &config.country,
+        &client_id,
+        &pkce.challenge,
+        crate::urls::portal_language(&config.country),
+    );
+    login.pkce = Some(pkce);
+    login.start(window, &url, bounds);
+}
+
+/// Shared completion/redeem path for the eframe app and Rune's explicit
+/// developer login window. No request is started until the navigation handler
+/// has captured a real authorization code from the production portal.
+pub(crate) fn poll_login_flow(
+    login: &mut WebviewLogin,
+    config: &mut crate::config::Config,
+    session: &Arc<Mutex<Session>>,
+    runtime: &tokio::runtime::Runtime,
+    config_error: &mut Option<String>,
+    persist_config: bool,
+) -> LoginPoll {
+    if let Some(result) = login.take_device_result() {
+        if !login.running {
+            return LoginPoll::Idle;
+        }
+        match result {
+            Ok(device_login) => {
+                let cookies_minted = device_login.cookies.is_some();
+                {
+                    let mut session = session.lock().unwrap();
+                    if let Some(cookies) = &device_login.cookies {
+                        apply_parsed_cookies(config, &mut session.cookies, cookies);
+                    }
+                    install_login_session(
+                        &mut session,
+                        device_login.register.refresh_token.clone(),
+                        device_login.register.access_token.clone(),
+                        device_login.register.expires_in,
+                        cookies_minted,
+                        Instant::now(),
+                    );
+                }
+                if persist_config {
+                    match config.save() {
+                        Ok(_) => {}
+                        Err(e) => {
+                            log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
+                            *config_error = Some(
+                                tr("Die Einstellungen konnten nicht gespeichert werden.")
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                login.cancel();
+                return LoginPoll::Succeeded;
+            }
+            Err(e) => {
+                login.error = Some(
+                    tr("Die Anmeldung wurde von Amazon abgelehnt. Bitte erneut versuchen.")
+                        .to_string(),
+                );
+                log::warn!("{e}");
+                login.cancel();
+                return LoginPoll::Failed;
+            }
+        }
+    }
+
+    if login.running {
+        if let Some(code) = login.take_auth_code() {
+            let Some(pkce) = login.take_pkce() else {
+                log::warn!("Anmeldecode ohne PKCE-Paket – verworfen");
+                login.cancel();
+                return LoginPoll::Failed;
+            };
+            let country = config.country.clone();
+            let serial = config.device_serial.clone();
+            let client_id = auth::client_id(&serial, auth::DEVICE_TYPE);
+            let language = crate::urls::portal_language(&country).to_string();
+            let slot = Arc::clone(&login.device_result);
+            let wakeup = Arc::clone(&login.wakeup);
+            let my_generation = login.login_generation;
+            runtime.spawn(async move {
+                let client = reqwest::Client::new();
+                // A single-use code is retried only while the request never
+                // reached the server; a counted server response spends it.
+                let mut offline_passes = 0u32;
+                let result: Result<DeviceLogin, String> = loop {
+                    match auth::register_device(
+                        &client,
+                        &country,
+                        &language,
+                        &serial,
+                        &code,
+                        &pkce.verifier,
+                        &client_id,
+                    )
+                    .await
+                    {
+                        Ok(outcome) => {
+                            if let Err(e) = auth::KeyringTokenStore.save(&outcome.refresh_token) {
+                                log::warn!(
+                                    "Refresh-Token konnte nicht im Schlüsselbund gespeichert werden: {e}"
+                                );
+                            }
+                            break match auth::fetch_auth_cookies(
+                                &client,
+                                &country,
+                                &language,
+                                &outcome.refresh_token,
+                            )
+                            .await
+                            {
+                                Ok(cookies) => Ok(DeviceLogin {
+                                    register: outcome,
+                                    cookies: Some(cookies),
+                                }),
+                                Err(e) => {
+                                    log::warn!(
+                                        "Cookies konnten nach der Anmeldung nicht abgerufen werden: {e}"
+                                    );
+                                    Ok(DeviceLogin {
+                                        register: outcome,
+                                        cookies: None,
+                                    })
+                                }
+                            };
+                        }
+                        Err(e) if !auth::counts_as_attempt(&e) => {
+                            offline_passes += 1;
+                            if offline_passes >= auth::REGISTER_MAX_ATTEMPTS {
+                                break Err(e.to_string());
+                            }
+                            log::warn!(
+                                "Einlösen fehlgeschlagen (offline {offline_passes}/{}): {e}",
+                                auth::REGISTER_MAX_ATTEMPTS
+                            );
+                            tokio::time::sleep(Duration::from_secs(
+                                auth::TICK_INTERVAL_SECONDS,
+                            ))
+                            .await;
+                        }
+                        Err(e) => break Err(e.to_string()),
+                    }
+                };
+                *slot.lock().unwrap() = Some((my_generation, result));
+                if let Some(wakeup) = wakeup.lock().unwrap().clone() {
+                    wakeup();
+                }
+            });
+            return LoginPoll::Redeeming;
+        }
+    }
+
+    LoginPoll::Idle
+}
+
 impl PrimePhotoApp {
     pub(crate) fn cancel_login(&mut self) {
         self.login.cancel();
@@ -704,28 +895,11 @@ impl PrimePhotoApp {
     /// parameters the page receives follow the original's desktop flow
     /// (`docs/original/SPEC_LOGIN.md` § 3.3).
     pub(crate) fn begin_login(&mut self, frame: &eframe::Frame, ctx: &egui::Context) {
-        if self.login.running {
-            return;
-        }
-        // Normally already set by the bootstrap in `App::new`; keep the safety
-        // net so a hand-edited `config.toml` cannot break the flow.
-        if self.config.device_serial.is_empty() {
-            self.config.device_serial = auth::new_device_serial();
-        }
-        let pkce = Pkce::generate();
-        let client_id = auth::client_id(&self.config.device_serial, auth::DEVICE_TYPE);
-        let url = crate::urls::auth_portal_url(
-            &self.config.country,
-            &client_id,
-            &pkce.challenge,
-            crate::urls::portal_language(&self.config.country),
-        );
-        self.login.pkce = Some(pkce);
         let screen = ctx.screen_rect();
         // Start just below an estimated header; the exact bounds are corrected
         // on the next frame once the header has been measured.
         let bounds = login::rect(0.0, HEADER_H, screen.width(), screen.height() - HEADER_H);
-        self.login.start(frame, &url, bounds);
+        start_device_login(&mut self.login, &mut self.config, frame, bounds);
     }
 
     pub(crate) fn poll_login(&mut self) {
@@ -736,170 +910,18 @@ impl PrimePhotoApp {
             self.demo_skip("Anmelde-Status abfragen");
             return;
         }
-        // (1) The device redemption (background task) reported back.
-        if let Some(result) = self.login.take_device_result() {
-            // The user cancelled while the task ran: drop the result.
-            if !self.login.running {
-                return;
-            }
-            match result {
-                Ok(dl) => {
-                    // Cookies may be absent: the register succeeded but the
-                    // follow-up cookie fetch failed. That is a **valid** login;
-                    // the cookie retry is scheduled separately from the
-                    // access-token appointment derived from `expires_in`.
-                    let cookies_minted = dl.cookies.is_some();
-                    if let Some(cookies) = &dl.cookies {
-                        self.apply_parsed(cookies);
-                    }
-                    {
-                        let mut s = self.session.lock().unwrap();
-                        install_login_session(
-                            &mut s,
-                            dl.register.refresh_token.clone(),
-                            dl.register.access_token.clone(),
-                            dl.register.expires_in,
-                            cookies_minted,
-                            Instant::now(),
-                        );
-                    }
-                    match self.config.save() {
-                        Ok(_) => self.log(tr("Login erfolgreich – Refresh-Token gespeichert.")),
-                        Err(e) => {
-                            log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
-                            self.config_error = Some(
-                                tr("Die Einstellungen konnten nicht gespeichert werden.")
-                                    .to_string(),
-                            );
-                        }
-                    }
-                    self.login.cancel();
-                    return;
-                }
-                Err(e) => {
-                    // The device path was rejected: report it (never swallow it).
-                    // There is no cookie fallback any more (user decision
-                    // 2026-10-15) — the device path is the only sign-in.
-                    self.login.error = Some(
-                        tr("Die Anmeldung wurde von Amazon abgelehnt. Bitte erneut versuchen.")
-                            .to_string(),
-                    );
-                    log::warn!("{e}");
-                    self.login.cancel();
-                    return;
-                }
-            }
-        }
-
-        // (2) The portal navigation carried the authorization code: redeem it on
-        // the runtime (never blocking a frame).
-        if self.login.running {
-            if let Some(code) = self.login.take_auth_code() {
-                let Some(pkce) = self.login.take_pkce() else {
-                    // Cannot happen in practice (`begin_login` always sets the
-                    // pair first); drop the code instead of guessing a verifier.
-                    log::warn!("Anmeldecode ohne PKCE-Paket – verworfen");
-                    self.login.cancel();
-                    return;
-                };
-                let country = self.config.country.clone();
-                let serial = self.config.device_serial.clone();
-                let client_id = auth::client_id(&serial, auth::DEVICE_TYPE);
-                let language = crate::urls::portal_language(&country).to_string();
-                let slot = Arc::clone(&self.login.device_result);
-                let my_gen = self.login.login_generation;
-                self.rt.spawn(async move {
-                    let client = reqwest::Client::new();
-                    // The slot holds `(generation, Result<DeviceLogin, String>)`:
-                    // build the inner result first, then tag it with the
-                    // generation in one place.
-                    //
-                    // The redeem is retried only to **wait out a network
-                    // failure** (user decision 2026-10-15): the request never
-                    // reached the server, so the single-use
-                    // `openid.oa2.authorization_code` is still valid. Up to
-                    // `REGISTER_MAX_ATTEMPTS` offline passes, with
-                    // `TICK_INTERVAL_SECONDS` between them (the login spinner
-                    // stays visible). A **counted** error (HTTP status, JSON,
-                    // empty token) means the server saw the code — a second try
-                    // would find it already consumed (`InvalidValue`), so the
-                    // loop stops at once instead of burning the code.
-                    let mut offline_passes = 0u32;
-                    let inner: Result<DeviceLogin, String> = loop {
-                        match auth::register_device(
-                            &client,
-                            &country,
-                            &language,
-                            &serial,
-                            &code,
-                            &pkce.verifier,
-                            &client_id,
-                        )
-                        .await
-                        {
-                            Ok(outcome) => {
-                                // The refresh token is persisted; a keychain
-                                // failure is reported but not fatal — the
-                                // cookies are still worth fetching.
-                                if let Err(e) =
-                                    auth::KeyringTokenStore.save(&outcome.refresh_token)
-                                {
-                                    log::warn!(
-                                        "Refresh-Token konnte nicht im Schlüsselbund gespeichert werden: {e}"
-                                    );
-                                }
-                                break match auth::fetch_auth_cookies(
-                                    &client,
-                                    &country,
-                                    &language,
-                                    &outcome.refresh_token,
-                                )
-                                .await
-                                {
-                                    Ok(cookies) => Ok(DeviceLogin {
-                                        register: outcome,
-                                        cookies: Some(cookies),
-                                    }),
-                                    // The register succeeded: the login is valid
-                                    // and the refresh token is stored. Do **not**
-                                    // turn this into a rejection — publish the
-                                    // outcome without cookies so the worker mints
-                                    // them on its next pass.
-                                    Err(e) => {
-                                        log::warn!(
-                                            "Cookies konnten nach der Anmeldung nicht abgerufen werden: {e}"
-                                        );
-                                        Ok(DeviceLogin {
-                                            register: outcome,
-                                            cookies: None,
-                                        })
-                                    }
-                                };
-                            }
-                            Err(e) if !auth::counts_as_attempt(&e) => {
-                                offline_passes += 1;
-                                if offline_passes >= auth::REGISTER_MAX_ATTEMPTS {
-                                    break Err(e.to_string());
-                                }
-                                log::warn!(
-                                    "Einlösen fehlgeschlagen (offline {offline_passes}/{}): {e}",
-                                    auth::REGISTER_MAX_ATTEMPTS
-                                );
-                                tokio::time::sleep(Duration::from_secs(
-                                    auth::TICK_INTERVAL_SECONDS,
-                                ))
-                                .await;
-                            }
-                            // A counted error means the server answered and the
-                            // one-time authorization code is spent: retrying it
-                            // cannot succeed, so fail immediately.
-                            Err(e) => break Err(e.to_string()),
-                        }
-                    };
-                    *slot.lock().unwrap() = Some((my_gen, inner));
-                });
-                return;
-            }
+        if matches!(
+            poll_login_flow(
+                &mut self.login,
+                &mut self.config,
+                &self.session,
+                &self.rt,
+                &mut self.config_error,
+                true,
+            ),
+            LoginPoll::Succeeded
+        ) {
+            self.log(tr("Login erfolgreich – Refresh-Token gespeichert."));
         }
     }
 
