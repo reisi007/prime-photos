@@ -30,6 +30,14 @@ settings-only Rune fixture is not an app cutover.
 - The signed-out login fixture is test evidence for Rune view structure and
   interactions only; it does not satisfy the production login/WebView cutover
   blocker below.
+- A separate backup-page fixture is available only for headless rendering and
+  interaction tests through `--rune-backup-fixture` plus `--snap`, `--tree`, or
+  `--script`. Its deterministic `empty`, `uploading`, and `failure` scenes use
+  synthetic target/file labels and file counts. Its buttons are local
+  demonstrations only: adding a target does not open a folder dialog, pausing
+  changes only fixture state, and retry does not enqueue an upload or access the
+  network. The fixture does not implement actual backups or change launch
+  behavior; normal debug/release start remains the existing eframe app.
 
 ## Cutover blockers
 
