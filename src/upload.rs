@@ -5,7 +5,7 @@ use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
 use crate::prime_photos::PrimePhotos;
 use crate::theme;
-use eframe::egui::{self, Color32};
+use eframe::egui::Color32;
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
     future::Future,
@@ -18,6 +18,10 @@ use std::{
 };
 use tokio::sync::{Mutex as AsyncMutex, watch};
 use tokio::task::JoinSet;
+
+/// Thread-safe callback used to wake the UI without coupling upload state to a
+/// particular UI framework.
+pub(crate) type WakeupCallback = Arc<dyn Fn() + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // Shared upload state (written by the async workers, read by the UI)
@@ -73,8 +77,8 @@ pub(crate) struct UploadShared {
     pub(crate) active: bool,
     /// The persisted store was updated outside the UI; the UI must reload its copy.
     pub(crate) store_dirty: bool,
-    /// UI context used to wake an on-demand UI after a background store update.
-    pub(crate) ctx: Option<egui::Context>,
+    /// Optional UI wakeup after a background store update.
+    pub(crate) wakeup: Option<WakeupCallback>,
     pub(crate) total: usize,
     pub(crate) done: usize,
     pub(crate) failed: usize,
@@ -192,6 +196,13 @@ pub(crate) struct UploadShared {
 }
 
 impl UploadShared {
+    /// Mark a persisted store update and return the registered wakeup callback.
+    /// The caller invokes it after releasing the shared-state lock.
+    pub(crate) fn mark_store_dirty(&mut self) -> Option<WakeupCallback> {
+        self.store_dirty = true;
+        self.wakeup.clone()
+    }
+
     /// Consume the marker that a background path persisted a new store state.
     pub(crate) fn take_store_dirty(&mut self) -> bool {
         std::mem::take(&mut self.store_dirty)
@@ -1717,6 +1728,31 @@ mod tests {
         assert!(shared.take_store_dirty());
         assert!(!shared.take_store_dirty());
         assert!(!shared.store_dirty);
+    }
+
+    #[test]
+    fn marking_store_dirty_forwards_to_registered_wakeup() {
+        let called = Arc::new(AtomicBool::new(false));
+        let called_by_callback = called.clone();
+        let mut shared = UploadShared {
+            wakeup: Some(Arc::new(move || {
+                called_by_callback.store(true, Ordering::Relaxed);
+            })),
+            ..UploadShared::default()
+        };
+
+        let wakeup = shared.mark_store_dirty();
+        assert!(shared.store_dirty);
+        wakeup.expect("registered wakeup callback")();
+        assert!(called.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn marking_store_dirty_without_wakeup_is_safe() {
+        let mut shared = UploadShared::default();
+
+        assert!(shared.mark_store_dirty().is_none());
+        assert!(shared.store_dirty);
     }
 
     #[test]

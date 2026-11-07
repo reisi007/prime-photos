@@ -1406,13 +1406,12 @@ fn finalize_background_store(shared: &Arc<Mutex<UploadShared>>) {
     );
     match store.save() {
         Ok(()) => {
-            let ctx = {
+            let wakeup = {
                 let mut state = shared.lock().unwrap();
-                state.store_dirty = true;
-                state.ctx.clone()
+                state.mark_store_dirty()
             };
-            if let Some(ctx) = ctx {
-                ctx.request_repaint();
+            if let Some(wakeup) = wakeup {
+                wakeup();
             }
         }
         Err(err) => log::error!("Sicherungsziele konnten nicht gespeichert werden: {err}"),

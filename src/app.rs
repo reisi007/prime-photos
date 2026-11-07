@@ -1271,8 +1271,9 @@ impl eframe::App for PrimePhotoApp {
 
         {
             let mut shared = self.upload.lock().unwrap();
-            if shared.ctx.is_none() {
-                shared.ctx = Some(ctx.clone());
+            if shared.wakeup.is_none() {
+                let ctx = ctx.clone();
+                shared.wakeup = Some(Arc::new(move || ctx.request_repaint()));
             }
         }
 
