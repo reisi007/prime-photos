@@ -4,6 +4,12 @@ version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+[features]
+default = []
+# Temporary, headless-only Rune migration spike. It is compiled only into debug
+# builds and is not the application UI or a user-selectable preview mode.
+rune-ui-spike = ["dep:rune"]
+
 [dependencies]
 chrono = { version = "0.4.40", features = ["serde"] }
 auto-launch = "0.6"
@@ -51,6 +57,12 @@ rand = "0.10"
 # `crypto-rust` as its session-encryption backend). No async/zbus stack is
 # pulled in.
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+# Issue #49 feasibility work only. Keep the exact tested revision and avoid
+# Rune's broad defaults; the optional feature is not enabled in normal builds.
+# native-file-dialog supplies the Linux XDG portal path (and enables D-Bus);
+# accessibility preserves native platform trees; Metal is used only on Apple.
+# SVG is omitted because our existing build.rs raster pipeline supplies PNGs.
+rune = { git = "https://github.com/anomalyco/rune", rev = "53c7f60f51ce12bd5da53145d9d86ce1552324e4", optional = true, default-features = false, features = ["accessibility", "dbus", "metal-backend", "native-file-dialog"] }
 
 [build-dependencies]
 # Rasterises `assets/*.svg` into PNGs inside `OUT_DIR` (see `build.rs`).

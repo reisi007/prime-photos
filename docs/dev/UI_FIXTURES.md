@@ -3,8 +3,12 @@
 Die Demo-Datenquelle rendert zehn ausgewählte UI-Zustände ohne echte
 Amazon-Sitzung und ohne echte Fotordner. Sie wird ausschließlich in Builds mit
 `debug_assertions` kompiliert und ist für Entwicklung und Sichtprüfung gedacht;
-Release-Builds enthalten weder Szenarien noch Fixtures. Die normale Anwendung ändert sich nicht. Die
-zustandsbezogene Prüfliste steht in [`UI_REVIEW.md`](UI_REVIEW.md).
+Release-Builds enthalten weder Szenarien noch Fixtures. Dies ist der **Legacy-
+eframe-Fixture-Harness**: Er bleibt vorübergehend für die App-Sicherheit und
+belegt keine Rune-Parität. Entfernen, sobald gleichwertige Rune-Fixtures dieselben
+Zustände und Flows abdecken. Die Migrations-Gates stehen in
+[`rune-migration.md`](../features/rune-migration.md), die zustandsbezogene
+Prüfliste in [`UI_REVIEW.md`](UI_REVIEW.md).
 
 ## Zweck
 
@@ -13,9 +17,11 @@ zustandsbezogene Prüfliste steht in [`UI_REVIEW.md`](UI_REVIEW.md).
 - Reproduzierbare Screenshots für Reviews und Bugreports: dieselben Fixtures,
   dieselbe Fenstergröße und dieselbe Sprache (standardmäßig Deutsch; optional
   Englisch mit `--demo-language=en`).
-- Die Demo rendert über die **bestehenden** Pfade (`PrimePhotoApp::update`,
-  `backup_ui`, `settings_ui`, `login_ui`). Es gibt keinen zweiten
-  Rendering-Weg — ein Screenshot zeigt, was ein echter Frame zeigt.
+- Die Demo rendert über die **bestehenden eframe**-Pfade
+  (`PrimePhotoApp::update`, `backup_ui`, `settings_ui`, `login_ui`). Es gibt
+  keinen zweiten eframe-Rendering-Weg — ein Screenshot zeigt, was ein echter
+  Frame zeigt. Dies testet weder das Rune-Fixture noch weist es Rune-Parität
+  nach.
 
 **Nicht abgedeckt** (bewusst noch kein Szenario): der Anlegen-/Bearbeiten-Dialog
 („Datensicherungseinstellungen"), der Namenskonflikt-Dialog, eine laufende

@@ -26,6 +26,8 @@ mod backup;
 mod backup_config;
 mod settings;
 mod single_instance;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+mod rune_settings;
 
 use app::PrimePhotoApp;
 use eframe::egui;
@@ -60,8 +62,16 @@ fn main() -> eframe::Result<()> {
         .filter_map(|arg| arg.into_string().ok())
         .collect();
 
-    #[cfg(not(debug_assertions))]
-    reject_release_demo_args(&args);
+    // Rune remains a headless-only migration fixture; it is not an
+    // interactive preview or an application start mode.
+    #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+    if has_rune_headless_args(&args) {
+        if let Err(message) = rune_settings::run(filter_launcher_args(args.clone())) {
+            eprintln!("Prime Photos Rune spike: {message}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
 
     #[cfg(debug_assertions)]
     let mode = match demo::parse_args(&args) {
@@ -83,27 +93,73 @@ fn main() -> eframe::Result<()> {
     }
 
     #[cfg(debug_assertions)]
-    let is_demo = mode.is_demo();
-    #[cfg(not(debug_assertions))]
-    let is_demo = false;
-
-    // A demo run never takes the single-instance slot (a running real instance
-    // would swallow it) and never replaces that instance's notification
-    // binding — it has no tray and never uploads in the background.
-    if is_demo {
-        log::info!("Prime Photos startet im Demo-Modus (keine echten Daten)");
-    } else {
-        // Only one instance at a time: a second start asks the running instance
-        // to show its window (see `src/single_instance.rs`) and exits instead of
-        // opening a second window. Runs before `notify::init()` so that a start
-        // which immediately gives up never builds the notification binding.
-        if !single_instance::acquire() {
-            log::info!("Prime Photos läuft bereits — Fenster der laufenden Instanz angefordert");
-            return Ok(());
-        }
-
-        notify::init();
+    if mode.is_demo() {
+        return run_eframe_demo(mode);
     }
+
+    #[cfg(not(debug_assertions))]
+    reject_release_demo_args(&args);
+
+    // Temporary legacy production host: it remains the sole normal user UI
+    // until Rune covers login, backup, settings, dialogs, and the app shell.
+    // Do not add eframe-only user flows; remove this host after the direct Rune
+    // replacement passes the gates in docs/features/rune-migration.md.
+    if !single_instance::acquire() {
+        log::info!("Prime Photos läuft bereits — Fenster der laufenden Instanz angefordert");
+        return Ok(());
+    }
+    notify::init();
+    app_activation::install_launch_diagnostic();
+
+    let viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1000.0, 700.0])
+        .with_min_inner_size([760.0, 520.0])
+        .with_icon(window_icon())
+        .with_visible(false);
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Prime Photos",
+        options,
+        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
+    )
+}
+
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+fn has_rune_headless_args(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        arg == "--snap"
+            || arg.starts_with("--snap=")
+            || arg == "--tree"
+            || arg.starts_with("--tree=")
+            || arg == "--script"
+            || arg.starts_with("--script=")
+    })
+}
+
+/// macOS launchers may inject process-serialization arguments.
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+fn filter_launcher_args(args: Vec<String>) -> Vec<String> {
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        if arg.starts_with("-psn_") {
+            continue;
+        }
+        if arg == "-NSDocumentRevisionsDebugMode" {
+            let _ = args.next();
+            continue;
+        }
+        filtered.push(arg);
+    }
+    filtered
+}
+
+#[cfg(debug_assertions)]
+fn run_eframe_demo(mode: demo::Mode) -> eframe::Result<()> {
+    log::info!("Prime Photos startet im Debug-Demo-Modus (keine echten Daten)");
 
     // Observe AppKit's first launch notification before eframe runs its launch
     // path, without taking over the application delegate or Apple-event handler.
@@ -113,58 +169,34 @@ fn main() -> eframe::Result<()> {
     // developer's screen; `--size WxH` picks a different one (Issue #30),
     // defaulting to the historical values. The normal app keeps its preferred
     // start size.
-    #[cfg(debug_assertions)]
     let inner_size = match &mode {
         demo::Mode::Screenshot { size, .. } | demo::Mode::Demo { size, .. } => size.points(),
         // `List` already returned above; keep the normal start size for it so
         // the match stays exhaustive without a wildcard.
         demo::Mode::Off | demo::Mode::List => [1000.0, 700.0],
     };
-    #[cfg(not(debug_assertions))]
-    let inner_size = [1000.0, 700.0];
     let viewport = egui::ViewportBuilder::default()
         .with_inner_size(inner_size)
         .with_min_inner_size([760.0, 520.0])
         .with_icon(window_icon());
-    let viewport = if is_demo {
-        // A demo run is meant to be looked at (and captured) — no hidden start.
-        viewport.with_visible(true)
-    } else {
-        // The window starts invisible — this only avoids the first-frame
-        // flash. It does **not** keep the window hidden: eframe shows it
-        // itself (unconditionally) after the first frame, so the start
-        // decision in `PrimePhotoApp::new` (silent login-item start vs.
-        // manual start) holds the hidden state with an explicit
-        // `ViewportCommand::Visible(false)`.
-        viewport.with_visible(false)
-    };
+    // A demo run is meant to be looked at (and captured) — no hidden start.
+    let viewport = viewport.with_visible(true);
 
     let options = eframe::NativeOptions {
         viewport,
         ..Default::default()
     };
-    #[cfg(debug_assertions)]
-    {
-        eframe::run_native(
-            "Prime Photos",
-            options,
-            Box::new(|cc| Ok(Box::new(PrimePhotoApp::new_with_mode(cc, mode)))),
-        )
-    }
-    #[cfg(not(debug_assertions))]
     eframe::run_native(
         "Prime Photos",
         options,
-        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(PrimePhotoApp::new_with_mode(cc, mode)))),
     )
 }
 
 #[cfg(not(debug_assertions))]
 fn reject_release_demo_args(args: &[String]) {
     let Some(arg) = args.iter().find(|arg| {
-        arg.starts_with("--demo")
-            || arg.starts_with("--screenshot")
-            || arg.starts_with("--size")
+        arg.starts_with("--demo") || arg.starts_with("--screenshot") || arg.starts_with("--size")
     }) else {
         return;
     };
