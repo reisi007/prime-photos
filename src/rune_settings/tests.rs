@@ -40,6 +40,24 @@ fn tabs_switch_the_live_settings_page() {
 }
 
 #[test]
+fn page_title_shifts_with_the_titlebar_inset() {
+    let (mut runtime, _) = runtime();
+    let initial_x = runtime.find("page-title").unwrap().0;
+    let inset = 48.0;
+
+    runtime.set_titlebar_inset(inset);
+    for _ in 0..120 {
+        runtime.frame(1.0 / 60.0);
+    }
+
+    let inset_x = runtime.find("page-title").unwrap().0;
+    assert!(
+        (inset_x - initial_x - inset).abs() < 0.01,
+        "page-title x moved from {initial_x} to {inset_x}, expected {inset}"
+    );
+}
+
+#[test]
 fn appearance_change_is_live_and_persisted_to_an_injected_path() {
     let (mut runtime, path) = runtime();
 

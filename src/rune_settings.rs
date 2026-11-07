@@ -158,7 +158,8 @@ fn view(state: &SettingsState, cx: &mut Cx<SettingsState>) -> El {
                 .key("page-header")
                 .w_full()
                 .h(68.0)
-                .px(30.0)
+                .pl(cx.titlebar_inset() + 30.0)
+                .pr(30.0)
                 .center_y()
                 .child(
                     text(i18n::tr("Einstellungen"))
