@@ -16,9 +16,20 @@ settings-only Rune fixture is not an app cutover.
 - No Rune interactive window is exposed. A normal debug or release launch
   remains the existing Prime Photos app, including the login, backup, tray,
   single-instance, and activation paths.
-- The current Rune fixture covers only General and Bandwidth settings. It is
+- The settings fixture covers only General and Bandwidth settings. It is
   useful for component experiments and is not production persistence or UI
   parity.
+- A separate signed-out login fixture is available only for headless rendering
+  and interaction tests through `--rune-login-fixture` plus `--snap`, `--tree`,
+  or `--script`. It shows Prime Photos identity, marketplace selection, a
+  sign-in CTA, and a deterministic fixture-only error. The CTA performs no
+  authentication and the fixture does not construct PKCE, create Wry/WKWebView,
+  access account/config/keychain data, or make network requests. This fixture
+  does not implement authentication or alter normal launch: eframe remains the
+  normal app UI.
+- The signed-out login fixture is test evidence for Rune view structure and
+  interactions only; it does not satisfy the production login/WebView cutover
+  blocker below.
 
 ## Cutover blockers
 
