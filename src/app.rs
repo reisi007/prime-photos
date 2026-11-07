@@ -356,6 +356,11 @@ pub(crate) struct PrimePhotoApp {
 }
 
 impl PrimePhotoApp {
+    fn app_menu_wakeup(ctx: &egui::Context) -> app_menu::WakeupCallback {
+        let ctx = ctx.clone();
+        Arc::new(move || ctx.request_repaint())
+    }
+
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         Self::prepare(cc);
         Self::new_normal(cc)
@@ -405,9 +410,9 @@ impl PrimePhotoApp {
         // A native main menu is required for ⌘V/⌘C/⌘X to work in the webview.
         // It is built only now — after the persisted/system language is set —
         // so every label (About, Quit, Edit, Undo …) is localized from the
-        // first visible frame. The context is handed in so the menu's About
-        // item can wake the UI (Issue #8).
-        app_menu::install(&cc.egui_ctx);
+        // first visible frame. A framework-independent callback lets the menu's
+        // About item wake the UI (Issue #8).
+        app_menu::install(Self::app_menu_wakeup(&cc.egui_ctx));
         // Build the load failure in the UI language (the language is only known
         // now) and log the technical detail — it never reaches the UI (user
         // decision 2026-10-15: no technical messages for the end user).
@@ -665,7 +670,7 @@ impl PrimePhotoApp {
         }
         // Same menu as the real start (⌘C/⌘V/About); it only wires labels and
         // flags, no IO.
-        app_menu::install(&cc.egui_ctx);
+        app_menu::install(Self::app_menu_wakeup(&cc.egui_ctx));
 
         let app = Self {
             rt: Arc::new(Runtime::new().expect("tokio runtime")),

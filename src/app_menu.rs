@@ -18,6 +18,7 @@
 
 #[cfg(target_os = "macos")]
 use std::cell::RefCell;
+use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
@@ -30,16 +31,33 @@ use objc2::runtime::{AnyObject, NSObject};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSMenuItem;
 
+/// Thread-safe callback used to wake the UI without coupling the menu to a UI
+/// framework.
+pub(crate) type WakeupCallback = Arc<dyn Fn() + Send + Sync>;
+
 /// Set by the About menu item's target object; consumed once per frame by
 /// `PrimePhotoApp::update` through [`take_about_request`].
 #[cfg(target_os = "macos")]
 static ABOUT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// The egui context to wake when the About item is chosen. Stored at
-/// [`install`] time; the AppKit callback only flags + repaints, never touches
+/// The optional UI wakeup to invoke when the About item is chosen. Stored at
+/// [`install`] time; the AppKit callback only flags + invokes it, never touches
 /// the UI directly.
 #[cfg(target_os = "macos")]
-static UI_CTX: OnceLock<eframe::egui::Context> = OnceLock::new();
+static UI_WAKEUP: OnceLock<WakeupCallback> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn register_wakeup_callback(slot: &OnceLock<WakeupCallback>, wakeup: WakeupCallback) {
+    let _ = slot.set(wakeup);
+}
+
+#[cfg(target_os = "macos")]
+fn request_about(requested: &AtomicBool, wakeup: Option<&WakeupCallback>) {
+    requested.store(true, Ordering::Relaxed);
+    if let Some(wakeup) = wakeup {
+        wakeup();
+    }
+}
 
 /// The AppKit target object of the About item. AppKit holds a menu item's
 /// target **weakly**, so this `'static` owner is what keeps it alive — without
@@ -62,10 +80,7 @@ objc2::define_class!(
         /// wakes the render loop (mirrors `src/tray.rs`'s event queue).
         #[unsafe(method(showAbout:))]
         fn show_about(&self, _sender: &AnyObject) {
-            ABOUT_REQUESTED.store(true, Ordering::Relaxed);
-            if let Some(ctx) = UI_CTX.get() {
-                ctx.request_repaint();
-            }
+            request_about(&ABOUT_REQUESTED, UI_WAKEUP.get());
         }
     }
 );
@@ -160,17 +175,17 @@ fn set_title(item: &NSMenuItem, title: &str) {
     item.setTitle(&objc2_foundation::NSString::from_str(title));
 }
 
-/// Install the main menu once. `ctx` is remembered so the About item's target
-/// object can wake the UI; passing it here (rather than a second setter) keeps
-/// the wiring in one place.
+/// Install the main menu once. The wakeup is remembered so the About item's
+/// target object can wake the UI; passing it here (rather than a second setter)
+/// keeps the wiring in one place.
 #[cfg(target_os = "macos")]
-pub fn install(ctx: &eframe::egui::Context) {
+pub fn install(wakeup: WakeupCallback) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
 
-    // Remember the context even before the (once-only) menu build, so the About
+    // Remember the callback even before the (once-only) menu build, so the About
     // callback can always wake the UI.
-    let _ = UI_CTX.set(ctx.clone());
+    register_wakeup_callback(&UI_WAKEUP, wakeup);
 
     // Defensive re-entrancy guard: installing the menu twice would leave AppKit
     // with two main menus. `install()` is idempotent either way; the `Once`
@@ -222,7 +237,7 @@ pub fn take_about_request() -> bool {
 
 /// Non-macOS: there is no app menu to install and no About request to drain.
 #[cfg(not(target_os = "macos"))]
-pub fn install(_ctx: &eframe::egui::Context) {}
+pub fn install(_wakeup: WakeupCallback) {}
 
 /// Non-macOS: the About item only exists in the tray there.
 #[cfg(not(target_os = "macos"))]
@@ -326,8 +341,12 @@ fn item(
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{MenuLabels, menu_labels};
+    use super::{MenuLabels, WakeupCallback, menu_labels, register_wakeup_callback, request_about};
     use crate::i18n::{Lang, tr_for};
+    use std::sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    };
 
     /// The production label source for the complete visible native menu, in
     /// both shipped languages. A missing EN table row would leave a German
@@ -391,5 +410,31 @@ mod tests {
         assert_eq!(menu_labels(Lang::En).redo, "Redo");
         assert_eq!(tr_for(Lang::En, "Wiederholen"), "Retry");
         assert_ne!(menu_labels(Lang::En).redo, tr_for(Lang::En, "Wiederholen"));
+    }
+
+    #[test]
+    fn about_request_invokes_the_registered_wakeup_callback() {
+        let called = Arc::new(AtomicBool::new(false));
+        let called_by_callback = called.clone();
+        let callback: WakeupCallback = Arc::new(move || {
+            called_by_callback.store(true, Ordering::Relaxed);
+        });
+        let slot = OnceLock::new();
+        register_wakeup_callback(&slot, callback);
+        let requested = AtomicBool::new(false);
+
+        request_about(&requested, slot.get());
+
+        assert!(requested.load(Ordering::Relaxed));
+        assert!(called.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn about_request_without_a_wakeup_still_records_the_request() {
+        let requested = AtomicBool::new(false);
+
+        request_about(&requested, None);
+
+        assert!(requested.load(Ordering::Relaxed));
     }
 }
