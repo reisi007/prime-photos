@@ -118,7 +118,7 @@ fn restored_queue_resume_requires_background_sync_session_idle_and_unpaused() {
 }
 
 #[test]
-fn one_time_plan_publishes_a_synthetic_queue_with_shared_dedup_options() {
+fn one_time_plan_publishes_queue_and_keeps_shared_dedup_options() {
     let mut plan = OneTimePlan::from_files(
         [PathBuf::from("first.jpg"), PathBuf::from("second.png")].to_vec(),
         true,
@@ -138,8 +138,9 @@ fn one_time_plan_publishes_a_synthetic_queue_with_shared_dedup_options() {
     assert_eq!(state.folder_total.get(&ONE_TIME_IDX), Some(&2));
     assert_eq!(state.queue.len(), 2);
     assert!(state.queue.iter().all(|entry| entry.folder == ONE_TIME_IDX));
+    drop(state);
     assert_eq!(
-        state.folder_opts.get(&ONE_TIME_IDX),
+        plan.folder_opts.get(&ONE_TIME_IDX),
         Some(&(true, ConflictResolution::Replace))
     );
 }
