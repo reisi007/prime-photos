@@ -385,7 +385,20 @@ fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
 
     runtime.wheel(210.0, 150.0, 800.0);
     runtime.frame(2.0 / 60.0);
-    let (x, y) = runtime.find("cancel-target-form").expect("cancel action is available after scrolling");
+    let cancel = runtime
+        .elements()
+        .into_iter()
+        .find(|element| element.key.as_deref() == Some("cancel-target-form"))
+        .expect("cancel action remains mounted after scrolling");
+    assert!(
+        cancel.visible[2] > 0.0 && cancel.visible[3] > 0.0,
+        "cancel action must have a visible hit area after scrolling: {:?}",
+        cancel.visible
+    );
+    // `find` returns the element's layout center, which may be outside its
+    // scroll viewport. Click the center of the actually visible intersection.
+    let x = cancel.visible[0] + cancel.visible[2] / 2.0;
+    let y = cancel.visible[1] + cancel.visible[3] / 2.0;
     runtime.pointer_down(x, y);
     runtime.pointer_up(x, y);
     runtime.frame(3.0 / 60.0);
