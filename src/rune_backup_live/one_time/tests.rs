@@ -408,7 +408,8 @@ fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
     runtime.pointer_up(x, y);
     runtime.frame(3.0 / 60.0);
     assert!(runtime.state.form.is_none());
-    runtime.state.form = Some(super::super::TargetForm {
+    let mut edit_state = signed_out_state();
+    edit_state.form = Some(super::super::TargetForm {
         path: PathBuf::from("/synthetic/photos"),
         dedup: true,
         conflict: ConflictResolution::Ask,
@@ -416,8 +417,10 @@ fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
         edit_path: Some(PathBuf::from("/synthetic/photos")),
         error: None,
     });
-    runtime.frame(4.0 / 60.0);
-    let edit_json = runtime.accessibility_json();
+    // Keep the edit accessibility check independent of the create dialog's
+    // scrolled runtime, whose scroll/layout state was used for the cancel hit.
+    let edit_runtime = production_runtime(edit_state, (420.0, 300.0));
+    let edit_json = edit_runtime.accessibility_json();
     let edit_dialog = find_a11y_node(&edit_json, "target-form")
         .expect("edit target form dialog is accessible");
     assert_eq!(edit_dialog["name"], "Sicherungsoptionen");

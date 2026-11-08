@@ -156,10 +156,14 @@ settings-only Rune fixture is not an app cutover.
   direction: pinned Rune's `Runtime::wheel` subtracts `dy` from the scroll
   offset, so positive `dy` moves content down. The test now sends a negative
   wheel delta to scroll down to the cancel action, retaining the positive
-  visible-hit assertion and actual cancel click/state assertion. Release build
-  passed in #42517959583; its Rune-backup test job had 314 passed / 1 failed.
-  This fix is pending rerun; do not treat these surfaces as verified or as
-  clearing the integration blocker.
+  visible-hit assertion and actual cancel click/state assertion. Workflow
+  #42518688040 (commit `96bc7fa`) passed the Release build and its Rune-backup
+  test job reported 314 passed / 1 failed: the cancel assertion passed, but the
+  subsequent edit-dialog accessibility lookup failed after replacing the form
+  in the already-scrolled runtime. The edit check now uses a fresh runtime,
+  isolating it from create-dialog scroll state while retaining the create and
+  cancel assertions. This fix is pending rerun; do not treat these surfaces as
+  verified or as clearing the integration blocker.
   CI run #42516532301 exposed a genuine production login cancellation gap: the
   loading WebView region replaced the backup content (including its cancel
   button). The running surface now retains the accessible cancel action beside
