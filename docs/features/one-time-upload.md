@@ -17,7 +17,7 @@ and it is deleted only after a completely finished run.
   `../original/SPEC_ONE_TIME_UPLOAD.md` §6).
 - **Ausnahme Einmal-Queue (Drag&Drop, User-Entscheidung 2025-10-15):** there
   is **no** folder in `folders.toml` (synthetic index
-  `ONE_TIME_IDX = usize::MAX`, `src/app.rs:26`, transient `BackupFolder`).
+  `ONE_TIME_IDX = usize::MAX`, `src/platform/app_shared.rs:6`, transient `BackupFolder`).
   The checkbox ("Nicht noch einmal fragen") is effective here **only
   run-wide**; at the next drop the Application Default decides again.
   Deliberately **not** chosen: silently overriding the Application Default
@@ -47,7 +47,7 @@ and it is deleted only after a completely finished run.
 
 - **Ausnahme Einmal-Queue (Drag&Drop, User-Entscheidung 2025-10-15):** dort
   gibt es **keinen** Ordner in `folders.toml` (synthetischer Index
-  `ONE_TIME_IDX = usize::MAX`, `src/app.rs:26`, transienter `BackupFolder`).
+  `ONE_TIME_IDX = usize::MAX`, `src/platform/app_shared.rs:6`, transienter `BackupFolder`).
   Das Häkchen wirkt hier **nur run-weit**; beim nächsten Drop entscheidet
   wieder der Application Default. Bewusst **nicht** gewählt: den
   Application Default still überschreiben (greift global statt nur für
