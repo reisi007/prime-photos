@@ -45,8 +45,14 @@ const WRAP_COLS: usize = 100;
 static LICENSE_LINES: OnceLock<Vec<String>> = OnceLock::new();
 
 /// The license lines, splitting and wrapping the embedded text on first use.
-fn license_lines() -> &'static [String] {
+pub(crate) fn license_lines() -> &'static [String] {
     LICENSE_LINES.get_or_init(|| wrap_lines(THIRD_PARTY_LICENSES, WRAP_COLS))
+}
+
+/// Curated icon and graphic attributions, embedded from the maintained notice file.
+#[cfg(feature = "rune-ui-spike")]
+pub(crate) fn icon_attributions() -> &'static str {
+    THIRD_PARTY_ICONS
 }
 
 /// Split `text` into lines and hard-wrap every line longer than `cols`
@@ -78,9 +84,10 @@ fn wrap_lines(text: &str, cols: usize) -> Vec<String> {
 }
 
 /// Which of the two license sources the window shows.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum LicenseTab {
     /// The generated component list + license texts.
+    #[default]
     Components,
     /// The curated icon/graphic attribution.
     Icons,
@@ -210,7 +217,7 @@ pub(crate) fn license_window(ctx: &egui::Context, open: &mut bool, tab: &mut Lic
 }
 
 /// Current calendar year, for the copyright line (runtime, not build time).
-fn current_year() -> String {
+pub(crate) fn current_year() -> String {
     chrono::Local::now().format("%Y").to_string()
 }
 

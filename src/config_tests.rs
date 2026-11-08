@@ -21,6 +21,18 @@ fn config_without_autostart_key_loads_as_none() {
 }
 
 #[test]
+fn album_name_defaults_for_legacy_configs_and_roundtrips() {
+    let legacy: Config = toml::from_str(LEGACY_TOML).unwrap();
+    assert!(legacy.album_name.is_empty());
+
+    let mut config = Config::default();
+    config.album_name = "Camera uploads".to_owned();
+    let serialized = toml::to_string_pretty(&config).unwrap();
+    let back: Config = toml::from_str(&serialized).unwrap();
+    assert_eq!(back.album_name, "Camera uploads");
+}
+
+#[test]
 fn appearance_defaults_to_system_for_new_and_legacy_configs() {
     assert_eq!(Config::default().appearance, Appearance::System);
     let config: Config = toml::from_str(LEGACY_TOML).unwrap();

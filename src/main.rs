@@ -18,6 +18,8 @@ mod notify;
 mod platform;
 mod text;
 mod theme;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+mod rune_theme;
 mod tray;
 mod upload;
 mod urls;
@@ -33,6 +35,8 @@ mod rune_login;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 mod rune_backup;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+mod rune_backup_live;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 mod rune_production_login;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 mod rune_wry_smoke;
@@ -47,8 +51,9 @@ use rune_fixture::is_rune_fixture_or_tooling_arg;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 use rune_fixture::{
     RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG,
-    RUNE_WRY_SMOKE_FLAG, is_malformed_rune_fixture_arg, rune_backup_fixture_args,
-    rune_interactive_route_args, rune_settings_fixture_args, strip_rune_login_fixture_arg,
+    RUNE_WRY_SMOKE_FLAG, RUNE_BACKUP_FLAG, RUNE_BACKUP_SMOKE_FLAG,
+    is_malformed_rune_fixture_arg, rune_backup_fixture_args, rune_interactive_route_args,
+    rune_login_fixture_args, rune_settings_fixture_args,
 };
 
 /// Window/dock icon, from the build-time 1024-px raster of `assets/logo.svg`
@@ -113,26 +118,64 @@ fn main() -> eframe::Result<()> {
                 std::process::exit(2);
             }
         };
-        match (login_args, smoke_args) {
-            (Some(_), Some(_)) => {
-                eprintln!("Rune interactive routes cannot be combined.");
+        let backup_args = match rune_interactive_route_args(&args, RUNE_BACKUP_FLAG) {
+            Ok(args) => args,
+            Err(message) => {
+                eprintln!("Prime Photos Rune backup route: {message}");
                 std::process::exit(2);
             }
-            (Some(route_args), None) => {
+        };
+        let backup_smoke_args = match rune_interactive_route_args(&args, RUNE_BACKUP_SMOKE_FLAG) {
+            Ok(args) => args,
+            Err(message) => {
+                eprintln!("Prime Photos Rune backup smoke route: {message}");
+                std::process::exit(2);
+            }
+        };
+        let selected_routes = [
+            login_args.is_some(),
+            smoke_args.is_some(),
+            backup_args.is_some(),
+            backup_smoke_args.is_some(),
+        ]
+        .into_iter()
+        .filter(|selected| *selected)
+        .count();
+        if selected_routes > 1 {
+            eprintln!("Rune interactive routes cannot be combined.");
+            std::process::exit(2);
+        }
+        match (login_args, smoke_args, backup_args, backup_smoke_args) {
+            (Some(route_args), None, None, None) => {
                 if let Err(message) = rune_production_login::run(route_args) {
                     eprintln!("Prime Photos Rune login route: {message}");
                     std::process::exit(1);
                 }
                 return Ok(());
             }
-            (None, Some(route_args)) => {
+            (None, Some(route_args), None, None) => {
                 if let Err(message) = rune_wry_smoke::run(route_args) {
                     eprintln!("Prime Photos Wry smoke route: {message}");
                     std::process::exit(1);
                 }
                 return Ok(());
             }
-            (None, None) => {}
+            (None, None, Some(route_args), None) => {
+                if let Err(message) = rune_backup_live::run_production(route_args) {
+                    eprintln!("Prime Photos Rune backup route: {message}");
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            (None, None, None, Some(route_args)) => {
+                if let Err(message) = rune_backup_live::run_smoke(route_args) {
+                    eprintln!("Prime Photos Rune backup smoke route: {message}");
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            (None, None, None, None) => {}
+            _ => unreachable!("interactive route count was validated"),
         }
     }
 
@@ -153,19 +196,19 @@ fn main() -> eframe::Result<()> {
     }
 
     #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
-    if args.iter().any(|arg| arg == RUNE_LOGIN_FIXTURE_FLAG) {
-        let rune_args = strip_rune_login_fixture_arg(args.clone());
-        if !rune_login::has_headless_action(&rune_args) {
-            eprintln!(
-                "Usage: prime-photos {RUNE_LOGIN_FIXTURE_FLAG} (--snap FILE | --tree FILE | --script FILE)"
-            );
+    match rune_login_fixture_args(args.clone()) {
+        Ok(Some(rune_args)) => {
+            if let Err(message) = rune_login::run(rune_args) {
+                eprintln!("Prime Photos Rune login fixture: {message}");
+                std::process::exit(1);
+            }
+            return Ok(());
+        }
+        Ok(None) => {}
+        Err(message) => {
+            eprintln!("Prime Photos Rune login fixture: {message}");
             std::process::exit(2);
         }
-        if let Err(message) = rune_login::run(rune_args) {
-            eprintln!("Prime Photos Rune login fixture: {message}");
-            std::process::exit(1);
-        }
-        return Ok(());
     }
 
     #[cfg(not(all(debug_assertions, feature = "rune-ui-spike")))]

@@ -106,6 +106,10 @@ pub struct Config {
     /// for existing `config.toml` files that predate this field.
     #[serde(default = "default_true")]
     pub notifications: bool,
+    /// Optional album to add successfully uploaded photos to. Defaults to empty
+    /// for existing `config.toml` files and is shared by both UI hosts.
+    #[serde(default)]
+    pub album_name: String,
     /// UI language override (`"de"`/`"en"`); `None` = follow the system locale.
     /// `#[serde(default)]` so an existing `config.toml` without this key still
     /// loads (and a `None` is omitted again on save).
@@ -267,6 +271,7 @@ impl Config {
             cookie_ubid_acb: "".to_string(),
             cookie_x_amz_access_token: "".to_string(),
             notifications: true,
+            album_name: String::new(),
             language: None,
             appearance: Appearance::System,
             background_sync: true,

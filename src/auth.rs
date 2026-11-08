@@ -431,7 +431,7 @@ fn get_ci<'a>(
 
 /// Where the refresh token is kept. Only the refresh token is persisted; the
 /// access token stays in memory.
-pub(crate) trait TokenStore {
+pub(crate) trait TokenStore: Send + Sync {
     fn save(&self, refresh_token: &str) -> Result<(), String>;
     fn load(&self) -> Result<Option<String>, String>;
     fn clear(&self) -> Result<(), String>;

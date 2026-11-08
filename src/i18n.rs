@@ -115,7 +115,11 @@ pub(crate) fn tr_ctx_for(lang: Lang, context: &'static str, key: &'static str) -
 
 /// Replace the `{}` placeholders in `tr(key)` with `args`, left to right.
 fn subst(key: &'static str, args: &[String]) -> String {
-    let mut out = tr(key).to_string();
+    subst_for(lang(), key, args)
+}
+
+fn subst_for(lang: Lang, key: &'static str, args: &[String]) -> String {
+    let mut out = tr_for(lang, key).to_string();
     for arg in args {
         if let Some(i) = out.find("{}") {
             out.replace_range(i..i + 2, arg);
@@ -248,6 +252,10 @@ const EN: &[(&str, &str)] = &[
     ("Letzter Upload: {} erfolgreich", "Last upload: {} successful"),
     ("Login – Prime Photos", "Sign in – Prime Photos"),
     ("Nicht angemeldet", "Not signed in"),
+    (
+        "Nicht angemeldet – die Anmeldung startet erst nach deiner Auswahl.",
+        "Not signed in — sign-in starts only when you choose.",
+    ),
     ("Upload läuft: {} · {} · {}", "Upload running: {} · {} · {}"),
     // -- backup list ----------------------------------------------------
     ("Aktionen", "Actions"),
@@ -255,6 +263,8 @@ const EN: &[(&str, &str)] = &[
     ("ANGEHALTEN", "PAUSED"),
     ("Alle Sicherungsvorgänge anhalten", "Pause all backups"),
     ("Alle Sicherungsvorgänge fortsetzen", "Resume all backups"),
+    ("Alle Vorgänge anhalten", "Pause all operations"),
+    ("Alle Vorgänge fortsetzen", "Resume all operations"),
     ("Alles aktuell", "Everything up to date"),
     ("Automatisch gesicherte Ordner:", "Automatically backed up folders:"),
     ("Bearbeiten", "Edit"),
@@ -314,11 +324,13 @@ const EN: &[(&str, &str)] = &[
         "Zur einmaligen Sicherung mit der Maus hierher ziehen",
         "Drag here for a one-time backup",
     ),
+    ("{} / {} Dateien · {}", "{} / {} files · {}"),
     ("{} Datei(en) werden hochgeladen …", "{} file(s) being uploaded …"),
     (
         "{} Datei(en) zusätzlich aufgenommen.",
         "{} additional file(s) taken up.",
     ),
+    ("{} von {} Dateien abgeschlossen", "{} of {} files completed"),
     ("{}% hochgeladen", "{}% uploaded"),
     // -- backup configuration dialog ------------------------------------
     (
@@ -346,6 +358,67 @@ const EN: &[(&str, &str)] = &[
         "Videos are not uploaded yet",
     ),
     ("Änderungen hochladen:", "Upload changes:"),
+    // -- Rune production backup route -----------------------------------
+    ("Aktiviert", "Enabled"),
+    ("Anderen Ordner wählen …", "Choose a different folder …"),
+    ("Anmeldeseite wird geladen …", "The sign-in page is loading …"),
+    ("Anmeldung abbrechen", "Cancel sign-in"),
+    ("Anmeldung abgebrochen.", "Sign-in cancelled."),
+    (
+        "Bei Namenskonflikt:",
+        "When a filename conflict occurs:",
+    ),
+    (
+        "Das Prime-Photos-Fenster ist noch nicht bereit.",
+        "The Prime Photos window is not ready yet.",
+    ),
+    ("Deaktiviert", "Disabled"),
+    (
+        "Der Anmeldebereich ist noch nicht bereit.",
+        "The sign-in area is not ready yet.",
+    ),
+    ("Der Ordner konnte nicht ausgewählt werden.", "Could not select the folder."),
+    (
+        "Der Ordnerdialog wird nur auf ausdrückliche Auswahl geöffnet.",
+        "The folder picker opens only when you choose a folder.",
+    ),
+    ("Duplikate vermeiden", "Avoid duplicates"),
+    ("Duplikate vermeiden: aus", "Avoid duplicates: off"),
+    ("Duplikate vermeiden: ein", "Avoid duplicates: on"),
+    ("Duplikatprüfung aus", "Duplicate checking off"),
+    (
+        "Einstellungen konnten nicht geladen oder gespeichert werden.",
+        "Settings could not be loaded or saved.",
+    ),
+    ("Entfernen", "Remove"),
+    ("Erneut versuchen", "Try again"),
+    (
+        "Füge einen Fotoordner hinzu, um deine Bilder für die Sicherung vorzubereiten.",
+        "Add a photo folder to prepare your pictures for backup.",
+    ),
+    ("Fragen", "Ask each time"),
+    ("Gesamtfortschritt", "Overall progress"),
+    ("Jetzt sichern", "Back up now"),
+    ("Keine Datei wird gerade übertragen.", "No file is being transferred right now."),
+    ("Neues Sicherungsziel", "New backup target"),
+    ("Noch keine Sicherungsziele", "No backup targets yet"),
+    ("Noch keine Upload-Dateien eingeplant.", "No upload files are queued yet."),
+    ("Optionen", "Options"),
+    ("Ordner hinzufügen …", "Add folder …"),
+    ("Sicherungsoptionen", "Backup options"),
+    ("Sicherungsordner auswählen", "Choose backup folder"),
+    ("Sicherungsziel", "Backup target"),
+    (
+        "Sicherungsziel hinzugefügt. Melde dich an und starte den Upload manuell.",
+        "Backup target added. Sign in and start the upload manually.",
+    ),
+    ("Sicherungsziele", "Backup targets"),
+    (
+        "Sicherungsziele konnten nicht geladen werden. Änderungen werden nicht gespeichert.",
+        "Backup targets could not be loaded. Changes will not be saved.",
+    ),
+    ("Warteschlange", "Queue"),
+    ("Zur Datensicherung", "Back to Backup"),
     // -- settings -------------------------------------------------------
     ("Album (optional):", "Album (optional):"),
     ("Allgemeines", "General"),
@@ -410,6 +483,10 @@ const EN: &[(&str, &str)] = &[
     (
         "Sitzung abgelaufen – bitte erneut anmelden.",
         "Session expired – please sign in again.",
+    ),
+    (
+        "Sitzung wird wiederhergestellt …",
+        "Restoring session …",
     ),
     (
         "Anmeldeseite konnte nicht geöffnet werden.",
@@ -589,7 +666,7 @@ const EN_CONTEXT: &[(&str, &str, &str)] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{EN, Lang, lang_from_env_value, lang_from_locale_id, tr_for};
+    use super::{EN, Lang, lang_from_env_value, lang_from_locale_id, subst_for, tr_for};
     #[cfg(target_os = "macos")]
     use super::{CONTEXT_NATIVE_MENU, EN_CONTEXT, tr_ctx_for};
     use std::collections::HashSet;
@@ -629,6 +706,152 @@ mod tests {
         ] {
             assert_eq!(tr_for(Lang::De, source), source);
             assert_eq!(tr_for(Lang::En, source), expected);
+        }
+    }
+
+    #[test]
+    fn rune_backup_status_and_controls_are_translated() {
+        for (source, english) in [
+            (
+                "Alle Vorgänge fortsetzen",
+                "Resume all operations",
+            ),
+            ("Alle Vorgänge anhalten", "Pause all operations"),
+            (
+                "Nicht angemeldet – die Anmeldung startet erst nach deiner Auswahl.",
+                "Not signed in — sign-in starts only when you choose.",
+            ),
+            ("Sitzung wird wiederhergestellt …", "Restoring session …"),
+            (
+                "Sitzung abgelaufen – bitte erneut anmelden.",
+                "Session expired – please sign in again.",
+            ),
+        ] {
+            assert_eq!(tr_for(Lang::De, source), source);
+            assert_eq!(tr_for(Lang::En, source), english);
+        }
+    }
+
+    #[test]
+    fn rune_backup_view_and_target_strings_are_translated() {
+        for (source, english) in [
+            ("Aktiviert", "Enabled"),
+            ("Anderen Ordner wählen …", "Choose a different folder …"),
+            ("Anmeldeseite wird geladen …", "The sign-in page is loading …"),
+            ("Anmeldung abbrechen", "Cancel sign-in"),
+            ("Anmeldung abgebrochen.", "Sign-in cancelled."),
+            ("Bei Namenskonflikt:", "When a filename conflict occurs:"),
+            (
+                "Das Prime-Photos-Fenster ist noch nicht bereit.",
+                "The Prime Photos window is not ready yet.",
+            ),
+            ("Deaktiviert", "Disabled"),
+            (
+                "Der Anmeldebereich ist noch nicht bereit.",
+                "The sign-in area is not ready yet.",
+            ),
+            ("Der Ordner konnte nicht ausgewählt werden.", "Could not select the folder."),
+            (
+                "Der Ordnerdialog wird nur auf ausdrückliche Auswahl geöffnet.",
+                "The folder picker opens only when you choose a folder.",
+            ),
+            ("Duplikate vermeiden", "Avoid duplicates"),
+            ("Duplikate vermeiden: aus", "Avoid duplicates: off"),
+            ("Duplikate vermeiden: ein", "Avoid duplicates: on"),
+            ("Duplikatprüfung aus", "Duplicate checking off"),
+            (
+                "Einstellungen konnten nicht geladen oder gespeichert werden.",
+                "Settings could not be loaded or saved.",
+            ),
+            ("Entfernen", "Remove"),
+            ("Erneut versuchen", "Try again"),
+            (
+                "Füge einen Fotoordner hinzu, um deine Bilder für die Sicherung vorzubereiten.",
+                "Add a photo folder to prepare your pictures for backup.",
+            ),
+            ("Fragen", "Ask each time"),
+            ("Gesamtfortschritt", "Overall progress"),
+            ("Jetzt sichern", "Back up now"),
+            ("Keine Datei wird gerade übertragen.", "No file is being transferred right now."),
+            ("Neues Sicherungsziel", "New backup target"),
+            ("Noch keine Sicherungsziele", "No backup targets yet"),
+            ("Noch keine Upload-Dateien eingeplant.", "No upload files are queued yet."),
+            ("Optionen", "Options"),
+            ("Ordner hinzufügen …", "Add folder …"),
+            ("Sicherungsoptionen", "Backup options"),
+            ("Sicherungsordner auswählen", "Choose backup folder"),
+            ("Sicherungsziel", "Backup target"),
+            (
+                "Sicherungsziel hinzugefügt. Melde dich an und starte den Upload manuell.",
+                "Backup target added. Sign in and start the upload manually.",
+            ),
+            ("Sicherungsziele", "Backup targets"),
+            (
+                "Sicherungsziele konnten nicht geladen werden. Änderungen werden nicht gespeichert.",
+                "Backup targets could not be loaded. Changes will not be saved.",
+            ),
+            ("Warteschlange", "Queue"),
+            ("Zur Datensicherung", "Back to Backup"),
+            ("{} / {} Dateien · {}", "{} / {} files · {}"),
+            (
+                "{} von {} Dateien abgeschlossen",
+                "{} of {} files completed",
+            ),
+        ] {
+            assert_eq!(tr_for(Lang::De, source), source);
+            assert_eq!(tr_for(Lang::En, source), english);
+        }
+
+        let progress_key = "{} von {} Dateien abgeschlossen";
+        assert_eq!(
+            subst_for(Lang::De, progress_key, &["3".to_owned(), "8".to_owned()]),
+            "3 von 8 Dateien abgeschlossen"
+        );
+        assert_eq!(
+            subst_for(Lang::En, progress_key, &["3".to_owned(), "8".to_owned()]),
+            "3 of 8 files completed"
+        );
+
+        let target_key = "{} / {} Dateien · {}";
+        for (label, english_label, german_rendered, english_rendered) in [
+            (
+                "Duplikate vermeiden",
+                "Avoid duplicates",
+                "2 / 5 Dateien · Duplikate vermeiden",
+                "2 / 5 files · Avoid duplicates",
+            ),
+            (
+                "Duplikatprüfung aus",
+                "Duplicate checking off",
+                "2 / 5 Dateien · Duplikatprüfung aus",
+                "2 / 5 files · Duplicate checking off",
+            ),
+        ] {
+            assert_eq!(
+                subst_for(
+                    Lang::De,
+                    target_key,
+                    &[
+                        "2".to_owned(),
+                        "5".to_owned(),
+                        tr_for(Lang::De, label).to_owned(),
+                    ],
+                ),
+                german_rendered
+            );
+            assert_eq!(
+                subst_for(
+                    Lang::En,
+                    target_key,
+                    &[
+                        "2".to_owned(),
+                        "5".to_owned(),
+                        tr_for(Lang::En, label).to_owned(),
+                    ],
+                ),
+                english_rendered
+            );
+            assert_eq!(tr_for(Lang::En, label), english_label);
         }
     }
 

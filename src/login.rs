@@ -275,6 +275,82 @@ pub(crate) struct Session {
     pub(crate) cookies: SessionCookies,
 }
 
+/// UI-neutral notification for session-worker state changes.
+pub(crate) type SessionWakeup = Arc<dyn Fn() + Send + Sync>;
+
+/// Restore only the persisted refresh token. Access tokens and cookies are
+/// intentionally transient and are recreated by the session worker.
+pub(crate) fn restore_refresh_token(
+    session: &mut Session,
+    token_store: &dyn auth::TokenStore,
+) -> Result<bool, String> {
+    match token_store.load()? {
+        Some(refresh_token) => {
+            session.refresh_token = Some(refresh_token);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// Claim the next session-worker generation. A restored token has no access
+/// token schedule, so it is due now; a signed-in session keeps its existing
+/// 80%-of-lifetime appointment.
+pub(crate) fn prepare_session_worker(session: &mut Session) -> Option<u64> {
+    if session.invalid || session.started || session.refresh_token.is_none() {
+        return None;
+    }
+    session.generation += 1;
+    session.started = true;
+    if session.next_refresh.is_none() {
+        log::info!("Gespeicherte Sitzung gefunden – Access-Token wird erneuert.");
+        session.next_refresh = Some(Instant::now());
+    }
+    Some(session.generation)
+}
+
+/// Clear all session and in-memory cookie state after the worker declares the
+/// refresh token invalid. The host owns persistence and user-facing status.
+pub(crate) fn clear_invalidated_session(
+    config: &mut crate::config::Config,
+    session: &mut Session,
+) {
+    session.refresh_token = None;
+    session.access_token = None;
+    session.next_refresh = None;
+    session.cookie_retry_at = None;
+    session.invalid = false;
+    session.generation += 1;
+    session.started = false;
+    session.cookies = SessionCookies::default();
+    session.pending_cookies = None;
+    clear_config_cookies(config);
+}
+
+fn clear_config_cookies(config: &mut crate::config::Config) {
+    config.session_id.clear();
+    config.cookie_x_acb.clear();
+    config.cookie_at_acb.clear();
+    config.cookie_ubid_acb.clear();
+    config.cookie_x_amz_access_token.clear();
+}
+
+/// Consume worker-minted cookies into both the host Config and the shared
+/// in-memory session. These fields are serde-skipped and are never persisted.
+pub(crate) fn apply_pending_cookies(
+    config: &mut crate::config::Config,
+    session: &mut Session,
+) -> bool {
+    if session.invalid {
+        return false;
+    }
+    let Some(cookies) = session.pending_cookies.take() else {
+        return false;
+    };
+    apply_parsed_cookies(config, &mut session.cookies, &cookies);
+    true
+}
+
 struct DueSessionWork {
     refresh_token: Option<String>,
     refresh_access_token: bool,
@@ -385,7 +461,7 @@ pub(crate) async fn session_worker(
     session: Arc<Mutex<Session>>,
     country: String,
     language: String,
-    ctx: egui::Context,
+    wakeup: SessionWakeup,
     my_gen: u64,
 ) {
     let client = reqwest::Client::new();
@@ -398,7 +474,7 @@ pub(crate) async fn session_worker(
         // the future. Whenever nothing is due, sleep a full tick — never spin.
         let work = {
             let s = session.lock().unwrap();
-            if s.generation != my_gen {
+            if s.generation != my_gen || s.invalid {
                 return;
             }
             due_session_work(&s, Instant::now(), next_token_attempt_at)
@@ -456,7 +532,7 @@ pub(crate) async fn session_worker(
                         Ok(()) => log::info!("Web-Cookies erneuert."),
                         Err(e) => log::warn!("Cookies konnten nicht erneuert werden: {e}"),
                     }
-                    ctx.request_repaint();
+                    wakeup();
                     // This pass already minted cookies after the successful
                     // access-token refresh, whether or not a retry was pending.
                     continue;
@@ -480,7 +556,7 @@ pub(crate) async fn session_worker(
                         s.next_refresh = None;
                         s.cookie_retry_at = None;
                         s.started = false;
-                        ctx.request_repaint();
+                        wakeup();
                         return;
                     }
                     log::warn!(
@@ -514,7 +590,7 @@ pub(crate) async fn session_worker(
             match result {
                 Ok(()) => {
                     log::info!("Web-Cookies erneut gemintet.");
-                    ctx.request_repaint();
+                    wakeup();
                 }
                 Err(e) => log::warn!("Cookies konnten nicht erneuert werden: {e}"),
             }
@@ -822,24 +898,8 @@ impl PrimePhotoApp {
             }
             {
                 let mut s = self.session.lock().unwrap();
-                s.refresh_token = None;
-                s.access_token = None;
-                s.next_refresh = None;
-                s.cookie_retry_at = None;
-                s.invalid = false;
-                s.generation += 1;
-                s.started = false;
-                s.cookies = SessionCookies::default();
-                // Drop any cookies the worker minted but the UI has not consumed
-                // yet: otherwise step (3) below would re-install exactly the
-                // cookies we just discarded in this same frame.
-                s.pending_cookies = None;
+                clear_invalidated_session(&mut self.config, &mut s);
             }
-            self.config.session_id = String::new();
-            self.config.cookie_x_acb = String::new();
-            self.config.cookie_at_acb = String::new();
-            self.config.cookie_ubid_acb = String::new();
-            self.config.cookie_x_amz_access_token = String::new();
             if let Err(e) = self.config.save() {
                 log::warn!("Einstellungen konnten nicht gespeichert werden: {e}");
                 self.config_error =
@@ -852,40 +912,22 @@ impl PrimePhotoApp {
         // work is due and the access-token appointment is still in the future.
         // `started` is cleared by login, logout and invalidation, so this covers
         // both "app start with a stored token" and "just signed in".
-        let start_gen = {
-            let mut s = self.session.lock().unwrap();
-            if !s.started && s.refresh_token.is_some() {
-                s.generation += 1;
-                s.started = true;
-                // A session restored from the keychain has no schedule yet: make
-                // the worker due immediately, so the access token is renewed and
-                // the web cookies are minted **at start**. After a login the
-                // 80 %-schedule is already set by `poll_login`.
-                if s.next_refresh.is_none() {
-                    log::info!("Gespeicherte Sitzung gefunden – Access-Token wird erneuert.");
-                    s.next_refresh = Some(Instant::now());
-                }
-                Some(s.generation)
-            } else {
-                None
-            }
-        };
+        let start_gen = prepare_session_worker(&mut self.session.lock().unwrap());
         if let Some(my_gen) = start_gen {
             let country = self.config.country.clone();
             let language = crate::urls::portal_language(&country).to_string();
             let session = Arc::clone(&self.session);
             let ctx = ctx.clone();
+            let wakeup: SessionWakeup = Arc::new(move || ctx.request_repaint());
             self.rt.spawn(async move {
-                session_worker(session, country, language, ctx, my_gen).await;
+                session_worker(session, country, language, wakeup, my_gen).await;
             });
         }
 
         // (3) Freshly minted cookies from the worker: into the in-memory config
         // only, never persisted (`#[serde(skip)]`, see `config.rs`).
-        let pending = self.session.lock().unwrap().pending_cookies.take();
-        if let Some(cookies) = pending {
-            self.apply_parsed(&cookies);
-        }
+        let mut session = self.session.lock().unwrap();
+        apply_pending_cookies(&mut self.config, &mut session);
     }
 
     /// Create the login webview. Needs the frame for the window handle.
@@ -923,17 +965,6 @@ impl PrimePhotoApp {
         ) {
             self.log(tr("Login erfolgreich – Refresh-Token gespeichert."));
         }
-    }
-
-    /// Copy a parsed cookie set into the config (the device path's
-    /// `fetch_auth_cookies`).
-    ///
-    /// The config fields feed the upload engine; the same set is mirrored into
-    /// the in-memory session so the **detached** background supervisor has the
-    /// live cookies the on-disk `config.toml` no longer carries (`#[serde(skip)]`).
-    pub(crate) fn apply_parsed(&mut self, parsed: &ParsedCookies) {
-        let mut session = self.session.lock().unwrap();
-        apply_parsed_cookies(&mut self.config, &mut session.cookies, parsed);
     }
 
     /// Login phase (same window as the app, like the original).

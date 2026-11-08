@@ -6,7 +6,7 @@ use super::{
 use rune::tok::{self, Theme};
 use rune::{El, col, el, row, text};
 
-pub(super) fn empty_content(theme: Theme, accent: rune::Color) -> El {
+pub(super) fn empty_content(theme: Theme, colors: crate::rune_theme::Palette) -> El {
     col()
         .key("targets")
         .w_full()
@@ -31,7 +31,7 @@ pub(super) fn empty_content(theme: Theme, accent: rune::Color) -> El {
                             "empty-icon",
                             "＋",
                             tok::TextStyle::new(34.0, 400.0),
-                            accent,
+                            colors.primary_foreground,
                         ))
                         .child(keyed_text(
                             "empty-title",
@@ -52,14 +52,19 @@ pub(super) fn empty_content(theme: Theme, accent: rune::Color) -> El {
                             "add-target-cta",
                             "Ordner hinzufügen",
                             theme,
-                            accent,
+                            colors.primary_fill,
+                            colors.primary_foreground,
                             show_add_target_notice,
                         )),
                 ),
         )
 }
 
-pub(super) fn uploading_content(state: &BackupState, theme: Theme, accent: rune::Color) -> El {
+pub(super) fn uploading_content(
+    state: &BackupState,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
     let global_total = UPLOADING_TARGETS
         .iter()
         .map(|target| target.total_files)
@@ -73,7 +78,7 @@ pub(super) fn uploading_content(state: &BackupState, theme: Theme, accent: rune:
         global_total,
         state.paused,
         theme,
-        accent,
+        colors.toggle_on,
     );
 
     let targets = UPLOADING_TARGETS.iter().fold(
@@ -92,7 +97,8 @@ pub(super) fn uploading_content(state: &BackupState, theme: Theme, accent: rune:
                         "pause-resume",
                         if state.paused { "Fortsetzen" } else { "Anhalten" },
                         theme,
-                        accent,
+                        colors.primary_fill,
+                        colors.primary_foreground,
                         toggle_pause,
                     )),
             ),
@@ -118,13 +124,18 @@ pub(super) fn uploading_content(state: &BackupState, theme: Theme, accent: rune:
         .child(queue)
 }
 
-pub(super) fn failure_content(theme: Theme, accent: rune::Color, alert: rune::Color) -> El {
+pub(super) fn failure_content(theme: Theme, colors: crate::rune_theme::Palette) -> El {
     let targets = col()
         .key("targets")
         .w_full()
         .gap(8.0)
         .child(section_heading("Sicherungsziele", theme))
-        .child(target_card(FAILED_TARGET, false, theme, Some(alert)));
+        .child(target_card(
+            FAILED_TARGET,
+            false,
+            theme,
+            Some(colors.alert_foreground),
+        ));
 
     let failed_row = col()
         .key("queue")
@@ -155,14 +166,15 @@ pub(super) fn failure_content(theme: Theme, accent: rune::Color, alert: rune::Co
                             text("Upload fehlgeschlagen")
                                 .key("failed-file-status")
                                 .font(tok::type_::LABEL)
-                                .color(alert),
+                                .color(colors.alert_foreground),
                         ),
                 )
                 .child(action_button(
                     "retry-failed",
                     "Erneut versuchen",
                     theme,
-                    accent,
+                    colors.primary_fill,
+                    colors.primary_foreground,
                     show_retry_notice,
                 )),
         );
@@ -332,7 +344,8 @@ fn action_button(
     key: &'static str,
     label: &'static str,
     theme: Theme,
-    accent: rune::Color,
+    fill: rune::Color,
+    foreground: rune::Color,
     action: fn(&mut BackupState),
 ) -> El {
     el()
@@ -344,8 +357,8 @@ fn action_button(
         .px(18.0)
         .center()
         .radius(9.0)
-        .fill(accent)
+        .fill(fill)
         .hover(theme.hover)
         .on_press(action)
-        .child(styled_text(label, tok::TextStyle::new(14.0, 650.0), theme.text).a11y_hidden())
+        .child(styled_text(label, tok::TextStyle::new(14.0, 650.0), foreground).a11y_hidden())
 }

@@ -21,15 +21,15 @@
 //! ## macOS
 //!
 //! `tray-icon` requires an already-running event loop on the main thread;
-//! eframe invokes the app creator (`PrimePhotoApp::new`) from winit's
-//! `resumed`, i.e. inside the running loop — so building the tray in `new()`
-//! is correct.
+//! construct the tray only after the app's main-thread event loop is active.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::i18n::tr;
-use eframe::egui;
+
+/// UI-neutral callback used to wake the app after a tray event.
+pub(crate) type WakeupCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// Menu events captured by the global [`MenuEvent`] handler, drained by the UI.
 static PENDING: Mutex<Vec<tray_icon::menu::MenuEvent>> = Mutex::new(Vec::new());
@@ -52,12 +52,11 @@ pub struct Tray {
     state: TrayState,
 }
 
-/// Build the tray icon and menu, wiring menu/tray events so the given egui
-/// context repaints when they arrive.
+/// Build the tray icon and menu, wiring menu/tray events to wake the app.
 ///
 /// Returns `None` on any failure (logged), so the app degrades to an ordinary
 /// close-to-quit window.
-pub fn build(ctx: egui::Context) -> Option<Tray> {
+pub(crate) fn build(theme: Theme, wakeup: WakeupCallback) -> Option<Tray> {
     let menu = tray_icon::menu::Menu::new();
     let show_item = tray_icon::menu::MenuItem::new(tr("Fenster anzeigen"), true, None);
     let pause_item = tray_icon::menu::MenuItem::new(tr("Alle anhalten"), true, None);
@@ -79,10 +78,6 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
         return None;
     }
 
-    // The icon is applied after the tray exists (see `set_state` below); the
-    // OS appearance is read once here for that initial idle glyph.
-    let theme = ctx.system_theme();
-
     let builder = tray_icon::TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip(tray_tooltip(TrayState::Idle));
@@ -96,13 +91,13 @@ pub fn build(ctx: egui::Context) -> Option<Tray> {
 
     // Wake the UI when a menu entry is activated. See the module docs for why
     // the event is queued here instead of read from `MenuEvent::receiver()`.
-    let menu_ctx = ctx.clone();
+    let menu_wakeup = wakeup.clone();
     tray_icon::menu::MenuEvent::set_event_handler(Some(move |ev: tray_icon::menu::MenuEvent| {
         PENDING.lock().unwrap().push(ev);
-        menu_ctx.request_repaint();
+        menu_wakeup();
     }));
     // Wake the UI on tray-icon interaction (click/enter/leave…).
-    tray_icon::TrayIconEvent::set_event_handler(Some(move |_| ctx.request_repaint()));
+    tray_icon::TrayIconEvent::set_event_handler(Some(move |_| wakeup()));
 
     let mut tray = Tray {
         _tray: tray,
@@ -155,7 +150,7 @@ impl Tray {
     pub(crate) fn set_state(
         &mut self,
         state: TrayState,
-        theme: Option<egui::Theme>,
+        theme: Theme,
     ) {
         self.set_icon(self.icons.icon(state, theme));
         if self.state != state {
@@ -217,6 +212,14 @@ impl TrayState {
             TrayState::Error => 4,
         }
     }
+}
+
+/// Appearance used by the tray without depending on a UI framework.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Theme {
+    Light,
+    Dark,
+    Unknown,
 }
 
 /// The tray tooltip: the brand name, plus the current status when there is one
@@ -304,6 +307,31 @@ struct TrayIcons {
     logo: tray_icon::Icon,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IconSelection {
+    Black(usize),
+    #[cfg(not(target_os = "macos"))]
+    White(usize),
+    #[cfg(not(target_os = "macos"))]
+    Logo,
+}
+
+fn icon_selection(state: TrayState, theme: Theme) -> IconSelection {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = theme;
+        IconSelection::Black(state.index())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        match theme {
+            Theme::Dark => IconSelection::White(state.index()),
+            Theme::Light => IconSelection::Black(state.index()),
+            Theme::Unknown => IconSelection::Logo,
+        }
+    }
+}
+
 impl TrayIcons {
     fn build() -> Self {
         #[cfg(target_os = "macos")]
@@ -321,19 +349,13 @@ impl TrayIcons {
         icons
     }
 
-    fn icon(&self, state: TrayState, theme: Option<egui::Theme>) -> tray_icon::Icon {
-        #[cfg(target_os = "macos")]
-        {
-            let _ = theme;
-            self.black[state.index()].clone()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            match theme {
-                Some(egui::Theme::Dark) => self.white[state.index()].clone(),
-                Some(egui::Theme::Light) => self.black[state.index()].clone(),
-                None => self.logo.clone(),
-            }
+    fn icon(&self, state: TrayState, theme: Theme) -> tray_icon::Icon {
+        match icon_selection(state, theme) {
+            IconSelection::Black(index) => self.black[index].clone(),
+            #[cfg(not(target_os = "macos"))]
+            IconSelection::White(index) => self.white[index].clone(),
+            #[cfg(not(target_os = "macos"))]
+            IconSelection::Logo => self.logo.clone(),
         }
     }
 }
@@ -353,6 +375,37 @@ fn decode_icon(png: &[u8]) -> tray_icon::Icon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn icon_selection_follows_platform_theme_and_tray_state() {
+        let states = [
+            TrayState::Idle,
+            TrayState::Active,
+            TrayState::Paused,
+            TrayState::Done,
+            TrayState::Error,
+        ];
+
+        for (index, state) in states.into_iter().enumerate() {
+            #[cfg(target_os = "macos")]
+            for theme in [Theme::Light, Theme::Dark, Theme::Unknown] {
+                assert_eq!(icon_selection(state, theme), IconSelection::Black(index));
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                assert_eq!(
+                    icon_selection(state, Theme::Light),
+                    IconSelection::Black(index)
+                );
+                assert_eq!(
+                    icon_selection(state, Theme::Dark),
+                    IconSelection::White(index)
+                );
+                assert_eq!(icon_selection(state, Theme::Unknown), IconSelection::Logo);
+            }
+        }
+    }
 
     #[test]
     fn tray_state_paused_wins_over_everything() {

@@ -15,20 +15,21 @@ settings-only Rune fixture is not an app cutover.
 - The default launch is still the existing eframe Prime Photos app, including
   login, backup, tray, single-instance, and activation paths. No cutover or
   second end-user UI mode has been made.
-- Two explicit interactive developer routes are available only in debug builds
-  with `rune-ui-spike`: `--rune-login` and `--rune-wry-smoke`. The production
-  login route reads the existing config only after the explicit route is
-  selected, and it does not access the keychain or make auth requests until the
-  user clicks its production sign-in action. It uses the existing
-  `WebviewLogin` navigation handler, PKCE portal URL, authorization-code
-  redemption, token/keyring write, and in-memory session install. Closing or
-  cancelling releases its Wry child.
+- Four explicit interactive developer routes are available only in debug
+  builds with `rune-ui-spike`: `--rune-login`, `--rune-wry-smoke`,
+  `--rune-backup`, and `--rune-backup-smoke`. The production login route reads
+  the existing config only after the explicit route is selected, and it does
+  not access the keychain or make auth requests until the user clicks its
+  production sign-in action. It uses the existing `WebviewLogin` navigation
+  handler, PKCE portal URL, authorization-code redemption, token/keyring write,
+  and in-memory session install. Closing or cancelling releases its Wry child.
 - `--rune-wry-smoke` is a separate local-only Wry route. Its page is embedded
   HTML with synthetic text, no external assets or HTTP(S) URLs, and it does not
   load app config/keychain state or perform authentication/network requests.
-  Both Rune routes use the same child-WebView owner, Rune logical bounds and
-  teardown path. Rune's standard native Edit menu supplies Copy/Paste where the
-  platform supports that menu path.
+  The production login and backup routes share the child-WebView owner; the Wry
+  smoke route verifies that host's Rune logical bounds and teardown path. Rune's
+  standard native Edit menu supplies Copy/Paste where the platform supports
+  that menu path.
 - The settings fixture covers only General and Bandwidth settings. It is
   useful for component experiments and is not production persistence or UI
   parity.
@@ -51,6 +52,40 @@ settings-only Rune fixture is not an app cutover.
   changes only fixture state, and retry does not enqueue an upload or access the
   network. The fixture does not implement actual backups or change launch
   behavior; normal debug/release start remains the existing eframe app.
+- `--rune-backup` is an interactive developer route for the persisted backup
+  page. It loads the existing config and backup-target store only after this
+  route is explicitly selected. After the single-instance guard succeeds, it
+  restores only the refresh token through the existing keyring abstraction; a
+  read error is logged and leaves the route signed out. The shared session
+  worker refreshes restored tokens immediately, keeps the existing scheduled
+  refresh and cookie-retry policies, and wakes Rune to apply renewed cookies to
+  memory only. A token being restored is distinct from cookies being upload
+  ready: the route shows a restoring status and does not enable uploads or start
+  background sync until cookies arrive. Invalidated sessions clear the token,
+  cookies, and active-upload state and return to the sign-in surface. After
+  successful sign-in or cookie renewal, the existing background supervisor
+  starts when enabled and configured; its initial pass scans enabled targets
+  and may upload before the filesystem watcher takes over. Polling observes
+  state and updates the view. The route reuses the
+  shared production planner, upload runner, queue/progress, pause, retry, target
+  options and conflict-answer handling. Target creation uses the native folder
+  picker; an existing target's source path remains read-only while its dedupe
+  and conflict options can be edited. Its General settings include an explicit
+  autostart action: the route seeds the switch from OS readback and changes the
+  login item only after a user click, recording intent after a successful OS
+  operation. Normal-start intent reconciliation remains unported. One-time
+  drag-and-drop uploads remain unported. The explicit route's lifecycle parity
+  and remaining blockers are detailed below; this is not a cutover.
+- `--rune-backup-smoke` is an interactive, synthetic-only visual check of the
+  backup layout, including target progress, queue rows and local-only controls.
+  It does not load app/account state, scan folders, authenticate, or upload.
+  Headless `--snap` captures support `--scene` values
+  `empty|populated|alert|about|licenses`, `--theme light|dark`, and
+  `--size WxH`. Initial and narrower viewport captures were inspected for
+  every original backup-scene/theme pairing under
+  `target/rune-backup-smoke/`; the interactive layout test also checks the
+  initial, resized, and minimum viewports. It is separate from the deterministic
+  headless `--rune-backup-fixture`, which remains unchanged.
 
 ## Cutover blockers
 
@@ -64,14 +99,55 @@ same app:
 2. The signed-in backup page: empty and populated targets, target add/edit and
    conflict dialogs, queue actions, pause/resume, active progress, retry and
    failure states, and the existing background upload/sync code.
-3. General and Bandwidth settings with immediate persistence, live appearance
-   and language changes, plus tray/native-menu label updates.
-4. About and third-party-licenses surfaces, plus the tray actions, close/reopen,
-   activation, and single-instance behavior.
+3. General and Bandwidth settings integrated with the production `Config`, with
+   immediate persistence, live appearance and language changes, plus
+   tray/native-menu label updates. The separate settings-only Rune fixture is
+   initialized from `Config::default()` with no persistence
+   path; downloads are not implemented. The interactive backup route now ports
+   the explicit autostart setting action, but normal-start autostart intent
+   reconciliation remains eframe-owned. Album selection is persisted in the
+   shared `Config` and synchronized by both hosts.
+4. The About and third-party-license UI now exists on the Rune backup route.
+   The explicit `--rune-backup` route now shares the single-instance guard and
+   show-request behavior, and reuses the native tray for show, pause/resume,
+   About, and quit when a signed-in session is pending. Its tray glyph derives
+   idle/active/paused state. With the current `Theme::Unknown`, macOS selects its
+   monochrome per-state icons while non-macOS uses the logo fallback. The
+   explicit route now shares close-to-tray, tray-show restoration, and macOS
+   reopen/activation behavior. This is source-level parity, not runtime
+   verification on macOS, Windows, or Linux. Tray done/error and dynamic
+   appearance parity, normal-start autostart reconciliation, full UI/platform
+   evidence, the default launcher, and eframe removal remain blockers.
 5. The existing debug fixtures represented by real Rune view paths, with
    interaction tests and screenshots covering at least signed-out/login chrome,
    backup empty/uploading/failure, and both settings tabs. Existing eframe demo
    screenshots are not Rune parity evidence.
+
+These are deliberate blockers for this backup slice, not implied ports:
+
+- `main.rs` still starts eframe by default. `app.rs` remains responsible for
+  the backup-configuration, About, and licenses dialogs. Rune's explicit
+  backup route has the close-to-tray and activation lifecycle slice described
+  above, but it is not runtime-verified across platforms.
+- Rune's built-in tray backend does not provide macOS support in the pinned
+  checkout (`53c7f60`): it supports Linux with D-Bus and Windows, while macOS
+  returns `TrayError::Unsupported`. The explicit backup route reuses Prime
+  Photos' existing `tray-icon` integration instead; this does not imply full
+  tray lifecycle or glyph/appearance parity.
+- Rune session restoration, access-token refresh, cookie renewal, and
+  invalidation cleanup are implemented by the explicit backup route through the
+  shared session worker. Source-level close-to-tray/reopen and macOS activation
+  parity is also integrated; tray done/error and dynamic appearance parity,
+  normal-start autostart reconciliation, full UI/platform evidence, the default
+  launcher, and eframe removal remain blockers.
+- Rune's native folder-dialog support already covers macOS/Windows and the
+  Linux XDG portal. This slice uses that facility; it is not a reason to
+  reimplement dialogs. The existing app-owned backup/About/licenses dialogs
+  remain separate cutover blockers.
+- The interactive backup route does not port one-time drag-and-drop uploads;
+  after sign-in it reuses the existing background supervisor when enabled and
+  configured, as noted above. The smoke route is synthetic-only and never reads
+  real configuration or starts authentication, scans, or uploads.
 
 The integrated local-only `--rune-wry-smoke` route was manually verified on
 macOS: the Rune window rendered its embedded page at 960×680 and after resizing
@@ -111,5 +187,5 @@ the intended desktop replacement / integration checks:
   rasterizes SVG assets with `build.rs`; audio features are not needed.
 
 The feature stays opt-in until the full direct replacement is ready. Do not add
-a `--rune-settings` flag or another production-like interactive mode; the two
-routes above remain developer-only verification tools.
+a `--rune-settings` flag or another production-like interactive mode; these
+interactive routes remain developer-only verification tools.

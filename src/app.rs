@@ -1,7 +1,6 @@
 use crate::about;
 use crate::app_activation;
 use crate::app_menu;
-use crate::auth::TokenStore;
 use crate::backup_config::{BackupConfigForm, ConfigFormAction, ConfigFormMode};
 use crate::config::Config;
 #[cfg(debug_assertions)]
@@ -304,7 +303,7 @@ pub(crate) struct PrimePhotoApp {
     pub(crate) tray_paused: bool,
     /// Last tray glyph state (plus the OS theme it was drawn for), so the icon
     /// is only re-set on an actual change — see [`Self::update_tray_icon`].
-    pub(crate) tray_icon_state: Option<(tray::TrayState, Option<egui::Theme>)>,
+    pub(crate) tray_icon_state: Option<(tray::TrayState, tray::Theme)>,
     /// Whether the last finished upload run had failures (drives the "error"
     /// glyph until the next run).
     pub(crate) tray_last_run_failed: bool,
@@ -356,9 +355,17 @@ pub(crate) struct PrimePhotoApp {
 }
 
 impl PrimePhotoApp {
-    fn app_menu_wakeup(ctx: &egui::Context) -> app_menu::WakeupCallback {
+    fn ui_wakeup(ctx: &egui::Context) -> app_menu::WakeupCallback {
         let ctx = ctx.clone();
         Arc::new(move || ctx.request_repaint())
+    }
+
+    fn tray_theme(ctx: &egui::Context) -> tray::Theme {
+        match ctx.system_theme() {
+            Some(egui::Theme::Light) => tray::Theme::Light,
+            Some(egui::Theme::Dark) => tray::Theme::Dark,
+            None => tray::Theme::Unknown,
+        }
     }
 
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -412,7 +419,7 @@ impl PrimePhotoApp {
         // so every label (About, Quit, Edit, Undo …) is localized from the
         // first visible frame. A framework-independent callback lets the menu's
         // About item wake the UI (Issue #8).
-        app_menu::install(Self::app_menu_wakeup(&cc.egui_ctx));
+        app_menu::install(Self::ui_wakeup(&cc.egui_ctx));
         // Build the load failure in the UI language (the language is only known
         // now) and log the technical detail — it never reaches the UI (user
         // decision 2026-10-15: no technical messages for the end user).
@@ -539,6 +546,7 @@ impl PrimePhotoApp {
             ),
             _ => (None, false),
         };
+        let album_name = config.album_name.clone();
         let mut app = Self {
             rt,
             config,
@@ -555,7 +563,7 @@ impl PrimePhotoApp {
             upload: Arc::new(Mutex::new(UploadShared::default())),
             paused,
             slow_mode: false,
-            album_name: String::new(),
+            album_name,
             was_active: false,
             scan_tx: None,
             config_form: None,
@@ -592,12 +600,12 @@ impl PrimePhotoApp {
         // worker then starts from `poll_session` on the first frame. A keychain
         // error (unavailable / locked) only logs a warning — the app simply
         // starts signed out.
-        match crate::auth::KeyringTokenStore.load() {
-            Ok(Some(refresh_token)) => {
-                app.session.lock().unwrap().refresh_token = Some(refresh_token);
-            }
-            Ok(None) => {}
-            Err(e) => log::warn!("Refresh-Token konnte nicht geladen werden: {e}"),
+        let token_restore = {
+            let mut session = app.session.lock().unwrap();
+            login::restore_refresh_token(&mut session, &crate::auth::KeyringTokenStore)
+        };
+        if let Err(e) = token_restore {
+            log::warn!("Refresh-Token konnte nicht geladen werden: {e}");
         }
         // Start decision (user decision 2026-10-18): a login-item (autostart)
         // start stays silent — no window, no Dock icon, tray only — while a
@@ -668,9 +676,10 @@ impl PrimePhotoApp {
             fixture.config_error =
                 Some(tr("Die Einstellungen konnten nicht geladen werden.").to_string());
         }
+        let album_name = fixture.config.album_name.clone();
         // Same menu as the real start (⌘C/⌘V/About); it only wires labels and
         // flags, no IO.
-        app_menu::install(Self::app_menu_wakeup(&cc.egui_ctx));
+        app_menu::install(Self::ui_wakeup(&cc.egui_ctx));
 
         let app = Self {
             rt: Arc::new(Runtime::new().expect("tokio runtime")),
@@ -695,7 +704,7 @@ impl PrimePhotoApp {
             upload: Arc::new(Mutex::new(fixture.upload)),
             paused: watch::Sender::new(fixture.paused),
             slow_mode: false,
-            album_name: String::new(),
+            album_name,
             was_active: false,
             scan_tx: None,
             config_form: None,
@@ -861,7 +870,7 @@ impl PrimePhotoApp {
         let busy = self.upload.lock().unwrap().active;
         let since_done = self.tray_done_at.map(|t| t.elapsed());
         let state = tray::tray_state(paused, busy, self.tray_last_run_failed, since_done);
-        let theme = ctx.system_theme();
+        let theme = Self::tray_theme(ctx);
         if self.tray_icon_state != Some((state, theme)) {
             self.tray_icon_state = Some((state, theme));
             if let Some(tray) = self.tray.as_mut() {
@@ -1420,7 +1429,7 @@ impl eframe::App for PrimePhotoApp {
         // The demo never builds one: no session, no tray, no menu-bar icon.
         if self.has_pending_session() && !self.is_demo() {
             if self.tray.is_none() && !self.tray_build_failed {
-                self.tray = tray::build(ctx.clone());
+                self.tray = tray::build(Self::tray_theme(ctx), Self::ui_wakeup(ctx));
                 if self.tray.is_none() {
                     // The OS gave us no tray (no backend, e.g. Linux without
                     // one — logged as an error in `src/tray.rs`). Latch it:

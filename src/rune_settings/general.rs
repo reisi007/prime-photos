@@ -1,11 +1,15 @@
 use crate::config::Appearance;
 use crate::i18n;
 use rune::tok::{self, Theme};
-use rune::{El, col, el, row, text};
+use rune::{El, col, el, row, text, text_input};
 
-use super::SettingsState;
+use super::SettingsHost;
 
-pub(super) fn general_page(state: &SettingsState, theme: Theme, accent: rune::Color) -> El {
+pub(super) fn general_page<S: SettingsHost + 'static>(
+    state: &S,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
     col()
         .key("general-page")
         .w_full()
@@ -15,8 +19,8 @@ pub(super) fn general_page(state: &SettingsState, theme: Theme, accent: rune::Co
             "Darstellung",
             theme,
             [
-                appearance_row(state, theme, accent),
-                language_row(state, theme, accent),
+                appearance_row(state, theme, colors),
+                language_row(state, theme, colors),
             ],
         ))
         .child(super::section(
@@ -24,40 +28,94 @@ pub(super) fn general_page(state: &SettingsState, theme: Theme, accent: rune::Co
             "Uploads",
             theme,
             [
+                album_row(state, theme, colors),
                 super::toggle_row(
                     "notifications-row",
                     "Desktop-Benachrichtigungen (Upload fertig / Fehler)",
                     "",
-                    state.config.notifications,
-                    toggle_notifications,
+                    state.config().notifications,
+                    toggle_notifications::<S>,
                     theme,
-                    accent,
+                    colors,
                 ),
                 super::toggle_row(
                     "background-sync-row",
                     "Hintergrund-Synchronisierung",
                     "Sucht automatisch nach neuen Dateien in den aktiven Sicherungszielen. Läuft nur, solange Prime Photos geöffnet ist.",
-                    state.config.background_sync,
-                    toggle_background_sync,
+                    state.config().background_sync,
+                    toggle_background_sync::<S>,
                     theme,
-                    accent,
+                    colors,
+                ),
+                super::toggle_row(
+                    "autostart-row",
+                    "Nach dem Anmelden starten",
+                    "Startet Prime Photos automatisch, wenn du dich am System anmeldest.",
+                    state.autostart_enabled(),
+                    toggle_autostart::<S>,
+                    theme,
+                    colors,
+                ),
+                super::toggle_row(
+                    "slow-mode-row",
+                    "Slow-Mode (1 Datei gleichzeitig)",
+                    "Gilt nur bis zum nächsten App-Start; wird nicht gespeichert.",
+                    state.slow_mode(),
+                    toggle_slow_mode::<S>,
+                    theme,
+                    colors,
                 ),
             ],
         ))
 }
 
-fn appearance_row(state: &SettingsState, theme: Theme, accent: rune::Color) -> El {
-    let appearance = state.config.appearance;
+fn album_row<S: SettingsHost + 'static>(
+    state: &S,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
+    setting_row(
+        "album-row",
+        "Album (optional):",
+        "",
+        theme,
+        el().key("album-name-field")
+            .size(240.0, 36.0)
+            .padding(8.0)
+            .radius(8.0)
+            .fill(theme.bg)
+            .border(1.0, colors.control_border)
+            .child(
+                text_input(state.album_edit(), tok::type_::BODY)
+                    .key("album-name-input")
+                    .single_line()
+                    .on_edit(|state: &mut S| state.album_edit_mut())
+                    .on_input_change(|state: &mut S, _| state.album_name_changed())
+                    .color(theme.text),
+            ),
+    )
+}
+
+fn appearance_row<S: SettingsHost + 'static>(
+    state: &S,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
+    let appearance = state.config().appearance;
     setting_row(
         "appearance-row",
         "Darstellung",
         "",
         theme,
-        appearance_segments(appearance, theme, accent),
+        appearance_segments::<S>(appearance, theme, colors),
     )
 }
 
-fn appearance_segments(current: Appearance, theme: Theme, accent: rune::Color) -> El {
+fn appearance_segments<S: SettingsHost + 'static>(
+    current: Appearance,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
     let options = [
         (Appearance::Light, "Hell", "appearance-light"),
         (Appearance::Dark, "Dunkel", "appearance-dark"),
@@ -68,6 +126,7 @@ fn appearance_segments(current: Appearance, theme: Theme, accent: rune::Color) -
         .gap(3.0)
         .padding(3.0)
         .fill(theme.control_track)
+        .border(1.0, colors.control_border)
         .radius(9.0);
     for (appearance, label, key) in options {
         let selected = appearance == current;
@@ -85,15 +144,15 @@ fn appearance_segments(current: Appearance, theme: Theme, accent: rune::Color) -
                 .center()
                 .radius(7.0)
                 .fill(if selected {
-                    theme.indicator
+                    colors.primary_fill
                 } else {
                     rune::Color::TRANSPARENT
                 })
                 .hover(theme.hover)
-                .on_press_tx(move |state: &mut SettingsState, tx| {
-                    if state.config.appearance != appearance {
-                        state.config.appearance = appearance;
-                        state.persist();
+                .on_press_tx(move |state: &mut S, tx| {
+                    if state.config().appearance != appearance {
+                        state.config_mut().appearance = appearance;
+                        state.persist_settings();
                         tx.color_motion(tok::motion::CALM);
                     }
                 })
@@ -101,7 +160,7 @@ fn appearance_segments(current: Appearance, theme: Theme, accent: rune::Color) -
                     text(i18n::tr(label))
                         .font(tok::type_::LABEL)
                         .color(if selected {
-                            theme.text
+                            colors.primary_foreground
                         } else {
                             theme.text_secondary
                         })
@@ -109,21 +168,28 @@ fn appearance_segments(current: Appearance, theme: Theme, accent: rune::Color) -
                 ),
         );
     }
-    let _ = accent;
     segments
 }
 
-fn language_row(state: &SettingsState, theme: Theme, accent: rune::Color) -> El {
+fn language_row<S: SettingsHost + 'static>(
+    state: &S,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
     setting_row(
         "language-row",
         "Sprache",
         "",
         theme,
-        language_segments(state.config.language.as_deref(), theme, accent),
+        language_segments::<S>(state.config().language.as_deref(), theme, colors),
     )
 }
 
-fn language_segments(current: Option<&str>, theme: Theme, accent: rune::Color) -> El {
+fn language_segments<S: SettingsHost + 'static>(
+    current: Option<&str>,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
     let options: [(Option<&'static str>, &'static str, &'static str); 3] = [
         (None, "Automatisch (System)", "language-system"),
         (Some("de"), "Deutsch", "language-de"),
@@ -134,6 +200,7 @@ fn language_segments(current: Option<&str>, theme: Theme, accent: rune::Color) -
         .gap(3.0)
         .padding(3.0)
         .fill(theme.control_track)
+        .border(1.0, colors.control_border)
         .radius(9.0);
     for (language, label, key) in options {
         let selected = current == language;
@@ -147,13 +214,13 @@ fn language_segments(current: Option<&str>, theme: Theme, accent: rune::Color) -
                 .center()
                 .radius(7.0)
                 .fill(if selected {
-                    theme.indicator
+                    colors.primary_fill
                 } else {
                     rune::Color::TRANSPARENT
                 })
                 .hover(theme.hover)
-                .on_press(move |state: &mut SettingsState| {
-                    if state.config.language.as_deref() != language {
+                .on_press(move |state: &mut S| {
+                    if state.config().language.as_deref() != language {
                         state.set_language(language);
                     }
                 })
@@ -161,7 +228,7 @@ fn language_segments(current: Option<&str>, theme: Theme, accent: rune::Color) -
                     text(i18n::tr(label))
                         .font(tok::type_::LABEL)
                         .color(if selected {
-                            theme.text
+                            colors.primary_foreground
                         } else {
                             theme.text_secondary
                         })
@@ -169,7 +236,6 @@ fn language_segments(current: Option<&str>, theme: Theme, accent: rune::Color) -
                 ),
         );
     }
-    let _ = accent;
     segments
 }
 
@@ -197,12 +263,22 @@ fn setting_row(
         .description(i18n::tr(description))
 }
 
-fn toggle_notifications(state: &mut SettingsState) {
-    state.config.notifications = !state.config.notifications;
-    state.persist();
+fn toggle_notifications<S: SettingsHost>(state: &mut S) {
+    let enabled = !state.config().notifications;
+    state.config_mut().notifications = enabled;
+    state.persist_settings();
 }
 
-fn toggle_background_sync(state: &mut SettingsState) {
-    state.config.background_sync = !state.config.background_sync;
-    state.persist();
+fn toggle_background_sync<S: SettingsHost>(state: &mut S) {
+    let enabled = !state.config().background_sync;
+    state.config_mut().background_sync = enabled;
+    state.persist_settings();
+}
+
+fn toggle_autostart<S: SettingsHost>(state: &mut S) {
+    state.set_autostart_enabled(!state.autostart_enabled());
+}
+
+fn toggle_slow_mode<S: SettingsHost>(state: &mut S) {
+    state.set_slow_mode(!state.slow_mode());
 }

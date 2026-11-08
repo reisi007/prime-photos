@@ -88,7 +88,10 @@ impl PrimePhotoApp {
         ui.heading(tr("Upload"));
         ui.horizontal(|ui| {
             ui.label(tr("Album (optional):"));
-            changed |= ui.text_edit_singleline(&mut self.album_name).changed();
+            if ui.text_edit_singleline(&mut self.album_name).changed() {
+                self.config.album_name = self.album_name.clone();
+                changed = true;
+            }
         });
         ui.add_space(8.0);
         changed |= ui

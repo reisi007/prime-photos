@@ -9,10 +9,13 @@ use crate::i18n::{self, Lang};
 use rune::tok::{self, Theme};
 use rune::{App, AppSpec, Cx, El, LiveRegion, ScrollSpec, TextEdit, col, el, row, text};
 
+mod components;
 mod controls;
 mod general;
 #[cfg(test)]
 mod tests;
+
+use components::{section, toggle_dedup_default, toggle_row};
 
 const WINDOW_SIZE: (f32, f32) = (1120.0, 800.0);
 const SLIDER_WIDTH: f32 = 300.0;
@@ -20,17 +23,64 @@ const SLIDER_HEIGHT: f32 = 28.0;
 const SLIDER_KNOB: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SettingsTab {
+pub(crate) enum SettingsTab {
     General,
     Bandwidth,
+}
+
+pub(crate) trait SettingsHost {
+    fn config(&self) -> &Config;
+    fn config_mut(&mut self) -> &mut Config;
+    fn settings_tab(&self) -> SettingsTab;
+    fn set_settings_tab(&mut self, tab: SettingsTab);
+    fn autostart_enabled(&self) -> bool;
+    fn set_autostart_enabled(&mut self, enabled: bool);
+    fn slow_mode(&self) -> bool;
+    fn set_slow_mode(&mut self, enabled: bool);
+    fn limit_edit(&self) -> &TextEdit;
+    fn limit_edit_mut(&mut self) -> &mut TextEdit;
+    fn slider_origin(&self) -> usize;
+    fn set_slider_origin(&mut self, value: usize);
+    fn save_error(&self) -> Option<&str>;
+    fn persist_settings(&mut self);
+    fn album_edit(&self) -> &TextEdit;
+    fn album_edit_mut(&mut self) -> &mut TextEdit;
+    fn album_name_changed(&mut self);
+
+    fn set_language(&mut self, language: Option<&'static str>) {
+        self.config_mut().language = language.map(str::to_owned);
+        let lang = self
+            .config()
+            .language
+            .as_deref()
+            .and_then(Lang::from_code)
+            .unwrap_or_else(i18n::system_lang);
+        i18n::set_lang(lang);
+        self.persist_settings();
+    }
+
+    fn set_limit_from_edit(&mut self) {
+        let text = self.limit_edit().text.trim().to_owned();
+        let Ok(value) = text.parse::<u32>() else {
+            return;
+        };
+        if value != self.config().limit_kbps {
+            self.config_mut().limit_kbps = value;
+            self.persist_settings();
+        }
+    }
 }
 
 struct SettingsState {
     config: Config,
     tab: SettingsTab,
+    /// Fixture-only switch state; it must not inspect or modify OS login items.
+    autostart_enabled: bool,
+    slow_mode: bool,
     limit_edit: TextEdit,
     save_error: Option<String>,
     slider_origin: usize,
+    album_edit: TextEdit,
     /// Persistence is opt-in for unit tests. Headless snapshots/scripts must
     /// never read or modify the user's real config.
     save_path: Option<std::path::PathBuf>,
@@ -40,12 +90,16 @@ impl SettingsState {
     fn new(mut config: Config) -> Self {
         config.concurrency = config.concurrency();
         let limit_edit = TextEdit::new(config.limit_kbps.to_string());
+        let album_edit = TextEdit::new(config.album_name.clone());
         SettingsState {
             config,
             tab: SettingsTab::General,
+            autostart_enabled: false,
+            slow_mode: false,
             limit_edit,
             save_error: None,
             slider_origin: 1,
+            album_edit,
             save_path: None,
         }
     }
@@ -68,25 +122,78 @@ impl SettingsState {
         }
     }
 
-    fn set_language(&mut self, language: Option<&'static str>) {
-        self.config.language = language.map(str::to_owned);
-        let lang = self
-            .config
-            .language
-            .as_deref()
-            .and_then(Lang::from_code)
-            .unwrap_or_else(i18n::system_lang);
-        i18n::set_lang(lang);
+}
+
+impl SettingsHost for SettingsState {
+    fn config(&self) -> &Config {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut Config {
+        &mut self.config
+    }
+
+    fn settings_tab(&self) -> SettingsTab {
+        self.tab
+    }
+
+    fn set_settings_tab(&mut self, tab: SettingsTab) {
+        self.tab = tab;
+    }
+
+    fn autostart_enabled(&self) -> bool {
+        self.autostart_enabled
+    }
+
+    fn set_autostart_enabled(&mut self, enabled: bool) {
+        self.autostart_enabled = enabled;
+    }
+
+    fn slow_mode(&self) -> bool {
+        self.slow_mode
+    }
+
+    fn set_slow_mode(&mut self, enabled: bool) {
+        self.slow_mode = enabled;
+    }
+
+    fn limit_edit(&self) -> &TextEdit {
+        &self.limit_edit
+    }
+
+    fn limit_edit_mut(&mut self) -> &mut TextEdit {
+        &mut self.limit_edit
+    }
+
+    fn slider_origin(&self) -> usize {
+        self.slider_origin
+    }
+
+    fn set_slider_origin(&mut self, value: usize) {
+        self.slider_origin = value;
+    }
+
+    fn save_error(&self) -> Option<&str> {
+        self.save_error.as_deref()
+    }
+
+    fn persist_settings(&mut self) {
         self.persist();
     }
 
-    fn set_limit_from_edit(&mut self) {
-        let Ok(value) = self.limit_edit.text.trim().parse::<u32>() else {
-            return;
-        };
-        if value != self.config.limit_kbps {
-            self.config.limit_kbps = value;
-            self.persist();
+    fn album_edit(&self) -> &TextEdit {
+        &self.album_edit
+    }
+
+    fn album_edit_mut(&mut self) -> &mut TextEdit {
+        &mut self.album_edit
+    }
+
+    fn album_name_changed(&mut self) {
+        let album_name = self.album_edit.text.clone();
+        if self.config.album_name != album_name {
+            self.config.album_name = album_name;
+            self.persist_settings();
         }
     }
 }
@@ -134,18 +241,11 @@ fn set_initial_language(config: &Config) {
 }
 
 fn view(state: &SettingsState, cx: &mut Cx<SettingsState>) -> El {
-    let dark = match state.config.appearance {
-        Appearance::System => cx.system_dark(),
-        Appearance::Light => false,
-        Appearance::Dark => true,
-    };
+    let dark = effective_dark(state.config.appearance, cx.system_dark());
     let theme = tok::theme(dark);
-    let accent = tok::accent(0, dark);
-
-    let page = match state.tab {
-        SettingsTab::General => general::general_page(state, theme, accent),
-        SettingsTab::Bandwidth => bandwidth_page(state, theme, accent),
-    };
+    let colors = crate::rune_theme::palette(dark);
+    cx.foreground(theme.text);
+    cx.focus_ring(2.0, 2.0, colors.focus_ring);
 
     col()
         .key("settings-window")
@@ -174,6 +274,41 @@ fn view(state: &SettingsState, cx: &mut Cx<SettingsState>) -> El {
                 .h(1.0)
                 .fill(theme.separator),
         )
+        .child(settings_content(state, theme, colors))
+        .child(settings_footer(state, theme, colors))
+}
+
+pub(crate) fn effective_dark(appearance: Appearance, system_dark: bool) -> bool {
+    match appearance {
+        Appearance::System => system_dark,
+        Appearance::Light => false,
+        Appearance::Dark => true,
+    }
+}
+
+pub(crate) fn embedded_page<S: SettingsHost + 'static>(
+    state: &S,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
+    settings_content(state, theme, colors)
+}
+
+fn settings_content<S: SettingsHost + 'static>(
+    state: &S,
+    theme: Theme,
+    colors: crate::rune_theme::Palette,
+) -> El {
+    let current = state.settings_tab();
+    let page = match current {
+        SettingsTab::General => general::general_page(state, theme, colors),
+        SettingsTab::Bandwidth => bandwidth_page(state, theme, colors),
+    };
+    col()
+        .key("settings-content-root")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
         .child(
             row()
                 .key("tabs")
@@ -183,18 +318,18 @@ fn view(state: &SettingsState, cx: &mut Cx<SettingsState>) -> El {
                 .center_y()
                 .gap(8.0)
                 .focus_group()
-                .child(tab_button(
+                .child(tab_button::<S>(
                     "tab-general",
                     "Allgemeines",
                     SettingsTab::General,
-                    state.tab,
+                    current,
                     theme,
                 ))
-                .child(tab_button(
+                .child(tab_button::<S>(
                     "tab-bandwidth",
                     "Bandbreite",
                     SettingsTab::Bandwidth,
-                    state.tab,
+                    current,
                     theme,
                 )),
         )
@@ -218,10 +353,9 @@ fn view(state: &SettingsState, cx: &mut Cx<SettingsState>) -> El {
                         .child(page),
                 ),
         )
-        .child(settings_footer(state, theme))
 }
 
-fn tab_button(
+fn tab_button<S: SettingsHost + 'static>(
     key: &'static str,
     title: &'static str,
     tab: SettingsTab,
@@ -250,7 +384,7 @@ fn tab_button(
             rune::Color::TRANSPARENT
         })
         .hover(theme.hover)
-        .on_press(move |state: &mut SettingsState| state.tab = tab)
+        .on_press(move |state: &mut S| state.set_settings_tab(tab))
         .child(
             text(i18n::tr(title))
                 .font(tok::type_::BODY)
@@ -263,131 +397,25 @@ fn tab_button(
         )
 }
 
-fn bandwidth_page(state: &SettingsState, theme: Theme, accent: rune::Color) -> El {
-    controls::bandwidth_page(state, theme, accent)
-}
-
-fn section<const N: usize>(
-    key: &'static str,
-    title: &'static str,
+fn bandwidth_page<S: SettingsHost + 'static>(
+    state: &S,
     theme: Theme,
-    rows: [El; N],
+    colors: crate::rune_theme::Palette,
 ) -> El {
-    let mut card = col()
-        .key(format!("{key}-card"))
-        .w_full()
-        .padding(4.0)
-        .gap(0.0)
-        .fill(theme.card)
-        .radius(12.0)
-        .border(1.0, theme.card_border)
-        .shadow(1.0, 2.0, theme.shadow)
-        .shadow(8.0, 24.0, theme.shadow_soft);
-    for (index, setting) in rows.into_iter().enumerate() {
-        card = card.child(setting);
-        if index + 1 < N {
-            card = card.child(
-                el().key(format!("{key}-separator-{index}"))
-                    .h(1.0)
-                    .mx(12.0)
-                    .fill(theme.separator)
-                    .a11y_hidden(),
-            );
-        }
-    }
-
-    col()
-        .key(key)
-        .w_full()
-        .gap(8.0)
-        .child(
-            text(i18n::tr(title))
-                .key(format!("{key}-heading"))
-                .font(tok::type_::SECTION)
-                .color(theme.text_secondary)
-                .padding(8.0),
-        )
-        .child(card)
+    controls::bandwidth_page(state, theme, colors)
 }
 
-fn toggle_row(
-    key: &'static str,
-    label: &'static str,
-    description: &'static str,
-    enabled: bool,
-    action: fn(&mut SettingsState),
+fn settings_footer<S: SettingsHost + 'static>(
+    state: &S,
     theme: Theme,
-    accent: rune::Color,
+    colors: crate::rune_theme::Palette,
 ) -> El {
-    row()
-        .key(key)
-        .role("switch")
-        .label(i18n::tr(label))
-        .description(i18n::tr(description))
-        .checked(enabled)
-        .focusable(true)
-        .w_full()
-        .h(if description.is_empty() { 58.0 } else { 72.0 })
-        .px(14.0)
-        .center_y()
-        .justify_between()
-        .hover(theme.hover)
-        .press(theme.press)
-        .on_press(action)
-        .child(
-            col()
-                .key(format!("{key}-copy"))
-                .grow(1.0)
-                .gap(4.0)
-                .child(
-                    text(i18n::tr(label))
-                        .font(tok::type_::BODY)
-                        .color(theme.text)
-                        .a11y_hidden(),
-                )
-                .child(if description.is_empty() {
-                    el().h(0.0).a11y_hidden()
-                } else {
-                    text(i18n::tr(description))
-                        .font(tok::type_::LABEL)
-                        .color(theme.text_secondary)
-                        .wrap()
-                        .a11y_hidden()
-                }),
-        )
-        .child(toggle_control(key, enabled, theme, accent).a11y_hidden())
-}
-
-fn toggle_control(key: &'static str, enabled: bool, theme: Theme, accent: rune::Color) -> El {
-    const WIDTH: f32 = 38.0;
-    const HEIGHT: f32 = 22.0;
-    const KNOB: f32 = 18.0;
-    let inset = (HEIGHT - KNOB) / 2.0;
-    el().key(format!("{key}-switch"))
-        .size(WIDTH, HEIGHT)
-        .radius(HEIGHT / 2.0)
-        .fill(if enabled { accent } else { theme.control_off })
-        .motion(tok::motion::SNAPPY)
-        .child(
-            el().key(format!("{key}-knob"))
-                .size(KNOB, KNOB)
-                .absolute(if enabled { WIDTH - KNOB - inset } else { inset }, inset)
-                .radius(KNOB / 2.0)
-                .fill(theme.knob)
-                .shadow(1.0, 3.0, theme.knob_shadow),
-        )
-}
-
-fn settings_footer(state: &SettingsState, theme: Theme) -> El {
-    let status = match &state.save_error {
-        Some(error) => text(error.clone())
+    let status = match state.save_error() {
+        Some(error) => text(error.to_owned())
             .key("save-error")
             .role("alert")
             .live_region(LiveRegion::Assertive)
-            .color(tok::accent(
-                2,
-                matches!(state.config.appearance, Appearance::Dark),
-            ))
+            .color(colors.alert_foreground)
             .wrap(),
         None => text(i18n::tr("Änderungen werden sofort gespeichert."))
             .key("save-status")
@@ -400,11 +428,6 @@ fn settings_footer(state: &SettingsState, theme: Theme) -> El {
         .px(30.0)
         .center_y()
         .child(status.font(tok::type_::LABEL))
-}
-
-fn toggle_dedup_default(state: &mut SettingsState) {
-    state.config.dedup_default = !state.config.dedup_default;
-    state.persist();
 }
 
 fn save_config_at_path(config: &Config, path: &std::path::Path) -> std::io::Result<()> {

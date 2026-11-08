@@ -135,7 +135,7 @@ fn plan_index_for(paths: &HashMap<usize, PathBuf>, path: &Path) -> Option<usize>
 
 /// Apply a run's folder counters to the current store rows, resolving each
 /// plan-time index by the path captured for that run.
-fn apply_folder_progress(
+pub(crate) fn apply_folder_progress(
     store: &mut FolderStore,
     paths: &HashMap<usize, PathBuf>,
     folder_total: &HashMap<usize, usize>,
@@ -1174,6 +1174,193 @@ impl UploadPlan {
     }
 }
 
+/// The immutable production inputs handed to the one shared upload runner.
+/// Keeping the plan/publish/launch path here means eframe and the Rune spike do
+/// not grow separate scanners or upload implementations.
+pub(crate) struct UploadLaunch {
+    items: Vec<(usize, usize, PathBuf)>,
+    config: Config,
+    shared: Arc<Mutex<UploadShared>>,
+    paused: watch::Sender<bool>,
+    concurrency: usize,
+    limit_kbps: u32,
+    album: String,
+    folder_opts: HashMap<usize, (bool, ConflictResolution)>,
+    destination_roots: HashMap<usize, PathBuf>,
+}
+
+impl UploadLaunch {
+    pub(crate) async fn run(self) {
+        run_upload(
+            self.items,
+            self.config,
+            self.shared,
+            self.paused,
+            self.concurrency,
+            self.limit_kbps,
+            self.album,
+            self.folder_opts,
+            self.destination_roots,
+        )
+        .await;
+    }
+
+    pub(crate) fn spawn(self, runtime: &tokio::runtime::Runtime) {
+        runtime.spawn(self.run());
+    }
+}
+
+/// Shared, explicit-user-action path for persisted target uploads. This does
+/// not run from route construction or polling; callers choose when the source
+/// check, scan, dedupe index, and production upload are allowed to start.
+pub(crate) fn prepare_scheduled_upload_shared(
+    store: &mut FolderStore,
+    indices: Vec<usize>,
+    config: &mut Config,
+    shared: Arc<Mutex<UploadShared>>,
+    paused: watch::Sender<bool>,
+    album: String,
+    slow_mode: bool,
+    persist_store: bool,
+ ) -> Option<UploadLaunch> {
+    prepare_scheduled_upload_with(
+        store,
+        indices,
+        config,
+        shared,
+        paused,
+        album,
+        slow_mode,
+        persist_store,
+        |path| path.is_dir(),
+        UploadPlan::build,
+        |store| {
+            let _ = store.save();
+        },
+    )
+}
+
+fn prepare_scheduled_upload_with(
+    store: &mut FolderStore,
+    indices: Vec<usize>,
+    config: &mut Config,
+    shared: Arc<Mutex<UploadShared>>,
+    paused: watch::Sender<bool>,
+    album: String,
+    slow_mode: bool,
+    persist_store: bool,
+    is_dir: impl Fn(&Path) -> bool,
+    build_plan: impl FnOnce(&FolderStore, &[usize]) -> Option<UploadPlan>,
+    mut save_store: impl FnMut(&FolderStore),
+) -> Option<UploadLaunch> {
+    let mut changed = false;
+    let mut missing = false;
+    let mut present = Vec::new();
+    for &index in &indices {
+        let Some(folder) = store.folders.get_mut(index) else {
+            continue;
+        };
+        let exists = is_dir(&folder.path);
+        let next = source_status(exists, folder.status);
+        if next != folder.status {
+            folder.status = next;
+            changed = true;
+        }
+        if exists {
+            present.push(index);
+        } else {
+            missing = true;
+        }
+    }
+    if changed && persist_store {
+        save_store(store);
+    }
+
+    let mut destination_roots: HashMap<usize, PathBuf> = present
+        .iter()
+        .filter_map(|&index| {
+            store
+                .folders
+                .get(index)
+                .map(|folder| (index, folder.path.clone()))
+        })
+        .collect();
+    let Some(mut plan) = build_plan(store, &present).or_else(|| {
+        if present.is_empty() {
+            return None;
+        }
+        let mut empty = UploadPlan::empty();
+        for &index in &present {
+            if let Some(folder) = store.folders.get(index) {
+                empty.per_folder.insert(index, 0);
+                empty.folder_opts.insert(
+                    index,
+                    (folder.dedup, folder.conflict_resolution),
+                );
+            }
+        }
+        Some(empty)
+    }) else {
+        let message = if missing {
+            tr("Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).")
+        } else {
+            tr("Keine Fotos oder Videos in diesem Ordner gefunden.")
+        };
+        shared.lock().unwrap().log(message);
+        return None;
+    };
+
+    // Include empty selected targets in destination preflight, even when a
+    // different selected target contains upload candidates.
+    for &index in &present {
+        if let Some(folder) = store.folders.get(index) {
+            plan.per_folder.entry(index).or_insert(0);
+            plan.folder_opts
+                .entry(index)
+                .or_insert((folder.dedup, folder.conflict_resolution));
+            destination_roots
+                .entry(index)
+                .or_insert_with(|| folder.path.clone());
+        }
+    }
+
+    let concurrency = config.concurrency();
+    let limit_kbps = if config.limit_enabled {
+        config.limit_kbps
+    } else {
+        0
+    };
+    let message = plan.start_message();
+    publish_plan(
+        &mut plan,
+        store,
+        &shared,
+        message,
+        Some(slow_mode),
+        persist_store,
+        &mut save_store,
+    );
+    if slow_mode {
+        shared
+            .lock()
+            .unwrap()
+            .log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
+    }
+    paused.send_replace(false);
+    config.paused = false;
+    Some(UploadLaunch {
+        items: plan.items,
+        config: config.clone(),
+        shared,
+        paused,
+        concurrency,
+        limit_kbps,
+        album,
+        folder_opts: plan.folder_opts,
+        destination_roots,
+    })
+}
+
 /// Publish a scanned plan on the shared upload state (active, counters, live
 /// queue and `msg` as the run-start log line). Both start paths go through
 /// here, so a manual run, a background run and a one-time run look and behave
@@ -1250,13 +1437,20 @@ fn publish_state(
 /// second, redundant claim — and a false one after a cancelled run or a quit in
 /// the middle of a run, because both finalizers return early on `cancelled` and
 /// never reset it. A file count is a number, not a claim.
-fn publish_folder_status(plan: &UploadPlan, store: &mut FolderStore) {
+fn publish_folder_status(
+    plan: &UploadPlan,
+    store: &mut FolderStore,
+    persist_store: bool,
+    save_store: &mut impl FnMut(&FolderStore),
+) {
     for (&i, &count) in &plan.per_folder {
         if let Some(f) = store.folders.get_mut(i) {
             f.total_files = count;
         }
     }
-    let _ = store.save();
+    if persist_store {
+        save_store(store);
+    }
 }
 
 /// Publish a plan for **persisted** folder targets: the shared state above
@@ -1268,10 +1462,12 @@ fn publish_plan(
     shared: &Arc<Mutex<UploadShared>>,
     msg: String,
     slow_mode: Option<bool>,
+    persist_store: bool,
+    save_store: &mut impl FnMut(&FolderStore),
 ) {
     let folder_paths = plan_folder_paths(plan, store);
     publish_state(plan, shared, msg, folder_paths, slow_mode);
-    publish_folder_status(plan, store);
+    publish_folder_status(plan, store, persist_store, save_store);
 }
 
 /// Capture the plan-time index → path association for a published folder plan.
@@ -1371,6 +1567,55 @@ fn with_watch_store<T>(
 /// Set once the supervising background task has been spawned for this process —
 /// `ensure_background_sync` is idempotent through it.
 static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Start the shared background-sync supervisor for a non-eframe Rune host.
+///
+/// The upload planner, watermark pass, watcher loop, and store finalizer remain
+/// the same as the existing app path. The caller owns the returned sender so a
+/// newly added folder can be handed to the supervisor while another run is
+/// active.
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+pub(crate) fn spawn_background_sync(
+    runtime: &tokio::runtime::Runtime,
+    shared: Arc<Mutex<UploadShared>>,
+    paused: watch::Sender<bool>,
+    session: Arc<Mutex<Session>>,
+    cfg: Config,
+    album: String,
+) -> Option<tokio::sync::mpsc::UnboundedSender<PathBuf>> {
+    if !cfg.background_sync
+        || cfg.session_id.is_empty()
+        || cfg.cookie_x_acb.is_empty()
+        || BG_SYNC_STARTED.swap(true, Ordering::SeqCst)
+    {
+        return None;
+    }
+
+    let concurrency = cfg.concurrency();
+    let limit = if cfg.limit_enabled {
+        cfg.limit_kbps
+    } else {
+        0
+    };
+    let (scan_tx, scan_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
+    runtime.spawn(async move {
+        background_sync_pass(
+            shared.clone(),
+            paused.clone(),
+            session.clone(),
+            cfg.clone(),
+            concurrency,
+            limit,
+            album.clone(),
+        )
+        .await;
+        watch_loop(
+            shared, paused, session, cfg, concurrency, limit, album, scan_rx,
+        )
+        .await;
+    });
+    Some(scan_tx)
+}
 
 /// Persist the counters of a finished **background** run. `finalize_upload` is
 /// only reached through the UI hook for manual runs (`was_active` in `update`),
@@ -1571,7 +1816,10 @@ fn start_background_run(
     // The detached supervisor has no `PrimePhotoApp`; the shared field is the
     // live app value and remains authoritative even if the user toggles while
     // this run is being prepared.
-    publish_plan(&mut plan, store, &shared, msg, None);
+    let mut save_store = |store: &FolderStore| {
+        let _ = store.save();
+    };
+    publish_plan(&mut plan, store, &shared, msg, None, true, &mut save_store);
 
     // Spawned, not awaited: the supervisor must keep watching while the run
     // uploads (the `active` guard in `can_start` already prevents a second one).
@@ -2374,7 +2622,7 @@ fn remember_folder<'a>(
 /// (transient target, index outside the store, file outside the folder path).
 ///
 /// Returns whether it wrote.
-fn remember_conflict_in_folder(
+pub(crate) fn remember_conflict_in_folder(
     store: &mut FolderStore,
     idx: usize,
     file_path: &Path,
@@ -2416,10 +2664,35 @@ fn remember_checkbox_label(folder_name: Option<&str>) -> String {
 /// store, or a file that does not live below the folder's path). Both
 /// decisions are the same query, so the checkbox never names a folder that
 /// would not receive the answer — the shifted-index case included.
-fn conflict_remember_label(store: &FolderStore, idx: usize, file_path: &Path) -> String {
+pub(crate) fn conflict_remember_label(store: &FolderStore, idx: usize, file_path: &Path) -> String {
     remember_folder(store, idx, file_path)
         .map(|f| remember_checkbox_label(Some(&f.name)))
         .unwrap_or_else(|| remember_checkbox_label(None))
+}
+
+/// Resolve the production worker's pending name conflict using the same shared
+/// answer fields and guarded per-target remembered policy as the eframe dialog.
+pub(crate) fn answer_pending_conflict(
+    store: &mut FolderStore,
+    shared: &Arc<Mutex<UploadShared>>,
+    answer: ConflictResolution,
+    remember: bool,
+    persist_store: bool,
+) {
+    let (pending_idx, pending_path) = {
+        let mut state = shared.lock().unwrap();
+        let pending = (state.pending_conflict_idx, state.pending_conflict_path.clone());
+        state.conflict_remember = remember;
+        state.conflict_answer = Some(answer);
+        pending
+    };
+    if remember {
+        if let (Some(index), Some(path)) = (pending_idx, pending_path) {
+            if remember_conflict_in_folder(store, index, &path, answer) && persist_store {
+                let _ = store.save();
+            }
+        }
+    }
 }
 
 impl PrimePhotoApp {
@@ -2550,124 +2823,22 @@ impl PrimePhotoApp {
     /// starts its runs through the very same steps — `UploadPlan::build` for the
     /// scan and `publish_plan` for the state/folder side effects.
     pub(crate) fn start_scheduled_upload(&mut self, indices: Vec<usize>) {
-        // Missing source (user decisions 2026-10-16, 2026-10-17): a target whose
-        // source folder is gone is flagged `NotFound`, not scanned — and it is
-        // kept **out** of the plan so a run can never settle it as `Done`. A
-        // folder whose drive came back is lifted to `Idle` here as well. The
-        // missing source gets a plain-language message instead of "no photos
-        // found".
-        let mut changed = false;
-        let mut missing = false;
-        let mut present: Vec<usize> = Vec::new();
-        for &i in &indices {
-            let Some(f) = self.store.folders.get_mut(i) else {
-                continue;
-            };
-            let exists = f.path.is_dir();
-            let next = source_status(exists, f.status);
-            if next != f.status {
-                f.status = next;
-                changed = true;
-            }
-            if exists {
-                present.push(i);
-            } else {
-                missing = true;
-            }
-        }
-        if changed {
-            let _ = self.store.save();
-        }
-        let mut destination_roots: HashMap<usize, PathBuf> = present
-            .iter()
-            .filter_map(|&i| {
-                self.store
-                    .folders
-                    .get(i)
-                    .map(|folder| (i, folder.path.clone()))
-            })
-            .collect();
-        let Some(mut plan) = UploadPlan::build(&self.store, &present).or_else(|| {
-            if present.is_empty() {
-                return None;
-            }
-            let mut empty = UploadPlan::empty();
-            for &i in &present {
-                if let Some(folder) = self.store.folders.get(i) {
-                    empty.per_folder.insert(i, 0);
-                    empty.folder_opts.insert(
-                        i,
-                        (folder.dedup, folder.conflict_resolution),
-                    );
-                }
-            }
-            Some(empty)
-        }) else {
-            if missing {
-                self.log(tr(
-                    "Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).",
-                ));
-            } else {
-                self.log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
-            }
+        let Some(run) = prepare_scheduled_upload_shared(
+            &mut self.store,
+            indices,
+            &mut self.config,
+            self.upload.clone(),
+            self.paused.clone(),
+            self.album_name.clone(),
+            self.slow_mode,
+            true,
+        ) else {
             return;
         };
-        // Include empty selected backups in the run's destination preflight,
-        // even when another selected folder has files.
-        for &i in &present {
-            if let Some(folder) = self.store.folders.get(i) {
-                plan.per_folder.entry(i).or_insert(0);
-                plan.folder_opts
-                    .entry(i)
-                    .or_insert((folder.dedup, folder.conflict_resolution));
-                destination_roots
-                    .entry(i)
-                    .or_insert_with(|| folder.path.clone());
-            }
-        }
-        let concurrency = self.config.concurrency();
-        let limit = if self.config.limit_enabled {
-            self.config.limit_kbps
-        } else {
-            0
-        };
-        let msg = plan.start_message();
-        publish_plan(
-            &mut plan,
-            &mut self.store,
-            &self.upload,
-            msg,
-            Some(self.slow_mode),
-        );
-        if self.slow_mode {
-            self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
-        }
-        self.paused.send_replace(false);
-        // Persist the lifted pause (user decision 2026-10-14): the start paths
-        // have no pause guard, so without this the runtime is unpaused while
-        // `config.toml` still says otherwise and the next restart resumes it.
-        self.config.paused = false;
+        // Keep eframe's original persistence-before-worker-start order.
         self.save_config();
         self.was_active = true;
-
-        let cfg = self.config.clone();
-        let shared = self.upload.clone();
-        let paused = self.paused.clone();
-        let album = self.album_name.clone();
-        self.rt.spawn(async move {
-            run_upload(
-                plan.items,
-                cfg,
-                shared,
-                paused,
-                concurrency,
-                limit,
-                album,
-                plan.folder_opts,
-                destination_roots,
-            )
-            .await;
-        });
+        run.spawn(&self.rt);
     }
 
     // -- one-time upload (drag & drop) --------------------------------------
@@ -2921,25 +3092,7 @@ impl PrimePhotoApp {
                 });
             });
         if let Some(a) = answer {
-            {
-                let mut s = self.upload.lock().unwrap();
-                s.conflict_remember = remember;
-                s.conflict_answer = Some(a);
-            }
-            // "Nicht noch einmal fragen" also persists into the folder the asked
-            // file belongs to (user decision 2026-10-15), so the next run there
-            // stops asking. Purely additive: the run-wide override the worker
-            // applies from `conflict_remember` is untouched, and the transient
-            // drag & drop target has no folder to write to — it stays run-only.
-            if remember {
-                if let (Some(idx), Some(path)) = (pending_idx, &pending_path) {
-                    if remember_conflict_in_folder(&mut self.store, idx, path, a) {
-                        // Same as every other folder write: a failed save must
-                        // not cost the user the answer they just gave.
-                        let _ = self.store.save();
-                    }
-                }
-            }
+            answer_pending_conflict(&mut self.store, &self.upload, a, remember, true);
         } else {
             // Remember the checkbox even before the user commits to an option.
             self.upload.lock().unwrap().conflict_remember = remember;
@@ -4609,6 +4762,148 @@ mod tests {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn scheduled_upload_uses_injected_services_for_present_and_empty_targets() {
+        let root = scratch_scan_folder("scheduled-helper");
+        let first_path = root.join("first");
+        let empty_path = root.join("empty");
+        let missing_path = root.join("missing");
+        let mut store = FolderStore {
+            folders: vec![
+                folders::BackupFolder {
+                    status: FolderStatus::NotFound,
+                    conflict_resolution: ConflictResolution::SaveAsNew,
+                    ..folders::BackupFolder::new(first_path.clone())
+                },
+                folders::BackupFolder {
+                    status: FolderStatus::Paused,
+                    dedup: false,
+                    conflict_resolution: ConflictResolution::Ignore,
+                    ..folders::BackupFolder::new(empty_path.clone())
+                },
+                folders::BackupFolder::new(missing_path),
+            ],
+        };
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let (paused, pause_state) = watch::channel(true);
+        let mut config = Config {
+            paused: true,
+            ..Config::default()
+        };
+        let builder_called = Cell::new(false);
+        let source_checks = Cell::new(0);
+        let save_calls = Cell::new(0);
+        let selected_indices = [0, 1];
+
+        let launch = prepare_scheduled_upload_with(
+            &mut store,
+            vec![0, 1, 2],
+            &mut config,
+            shared.clone(),
+            paused,
+            "synthetic album".to_owned(),
+            true,
+            false,
+            |path| {
+                source_checks.set(source_checks.get() + 1);
+                path == first_path.as_path() || path == empty_path.as_path()
+            },
+            |store, indices| {
+                builder_called.set(true);
+                assert_eq!(indices, selected_indices);
+                assert_eq!(store.folders[0].status, FolderStatus::Idle);
+                assert_eq!(store.folders[1].status, FolderStatus::Idle);
+                assert_eq!(store.folders[2].status, FolderStatus::NotFound);
+                // No files are returned: the helper's empty-plan fallback must
+                // still retain both present destinations and their options.
+                None
+            },
+            |_| save_calls.set(save_calls.get() + 1),
+        )
+        .expect("present targets produce an empty destination plan");
+
+        assert!(builder_called.get());
+        assert_eq!(source_checks.get(), 3);
+        assert_eq!(save_calls.get(), 0, "persist_store=false must not save");
+        assert_eq!(store.folders[0].status, FolderStatus::Idle);
+        assert_eq!(store.folders[1].status, FolderStatus::Idle);
+        assert_eq!(store.folders[2].status, FolderStatus::NotFound);
+        assert_eq!(launch.items.len(), 0);
+        assert_eq!(launch.album, "synthetic album");
+        assert_eq!(
+            launch.destination_roots,
+            HashMap::from([(0, first_path.clone()), (1, empty_path.clone())])
+        );
+        assert_eq!(
+            launch.folder_opts.get(&0),
+            Some(&(true, ConflictResolution::SaveAsNew))
+        );
+        assert_eq!(
+            launch.folder_opts.get(&1),
+            Some(&(false, ConflictResolution::Ignore))
+        );
+        assert!(!config.paused);
+        assert!(!*pause_state.borrow());
+        {
+            let state = shared.lock().unwrap();
+            assert!(state.active);
+            assert!(state.slow_mode);
+            assert_eq!(state.total, 0);
+            assert!(state.queue.is_empty());
+            assert_eq!(state.folder_total, HashMap::from([(0, 0), (1, 0)]));
+            assert_eq!(
+                state.folder_paths,
+                HashMap::from([(0, first_path), (1, empty_path)])
+            );
+        }
+    }
+
+    #[test]
+    fn scheduled_upload_logs_missing_sources_without_persisting_or_unpausing() {
+        let root = scratch_scan_folder("scheduled-missing");
+        let path = root.join("missing");
+        let mut store = store_with(&path.to_string_lossy(), FolderStatus::Idle);
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let (paused, pause_state) = watch::channel(true);
+        let mut config = Config {
+            paused: true,
+            ..Config::default()
+        };
+        let builder_called = Cell::new(false);
+        let save_calls = Cell::new(0);
+
+        let launch = prepare_scheduled_upload_with(
+            &mut store,
+            vec![0],
+            &mut config,
+            shared.clone(),
+            paused,
+            String::new(),
+            false,
+            false,
+            |_| false,
+            |_, indices| {
+                builder_called.set(true);
+                assert!(indices.is_empty());
+                None
+            },
+            |_| save_calls.set(save_calls.get() + 1),
+        );
+
+        assert!(launch.is_none());
+        assert!(builder_called.get());
+        assert_eq!(save_calls.get(), 0, "persist_store=false must not save");
+        assert_eq!(store.folders[0].status, FolderStatus::NotFound);
+        assert!(config.paused);
+        assert!(*pause_state.borrow());
+        let state = shared.lock().unwrap();
+        assert!(!state.active);
+        assert!(state
+            .log
+            .last()
+            .is_some_and(|message| message.contains("Quellordner")));
     }
 
     #[test]

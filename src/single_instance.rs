@@ -18,12 +18,16 @@
 //! app then runs **without** the guard rather than refusing to start.
 //!
 //! The accept loop runs on its own thread and never touches the UI: it only
-//! sets an `AtomicBool` and wakes the render loop, exactly like `src/tray.rs`
-//! and `src/app_menu.rs`. `PrimePhotoApp::update` drains the request through
-//! [`take_show_request`] and shows the (possibly hidden) window.
+//! sets an `AtomicBool` and invokes a UI-neutral wake callback. The active UI
+//! host drains the request through [`take_show_request`] and shows its window.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+
+#[cfg(test)]
+mod tests;
+
+type Wakeup = Arc<dyn Fn() + Send + Sync>;
 
 /// The line a second process sends to ask the running instance to show itself.
 const SHOW_REQUEST: &str = "prime-photos:show\n";
@@ -46,11 +50,9 @@ const WINDOWS_INSTANCE_PORT: u16 = 47733;
 /// [`take_show_request`].
 static SHOW_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// The egui context to wake when a second process asks for the window. Stored
-/// by [`attach_ctx`]; the accept loop only flags + repaints, never touches the
-/// UI directly. Missing context = the flag is still set, only the immediate
-/// repaint is skipped.
-static UI_CTX: OnceLock<eframe::egui::Context> = OnceLock::new();
+/// The active UI host's wake callback. The accept loop only flags + wakes,
+/// never touches the UI directly. Missing callback = the flag is still set.
+static UI_WAKEUP: OnceLock<Wakeup> = OnceLock::new();
 
 /// Unix ownership locks outlive the detached accept thread. If that thread
 /// exits or panics while the app remains alive, another process must still not
@@ -58,11 +60,22 @@ static UI_CTX: OnceLock<eframe::egui::Context> = OnceLock::new();
 #[cfg(unix)]
 static UNIX_INSTANCE_LOCKS: OnceLock<std::sync::Mutex<Vec<std::fs::File>>> = OnceLock::new();
 
-/// Remember the render-loop context. `PrimePhotoApp::new` calls this next to
-/// `app_menu::install`; the `egui::Context` only exists once `eframe` has
-/// started, which is why the accept loop cannot just capture it.
+/// Remember a UI-neutral render-loop waker for the active host.
+pub(crate) fn attach_wakeup(wakeup: Arc<dyn Fn() + Send + Sync>) {
+    let _ = UI_WAKEUP.set(wakeup);
+    // A launch request can arrive between acquiring the guard and attaching
+    // the UI. Wake the newly attached host so it can drain that request.
+    if SHOW_REQUESTED.load(Ordering::Relaxed)
+        && let Some(wakeup) = UI_WAKEUP.get()
+    {
+        wakeup();
+    }
+}
+
+/// Eframe adapter: `PrimePhotoApp::new` calls this after its context exists.
 pub fn attach_ctx(ctx: &eframe::egui::Context) {
-    let _ = UI_CTX.set(ctx.clone());
+    let ctx = ctx.clone();
+    attach_wakeup(Arc::new(move || ctx.request_repaint()));
 }
 
 /// Whether another process asked this instance to show its window since the
@@ -230,12 +243,19 @@ fn serve<S: std::io::Read + std::io::Write>(stream: &mut S) {
 
     // The requester only needs to know that we got it; the UI is woken, never
     // touched from here.
-    SHOW_REQUESTED.store(true, Ordering::Relaxed);
-    if let Some(ctx) = UI_CTX.get() {
-        ctx.request_repaint();
-    }
+    request_show(UI_WAKEUP.get());
     let _ = stream.write_all(SHOW_ANSWER.as_bytes());
     let _ = stream.flush();
+}
+
+/// Record a show request and wake the UI if its host has registered a callback.
+/// Kept separate from the process guard so both outcomes can be tested without
+/// binding the user's configured socket or port.
+fn request_show(wakeup: Option<&Wakeup>) {
+    SHOW_REQUESTED.store(true, Ordering::Relaxed);
+    if let Some(wakeup) = wakeup {
+        wakeup();
+    }
 }
 
 /// Ask the instance behind `path` to show its window. `true` only when a Prime
@@ -346,125 +366,4 @@ fn spawn_tcp_accept_loop(listener: std::net::TcpListener) {
     if let Err(e) = spawned {
         log::warn!("Prime Photos: Instanz-Thread nicht startbar: {e}");
     }
-}
-
-/// Serialises the two tests: `SHOW_REQUESTED` is a process-global flag, so two
-/// tests draining it in parallel could steal each other's request. Poisoning is
-/// ignored — a failed test must not fail the other one.
-#[cfg(test)]
-static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Make a fresh directory for each Unix test. The test's listener and process-
-/// lifetime sidecar lock intentionally remain alive until the test process
-/// exits, so neither path may be reused or unlinked during the test run.
-#[cfg(all(test, unix))]
-fn unique_unix_test_socket() -> std::path::PathBuf {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static NEXT_PATH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-
-    loop {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros()
-            % 1_000_000;
-        let sequence = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("pp-{}-{timestamp}-{sequence}", std::process::id()));
-        match std::fs::create_dir(&dir) {
-            Ok(()) => return dir.join("sock"),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => panic!("Temp-Verzeichnis anlegen: {error}"),
-        }
-    }
-}
-
-#[cfg(all(test, unix))]
-#[test]
-fn second_instance_defers_and_the_first_shows_its_window() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    let path = unique_unix_test_socket();
-
-    assert!(acquire_at(&path), "der erste Start muss primär werden");
-    assert!(!acquire_at(&path), "der zweite Start muss sich fügen");
-    assert!(
-        take_show_request(),
-        "die laufende Instanz muss den Show-Wunsch sehen"
-    );
-
-    // Keep the socket and locked sidecar in this unique directory. The accept
-    // thread and ownership lock live until this test process exits.
-}
-
-#[cfg(all(test, unix))]
-#[test]
-fn concurrent_stale_socket_takeover_has_exactly_one_owner() {
-    use std::os::unix::net::UnixListener;
-    use std::sync::Barrier;
-
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    let path = unique_unix_test_socket();
-
-    // Leave behind the filesystem entry from a listener that crashed.
-    drop(UnixListener::bind(&path).expect("stale socket anlegen"));
-    assert!(
-        path.exists(),
-        "der verwaiste Socket-Pfad muss bestehen bleiben"
-    );
-
-    let barrier = std::sync::Arc::new(Barrier::new(3));
-    let contenders = (0..2)
-        .map(|_| {
-            let path = path.clone();
-            let barrier = barrier.clone();
-            std::thread::spawn(move || {
-                barrier.wait();
-                acquire_at(&path)
-            })
-        })
-        .collect::<Vec<_>>();
-    barrier.wait();
-
-    let owners = contenders
-        .into_iter()
-        .map(|contender| contender.join().expect("contender panicked"))
-        .filter(|owns_guard| *owns_guard)
-        .count();
-    assert_eq!(owners, 1, "genau ein Contender darf Guard-Eigentümer sein");
-
-    // Even when the loser could not handshake during recovery and controlled-
-    // rejected, it must not have removed/rebound the eventual owner's socket.
-    assert!(
-        ask_existing_instance(&path),
-        "der Gewinner-Socket muss nach dem Rennen erreichbar bleiben"
-    );
-    assert!(
-        take_show_request(),
-        "der Gewinner muss mindestens eine Show-Anfrage erhalten"
-    );
-
-    // Keep the socket and locked sidecar in this unique directory. The accept
-    // thread and ownership lock live until this test process exits.
-}
-
-/// The Windows transport is exercised on every platform (it is plain `std`),
-/// so its handshake is covered by `cargo test` even without a Windows host.
-#[cfg(test)]
-#[test]
-fn tcp_second_instance_defers_and_the_first_shows_its_window() {
-    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    // Below the ephemeral range and derived from the pid, so the test does not
-    // collide with the production port or with a random outgoing connection.
-    let port = 44733 + (std::process::id() % 1000) as u16;
-
-    assert!(acquire_tcp_at(port), "der erste Start muss primär werden");
-    assert!(!acquire_tcp_at(port), "der zweite Start muss sich fügen");
-    assert!(
-        take_show_request(),
-        "die laufende Instanz muss den Show-Wunsch sehen"
-    );
 }

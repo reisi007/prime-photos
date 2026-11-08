@@ -128,8 +128,9 @@ fn close(state: &mut LoginState, _: &mut Tx) {
 fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
     let dark = cx.system_dark();
     let theme = tok::theme(dark);
-    let accent = tok::accent(0, dark);
-    let alert = tok::accent(2, dark);
+    let colors = crate::rune_theme::palette(dark);
+    cx.foreground(theme.text);
+    cx.focus_ring(2.0, 2.0, colors.focus_ring);
     let titlebar_inset = cx.titlebar_inset();
 
     let header = row()
@@ -199,7 +200,7 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
                     .color(theme.text_secondary),
             )
     } else {
-        signed_out(state, theme, accent, alert, dark)
+        signed_out(state, theme, colors)
     };
 
     col()
@@ -226,9 +227,7 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
 fn signed_out(
     state: &LoginState,
     theme: rune::tok::Theme,
-    accent: rune::Color,
-    alert: rune::Color,
-    dark: bool,
+    colors: crate::rune_theme::Palette,
 ) -> El {
     let label = tr("Land / Amazon-Marktplatz:");
     let current_country = countries::country_label(&state.config.country);
@@ -243,6 +242,7 @@ fn signed_out(
         .center_y()
         .radius(9.0)
         .fill(theme.control_track)
+        .border(1.0, colors.control_border)
         .hover(theme.hover)
         .on_press_tx(|state: &mut LoginState, tx: &mut Tx| {
             if rune::popup_menu_supported() {
@@ -302,6 +302,7 @@ fn signed_out(
             .padding(6.0)
             .gap(2.0)
             .fill(theme.control_track)
+            .border(1.0, colors.control_border)
             .radius(9.0);
         for &(country, _) in COUNTRIES {
             let title = countries::country_label(country);
@@ -344,13 +345,13 @@ fn signed_out(
         .h(48.0)
         .center()
         .radius(10.0)
-        .fill(accent)
+        .fill(colors.primary_fill)
         .hover(theme.hover)
         .on_press_tx(start_login)
         .child(
             text(sign_in_label)
                 .font(tok::TextStyle::new(14.0, 650.0))
-                .color(if dark { rune::Color::WHITE } else { theme.text })
+                .color(colors.primary_foreground)
                 .a11y_hidden(),
         );
 
@@ -389,7 +390,7 @@ fn signed_out(
                 .role("alert")
                 .live_region(LiveRegion::Assertive)
                 .font(tok::type_::BODY)
-                .color(alert)
+                .color(colors.alert_foreground)
                 .wrap(),
         );
     }
@@ -399,7 +400,7 @@ fn signed_out(
                 .key("config-error")
                 .role("alert")
                 .font(tok::type_::BODY)
-                .color(alert)
+                .color(colors.alert_foreground)
                 .wrap(),
         );
     }

@@ -150,13 +150,14 @@ fn failure_scene(state: &mut BackupState) {
 fn view(state: &BackupState, cx: &mut Cx<BackupState>) -> El {
     let dark = cx.system_dark();
     let theme = tok::theme(dark);
-    let accent = tok::accent(0, dark);
-    let alert = tok::accent(2, dark);
+    let colors = crate::rune_theme::palette(dark);
+    cx.foreground(theme.text);
+    cx.focus_ring(2.0, 2.0, colors.focus_ring);
 
     let content = match state.scene {
-        Scene::Empty => scenes::empty_content(theme, accent),
-        Scene::Uploading => scenes::uploading_content(state, theme, accent),
-        Scene::Failure => scenes::failure_content(theme, accent, alert),
+        Scene::Empty => scenes::empty_content(theme, colors),
+        Scene::Uploading => scenes::uploading_content(state, theme, colors),
+        Scene::Failure => scenes::failure_content(theme, colors),
     };
 
     let mut footer = row()
@@ -172,7 +173,12 @@ fn view(state: &BackupState, cx: &mut Cx<BackupState>) -> El {
         ));
     if let Some(notice) = state.notice {
         footer = footer.child(
-            keyed_text("fixture-notice", notice, tok::type_::LABEL, alert)
+            keyed_text(
+                "fixture-notice",
+                notice,
+                tok::type_::LABEL,
+                colors.alert_foreground,
+            )
                 .role("status")
                 .live_region(LiveRegion::Polite),
         );

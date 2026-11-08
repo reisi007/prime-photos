@@ -2,12 +2,16 @@ pub(super) const RUNE_LOGIN_FIXTURE_FLAG: &str = "--rune-login-fixture";
 pub(super) const RUNE_BACKUP_FIXTURE_FLAG: &str = "--rune-backup-fixture";
 pub(super) const RUNE_PRODUCTION_LOGIN_FLAG: &str = "--rune-login";
 pub(super) const RUNE_WRY_SMOKE_FLAG: &str = "--rune-wry-smoke";
+pub(super) const RUNE_BACKUP_FLAG: &str = "--rune-backup";
+pub(super) const RUNE_BACKUP_SMOKE_FLAG: &str = "--rune-backup-smoke";
 const RUNE_HEADLESS_FLAGS: [&str; 3] = ["--snap", "--tree", "--script"];
-const RUNE_ROUTE_FLAGS: [&str; 4] = [
+const RUNE_ROUTE_FLAGS: [&str; 6] = [
     RUNE_LOGIN_FIXTURE_FLAG,
     RUNE_BACKUP_FIXTURE_FLAG,
     RUNE_PRODUCTION_LOGIN_FLAG,
     RUNE_WRY_SMOKE_FLAG,
+    RUNE_BACKUP_FLAG,
+    RUNE_BACKUP_SMOKE_FLAG,
 ];
 
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
@@ -42,19 +46,29 @@ pub(super) fn rune_interactive_route_args(
     args: &[String],
     route_flag: &str,
 ) -> Result<Option<Vec<String>>, &'static str> {
+    let allow_synthetic_smoke_capture = route_flag == RUNE_BACKUP_SMOKE_FLAG;
     let marker_count = args.iter().filter(|arg| arg.as_str() == route_flag).count();
     if marker_count == 0 {
         return Ok(None);
     }
     if marker_count != 1
         || args.iter().any(|arg| {
-            arg != route_flag
-                && (RUNE_ROUTE_FLAGS.iter().any(|flag| arg.starts_with(flag))
-                    || rune_headless_flag(arg).is_some()
-                    || arg == "--headless")
+            if arg == route_flag {
+                return false;
+            }
+            RUNE_ROUTE_FLAGS.iter().any(|flag| arg.starts_with(flag))
+                || arg == "--headless"
+                || (rune_headless_flag(arg).is_some() && !allow_synthetic_smoke_capture)
         })
     {
         return Err("interactive Rune route cannot be combined with fixtures or headless tooling");
+    }
+
+    if allow_synthetic_smoke_capture {
+        validate_rune_headless_options(args)?;
+        if args.iter().any(|arg| rune_headless_flag(arg).is_some()) && !has_rune_headless_args(args) {
+            return Err("malformed Rune headless action");
+        }
     }
 
     Ok(Some(
@@ -68,6 +82,7 @@ pub(super) fn rune_interactive_route_args(
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 fn validate_rune_headless_options(args: &[String]) -> Result<bool, &'static str> {
     let mut found_option = false;
+    let mut action: Option<&str> = None;
     let mut i = 0;
 
     while i < args.len() {
@@ -75,8 +90,12 @@ fn validate_rune_headless_options(args: &[String]) -> Result<bool, &'static str>
             if args[i] != flag {
                 return Err("malformed Rune tooling option");
             }
+            if action.is_some() {
+                return Err("Rune headless actions cannot be duplicated or combined");
+            }
 
             found_option = true;
+            action = Some(flag);
             let Some(value) = args.get(i + 1) else {
                 return Err("Rune tooling option requires a file path");
             };
@@ -147,6 +166,30 @@ pub(super) fn rune_backup_fixture_args(
     } else {
         Err("launcher argument filtering removed the Rune headless action")
     }
+}
+
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+pub(super) fn rune_login_fixture_args(
+    args: Vec<String>,
+) -> Result<Option<Vec<String>>, &'static str> {
+    if args.iter().any(|arg| is_malformed_rune_fixture_arg(arg)) {
+        return Err("malformed Rune fixture/tooling option");
+    }
+    let marker_count = args
+        .iter()
+        .filter(|arg| arg.as_str() == RUNE_LOGIN_FIXTURE_FLAG)
+        .count();
+    if marker_count == 0 {
+        return Ok(None);
+    }
+    if marker_count != 1 || args.iter().any(|arg| arg == RUNE_BACKUP_FIXTURE_FLAG) {
+        return Err("Rune fixture markers cannot be combined or duplicated");
+    }
+    let stripped_args = strip_rune_login_fixture_arg(args);
+    if !validate_rune_headless_options(&stripped_args)? || !has_rune_headless_args(&stripped_args) {
+        return Err("--rune-login-fixture requires --snap FILE, --tree FILE, or --script FILE");
+    }
+    Ok(Some(stripped_args))
 }
 
 /// macOS launchers may inject process-serialization arguments.
@@ -309,86 +352,14 @@ mod rune_backup_routing_tests {
 }
 
 #[cfg(all(test, debug_assertions, feature = "rune-ui-spike"))]
-mod rune_interactive_routing_tests {
-    use super::{
-        RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG,
-        RUNE_WRY_SMOKE_FLAG, is_malformed_rune_fixture_arg, rune_interactive_route_args,
-    };
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| (*value).to_owned()).collect()
-    }
-
-    #[test]
-    fn interactive_routes_strip_only_their_explicit_marker() {
-        assert_eq!(
-            rune_interactive_route_args(
-                &args(&[RUNE_PRODUCTION_LOGIN_FLAG, "--theme", "light"]),
-                RUNE_PRODUCTION_LOGIN_FLAG,
-            ),
-            Ok(Some(args(&["--theme", "light"])))
-        );
-        assert_eq!(
-            rune_interactive_route_args(&args(&[RUNE_WRY_SMOKE_FLAG]), RUNE_WRY_SMOKE_FLAG),
-            Ok(Some(Vec::new()))
-        );
-        assert_eq!(
-            rune_interactive_route_args(&args(&["--theme", "light"]), RUNE_PRODUCTION_LOGIN_FLAG),
-            Ok(None)
-        );
-    }
-
-    #[test]
-    fn interactive_routes_fail_closed_when_combined_with_other_routes_or_headless_args() {
-        assert!(rune_interactive_route_args(
-            &args(&[RUNE_PRODUCTION_LOGIN_FLAG, RUNE_WRY_SMOKE_FLAG]),
-            RUNE_PRODUCTION_LOGIN_FLAG,
-        )
-        .is_err());
-        assert!(rune_interactive_route_args(
-            &args(&[RUNE_WRY_SMOKE_FLAG, "--rune-login-fixture"]),
-            RUNE_WRY_SMOKE_FLAG,
-        )
-        .is_err());
-        assert!(rune_interactive_route_args(
-            &args(&[RUNE_WRY_SMOKE_FLAG, "--snap", "out.png"]),
-            RUNE_WRY_SMOKE_FLAG,
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn production_login_prefix_does_not_make_the_headless_fixture_malformed() {
-        assert!(!is_malformed_rune_fixture_arg(RUNE_LOGIN_FIXTURE_FLAG));
-        for flag in [
-            RUNE_BACKUP_FIXTURE_FLAG,
-            RUNE_LOGIN_FIXTURE_FLAG,
-            RUNE_PRODUCTION_LOGIN_FLAG,
-            RUNE_WRY_SMOKE_FLAG,
-        ] {
-            assert!(!is_malformed_rune_fixture_arg(flag), "{flag} should be valid");
-        }
-        assert!(is_malformed_rune_fixture_arg("--rune-login=unexpected"));
-    }
-
-    #[test]
-    fn malformed_route_suffixes_fail_closed() {
-        for arg in [
-            "--rune-login-typo",
-            "--rune-login-fixture-typo",
-            "--rune-backup-fixture-typo",
-            "--rune-wry-smoke-typo",
-        ] {
-            assert!(is_malformed_rune_fixture_arg(arg), "{arg} should be rejected");
-        }
-    }
-}
+mod rune_interactive_routing_tests;
 
 #[cfg(test)]
 mod rune_route_guard_tests {
     use super::{
         RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG,
-        RUNE_WRY_SMOKE_FLAG, is_rune_fixture_or_tooling_arg,
+        RUNE_WRY_SMOKE_FLAG, RUNE_BACKUP_FLAG, RUNE_BACKUP_SMOKE_FLAG,
+        is_rune_fixture_or_tooling_arg,
     };
 
     #[test]
@@ -398,6 +369,8 @@ mod rune_route_guard_tests {
             RUNE_LOGIN_FIXTURE_FLAG,
             RUNE_PRODUCTION_LOGIN_FLAG,
             RUNE_WRY_SMOKE_FLAG,
+            RUNE_BACKUP_FLAG,
+            RUNE_BACKUP_SMOKE_FLAG,
         ] {
             assert!(is_rune_fixture_or_tooling_arg(flag));
         }

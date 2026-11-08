@@ -4,6 +4,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 static NEXT_TEST_PATH: AtomicUsize = AtomicUsize::new(0);
 
+#[test]
+fn effective_dark_respects_appearance_override_and_system_fallback() {
+    for system_dark in [false, true] {
+        assert!(!effective_dark(Appearance::Light, system_dark));
+        assert!(effective_dark(Appearance::Dark, system_dark));
+        assert_eq!(effective_dark(Appearance::System, system_dark), system_dark);
+    }
+}
+
 fn test_path() -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "prime-photos-rune-settings-{}-{}.toml",
@@ -79,6 +88,54 @@ fn notification_toggle_updates_live_state_and_saves_config() {
     assert!(!runtime.state.config.notifications);
     let saved = std::fs::read_to_string(&path).unwrap();
     assert!(saved.contains("notifications = false"));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn slow_mode_toggle_is_live_and_never_persists_config() {
+    let (mut runtime, path) = runtime();
+    assert!(!runtime.state.slow_mode);
+    assert!(runtime.find("slow-mode-row").is_some());
+
+    click(&mut runtime, "slow-mode-row");
+
+    assert!(runtime.state.slow_mode);
+    assert!(!path.exists(), "transient slow mode must not save Config");
+
+    click(&mut runtime, "slow-mode-row");
+
+    assert!(!runtime.state.slow_mode);
+    assert!(!path.exists(), "toggling slow mode off must not save Config");
+}
+
+#[test]
+fn autostart_toggle_is_fixture_only_and_never_persists_config() {
+    let (mut runtime, path) = runtime();
+    assert!(!runtime.state.autostart_enabled);
+    assert!(runtime.find("autostart-row").is_some());
+
+    click(&mut runtime, "autostart-row");
+
+    assert!(runtime.state.autostart_enabled);
+    assert_eq!(runtime.state.config.autostart_enabled, None);
+    assert!(!path.exists(), "fixture autostart must not save Config");
+}
+
+#[test]
+fn album_edit_is_initialized_from_and_persisted_to_config() {
+    let path = test_path();
+    let mut config = Config::default();
+    config.album_name = "Existing album".to_owned();
+    let mut state = SettingsState::new(config);
+    state.save_path = Some(path.clone());
+    assert_eq!(state.album_edit.text, "Existing album");
+
+    state.album_edit.replace_text("Updated album");
+    state.album_name_changed();
+
+    assert_eq!(state.config.album_name, "Updated album");
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("album_name = \"Updated album\""));
     std::fs::remove_file(path).unwrap();
 }
 

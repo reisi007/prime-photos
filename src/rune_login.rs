@@ -69,8 +69,9 @@ fn error_scene(state: &mut LoginState) {
 fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
     let dark = cx.system_dark();
     let theme = tok::theme(dark);
-    let accent = tok::accent(0, dark);
-    let alert = tok::accent(2, dark);
+    let colors = crate::rune_theme::palette(dark);
+    cx.foreground(theme.text);
+    cx.focus_ring(2.0, 2.0, colors.focus_ring);
 
     let label = i18n::tr("Land / Amazon-Marktplatz:");
     let current_country = countries::country_label(&state.country);
@@ -85,6 +86,7 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
         .center_y()
         .radius(9.0)
         .fill(theme.control_track)
+        .border(1.0, colors.control_border)
         .hover(theme.hover)
         .on_press_tx(|state: &mut LoginState, tx: &mut Tx| {
             if rune::popup_menu_supported() {
@@ -136,17 +138,13 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
         .h(48.0)
         .center()
         .radius(10.0)
-        .fill(accent)
+        .fill(colors.primary_fill)
         .hover(theme.hover)
         .on_press(|state: &mut LoginState| state.error = Some(FIXTURE_ERROR))
         .child(
             text(sign_in_label)
                 .font(tok::TextStyle::new(14.0, 650.0))
-                .color(if dark {
-                    rune::Color::WHITE
-                } else {
-                    theme.text
-                })
+                .color(colors.primary_foreground)
                 .a11y_hidden(),
         );
 
@@ -175,6 +173,7 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
             .padding(6.0)
             .gap(2.0)
             .fill(theme.control_track)
+            .border(1.0, colors.control_border)
             .radius(9.0);
         for &(country, _) in COUNTRIES {
             let title = countries::country_label(country);
@@ -192,7 +191,7 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
                     .center_y()
                     .radius(6.0)
                     .fill(if selected {
-                        theme.indicator
+                        colors.primary_fill
                     } else {
                         rune::Color::TRANSPARENT
                     })
@@ -204,7 +203,11 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
                     .child(
                         text(title)
                             .font(tok::type_::LABEL)
-                            .color(theme.text)
+                            .color(if selected {
+                                colors.primary_foreground
+                            } else {
+                                theme.text
+                            })
                             .a11y_hidden(),
                     ),
             );
@@ -248,7 +251,7 @@ fn view(state: &LoginState, cx: &mut Cx<LoginState>) -> El {
                 .role("alert")
                 .live_region(LiveRegion::Assertive)
                 .font(tok::type_::BODY)
-                .color(alert)
+                .color(colors.alert_foreground)
                 .wrap(),
         );
     }
