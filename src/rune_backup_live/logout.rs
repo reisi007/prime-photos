@@ -150,10 +150,8 @@ mod tests {
             },
             ..Session::default()
         };
-        let mut upload = UploadShared {
-            active: true,
-            ..UploadShared::default()
-        };
+        let mut upload = UploadShared::default();
+        upload.active = true;
 
         let (deregistration, clear_result) =
             clear_local_session(&mut config, &mut session, &mut upload, &token_store);
