@@ -176,14 +176,40 @@ fn smoke_controls_only_change_local_synthetic_state() {
     click(&mut runtime, "smoke-advance");
     assert_eq!(runtime.state.progress_done, completed);
     click(&mut runtime, "smoke-pause");
-    click(&mut runtime, "smoke-retry");
-    assert_eq!(runtime.state.retry_count, 1);
-    assert_eq!(runtime.state.targets[0].status, TargetStatus::Waiting);
-    assert!(runtime
+    let failed_before = runtime
         .state
         .queue
         .iter()
-        .all(|item| item.status != QueueStatus::Failed));
+        .filter(|item| item.status == QueueStatus::Failed)
+        .count();
+    let waiting_before = runtime
+        .state
+        .queue
+        .iter()
+        .filter(|item| item.status == QueueStatus::Waiting)
+        .count();
+    click(&mut runtime, "smoke-retry");
+    assert_eq!(runtime.state.retry_count, 1);
+    assert_eq!(runtime.state.targets[0].status, TargetStatus::Waiting);
+    assert_eq!(
+        runtime
+            .state
+            .queue
+            .iter()
+            .filter(|item| item.status == QueueStatus::Failed)
+            .count(),
+        failed_before - 1
+    );
+    assert_eq!(
+        runtime
+            .state
+            .queue
+            .iter()
+            .filter(|item| item.status == QueueStatus::Waiting)
+            .count(),
+        waiting_before + 1
+    );
+    assert!(runtime.state.notice.contains("kein Upload gestartet"));
 }
 
 #[test]
