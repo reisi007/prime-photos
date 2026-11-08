@@ -23,6 +23,7 @@ pub(crate) enum Lang {
 
 impl Lang {
     /// Stable code used for persistence (`Config.language`).
+    #[cfg(any(feature = "legacy-eframe", test))]
     pub(crate) fn code(self) -> &'static str {
         match self {
             Lang::De => "de",
@@ -145,6 +146,7 @@ pub(crate) fn tr3(key: &'static str, a: impl Display, b: impl Display, c: impl D
 
 /// Count-dependent text: `singular` for exactly one, `plural` otherwise, with
 /// the literal token `{n}` in the plural replaced by the count.
+#[cfg(any(feature = "legacy-eframe", test))]
 pub(crate) fn tr_n(n: usize, singular: &'static str, plural: &'static str) -> String {
     let key = if n == 1 { singular } else { plural };
     tr(key).replace("{n}", &n.to_string())

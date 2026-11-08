@@ -235,6 +235,7 @@ impl Config {
 
     /// The queue's share of the splittable height, clamped to 0.20..=0.80; a
     /// non-finite hand-written value falls back to the default (Issue #33).
+    #[cfg(any(feature = "legacy-eframe", test))]
     pub fn backup_queue_ratio(&self) -> f32 {
         crate::backup::sanitize_backup_queue_ratio(self.backup_queue_ratio)
     }

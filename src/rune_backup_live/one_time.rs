@@ -65,6 +65,7 @@ impl OneTimePlan {
                 name,
                 state: FileState::Waiting,
                 size,
+                #[cfg(feature = "legacy-eframe")]
                 path: path.clone(),
                 bytes_sent: 0,
             });

@@ -123,6 +123,8 @@ pub(super) fn entry(
     state: FileState,
     pct: u64,
 ) -> QueueEntry {
+    #[cfg(not(feature = "legacy-eframe"))]
+    let _ = folder_path;
     let name = photo_name(i);
     let size = file_size(i);
     let bytes_sent = match state {
@@ -132,6 +134,7 @@ pub(super) fn entry(
     };
     QueueEntry {
         folder,
+        #[cfg(feature = "legacy-eframe")]
         path: folder_path.join(SUBDIRS[i % SUBDIRS.len()]).join(&name),
         name,
         state,

@@ -109,6 +109,7 @@ pub(crate) fn country_label(code: &str) -> String {
 }
 
 /// Best-effort country from the system locale (macOS `AppleLocale`, then `LANG`).
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn system_country() -> Option<String> {
     if let Ok(out) = std::process::Command::new("defaults")
         .args(["read", "-g", "AppleLocale"])

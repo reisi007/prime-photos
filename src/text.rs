@@ -28,6 +28,7 @@ pub(crate) fn nfc(s: &str) -> String {
 /// `B/KB/MB/GB/TB` (short, untranslated), whole bytes without a decimal and
 /// every larger value with **one decimal, truncated** (abgerundet — not
 /// rounded), so `1535` is `1.4 KB`, never `1.5`.
+#[cfg(any(feature = "legacy-eframe", test))]
 pub(crate) fn format_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     if bytes < 1024 {

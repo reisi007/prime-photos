@@ -292,6 +292,7 @@ impl crate::rune_settings::SettingsHost for LiveState {
         self.settings_slider_origin = value;
     }
 
+    #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
     fn save_error(&self) -> Option<&str> {
         self.config_error.as_deref()
     }

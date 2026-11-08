@@ -53,6 +53,7 @@ pub(crate) struct QueueEntry {
     pub(crate) size: u64,
     /// Full path, shown as the name column's hover tooltip
     /// (docs/original/SPEC_UPLOAD_PROGRESS.md §7.3).
+    #[cfg(feature = "legacy-eframe")]
     pub(crate) path: PathBuf,
     /// Bytes handed to the transport for this file so far (Befund 11c), copied
     /// from the upload's progress counter by a 100 ms polling task. `0` before a
@@ -1943,6 +1944,7 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/a.jpg"),
                 bytes_sent: 0,
             },
@@ -1951,6 +1953,7 @@ mod tests {
                 name: "b.jpg".into(),
                 state: FileState::Done,
                 size: 2,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/b.jpg"),
                 bytes_sent: 0,
             },
@@ -1959,6 +1962,7 @@ mod tests {
                 name: "c.jpg".into(),
                 state: FileState::Uploading,
                 size: 3,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/c.jpg"),
                 bytes_sent: 0,
             },
@@ -1967,6 +1971,7 @@ mod tests {
                 name: "d.jpg".into(),
                 state: FileState::Failed,
                 size: 4,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/d.jpg"),
                 bytes_sent: 0,
             },
@@ -2131,6 +2136,7 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/a.jpg"),
                 bytes_sent: 7,
             }],
@@ -2207,6 +2213,7 @@ mod tests {
                     name: "a.jpg".into(),
                     state: FileState::Waiting,
                     size: 1,
+                    #[cfg(feature = "legacy-eframe")]
                     path: PathBuf::from("/fotos/a/a.jpg"),
                     bytes_sent: 0,
                 },
@@ -2215,6 +2222,7 @@ mod tests {
                     name: "b.jpg".into(),
                     state: FileState::Waiting,
                     size: 1,
+                    #[cfg(feature = "legacy-eframe")]
                     path: PathBuf::from("/fotos/a/b.jpg"),
                     bytes_sent: 0,
                 },
@@ -2255,6 +2263,7 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Waiting,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/a.jpg"),
                 bytes_sent: 0,
             }],
@@ -2285,6 +2294,7 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Waiting,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: path.clone(),
                 bytes_sent: 0,
             }],
@@ -2327,6 +2337,7 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: path.clone(),
                 bytes_sent: 0,
             }],
@@ -2400,6 +2411,7 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: path.clone(),
                 bytes_sent: 0,
             }],

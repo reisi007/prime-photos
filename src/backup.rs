@@ -798,6 +798,7 @@ impl UploadPlan {
                     name,
                     state: FileState::Waiting,
                     size,
+                    #[cfg(feature = "legacy-eframe")]
                     path: p.clone(),
                     bytes_sent: 0,
                 });
@@ -816,6 +817,7 @@ impl UploadPlan {
     /// (the one-time drag & drop path): every entry belongs to the single
     /// synthetic folder index `idx`, so the whole queue is one folder as far as
     /// `run_upload`'s counters and `folder_opts` are concerned.
+    #[cfg(feature = "legacy-eframe")]
     fn from_files(
         idx: usize,
         dedup: bool,
@@ -838,6 +840,7 @@ impl UploadPlan {
                 name,
                 state: FileState::Waiting,
                 size,
+                #[cfg(feature = "legacy-eframe")]
                 path: p.clone(),
                 bytes_sent: 0,
             });
@@ -871,6 +874,7 @@ impl UploadPlan {
                 name,
                 state: FileState::Waiting,
                 size,
+                #[cfg(feature = "legacy-eframe")]
                 path: p.clone(),
                 bytes_sent: 0,
             });
@@ -1206,6 +1210,7 @@ fn plan_folder_paths(plan: &UploadPlan, store: &FolderStore) -> HashMap<usize, P
 /// Deepest directory that contains every dropped path, or `None` when they sit
 /// on different roots (e.g. two volumes). Only used to label the transient
 /// one-time target of a multi-path drop — a display value, never a scan root.
+#[cfg(feature = "legacy-eframe")]
 fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
     let mut common = paths.first()?.parent()?.to_path_buf();
     for p in paths.iter().skip(1) {
@@ -2995,6 +3000,7 @@ mod tests {
             name: name.to_string(),
             state,
             size: 0,
+            #[cfg(feature = "legacy-eframe")]
             path: PathBuf::new(),
             bytes_sent: 0,
         }
@@ -3970,6 +3976,7 @@ mod tests {
                 name: name.to_string(),
                 state: FileState::Waiting,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: path.clone(),
                 bytes_sent: 0,
             });
@@ -4007,6 +4014,7 @@ mod tests {
                 name: "existing.jpg".into(),
                 state: FileState::Waiting,
                 size: 1,
+                #[cfg(feature = "legacy-eframe")]
                 path: PathBuf::from("/src/folder-a/existing.jpg"),
                 bytes_sent: 0,
             }];

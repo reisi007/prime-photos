@@ -45,6 +45,7 @@ pub(crate) trait SettingsHost {
     fn limit_edit_mut(&mut self) -> &mut TextEdit;
     fn slider_origin(&self) -> usize;
     fn set_slider_origin(&mut self, value: usize);
+    #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
     fn save_error(&self) -> Option<&str>;
     fn persist_settings(&mut self);
     fn album_edit(&self) -> &TextEdit;
@@ -180,6 +181,7 @@ impl SettingsHost for SettingsState {
         self.slider_origin = value;
     }
 
+    #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
     fn save_error(&self) -> Option<&str> {
         self.save_error.as_deref()
     }
@@ -415,6 +417,7 @@ fn bandwidth_page<S: SettingsHost + 'static>(
     controls::bandwidth_page(state, theme, colors)
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 fn settings_footer<S: SettingsHost + 'static>(
     state: &S,
     theme: Theme,

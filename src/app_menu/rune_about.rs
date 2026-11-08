@@ -31,19 +31,15 @@ pub(super) fn install_about_item() {
     let app = NSApplication::sharedApplication(mtm);
     // Rune's standard About item is in the first (app) submenu and keeps
     // AppKit's nil-target responder behavior until this exact item is adapted.
-    // SAFETY: AppKit menus are main-thread-only; `app` is retained, and its
-    // submenu/items returned here are retained for the duration of the lookup.
-    let about_item = unsafe {
-        let Some(root) = app.mainMenu() else {
-            return;
-        };
-        let Some(app_menu) = root.itemAtIndex(0).and_then(|item| item.submenu()) else {
-            return;
-        };
-        (0..app_menu.numberOfItems())
-            .filter_map(|index| app_menu.itemAtIndex(index))
-            .find(|item| item.action() == Some(sel!(orderFrontStandardAboutPanel:)))
+    let Some(root) = app.mainMenu() else {
+        return;
     };
+    let Some(app_menu) = root.itemAtIndex(0).and_then(|item| item.submenu()) else {
+        return;
+    };
+    let about_item = (0..app_menu.numberOfItems())
+        .filter_map(|index| app_menu.itemAtIndex(index))
+        .find(|item| item.action() == Some(sel!(orderFrontStandardAboutPanel:)));
     let Some(about_item) = about_item else {
         return;
     };
