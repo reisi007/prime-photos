@@ -379,20 +379,6 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                         .set_bounds(login::rect(bounds[0], bounds[1], bounds[2], bounds[3]));
                 }
             })
-    } else if let Some(form) = &state.form {
-        col()
-            .key("backup-form-viewport")
-            .w_full()
-            .grow(1.0)
-            .min_h(0.0)
-            .scroll(ScrollSpec { stick_bottom: false })
-            .child(target_form(
-                form,
-                theme,
-                colors.primary_fill,
-                colors.primary_foreground,
-                colors.alert_foreground,
-            ))
     } else {
         col()
             .key("backup-content-viewport")
@@ -417,15 +403,55 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                     .child(col().grow(1.0)),
             )
     };
-    col()
+    let mut root = col()
         .key("rune-backup-production")
         .role("window")
         .w_full()
         .h_full()
         .fill(theme.bg)
         .child(header)
-        .child(main_content)
-        .child(conflict.unwrap_or_else(|| el()))
+        .child(main_content);
+    // A pending upload decision owns the modal layer. Keep an edit form mounted in
+    // state, but never expose it behind the conflict decision.
+    if let Some(form) = state.form.as_ref().filter(|_| conflict.is_none()) {
+        root = root.child(
+            col()
+                .key("target-form-overlay")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .center()
+                .padding(24.0)
+                .fill(rune::Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: if dark { 0.72 } else { 0.42 },
+                })
+                .child(target_form(
+                    form,
+                    theme,
+                    colors.primary_fill,
+                    colors.primary_foreground,
+                    colors.alert_foreground,
+                )),
+        );
+    }
+    if let Some(conflict) = conflict {
+        root = root.child(
+            col()
+                .key("conflict-overlay")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .center()
+                .padding(24.0)
+                .fill(rune::Color {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: if dark { 0.72 } else { 0.42 },
+                })
+                .child(conflict),
+        );
+    }
+    root
 }
 
 fn start_login(state: &mut LiveState, tx: &mut Tx) {

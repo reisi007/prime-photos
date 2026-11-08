@@ -143,9 +143,14 @@ settings-only Rune fixture is not an app cutover.
   `src/rune_backup_live/smoke/scenes.rs:67`. This completes only Rune headless
   screenshot generation/inspection: it is fixture-only visual review, not
   production parity or native macOS/AppKit/Wry runtime validation. Production
-  dialogs and integration/native-runtime validation remain open, as do the
-  other cutover blockers below. Legacy eframe visual checks remain separate and
-  open.
+  target-form and pending-conflict overlays have been implemented with Rune's
+  modal API, bounded scrollable contents, and semantic dialog controls. Headless
+  tests now cover hit blocking, constrained layout, accessibility tree, and
+  conflict priority, but were not run here; do not treat these surfaces as
+  verified or as clearing the integration blocker. Native macOS/AppKit/Wry
+  runtime validation, full UI integration/parity, accessibility decision/gates,
+  packaging/platform/performance evidence, and legacy eframe visual checks remain
+  open. The configured Rune capture workflow is still needed for visual review.
 
 ## Cutover blockers
 

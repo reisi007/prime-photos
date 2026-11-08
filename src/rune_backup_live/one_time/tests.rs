@@ -283,3 +283,128 @@ fn production_backup_tree_renders_the_restored_transient_one_time_row() {
     assert!(runtime.find("one-time-drop-target").is_some());
     assert!(runtime.find("one-time-backup-row").is_some());
 }
+
+fn find_a11y_node<'a>(node: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    if node["key"] == key {
+        return Some(node);
+    }
+    node["children"]
+        .as_array()?
+        .iter()
+        .find_map(|child| find_a11y_node(child, key))
+}
+
+fn count_a11y_role(node: &serde_json::Value, role: &str) -> usize {
+    (if node["role"] == role { 1 } else { 0 })
+        + node["children"]
+            .as_array()
+            .map_or(0, |children| children.iter().map(|child| count_a11y_role(child, role)).sum())
+}
+
+fn production_runtime(state: LiveState, size: (f32, f32)) -> Runtime<LiveState> {
+    let mut runtime = Runtime::new(
+        state,
+        super::super::view::live_view,
+        size,
+        Env::new(false, 1.0),
+    );
+    runtime.frame(0.0);
+    runtime
+}
+
+#[test]
+fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
+    let mut state = signed_out_state();
+    state.form = Some(super::super::TargetForm {
+        path: PathBuf::from("/synthetic/photos"),
+        dedup: true,
+        conflict: ConflictResolution::Ask,
+        content_filter: ContentFilter::Photos,
+        edit_path: None,
+        error: None,
+    });
+    let mut runtime = production_runtime(state, (420.0, 300.0));
+
+    assert!(runtime.find("target-form-overlay").is_some());
+    assert!(runtime.find("target-form").is_some());
+    let json = runtime.accessibility_json();
+    assert_eq!(count_a11y_role(&json, "dialog"), 1, "one dialog semantic per modal");
+    let dialog = find_a11y_node(&json, "target-form").expect("target form dialog is accessible");
+    assert_eq!(dialog["role"], "dialog");
+    assert_eq!(dialog["name"], "Neues Sicherungsziel");
+    let photo = find_a11y_node(&json, "toggle-photos").expect("photo checkbox is accessible");
+    assert_eq!(photo["role"], "checkbox");
+    assert_eq!(photo["states"].as_array().unwrap().len(), 1);
+    assert_eq!(photo["states"][0], "checked");
+
+    let panel = runtime
+        .elements()
+        .into_iter()
+        .find(|element| element.key.as_deref() == Some("target-form"))
+        .expect("target form geometry exists");
+    assert!(panel.rect[2] <= 372.0, "dialog width {} exceeds constrained viewport", panel.rect[2]);
+    assert!(
+        panel.visible[1] >= 0.0 && panel.visible[1] + panel.visible[3] <= 300.0,
+        "dialog clips outside the viewport: {:?}",
+        panel.visible
+    );
+    assert!(dialog["scroll"].is_array(), "constrained dialog exposes a scroll viewport");
+
+    let (x, y) = runtime.find("open-settings").expect("background control remains mounted");
+    runtime.pointer_down(x, y);
+    runtime.pointer_up(x, y);
+    runtime.frame(1.0 / 60.0);
+    assert_eq!(runtime.state.page, LivePage::Backup, "modal must block background actions");
+    assert!(runtime.state.form.is_some());
+
+    runtime.wheel(210.0, 150.0, 800.0);
+    runtime.frame(2.0 / 60.0);
+    let (x, y) = runtime.find("cancel-target-form").expect("cancel action is available after scrolling");
+    runtime.pointer_down(x, y);
+    runtime.pointer_up(x, y);
+    runtime.frame(3.0 / 60.0);
+    assert!(runtime.state.form.is_none());
+    runtime.state.form = Some(super::super::TargetForm {
+        path: PathBuf::from("/synthetic/photos"),
+        dedup: true,
+        conflict: ConflictResolution::Ask,
+        content_filter: ContentFilter::Photos,
+        edit_path: Some(PathBuf::from("/synthetic/photos")),
+        error: None,
+    });
+    runtime.frame(4.0 / 60.0);
+    let edit_json = runtime.accessibility_json();
+    let edit_dialog = find_a11y_node(&edit_json, "target-form")
+        .expect("edit target form dialog is accessible");
+    assert_eq!(edit_dialog["name"], "Sicherungsoptionen");
+}
+
+#[test]
+fn pending_conflict_takes_modal_priority_over_target_form() {
+    let mut state = signed_out_state();
+    state.form = Some(super::super::TargetForm {
+        path: PathBuf::from("/synthetic/photos"),
+        dedup: true,
+        conflict: ConflictResolution::Ask,
+        content_filter: ContentFilter::Photos,
+        edit_path: None,
+        error: None,
+    });
+    {
+        let mut upload = state.upload.lock().unwrap();
+        upload.pending_conflict = Some("photo.jpg".to_owned());
+    }
+    let runtime = production_runtime(state, (420.0, 300.0));
+
+    assert!(runtime.find("conflict-overlay").is_some());
+    assert!(runtime.find("conflict-decision").is_some());
+    assert!(runtime.find("target-form-overlay").is_none());
+    let json = runtime.accessibility_json();
+    assert_eq!(count_a11y_role(&json, "dialog"), 1, "conflict owns the only dialog semantic");
+    let dialog = find_a11y_node(&json, "conflict-decision").expect("conflict dialog is accessible");
+    assert_eq!(dialog["role"], "dialog");
+    assert_eq!(dialog["name"], "Dateiname-Konflikt: photo.jpg");
+    for key in ["remember-conflict", "conflict-ignore", "conflict-save-new", "conflict-replace"] {
+        assert!(runtime.find(key).is_some(), "missing conflict action {key}");
+    }
+}

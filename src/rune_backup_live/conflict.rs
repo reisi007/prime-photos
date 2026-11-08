@@ -2,7 +2,7 @@ use crate::backup::answer_pending_conflict;
 use crate::folders::ConflictResolution;
 use crate::i18n::{tr, tr1};
 use rune::tok;
-use rune::{El, col, text};
+use rune::{El, ScrollSpec, col, text};
 use tok::Theme;
 
 use super::widgets::action_button;
@@ -21,7 +21,15 @@ pub(super) fn conflict_panel(
 ) -> El {
     col()
         .key("conflict-decision")
+        .role("dialog")
+        .label(tr1("Dateiname-Konflikt: {}", &file_name))
+        .modal(false, |_: &mut LiveState| {})
         .w_full()
+        .max_w(560.0)
+        .h_full()
+        .max_h(480.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec { stick_bottom: false })
         .padding(14.0)
         .gap(8.0)
         .fill(theme.card)
