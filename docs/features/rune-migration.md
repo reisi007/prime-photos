@@ -151,7 +151,7 @@ settings-only Rune fixture is not an app cutover.
   `checkbox`. The assertion is corrected, but the fix has not yet been rerun;
   do not treat these surfaces as verified or as clearing the integration
   blocker. Native macOS/AppKit/Wry
-  runtime validation, full UI integration/parity, accessibility decision/gates,
+  runtime validation, full UI integration/parity, accessibility validation,
   packaging/platform/performance evidence, and legacy eframe visual checks remain
   open. The configured Rune capture workflow is still needed for visual review.
 
@@ -267,9 +267,14 @@ the intended desktop replacement / integration checks:
   backend.
 - `accessibility` enables the native AccessKit adapters for UI Automation,
   NSAccessibility, and AT-SPI. It is included for accessibility parity, but is
-  not evidence of conformance: Rune's macOS accessibility re-entrancy issue
-  (#150) and the absence of an independent cross-platform audit remain release
-  risks.
+  not evidence of conformance.
+- **Accessibility decision (Issue #49): “Bekannte Regression akzeptieren”.**
+  The user chose to accept Rune's known macOS accessibility re-entrancy risk
+  (#150) and the lack of an independent cross-platform accessibility audit as
+  explicit tradeoffs. This acceptance does not waive other validation or quality
+  requirements and does not authorize cutover by itself. Native runtime,
+  production parity, packaging, platform, and performance gates remain open;
+  accessibility validation must still be documented against the accepted risk.
 - `embedded-fonts` is omitted (desktop builds bundle Inter independently of
   that web-oriented feature); `svg` is omitted because Prime Photos already
   rasterizes SVG assets with `build.rs`; audio features are not needed.
