@@ -284,6 +284,32 @@ fn production_backup_tree_renders_the_restored_transient_one_time_row() {
     assert!(runtime.find("one-time-backup-row").is_some());
 }
 
+#[test]
+fn production_backup_surfaces_startup_login_error_and_keeps_retry_available() {
+    let mut state = signed_out_state();
+    let error = tr("Anmeldeseite konnte nicht geöffnet werden.").to_owned();
+    state.login.error = Some(error.clone());
+    let runtime = production_runtime(state, (1180.0, 820.0));
+
+    assert!(runtime.find("login-error").is_some());
+    assert!(runtime.find("sign-in").is_some());
+    let json = runtime.accessibility_json();
+    assert!(find_a11y_node(&json, "login-error").is_some(), "login error is accessible");
+}
+
+#[test]
+fn production_backup_hides_stale_login_error_while_webview_is_running() {
+    let mut state = signed_out_state();
+    state.login.running = true;
+    state.login.error = Some(tr("Anmeldeseite konnte nicht geöffnet werden.").to_owned());
+    let runtime = production_runtime(state, (1180.0, 820.0));
+
+    assert!(runtime.find("login-error").is_none());
+    assert!(runtime.find("sign-in").is_none());
+    assert!(runtime.find("cancel-login").is_some());
+    assert!(find_a11y_node(&runtime.accessibility_json(), "login-error").is_none());
+}
+
 fn find_a11y_node<'a>(node: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
     if node["key"] == key {
         return Some(node);

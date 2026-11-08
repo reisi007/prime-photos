@@ -312,6 +312,17 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
         .w_full()
         .gap(10.0)
         .child(auth_notice);
+    if !state.login.running && !state.logged_in() {
+        if let Some(error) = state.login.error.as_ref() {
+            login_panel = login_panel.child(
+                text(error.clone())
+                    .key("login-error")
+                    .font(tok::type_::LABEL)
+                    .color(colors.alert_foreground)
+                    .wrap(),
+            );
+        }
+    }
     if state.sign_in_available() {
         login_panel = login_panel.child(marketplace_picker(state, theme, colors));
     }

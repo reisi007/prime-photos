@@ -47,6 +47,15 @@ used until the user explicitly clicks “Mit Amazon anmelden”. Closing or
 cancelling releases the child WebView. This developer route does not change the
 default launcher or establish Rune parity/cutover.
 
+The production `--rune-backup` login surface also shows the existing localized,
+generic `WebviewLogin.error` when WebView startup fails, while keeping the sign-in
+retry action available. The message is shown only while the WebView is not
+running, and the error text does not include URL or token data. Focused headless
+coverage was added for the signed-out and running states; it remains unverified
+until macOS CI runs. This
+parity fix does not change the launcher, feature selection, auth flow, or any
+existing cutover/native gates.
+
 The separate `--rune-wry-smoke` route loads embedded synthetic HTML only. It
 does not read config or keychain data and does not make network requests. It is
 for local verification of WebKit rendering, resize, keyboard focus/input, and
