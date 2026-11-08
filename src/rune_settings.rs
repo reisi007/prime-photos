@@ -8,7 +8,9 @@
 use crate::config::{Appearance, Config};
 use crate::i18n::{self, Lang};
 use rune::tok::{self, Theme};
-use rune::{El, LiveRegion, ScrollSpec, TextEdit, col, el, row, text};
+use rune::{El, ScrollSpec, TextEdit, col, el, row, text};
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+use rune::LiveRegion;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 use rune::{App, AppSpec, Cx};
 
