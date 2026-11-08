@@ -153,7 +153,12 @@ settings-only Rune fixture is not an app cutover.
   reported visible intersection and still asserts that the explicit cancel
   action clears `state.form`. This correction has not yet been rerun; do not
   treat these surfaces as verified or as clearing the integration blocker.
-  Native macOS/AppKit/Wry
+  CI run #42516532301 exposed a genuine production login cancellation gap: the
+  loading WebView region replaced the backup content (including its cancel
+  button). The running surface now retains the accessible cancel action beside
+  the loading status, while stale login errors remain hidden. This parity
+  correction is pending CI; no real auth/WebView was started for the headless
+  coverage. Native macOS/AppKit/Wry
   runtime validation, full UI integration/parity, accessibility validation,
   packaging/platform/performance evidence, and legacy eframe visual checks remain
   open. The configured Rune capture workflow is still needed for visual review.

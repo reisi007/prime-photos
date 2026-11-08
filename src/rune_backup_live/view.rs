@@ -377,9 +377,15 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
             .fill(theme.bg)
             .center()
             .child(
-                text(tr("Anmeldeseite wird geladen …"))
-                    .font(tok::type_::BODY)
-                    .color(theme.text_secondary),
+                col()
+                    .gap(12.0)
+                    .center()
+                    .child(
+                        text(tr("Anmeldeseite wird geladen …"))
+                            .font(tok::type_::BODY)
+                            .color(theme.text_secondary),
+                    )
+                    .child(login_button),
             )
             .on_layout(|state: &mut LiveState, rect| {
                 let bounds = crate::wry_host::bounds_from_layout(rect);

@@ -307,7 +307,10 @@ fn production_backup_hides_stale_login_error_while_webview_is_running() {
     assert!(runtime.find("login-error").is_none());
     assert!(runtime.find("sign-in").is_none());
     assert!(runtime.find("cancel-login").is_some());
-    assert!(find_a11y_node(&runtime.accessibility_json(), "login-error").is_none());
+    let json = runtime.accessibility_json();
+    assert!(find_a11y_node(&json, "login-error").is_none());
+    assert!(find_a11y_node(&json, "cancel-login").is_some());
+    assert!(runtime.find("production-backup-login-webview-region").is_some());
 }
 
 fn find_a11y_node<'a>(node: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
