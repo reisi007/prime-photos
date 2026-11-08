@@ -21,9 +21,9 @@
 //! back from close-to-tray" moment, so no delegate is needed for it.
 //!
 //! Like [`crate::app_menu`], the AppKit callback must never touch the UI
-//! directly: it only records the request in a flag and wakes the render loop.
-//! `PrimePhotoApp::update` drains the flag via [`take_become_active_request`]
-//! and then shows and focuses the window.
+//! directly: it only records the request in a flag and wakes the active host's
+//! render loop. The host drains the flag via [`take_become_active_request`] and
+//! then shows and focuses the window.
 //!
 //! **The Dock icon follows the window** (original parity, user decision
 //! 2026-10-25 — `SPEC_OS_INTEGRATION.md` §3.4): the bundle sets `LSUIElement`
@@ -31,12 +31,12 @@
 //! app menu) and `Accessory` (closed-to-tray, no Dock icon or app menu). The
 //! previous `NSApplication::hide` call is removed: a live test on 2026-10-25
 //! showed that the hidden state kept the Dock tile around even after the policy
-//! had correctly changed to `Accessory`. [`step_back`] now changes the policy
+//! had correctly changed to `Accessory`. `step_back` now changes the policy
 //! and calls `deactivate()` to give up activation, so a later activation via
 //! `open -a` or Finder can post `NSApplicationDidBecomeActiveNotification` and
 //! bring the window back; without deactivation that observer-based return path
 //! would be dead. The tray's "Fenster anzeigen" entry calls `show_main_window`
-//! directly instead. [`come_forward`]
+//! directly instead. `come_forward`
 //! restores `Regular` **first** and still unhides a hidden app before activating
 //! it (the unhide also protects the ⌘H case). The observer mechanism itself is
 //! unchanged. While the window is open the app is `Regular`, so a Dock click
@@ -44,32 +44,33 @@
 //! paths are the tray (a direct `show_main_window` call), a relaunch (through
 //! the activation observer), and a second start.
 //!
-//! **Silent login-item start** (user decision 2026-10-18, original behaviour —
-//! `SPEC_OS_INTEGRATION.md` §3.5): the retained launch-notification observer
-//! reads `currentAppleEvent` while `NSApplicationDidFinishLaunchingNotification`
-//! is delivered and caches whether `oapp` carries `prdt=lgit`. The app creator
-//! consumes only that cache; it does not re-query the transient current event.
-//! No Apple-event handler or application delegate is registered.
+//! **Login-item launch diagnostic** (`SPEC_OS_INTEGRATION.md` §3.5): the
+//! retained launch-notification observer reads `currentAppleEvent` while
+//! `NSApplicationDidFinishLaunchingNotification` is delivered and caches
+//! whether `oapp` carries `prdt=lgit`. The legacy and Rune production hosts use
+//! that cache for their silent-start policy. No Apple-event handler or
+//! application delegate is registered.
 //!
 //! **Why closing steps the app back (`step_back` / `come_forward`).**
 //! Reactivating an app that is *already* the frontmost one activates nothing:
 //! AppKit posts no `NSApplicationDidBecomeActiveNotification`, so the observer
 //! above would never fire and the way back would look dead until the user
-//! focused some other app first. [`step_back`] therefore switches to `Accessory`
+//! focused some other app first. `step_back` therefore switches to `Accessory`
 //! and calls `deactivate()` to give up activation, without setting the hidden
 //! state: a live finding on 2026-10-25 showed that `hide` kept the Dock tile
 //! visible despite the `Accessory` policy. A later relaunch from Finder,
 //! Spotlight, or `open -a` can then post the notification and bring the window
-//! back; the tray entry calls `show_main_window` directly. [`come_forward`] is
+//! back; the tray entry calls `show_main_window` directly. `come_forward` is
 //! the counterpart: restore `Regular` first, then unhide (if hidden, e.g. by
 //! ⌘H) and activate.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::{Once, OnceLock};
+use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
@@ -79,9 +80,10 @@ use objc2::runtime::NSObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 #[cfg(target_os = "macos")]
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDidBecomeActiveNotification,
-    NSApplicationDidFinishLaunchingNotification,
+    NSApplicationDidBecomeActiveNotification, NSApplicationDidFinishLaunchingNotification,
 };
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
+use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSAppleEventManager, NSNotification, NSNotificationCenter};
 
@@ -98,22 +100,32 @@ type AEKeyword = u32;
 #[cfg(target_os = "macos")]
 type OSType = u32;
 
-/// Set by the activation observer; consumed once per frame by
-/// `PrimePhotoApp::update` through [`take_become_active_request`].
+/// Set by the activation observer; consumed by the active host through
+/// [`take_become_active_request`].
 #[cfg(target_os = "macos")]
 static BECOME_ACTIVE_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Written by the main-thread launch observer before eframe's initial dispatch.
+/// Written by the main-thread launch observer during AppKit's launch event.
 #[cfg(target_os = "macos")]
 static LAUNCH_NOTIFICATION_SEEN: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static LAUNCHED_AS_LOGIN_ITEM: AtomicBool = AtomicBool::new(false);
 
-/// The egui context to wake when the app is activated. Stored at [`install`]
-/// time; the AppKit callback only flags + repaints, never touches the UI
-/// directly.
+/// The active host's render-loop wake callback. Stored at [`install`] time; the
+/// AppKit callback only flags + wakes, never touches the UI directly.
 #[cfg(target_os = "macos")]
-static UI_CTX: OnceLock<eframe::egui::Context> = OnceLock::new();
+static UI_WAKEUP: OnceLock<WakeupCallback> = OnceLock::new();
+
+/// UI-neutral callback used to wake whichever host owns the render loop.
+pub(crate) type WakeupCallback = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(any(target_os = "macos", test))]
+fn signal_become_active_request(requested: &AtomicBool, wakeup: Option<&WakeupCallback>) {
+    requested.store(true, Ordering::Relaxed);
+    if let Some(wakeup) = wakeup {
+        wakeup();
+    }
+}
 
 #[cfg(target_os = "macos")]
 objc2::define_class!(
@@ -135,10 +147,7 @@ objc2::define_class!(
         #[unsafe(method(didBecomeActive:))]
         fn did_become_active(&self, _notification: &NSNotification) {
             log::debug!("App-Aktivierungsdiagnose: NSApplicationDidBecomeActiveNotification empfangen");
-            BECOME_ACTIVE_REQUESTED.store(true, Ordering::Relaxed);
-            if let Some(ctx) = UI_CTX.get() {
-                ctx.request_repaint();
-            }
+            signal_become_active_request(&BECOME_ACTIVE_REQUESTED, UI_WAKEUP.get());
         }
     }
 );
@@ -213,7 +222,8 @@ impl LaunchDiagnosticObserver {
     }
 }
 
-/// Register the retained launch-event observer before eframe starts AppKit.
+/// Register the retained launch-event observer before the native host starts
+/// AppKit's launch path.
 #[cfg(target_os = "macos")]
 pub fn install_launch_diagnostic() {
     static INSTALL_ONCE: Once = Once::new();
@@ -238,14 +248,12 @@ pub fn install_launch_diagnostic() {
 #[cfg(not(target_os = "macos"))]
 pub fn install_launch_diagnostic() {}
 
-/// Install the activation observer once. `ctx` is remembered so the observer
-/// can wake the UI; passing it here (rather than a second setter) keeps the
-/// wiring in one place.
+/// Install the activation observer once with a UI-neutral render-loop waker.
 #[cfg(target_os = "macos")]
-pub fn install(ctx: &eframe::egui::Context) {
-    // Remember the context even before the (once-only) observer setup, so the
-    // callback can always wake the UI.
-    let _ = UI_CTX.set(ctx.clone());
+pub(crate) fn install(wakeup: WakeupCallback) {
+    // Remember the waker even before the (once-only) observer setup, so the
+    // callback can always wake the active host.
+    let _ = UI_WAKEUP.set(wakeup);
 
     // Defensive re-entrancy guard: a second observer would be registered twice
     // and a single activation would flag the request twice. `install()` is
@@ -302,7 +310,7 @@ pub fn launched_as_log_in_item() -> bool {
 /// hidden / not open). Main-thread-bound like the other functions. The `bool`
 /// return value of `setActivationPolicy` is **not** an error signal (see
 /// [`become_regular`]).
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub fn become_accessory() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -321,7 +329,7 @@ pub fn become_accessory() {
 /// `Regular` (external check: `activationPolicy` changes, the window comes
 /// back). The assignment itself is therefore unconditional and a `false` is
 /// only logged, at debug level.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub fn become_regular() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -342,7 +350,7 @@ pub fn become_regular() {
 /// 2026-10-25). A `false` return from `setActivationPolicy` is only logged, not
 /// treated as an error. Main-thread-bound: returns early without a
 /// [`MainThreadMarker`] (AppKit may only be messaged from the main thread).
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub fn step_back() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -359,7 +367,7 @@ pub fn step_back() {
 /// also comes to the front. `Regular` **first** is load-bearing: without the
 /// Dock icon/policy back, the following `activate` does not take effect.
 /// Main-thread-bound like [`step_back`].
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub fn come_forward() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -375,11 +383,11 @@ pub fn come_forward() {
 }
 
 /// Non-macOS: there is no AppKit app to step back.
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
 pub fn step_back() {}
 
 /// Non-macOS: there is no AppKit app to bring forward.
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
 pub fn come_forward() {}
 
 /// Non-macOS: there is no Apple event to detect a login-item start.
@@ -389,19 +397,50 @@ pub fn launched_as_log_in_item() -> bool {
 }
 
 /// Non-macOS: there is no AppKit activation policy to switch.
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
 pub fn become_accessory() {}
 
 /// Non-macOS: there is no AppKit activation policy to switch.
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
 pub fn become_regular() {}
 
 /// Non-macOS: there is no activation observer to install.
 #[cfg(not(target_os = "macos"))]
-pub fn install(_ctx: &eframe::egui::Context) {}
+pub(crate) fn install(_wakeup: WakeupCallback) {}
 
 /// Non-macOS: the activation path only exists on macOS.
 #[cfg(not(target_os = "macos"))]
 pub fn take_become_active_request() -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WakeupCallback, signal_become_active_request};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn activation_request_flags_and_invokes_the_host_waker() {
+        let requested = AtomicBool::new(false);
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let wake_count = wakes.clone();
+        let wakeup: WakeupCallback = Arc::new(move || {
+            wake_count.fetch_add(1, Ordering::Relaxed);
+        });
+
+        signal_become_active_request(&requested, Some(&wakeup));
+
+        assert!(requested.load(Ordering::Relaxed));
+        assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn activation_request_is_flagged_even_without_a_host_waker() {
+        let requested = AtomicBool::new(false);
+
+        signal_become_active_request(&requested, None);
+
+        assert!(requested.load(Ordering::Relaxed));
+    }
 }

@@ -1,22 +1,26 @@
-//! Headless-only Rune feasibility fixture for Issue #49.
+//! Shared Rune settings controls plus their headless feasibility fixture.
 //!
-//! This settings-only surface is not the Prime Photos app and must never become
-//! an interactive alternate user mode. The eframe app remains the normal UI
-//! until all established user flows have been ported to Rune.
+//! The fixture is not the Prime Photos app and must never become an interactive
+//! alternate user mode. The explicit Rune backup route embeds the shared
+//! controls, while eframe remains the normal UI until all established user
+//! flows have been ported to Rune.
 
 use crate::config::{Appearance, Config};
 use crate::i18n::{self, Lang};
 use rune::tok::{self, Theme};
-use rune::{App, AppSpec, Cx, El, LiveRegion, ScrollSpec, TextEdit, col, el, row, text};
+use rune::{El, LiveRegion, ScrollSpec, TextEdit, col, el, row, text};
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+use rune::{App, AppSpec, Cx};
 
 mod components;
 mod controls;
 mod general;
-#[cfg(test)]
+#[cfg(all(test, debug_assertions, feature = "rune-ui-spike"))]
 mod tests;
 
 use components::{section, toggle_dedup_default, toggle_row};
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 const WINDOW_SIZE: (f32, f32) = (1120.0, 800.0);
 const SLIDER_WIDTH: f32 = 300.0;
 const SLIDER_HEIGHT: f32 = 28.0;
@@ -71,6 +75,7 @@ pub(crate) trait SettingsHost {
     }
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 struct SettingsState {
     config: Config,
     tab: SettingsTab,
@@ -86,6 +91,7 @@ struct SettingsState {
     save_path: Option<std::path::PathBuf>,
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 impl SettingsState {
     fn new(mut config: Config) -> Self {
         config.concurrency = config.concurrency();
@@ -124,6 +130,7 @@ impl SettingsState {
 
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 impl SettingsHost for SettingsState {
     fn config(&self) -> &Config {
         &self.config
@@ -198,6 +205,7 @@ impl SettingsHost for SettingsState {
     }
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
     // This is a test fixture, not a product settings window. Starting it must
     // not inspect a real user's settings, account, keychain, or folders.
@@ -231,6 +239,7 @@ pub(crate) fn run(args: Vec<String>) -> Result<(), String> {
         .try_run()
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 fn set_initial_language(config: &Config) {
     let language = config
         .language
@@ -240,6 +249,7 @@ fn set_initial_language(config: &Config) {
     i18n::set_lang(language);
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 fn view(state: &SettingsState, cx: &mut Cx<SettingsState>) -> El {
     let dark = effective_dark(state.config.appearance, cx.system_dark());
     let theme = tok::theme(dark);
@@ -430,6 +440,7 @@ fn settings_footer<S: SettingsHost + 'static>(
         .child(status.font(tok::type_::LABEL))
 }
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 fn save_config_at_path(config: &Config, path: &std::path::Path) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

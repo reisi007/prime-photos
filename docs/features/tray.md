@@ -153,7 +153,7 @@ closing the window quits the app.
   Dekodier-Fehler zur Laufzeit = fail fast.
 
 - **UI-Icons: Bibliothek statt selbst gezeichnet (Welle 3c, 2026-10-16).**
-  `src/icons.rs` enthält nach Welle 3c **keine** selbst gezeichneten
+  `src/icons/eframe_ui.rs` enthält nach Welle 3c **keine** selbst gezeichneten
   Navigations-Glyphen mehr. Die beiden Sidebar-Icons sind **Material
   Symbols**-SVGs (Apache-2.0, Google LLC) über **dieselbe** Pipeline:
   `assets/icon-cloud.svg` („Sicherung") und `assets/icon-settings.svg`

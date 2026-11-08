@@ -13,16 +13,20 @@
 //! target because the responder chain provides one; a **custom** selector does
 //! not, so that item gets its own target object (see [`AboutTarget`]). The
 //! callback must not touch the UI from inside AppKit — it only sets a flag and
-//! wakes the render loop, which `PrimePhotoApp::update` drains via
-//! [`take_about_request`], exactly like `src/tray.rs` does with its queue.
+//! wakes the render loop, which `PrimePhotoApp::update` or Rune's `poll` drains
+//! via [`take_about_request`], exactly like `src/tray.rs` does with its queue.
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 use std::cell::RefCell;
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
-use std::sync::{Once, OnceLock};
+use std::sync::OnceLock;
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
+use std::sync::Once;
+#[cfg(all(target_os = "macos", feature = "rune-backup"))]
+mod rune_about;
 
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
@@ -41,8 +45,8 @@ pub(crate) type WakeupCallback = Arc<dyn Fn() + Send + Sync>;
 static ABOUT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// The optional UI wakeup to invoke when the About item is chosen. Stored at
-/// [`install`] time; the AppKit callback only flags + invokes it, never touches
-/// the UI directly.
+/// menu-install time; the AppKit callback only flags + invokes it, never
+/// touches the UI directly.
 #[cfg(target_os = "macos")]
 static UI_WAKEUP: OnceLock<WakeupCallback> = OnceLock::new();
 
@@ -94,10 +98,16 @@ impl AboutTarget {
     );
 }
 
-/// Every visible label of the native main menu for one UI language. This is the
-/// single source used by both the initial build and [`refresh_labels`]; the
-/// tests exercise it directly for German and English.
+/// The localized About label shared by Rune's existing menu and the eframe menu.
 #[cfg(target_os = "macos")]
+fn about_label(lang: crate::i18n::Lang) -> &'static str {
+    crate::i18n::tr_for(lang, "Über Prime Photos")
+}
+
+/// Every visible label of the eframe native main menu for one UI language. This
+/// is the single source used by both the initial build and [`refresh_labels`];
+/// the tests exercise it directly for German and English.
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 #[derive(Debug, PartialEq, Eq)]
 struct MenuLabels {
     about: &'static str,
@@ -114,12 +124,12 @@ struct MenuLabels {
 /// Resolve the native menu labels for `lang`. The "Wiederholen" Edit-menu item
 /// uses the contextual lookup: the same German key means "Retry" in the backup
 /// list but "Redo" here (`docs/dev/I18N.md`, `docs/features/languages.md`).
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 fn menu_labels(lang: crate::i18n::Lang) -> MenuLabels {
     use crate::i18n::{CONTEXT_NATIVE_MENU, tr_ctx_for, tr_for};
 
     MenuLabels {
-        about: tr_for(lang, "Über Prime Photos"),
+        about: about_label(lang),
         quit: tr_for(lang, "Prime Photos beenden"),
         edit: tr_for(lang, "Bearbeiten"),
         undo: tr_for(lang, "Rückgängig"),
@@ -135,7 +145,7 @@ fn menu_labels(lang: crate::i18n::Lang) -> MenuLabels {
 /// main-thread-only, so these live in a thread-local instead of a `static`
 /// (`Retained<NSMenuItem>` is not `Sync`). The main menu itself keeps all items
 /// alive; these handles exist only to re-title them in place.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 struct MenuItems {
     about: Retained<NSMenuItem>,
     quit: Retained<NSMenuItem>,
@@ -143,7 +153,7 @@ struct MenuItems {
     edit: [Retained<NSMenuItem>; 6],
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 impl MenuItems {
     fn apply_labels(&self, labels: &MenuLabels) {
         set_title(&self.about, labels.about);
@@ -163,7 +173,7 @@ impl MenuItems {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 thread_local! {
     /// The installed menu's label handles; `None` before [`install`].
     static MENU_ITEMS: RefCell<Option<MenuItems>> = const { RefCell::new(None) };
@@ -178,7 +188,7 @@ fn set_title(item: &NSMenuItem, title: &str) {
 /// Install the main menu once. The wakeup is remembered so the About item's
 /// target object can wake the UI; passing it here (rather than a second setter)
 /// keeps the wiring in one place.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub fn install(wakeup: WakeupCallback) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
@@ -203,12 +213,31 @@ pub fn install(wakeup: WakeupCallback) {
     });
 }
 
+/// Register the Rune About callback and adapt Rune's existing standard About
+/// item in place when it is available. This never replaces or adds to Rune's
+/// main menu; [`ensure_rune_about_installed`] retries after Rune promotes its
+/// accessory app menu.
+#[cfg(all(target_os = "macos", feature = "rune-backup"))]
+pub fn install_rune_about(wakeup: WakeupCallback) {
+    register_wakeup_callback(&UI_WAKEUP, wakeup);
+    rune_about::install_about_item();
+}
+
+/// Retry the in-place Rune About adaptation after Rune has had a chance to
+/// create its standard item. Safe to call once per UI poll; after success it
+/// is a no-op.
+#[cfg(all(target_os = "macos", feature = "rune-backup"))]
+pub(crate) fn ensure_rune_about_installed() {
+    rune_about::install_about_item();
+}
+
 /// Re-apply every visible menu label from the current UI language, in place.
 ///
 /// Idempotent and cheap, macOS-only: called immediately after `i18n::set_lang`
 /// in the settings path so an already-installed menu does not stay in the old
-/// language. Before [`install`] has built the menu — or when called off the
-/// main thread — this is a silent no-op, never a panic.
+/// language. With Rune enabled, it also updates Rune's adapted About item.
+/// Before either menu is available — or when called off the main thread — this
+/// is a silent no-op.
 #[cfg(target_os = "macos")]
 pub fn refresh_labels() {
     use objc2::MainThreadMarker;
@@ -216,12 +245,18 @@ pub fn refresh_labels() {
     if MainThreadMarker::new().is_none() {
         return;
     }
-    let labels = menu_labels(crate::i18n::lang());
-    MENU_ITEMS.with(|slot| {
-        if let Some(items) = slot.borrow().as_ref() {
-            items.apply_labels(&labels);
-        }
-    });
+    let lang = crate::i18n::lang();
+    #[cfg(feature = "rune-backup")]
+    rune_about::refresh_label(about_label(lang));
+    #[cfg(feature = "legacy-eframe")]
+    {
+        let labels = menu_labels(lang);
+        MENU_ITEMS.with(|slot| {
+            if let Some(items) = slot.borrow().as_ref() {
+                items.apply_labels(&labels);
+            }
+        });
+    }
 }
 
 /// Non-macOS: no native app menu exists, so the refresh is a harmless no-op.
@@ -236,8 +271,16 @@ pub fn take_about_request() -> bool {
 }
 
 /// Non-macOS: there is no app menu to install and no About request to drain.
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
 pub fn install(_wakeup: WakeupCallback) {}
+
+/// Rune has no native macOS About item on non-macOS platforms.
+#[cfg(all(not(target_os = "macos"), feature = "rune-backup"))]
+pub fn install_rune_about(_wakeup: WakeupCallback) {}
+
+/// Non-macOS: there is no Rune AppKit menu to adapt.
+#[cfg(all(not(target_os = "macos"), feature = "rune-backup"))]
+pub(crate) fn ensure_rune_about_installed() {}
 
 /// Non-macOS: the About item only exists in the tray there.
 #[cfg(not(target_os = "macos"))]
@@ -245,7 +288,7 @@ pub fn take_about_request() -> bool {
     false
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 fn build_main_menu(app: &objc2_app_kit::NSApplication, mtm: objc2::MainThreadMarker) {
     use objc2::sel;
     use objc2_app_kit::NSMenu;
@@ -319,7 +362,7 @@ fn build_main_menu(app: &objc2_app_kit::NSApplication, mtm: objc2::MainThreadMar
 
 /// One menu item with a `nil` target (handled via the responder chain) and the
 /// default ⌘ modifier.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 fn item(
     mtm: objc2::MainThreadMarker,
     title: &str,
@@ -341,17 +384,22 @@ fn item(
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{MenuLabels, WakeupCallback, menu_labels, register_wakeup_callback, request_about};
-    use crate::i18n::{Lang, tr_for};
+    use super::{WakeupCallback, register_wakeup_callback, request_about};
     use std::sync::{
         Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     };
 
+    #[cfg(feature = "legacy-eframe")]
+    use super::{MenuLabels, menu_labels};
+    #[cfg(feature = "legacy-eframe")]
+    use crate::i18n::{Lang, tr_for};
+
     /// The production label source for the complete visible native menu, in
     /// both shipped languages. A missing EN table row would leave a German
     /// label and fail here (the `tr` fallback), so this pins every entry
     /// without launching AppKit.
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn native_menu_labels_are_complete_in_german_and_english() {
         assert_eq!(
@@ -404,6 +452,7 @@ mod tests {
 
     /// "Wiederholen" stays the German Edit-menu wording, but its English menu
     /// label is "Redo" — not the backup list's "Retry" from the plain table.
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn edit_redo_is_not_backup_retry() {
         assert_eq!(menu_labels(Lang::De).redo, "Wiederholen");

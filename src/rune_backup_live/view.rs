@@ -1,15 +1,21 @@
+use super::account_identity;
 use super::targets::{empty_targets, target_card, target_form};
 use super::widgets::{action_button, file_state_text, section_heading};
+use super::one_time::{backup_row, drop_zone};
+use super::login_panel::marketplace_picker;
 use super::{HEADER_HEIGHT, LivePage, LiveState};
 use crate::backup;
 use crate::i18n::{tr, tr2};
 use crate::login;
+use crate::platform::app_shared::ONE_TIME_IDX;
 use crate::upload::{FileState, calculate_pct};
 use rune::tok;
 use rune::{Cx, El, FileDialogOptions, FileDialogResult, ScrollSpec, Tx, col, el, row, text};
 
 pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
-    let dark = crate::rune_settings::effective_dark(state.config.appearance, cx.system_dark());
+    let system_dark = cx.system_dark();
+    state.tray_route.observe_system_dark(system_dark);
+    let dark = crate::rune_settings::effective_dark(state.config.appearance, system_dark);
     let theme = tok::theme(dark);
     let colors = crate::rune_theme::palette(dark);
     cx.foreground(theme.text);
@@ -215,11 +221,15 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                 .folder_paths
                 .get(folder)
                 .cloned();
-            let target_name = target_path
-                .as_ref()
-                .and_then(|path| state.store.folders.iter().find(|target| target.path == *path))
-                .map(|target| target.name.clone())
-                .unwrap_or_else(|| tr("Sicherungsziel").to_owned());
+            let target_name = if *folder == ONE_TIME_IDX {
+                tr("Einmalige Sicherung").to_owned()
+            } else {
+                target_path
+                    .as_ref()
+                    .and_then(|path| state.store.folders.iter().find(|target| target.path == *path))
+                    .map(|target| target.name.clone())
+                    .unwrap_or_else(|| tr("Sicherungsziel").to_owned())
+            };
             let progress_text = if *file_state == FileState::Uploading && *size > 0 {
                 format!("{}%", calculate_pct(*size, *bytes_sent))
             } else {
@@ -264,7 +274,7 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
     }
 
     let auth_notice = if state.logged_in() {
-        text(tr("Angemeldet")).color(theme.text_secondary)
+        account_identity::signed_in_notice(state, theme)
     } else if state.has_pending_session() {
         text(tr("Sitzung wird wiederhergestellt …")).color(theme.text_secondary)
     } else {
@@ -297,13 +307,16 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
             start_login,
         )
     };
-    let login_panel = row()
+    let mut login_panel = col()
         .key("login-status")
         .w_full()
         .gap(10.0)
-        .center_y()
-        .child(auth_notice)
-        .child(login_button)
+        .child(auth_notice);
+    if state.sign_in_available() {
+        login_panel = login_panel.child(marketplace_picker(state, theme, colors));
+    }
+    let login_panel = login_panel
+        .child(row().w_full().gap(10.0).center_y().child(login_button))
         .child(if state.config_error.is_some() {
             text(tr("Einstellungen konnten nicht geladen oder gespeichert werden.")).color(colors.alert_foreground)
         } else {
@@ -396,6 +409,8 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                     .child(login_panel)
                     .child(store_warning.unwrap_or_else(|| el()))
                     .child(status.unwrap_or_else(|| el()))
+                    .child(drop_zone(state, theme, colors))
+                    .child(backup_row(state, theme, colors))
                     .child(progress)
                     .child(targets)
                     .child(queue_column)

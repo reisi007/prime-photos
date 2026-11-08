@@ -1,14 +1,20 @@
 # UI-Fixtures und Screenshot-Harness (Debug-only, Issue #29)
 
-Die Demo-Datenquelle rendert zehn ausgewählte UI-Zustände ohne echte
-Amazon-Sitzung und ohne echte Fotordner. Sie wird ausschließlich in Builds mit
-`debug_assertions` kompiliert und ist für Entwicklung und Sichtprüfung gedacht;
-Release-Builds enthalten weder Szenarien noch Fixtures. Dies ist der **Legacy-
-eframe-Fixture-Harness**: Er bleibt vorübergehend für die App-Sicherheit und
-belegt keine Rune-Parität. Entfernen, sobald gleichwertige Rune-Fixtures dieselben
-Zustände und Flows abdecken. Die Migrations-Gates stehen in
-[`rune-migration.md`](../features/rune-migration.md), die zustandsbezogene
-Prüfliste in [`UI_REVIEW.md`](UI_REVIEW.md).
+Es gibt zwei getrennte Review-Wege, keinen gemeinsamen Renderer:
+
+- Der **Legacy-eframe-Fixture-Harness** weiter unten rendert zehn ausgewählte
+  Demo-Zustände über `PrimePhotoApp::update` und die bestehenden eframe-Seiten.
+- Die **Rune-Review-Matrix** am Ende rendert die entsprechenden synthetischen
+  Szenen über die dedizierte Rune-Smoke-Ansicht und die bestehenden Rune-Login-
+  und Rune-Einstellungs-Fixtures.
+
+Beide Wege sind für Entwicklung und Sichtprüfung gedacht und nur in Debug-Builds
+verfügbar. Rune-Smoke-Aufnahmen belegen weder eframe-Parität noch die Freigabe
+der normalen App-UI; `--rune-backup` bleibt der separate interaktive
+Entwicklerpfad. Release-Builds enthalten keine eframe-Demo-Szenarien oder
+Debug-Fixture-Routen. Die Migrations-Gates stehen in
+[`rune-migration.md`](../features/rune-migration.md), die Prüflisten in
+[`UI_REVIEW.md`](UI_REVIEW.md).
 
 ## Zweck
 
@@ -87,7 +93,7 @@ ignoriert — macOS injiziert z. B. `-psn_0_…` beim ersten Bundle-Start, IDEs
 schicken eigene Flags. Sobald aber ein Demo-Lauf angefordert ist, gilt ein
 solches Argument als Tippfehler und wird gemeldet.
 
-## Szenarien
+## Legacy-eframe-Szenarien
 
 | ID | Beschreibung |
 |---|---|
@@ -218,3 +224,40 @@ damit ein späterer Frame den Erfolg nicht in einen Timeout umdeutet.
 
 Die Tests brauchen weder Netzwerk noch Dateisystem und dürfen keine der
 Fixture-Pfade anlegen.
+
+## Rune-Review-Matrix
+
+Die Rune-Matrix ist eine **separate Headless-Ansicht**, kein alternativer
+Produktionsstart und kein Ersatz für die eframe-Demo. `--rune-backup-smoke`
+zeigt die Backup-Szenen `mixed`, `uploading`, `paused`, `all-done`, `failures`,
+`empty` und `many-folders` sowie die vorhandenen About- und Lizenz-Routen. Die
+Anmeldung (`signed-out` und `error`) bleibt in `--rune-login-fixture`; die Tabs
+Allgemeines und Bandbreite bleiben im Rune-Einstellungs-Fixture. Dieses Fixture
+startet aus `Config::default()` ohne Speicherpfad. Die Fenster und Screenshots
+greifen nicht auf Konten, Konfiguration, Keychain, SQLite, Nutzdateien, Netzwerk,
+Dateiauswahl oder native OS-Aktionen zu. Das Aufnahmeskript schreibt nur die
+explizit angeforderten PNG-/JSON-Artefakte in sein Zielverzeichnis.
+Backup-Smoke-Schaltflächen ändern ausschließlich den lokalen Fixture-Zustand.
+
+Nach einem Debug-Build mit dem optionalen Rune-Feature erzeugt das Skript eine
+feste Matrix mit `--snap`-PNG-Dateien und `--tree`-JSON-Dateien:
+
+```bash
+cargo build --locked --features rune-ui-spike
+scripts/capture-rune-ui-review.sh
+```
+
+Die Standardausgabe liegt unter `target/rune-ui-review/`. `RUNE_UI_BIN` und
+`RUNE_UI_REVIEW_OUT` können Binary bzw. Zielverzeichnis überschreiben. Alle
+Rune-Backup-Szenen entstehen bei 1400×900 in Hell und Dunkel; `mixed`, `failures`
+und `many-folders` zusätzlich bei 760×560 (Fixture-Minimum) und 1000×700 in
+beiden Themes. Für jede der neun Backup-Szenen wird außerdem bei 1400×900 ein
+Rune-View-Tree gespeichert. Signed-out, Login-Fehler, Einstellungen-Allgemeines
+und Bandbreite werden jeweils bei 760×560 und 1000×700 in beiden Themes
+aufgenommen. Sprache und Render-Skala sind fest auf Deutsch bzw. 1× gesetzt.
+
+**Aufnahmestatus dieser Änderung:** Das Skript wurde nicht ausgeführt; keine der
+aufgeführten Rune-PNGs oder View-Trees wurde hier erzeugt oder visuell geprüft.
+Auch die oben dokumentierte Legacy-eframe-Screenshot-Matrix wurde in dieser
+Sitzung nicht aufgenommen. Die tatsächliche Screenshot-Inspektion bleibt ein
+offenes Gate und muss auf macOS erfolgen.

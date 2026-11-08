@@ -37,7 +37,7 @@ pub(crate) fn close() {
 /// Keep Rune's logical-point layout coordinates for Wry's logical child bounds.
 /// The rectangle is the laid-out WebView area, so its origin already includes the
 /// Rune header and any titlebar inset reserved by that header.
-#[cfg(any(all(debug_assertions, feature = "rune-ui-spike"), test))]
+#[cfg(any(feature = "rune-backup", test))]
 pub(crate) fn bounds_from_layout(rect: [f32; 4]) -> [f32; 4] {
     [rect[0], rect[1], rect[2].max(1.0), rect[3].max(1.0)]
 }

@@ -1,17 +1,9 @@
-use crate::app::{FolderPickerTarget, Page, ONE_TIME_IDX, PrimePhotoApp};
-use crate::backup_config::{BackupConfigForm, ConfigFormMode};
 use crate::config::Config;
 use crate::dedup::{DedupIndex, Origin};
 use crate::folders::{self, ConflictResolution, FolderStatus, FolderStore};
-use crate::i18n::{tr, tr1, tr2, tr3};
-use crate::icons;
+use crate::i18n::{tr, tr1};
 use crate::login::Session;
-use crate::theme;
-use crate::upload::{
-    FileState, QueueEntry, UploadShared, calculate_pct, folder_progress_text, outcome_text,
-    run_upload, status_text_for_theme, upload_progress_text,
-};
-use eframe::egui::{self, RichText};
+use crate::upload::{FileState, QueueEntry, UploadShared, run_upload};
 // NOTE: `notify` is the filesystem-event crate — not `crate::notify`, the
 // desktop-notification module (they are unrelated and both stay).
 use notify;
@@ -23,6 +15,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
+#[cfg(feature = "legacy-eframe")]
+pub(crate) mod eframe_ui;
+#[cfg(feature = "legacy-eframe")]
+mod eframe_app;
+
+#[cfg(feature = "legacy-eframe")]
 pub(crate) enum FolderAction {
     Upload(usize),
     Retry(usize),
@@ -32,6 +30,7 @@ pub(crate) enum FolderAction {
     Edit(usize),
 }
 
+#[cfg(feature = "legacy-eframe")]
 struct Row {
     idx: usize,
     name: String,
@@ -56,6 +55,7 @@ struct Row {
 /// Pure: no lock, no UI, no filesystem, and therefore cheap to test. A target
 /// that knows no total (`total == 0`) contributes nothing and can never skew
 /// the sum; the caller guards the division by zero.
+#[cfg(feature = "legacy-eframe")]
 fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
     rows.iter()
         .fold((0usize, 0usize), |(done, total), r| {
@@ -65,6 +65,7 @@ fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
 
 /// Live progress is scoped to the current run; the library-wide row sum is for
 /// the idle display only.
+#[cfg(feature = "legacy-eframe")]
 fn displayed_progress(
     running: bool,
     run_done: usize,
@@ -81,6 +82,7 @@ fn displayed_progress(
 /// Live completion is scoped to the current run. The shared map outlives a run,
 /// and its positional folder keys can become stale when store rows shift; idle
 /// rows must always use their persisted completion count.
+#[cfg(feature = "legacy-eframe")]
 fn row_done(in_run: bool, folder_done_entry: Option<usize>, persisted_done: usize) -> usize {
     if in_run {
         folder_done_entry.unwrap_or(0)
@@ -92,6 +94,7 @@ fn row_done(in_run: bool, folder_done_entry: Option<usize>, persisted_done: usiz
 /// Use live plan totals only while that row belongs to the active run. The
 /// shared map outlives a run, and its positional folder keys can become stale
 /// when the store's rows shift; idle rows must use their persisted totals.
+#[cfg(feature = "legacy-eframe")]
 fn row_total(
     in_run: bool,
     folder_total_entry: Option<usize>,
@@ -113,7 +116,7 @@ fn row_index_for(
     paths: &HashMap<usize, PathBuf>,
     idx: usize,
 ) -> Option<usize> {
-    if idx == ONE_TIME_IDX {
+    if idx == crate::platform::app_shared::ONE_TIME_IDX {
         return None;
     }
     let path = paths.get(&idx)?;
@@ -124,11 +127,13 @@ fn row_index_for(
 /// unique within a run; if a malformed/legacy state violates that invariant,
 /// choose the lowest matching plan index so the result remains deterministic.
 /// The one-time target is synthetic and never maps to a persisted folder row.
+#[cfg(feature = "legacy-eframe")]
 fn plan_index_for(paths: &HashMap<usize, PathBuf>, path: &Path) -> Option<usize> {
     paths
         .iter()
         .filter_map(|(&idx, folder_path)| {
-            (idx != ONE_TIME_IDX && folder_path == path).then_some(idx)
+            (idx != crate::platform::app_shared::ONE_TIME_IDX && folder_path == path)
+                .then_some(idx)
         })
         .min()
 }
@@ -165,6 +170,7 @@ pub(crate) fn apply_folder_progress(
 /// progress text is empty then ([`crate::upload::folder_progress_text`]) and the
 /// aggregate bar guards its division. Pure, so the row's percent text and the
 /// aggregate bar below stay consistent.
+#[cfg(feature = "legacy-eframe")]
 fn capped_done(done: usize, total: usize) -> usize {
     done.min(total)
 }
@@ -249,6 +255,7 @@ fn lift_returned_sources(
 /// computed once per frame over the active run's captured paths, so removed
 /// store rows do not change their queue labels. The name is shown
 /// NFC-normalised, like every other displayed path in the app.
+#[cfg(feature = "legacy-eframe")]
 fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> String {
     let name = crate::text::nfc(name);
     if !ambiguous.contains(&name) {
@@ -265,12 +272,13 @@ fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> S
 /// The store may have shifted or removed the row since then. The returned pair
 /// is the display label and full-path tooltip; synthetic/missing targets have
 /// no resolved display and keep their caller's neutral fallback.
+#[cfg(feature = "legacy-eframe")]
 fn queue_folder_display(
     paths: &HashMap<usize, PathBuf>,
     idx: usize,
     ambiguous: &HashSet<String>,
 ) -> Option<(String, String)> {
-    if idx == ONE_TIME_IDX {
+    if idx == crate::platform::app_shared::ONE_TIME_IDX {
         return None;
     }
     let path = paths.get(&idx)?;
@@ -288,10 +296,11 @@ fn queue_folder_display(
 /// once — the input of [`queue_folder_label`]. Cheap (the run holds a handful
 /// of folders) and built once per frame, not per queue row. Names are
 /// NFC-normalised so the set matches the displayed form.
+#[cfg(feature = "legacy-eframe")]
 fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<String> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for (&idx, path) in paths {
-        if idx == ONE_TIME_IDX {
+        if idx == crate::platform::app_shared::ONE_TIME_IDX {
             continue;
         }
         let name = path
@@ -310,54 +319,76 @@ fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<
 /// Fixed geometry of the live queue table (docs/original/SPEC_UPLOAD_PROGRESS.md §7.8):
 /// the name column takes the remaining width, folder/size/status are fixed, the
 /// row height is fixed. The header uses the same widths, so both line up.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_ROW_H: f32 = 20.0;
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_HEADER_H: f32 = 20.0;
 /// Headless-measured production consumption above the table's first row with
 /// the theme: a 20 px header-cell response at a 3 px top inset, 8 px to the
 /// 1 px divider, then 8 px to the first row. The split reserves all 40 px.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_HEADER_TOTAL_H: f32 = 40.0;
 /// Compact column carrying the backup folder of each queue row (user decision
 /// 2026-10-16): without it the files of several targets are indistinguishable.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_FOLDER_W: f32 = 120.0;
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_SIZE_W: f32 = 80.0;
 /// Wide enough for "In Bearbeitung · 100 %" at 12 pt (Issue #30); the text is
 /// truncated instead of painting over the next column if a translation is
 /// longer.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_STATUS_W: f32 = 140.0;
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_MIN_NAME_W: f32 = 80.0;
 /// Item spacing egui adds after the queue `ScrollArea`.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_TABLE_TRAILING_H: f32 = 8.0;
 /// Fixed height of the aggregate progress row (spinner / progress bar).
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_PROGRESS_ROW_H: f32 = 26.0;
 /// Height of the aggregate progress zone under the queue table: the 6 px gap,
 /// the fixed 26 px row and the 8 px trailing item spacing. The row is reserved
 /// in every branch, so the splitter and folder heading keep a deterministic y.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_PROGRESS_ZONE_H: f32 = 6.0 + QUEUE_PROGRESS_ROW_H + 8.0;
 /// Hit area of the draggable horizontal splitter and the air above/below it.
+#[cfg(feature = "legacy-eframe")]
 const SPLITTER_H: f32 = 10.0;
+#[cfg(feature = "legacy-eframe")]
 const SPLITTER_GAP: f32 = 3.0;
 /// Splitter zone including the trailing item spacing: 3 + 10 + 8 + 3 = 24 px.
+#[cfg(feature = "legacy-eframe")]
 const SPLITTER_ZONE_H: f32 = 2.0 * SPLITTER_GAP + SPLITTER_H + 8.0;
 /// Headless-measured folder disclosure layout row (26 px, even though its text
 /// label response is 16 px) plus the trailing item spacing: 26 + 8 = 34 px.
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_HEADING_ZONE_H: f32 = 26.0 + 8.0;
 /// Air between the folder heading and the card list.
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_HEADING_GAP: f32 = 6.0;
 /// Air after the folder `ScrollArea` before the result footer.
+#[cfg(feature = "legacy-eframe")]
 const POST_LIST_GAP: f32 = 6.0;
 /// Air between the post-list gap and the footer line.
+#[cfg(feature = "legacy-eframe")]
 const FOOTER_GAP: f32 = 6.0;
 /// Line box of the 11 pt result footer.
+#[cfg(feature = "legacy-eframe")]
 const FOOTER_LINE_H: f32 = 13.0;
 /// Gap between two page sections when no splitter separates them.
+#[cfg(feature = "legacy-eframe")]
 const SECTION_GAP: f32 = 6.0;
 /// Height the folder list must leave for the result footer below it:
 /// table trailing 8 + post-list 6 + footer gap 6 + line 13 = 33 px.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_FOOTER_H: f32 =
     QUEUE_TABLE_TRAILING_H + POST_LIST_GAP + FOOTER_GAP + FOOTER_LINE_H;
 /// Floor of the queue-table viewport when the window has room for both floors.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_MIN_VIEWPORT_H: f32 = 72.0;
 /// Floor of the folder-list viewport when the window has room for both floors.
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_MIN_VIEWPORT_H: f32 = 96.0;
 /// Default share of the splittable height taken by the queue while both
 /// sections are open (Issue #33, user wish 2026-11-03).
@@ -369,6 +400,7 @@ pub(crate) const BACKUP_QUEUE_RATIO_MAX: f32 = 0.80;
 /// Chrome below the table while **both** sections are open: table trailing,
 /// progress zone, splitter zone, folder heading zone and the footer area.
 /// 8 + 40 + 24 + 34 + 6 + 33 = 145 px.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
     + QUEUE_PROGRESS_ZONE_H
     + SPLITTER_ZONE_H
@@ -378,6 +410,7 @@ const QUEUE_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
 /// Chrome below the table when only the queue is open: table trailing, progress,
 /// section gap, folder heading, footer gap and line. 8 + 40 + 6 + 34 + 6 + 13
 /// = 107 px.
+#[cfg(feature = "legacy-eframe")]
 const QUEUE_ONLY_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
     + QUEUE_PROGRESS_ZONE_H
     + SECTION_GAP
@@ -387,23 +420,28 @@ const QUEUE_ONLY_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
 /// Chrome below the queue section when only the folder list is open: progress,
 /// section gap, folder heading, heading/list gap and the footer area.
 /// 40 + 6 + 34 + 6 + 33 = 119 px.
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_ONLY_BELOW_H: f32 = QUEUE_PROGRESS_ZONE_H
     + SECTION_GAP
     + FOLDER_HEADING_ZONE_H
     + FOLDER_HEADING_GAP
     + QUEUE_FOOTER_H;
 /// Vertical inner margin of a folder card (top and bottom).
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_CARD_INNER_Y: i8 = 10;
 /// Vertical outer margin of a folder card (top and bottom).
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_CARD_OUTER_Y: i8 = 3;
 /// Vertical gap between two folder cards, applied as the folder list's
 /// `item_spacing.y`. The cards draw at their natural height in the scroll area.
+#[cfg(feature = "legacy-eframe")]
 const FOLDER_CARD_GAP: f32 = 6.0;
 
 /// Column geometry of the queue table, derived once per frame and reused by the
 /// header and **every** row (Issue #30: both used to recompute the name width,
 /// and the header's cells were centred while the values were not).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg(feature = "legacy-eframe")]
 struct QueueColumns {
     /// Width the table occupies: the page content minus the scroll-bar strip
     /// the theme reserves.
@@ -418,6 +456,7 @@ struct QueueColumns {
 /// gaps between four cells), `bar_w` the reserved scroll-bar strip. The table
 /// ends at `content_w - bar_w`; the name takes what is left, at least
 /// [`QUEUE_MIN_NAME_W`] (the minimum window is wide enough for that).
+#[cfg(feature = "legacy-eframe")]
 fn queue_columns(content_w: f32, gap: f32, bar_w: f32) -> QueueColumns {
     let table_w = (content_w - bar_w).max(0.0);
     let name_w = (table_w - QUEUE_FOLDER_W - QUEUE_SIZE_W - QUEUE_STATUS_W - 3.0 * gap)
@@ -429,141 +468,6 @@ fn queue_columns(content_w: f32, gap: f32, bar_w: f32) -> QueueColumns {
         size_w: QUEUE_SIZE_W,
         status_w: QUEUE_STATUS_W,
     }
-}
-
-/// One queue-table cell, allocated at exactly `width` × `height` and aligned
-/// inside it (`right_aligned` puts the widget at the cell's right edge). The
-/// cell is its own `Ui`, so alignment does not depend on the widgets before it,
-/// and a long value can never paint into the next column (Issue #30).
-fn table_cell(
-    ui: &mut egui::Ui,
-    width: f32,
-    height: f32,
-    right_aligned: bool,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    let layout = if right_aligned {
-        egui::Layout::right_to_left(egui::Align::Center)
-    } else {
-        egui::Layout::left_to_right(egui::Align::Center)
-    };
-    ui.allocate_ui_with_layout(egui::vec2(width, height), layout, |ui| {
-        // Reserve the full cell before adding the widget: a short label's own
-        // rect would otherwise shrink the cell and shift every later column.
-        ui.set_min_size(egui::vec2(width, height));
-        add_contents(ui);
-    });
-}
-
-/// Draw the fixed queue-table header and divider. Kept on the production path
-/// so its actual egui allocation can be measured by the headless layout test.
-fn draw_queue_table_header(ui: &mut egui::Ui, cols: QueueColumns) -> (egui::Rect, egui::Rect) {
-    let header_row = ui.horizontal(|ui| {
-        table_cell(ui, cols.folder_w, QUEUE_HEADER_H, false, |ui| {
-            ui.label(RichText::new(tr("Ordner")).strong().size(11.0));
-        });
-        table_cell(ui, cols.name_w, QUEUE_HEADER_H, false, |ui| {
-            ui.label(RichText::new(tr("Name")).strong().size(11.0));
-        });
-        table_cell(ui, cols.size_w, QUEUE_HEADER_H, true, |ui| {
-            ui.label(RichText::new(tr("Größe")).strong().size(11.0));
-        });
-        table_cell(ui, cols.status_w, QUEUE_HEADER_H, false, |ui| {
-            ui.label(RichText::new(tr("Status")).strong().size(11.0));
-        });
-    });
-
-    // 1 px divider under the header, spanning exactly the table width (never
-    // the reserved scroll-bar strip). The following ScrollArea supplies the
-    // actual trailing item spacing before the first queue row.
-    let (divider, _) =
-        ui.allocate_exact_size(egui::vec2(cols.table_w, 1.0), egui::Sense::hover());
-    ui.painter().hline(
-        divider.x_range(),
-        divider.center().y,
-        egui::Stroke::new(1.0_f32, theme::palette(ui.visuals().dark_mode).border),
-    );
-    (header_row.response.rect, divider)
-}
-
-/// Draw the queue header and its production virtualized row area together, so
-/// header height tests observe the same spacing and first-row position as the
-/// live table.
-fn show_queue_table(
-    ui: &mut egui::Ui,
-    cols: QueueColumns,
-    table_h: f32,
-    row_count: usize,
-    add_rows: impl FnOnce(&mut egui::Ui, std::ops::Range<usize>),
-) -> (egui::Rect, egui::Rect) {
-    let header_geometry = draw_queue_table_header(ui, cols);
-    egui::ScrollArea::vertical()
-        // Own scroll state (user decision 2026-10-16): egui keys a ScrollArea's
-        // offset by `make_persistent_id("scroll_area")` when no `id_salt` is
-        // given, so the queue and folder list would share one offset.
-        .id_salt("queue")
-        .max_height(table_h)
-        .auto_shrink(false)
-        // Honor the cap even when tiny: the default `min_scrolled_height`
-        // (64 px) would otherwise overrule a smaller `max_height`.
-        .min_scrolled_height(0.0)
-        // Reserve the 18 px strip on every frame, not only while hovered; the
-        // floating handle stays dormant until hover.
-        .scroll_bar_visibility(egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible)
-        // Every row is allocated at exactly `QUEUE_ROW_H`, so `show_rows`
-        // advances by the same row height plus the theme's item spacing.
-        .show_rows(ui, QUEUE_ROW_H, row_count, add_rows);
-    header_geometry
-}
-
-/// The card's small meta line: path · progress · last updated (each present part
-/// exactly once, empty parts omitted). Shared by the card draw and its labels.
-fn folder_card_meta(r: &Row) -> String {
-    let mut line = crate::text::nfc(&r.path.display().to_string());
-    let progress = folder_progress_text(r.status, r.done, r.total);
-    if !progress.is_empty() {
-        line.push_str(" · ");
-        line.push_str(&progress);
-    }
-    if !r.last_updated.is_empty() {
-        line.push_str(" · ");
-        line.push_str(&tr1("Zuletzt aktualisiert: {}", &r.last_updated));
-    }
-    line
-}
-
-/// One text block in a folder card's left column.
-struct CardLabel {
-    text: String,
-    font: egui::FontId,
-    /// `theme::muted` (meta/outcome); the name uses the strong 15 pt style.
-    muted: bool,
-}
-
-/// The left column of a folder card: name, meta line and — **only when the run
-/// produced a result for it** — the outcome line.
-fn folder_card_labels(r: &Row) -> Vec<CardLabel> {
-    let mut labels = vec![
-        CardLabel {
-            text: crate::text::nfc(&r.name),
-            font: egui::FontId::proportional(15.0),
-            muted: false,
-        },
-        CardLabel {
-            text: folder_card_meta(r),
-            font: egui::FontId::proportional(11.0),
-            muted: true,
-        },
-    ];
-    let outcome = outcome_text(r.new, r.existing, r.unchanged, r.failed);
-    if !outcome.is_empty() {
-        labels.push(CardLabel {
-            text: outcome,
-            font: egui::FontId::proportional(11.0),
-            muted: true,
-        });
-    }
-    labels
 }
 
 /// Clamp a persisted or runtime split ratio into the supported range. A
@@ -581,6 +485,7 @@ pub(crate) fn sanitize_backup_queue_ratio(ratio: f32) -> f32 {
 /// is normalised by the splittable height, so the same drag feels the same at
 /// every window size. A non-finite or empty splittable height leaves the ratio
 /// usable instead of producing `NaN`.
+#[cfg(feature = "legacy-eframe")]
 fn adjusted_backup_queue_ratio(ratio: f32, delta_y: f32, splittable_h: f32) -> f32 {
     if !delta_y.is_finite() || !splittable_h.is_finite() || splittable_h <= 0.0 {
         return sanitize_backup_queue_ratio(ratio);
@@ -590,17 +495,20 @@ fn adjusted_backup_queue_ratio(ratio: f32, delta_y: f32, splittable_h: f32) -> f
 
 /// Hard layout invariant: the two backup sections can never be closed at the
 /// same time. A section may only close while the other one is open.
+#[cfg(feature = "legacy-eframe")]
 fn keep_one_section_open(open: bool, other_open: bool) -> bool {
     open || !other_open
 }
 
 /// A section can be toggled only while its sibling is open and its parent UI
 /// is enabled.
+#[cfg(feature = "legacy-eframe")]
 fn section_toggle_enabled(ui_enabled: bool, other_open: bool) -> bool {
     ui_enabled && other_open
 }
 
 /// A section-header click changes state only when the header may be toggled.
+#[cfg(feature = "legacy-eframe")]
 fn section_toggle_after_click(
     clicked: bool,
     can_toggle: bool,
@@ -617,6 +525,7 @@ fn section_toggle_after_click(
 /// Split the splittable height by the queue ratio, respecting both viewport
 /// floors when the height has room for them. In a tiny window the split
 /// degrades proportionally; sizes never become negative.
+#[cfg(feature = "legacy-eframe")]
 fn split_viewports(total: f32, ratio: f32) -> (f32, f32) {
     let total = if total.is_finite() {
         total.max(0.0)
@@ -639,6 +548,7 @@ fn split_viewports(total: f32, ratio: f32) -> (f32, f32) {
 
 /// Height the splitter can actually distribute below the table column header
 /// and above the fixed chrome.
+#[cfg(feature = "legacy-eframe")]
 fn backup_split_splittable(free: f32) -> f32 {
     (free - QUEUE_HEADER_TOTAL_H - QUEUE_BELOW_H).max(0.0)
 }
@@ -647,6 +557,7 @@ fn backup_split_splittable(free: f32) -> f32 {
 /// disclosure and splitter state. The saved ratio is only read while **both**
 /// sections are open; with exactly one open, that section receives every free
 /// pixel and the ratio stays untouched.
+#[cfg(feature = "legacy-eframe")]
 fn page_heights_for_sections(
     free: f32,
     queue_open: bool,
@@ -668,16 +579,12 @@ fn page_heights_for_sections(
     }
 }
 
-fn section_is_open(ui: &egui::Ui, id: egui::Id, default_open: bool) -> bool {
-    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, default_open)
-        .is_open()
-}
-
 /// Whether the folder list may draw in this frame. The folder header toggles
 /// *after* the split was computed: opening waits for the next frame's both-open
 /// split, while closing keeps the list for one final frame in its existing
 /// viewport. Drawing from the layout snapshot preserves that allocation; the
 /// actual-height cap below keeps the footer safe even in a tiny window.
+#[cfg(feature = "legacy-eframe")]
 fn folder_list_draws(expanded: bool, expanded_for_layout: bool) -> bool {
     match (expanded, expanded_for_layout) {
         (true, true) => true,   // stable open
@@ -687,191 +594,6 @@ fn folder_list_draws(expanded: bool, expanded_for_layout: bool) -> bool {
     }
 }
 
-/// Draw a standard egui disclosure control and persist its open state. The
-/// toggle is keyboard-focusable and announces its localized action and section.
-///
-/// `other_open` enforces the hard invariant: a section may only be closed while
-/// the other one is open. If both persisted states are closed, this header
-/// reopens itself before painting, so the icon and the announced action always
-/// match the real state.
-fn show_section_header(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    default_open: bool,
-    other_open: bool,
-    show_label: &str,
-    hide_label: &str,
-    add_header: impl FnOnce(&mut egui::Ui) -> egui::Response,
-) -> (bool, f32) {
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        id,
-        default_open,
-    );
-    let corrected = keep_one_section_open(state.is_open(), other_open);
-    if corrected != state.is_open() {
-        state.set_open(corrected);
-        state.store(ui.ctx());
-    }
-    // The only open section cannot be collapsed. Expose that as disabled to
-    // assistive technology and remove click semantics instead of swallowing an
-    // apparently enabled action.
-    let can_toggle = section_toggle_enabled(ui.is_enabled(), other_open);
-    let header = ui.horizontal(|ui| {
-        let item_spacing = ui.spacing().item_spacing;
-        ui.spacing_mut().item_spacing.x = 0.0;
-        // A custom toggle (not `show_toggle_button`) keeps the localized action
-        // label and supports a genuinely disabled state for the last section.
-        let size = egui::vec2(ui.spacing().indent, ui.spacing().icon_width);
-        let (_auto_id, disclosure_rect) = ui.allocate_space(size);
-        ui.spacing_mut().item_spacing = item_spacing;
-        let label_response = add_header(ui);
-        // One interaction and one id cover both icon and label, keeping a
-        // single keyboard focus target, accessibility action and focus ring.
-        let header_rect = disclosure_rect.union(label_response.rect);
-        let sense = if can_toggle {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        };
-        let toggle = ui.interact(header_rect, id, sense);
-        let toggle = if can_toggle {
-            toggle.on_hover_cursor(egui::CursorIcon::PointingHand)
-        } else {
-            toggle
-        };
-        if let Some(next) = section_toggle_after_click(
-            toggle.clicked(),
-            can_toggle,
-            state.is_open(),
-            other_open,
-        ) {
-            state.set_open(next);
-            state.store(ui.ctx());
-            ui.ctx().request_repaint();
-        }
-        let accessible_label = if state.is_open() {
-            hide_label
-        } else {
-            show_label
-        };
-        toggle.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, can_toggle, accessible_label)
-        });
-        let openness = state.openness(ui.ctx());
-        let (mut icon_rect, _) = ui.spacing().icon_rectangles(disclosure_rect);
-        icon_rect.set_center(egui::pos2(
-            disclosure_rect.left() + ui.spacing().indent / 2.0,
-            disclosure_rect.center().y,
-        ));
-        let icon_response = toggle.clone().with_new_rect(icon_rect);
-        egui::collapsing_header::paint_default_icon(ui, openness, &icon_response);
-        // `Sense::click` makes this shared control keyboard-focusable, but the
-        // custom interaction does not paint egui's usual focus outline.
-        // Expand outside the icon and label so the ring cannot cover either.
-        if can_toggle && toggle.has_focus() {
-            ui.painter().rect_stroke(
-                header_rect.expand(2.0),
-                egui::CornerRadius::same(3),
-                egui::Stroke::new(
-                    1.5_f32,
-                    crate::theme::palette(ui.visuals().dark_mode).focus,
-                ),
-                egui::StrokeKind::Outside,
-            );
-        }
-    });
-    state.store(ui.ctx());
-    (state.is_open(), header.response.rect.height())
-}
-
-/// The production folder disclosure heading, including its exact localized
-/// label and toggle action. Sharing this helper lets the headless geometry test
-/// measure the same rendered row rather than a stand-in.
-fn show_folder_section_header(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    queue_open: bool,
-) -> (bool, f32, f32) {
-    let mut label_h = 0.0;
-    let (is_open, row_h) = show_section_header(
-        ui,
-        id,
-        true,
-        queue_open,
-        tr("Automatisch gesicherte Ordner ausklappen"),
-        tr("Automatisch gesicherte Ordner einklappen"),
-        |ui| {
-            let label = ui.label(theme::muted(tr("Automatisch gesicherte Ordner:")).size(14.0));
-            label_h = label.rect.height();
-            label
-        },
-    );
-    (is_open, row_h, label_h)
-}
-
-/// Draw the accessible drag handle between the two open scroll panes.
-/// Up/down arrows adjust the same ratio for keyboard users.
-fn show_backup_splitter(ui: &mut egui::Ui, ratio: f32, splittable_h: f32) -> (f32, bool) {
-    ui.add_space(SPLITTER_GAP);
-    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), SPLITTER_H));
-    let response = ui.interact(
-        rect,
-        ui.make_persistent_id("backup-layout-splitter"),
-        egui::Sense::click_and_drag(),
-    );
-    if response.clicked() || response.drag_started() || response.is_pointer_button_down_on() {
-        response.request_focus();
-    }
-    let ratio = sanitize_backup_queue_ratio(ratio);
-    let enabled = ui.is_enabled();
-    let accessible_label = tr("Höhe von Warteschlange und Ordnern anpassen");
-    response.widget_info(|| egui::WidgetInfo::slider(enabled, f64::from(ratio), accessible_label));
-    let response = response.on_hover_text(tr(
-        "Mit den Pfeiltasten nach oben oder unten anpassen",
-    ));
-
-    if response.hovered() || response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-    }
-    let colors = theme::palette(ui.visuals().dark_mode);
-    let grip_color = if response.dragged() || response.has_focus() {
-        colors.focus
-    } else if response.hovered() {
-        colors.muted
-    } else {
-        colors.border
-    };
-    let grip = egui::Rect::from_center_size(rect.center(), egui::vec2(48.0, 2.0));
-    ui.painter().rect_filled(grip, 1.0, grip_color);
-
-    let mut next_ratio = adjusted_backup_queue_ratio(ratio, response.drag_delta().y, splittable_h);
-    let keyboard_delta = if response.has_focus() {
-        let step = if ui.input(|input| input.modifiers.shift) {
-            0.10
-        } else {
-            0.03
-        };
-        ui.input(|input| {
-            if input.key_pressed(egui::Key::ArrowUp) {
-                -step
-            } else if input.key_pressed(egui::Key::ArrowDown) {
-                step
-            } else {
-                0.0
-            }
-        })
-    } else {
-        0.0
-    };
-    if keyboard_delta != 0.0 {
-        next_ratio = sanitize_backup_queue_ratio(next_ratio + keyboard_delta);
-    }
-    ui.add_space(SPLITTER_GAP);
-    let should_save = response.drag_stopped() || keyboard_delta != 0.0;
-    (next_ratio, should_save)
-}
-
 /// Status bucket of the live queue's flat ordering: **our own** order, decided
 /// by the user on 2026-10-26 — "In Bearbeitung" → "Fehlgeschlagen" → "Warten"
 /// → "Abgeschlossen" → "Übersprungen". The original status table is at most a
@@ -879,6 +601,7 @@ fn show_backup_splitter(ui: &mut egui::Ui, ratio: f32, splittable_h: f32) -> (f3
 /// docs/original/SPEC_STATUS_DETAIL.md §3.3); it additionally sorts by
 /// `SortDate` and does not preserve insertion order, so its key is
 /// deliberately **not** copied.
+#[cfg(feature = "legacy-eframe")]
 fn status_rank(state: FileState) -> u8 {
     match state {
         FileState::Uploading => 0,
@@ -893,6 +616,7 @@ fn status_rank(state: FileState) -> u8 {
 /// order (the queue index) inside a bucket. Folder membership deliberately does
 /// not matter — no group headers, no folder grouping (user decision
 /// 2026-10-26). Pure, so the ordering is testable without a `Ui`.
+#[cfg(feature = "legacy-eframe")]
 fn queue_layout(queue: &[QueueEntry]) -> Vec<usize> {
     let mut layout: Vec<usize> = (0..queue.len()).collect();
     layout.sort_by_key(|&i| (status_rank(queue[i].state), i));
@@ -1304,7 +1028,7 @@ fn prepare_scheduled_upload_with(
         let message = if missing {
             tr("Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).")
         } else {
-            tr("Keine Fotos oder Videos in diesem Ordner gefunden.")
+            tr("Keine Fotos in diesem Ordner gefunden.")
         };
         shared.lock().unwrap().log(message);
         return None;
@@ -1574,7 +1298,7 @@ static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
 /// the same as the existing app path. The caller owns the returned sender so a
 /// newly added folder can be handed to the supervisor while another run is
 /// active.
-#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+#[cfg(feature = "rune-backup")]
 pub(crate) fn spawn_background_sync(
     runtime: &tokio::runtime::Runtime,
     shared: Arc<Mutex<UploadShared>>,
@@ -2586,8 +2310,9 @@ async fn watch_loop(
 
 /// The persisted folder a remembered answer would be written into — `None`
 /// exactly when [`remember_conflict_in_folder`] refuses to write:
-/// - the transient drag & drop target (`ONE_TIME_IDX`), which has no
-///   `folders.toml` entry at all and stays run-only,
+/// - the transient drag & drop target
+///   (`crate::platform::app_shared::ONE_TIME_IDX`), which has no `folders.toml`
+///   entry at all and stays run-only,
 /// - an index outside the store (`FolderStore::remove` shifts indices), and
 /// - a file that does not live below that folder's own path — the decisive
 ///   guard, because the shifted index is exactly what could point at a
@@ -2601,7 +2326,7 @@ fn remember_folder<'a>(
     idx: usize,
     file_path: &Path,
 ) -> Option<&'a folders::BackupFolder> {
-    if idx == ONE_TIME_IDX {
+    if idx == crate::platform::app_shared::ONE_TIME_IDX {
         return None;
     }
     store
@@ -2695,1298 +2420,7 @@ pub(crate) fn answer_pending_conflict(
     }
 }
 
-impl PrimePhotoApp {
-    // -- folders ------------------------------------------------------------
 
-    /// Ask for a folder for a **new** backup target. The native dialog is opened
-    /// asynchronously (Welle 5.1) — the UI keeps running; `poll_folder_picker`
-    /// opens the Create form once a folder was picked.
-    pub(crate) fn add_backup_folder(&mut self, ctx: &egui::Context) {
-        // Demo fixtures are read-only: no native dialog, no store write.
-        if self.is_demo() {
-            self.demo_skip("Ordner-Dialog öffnen");
-            return;
-        }
-        self.spawn_folder_picker(FolderPickerTarget::NewBackup, ctx);
-    }
-
-    pub(crate) fn apply_action(&mut self, action: FolderAction) {
-        // Demo fixtures are read-only: no remove/toggle/upload/reveal/edit side
-        // effect. The global pause button does not route through here, so the
-        // paused state stays inspectable.
-        if self.is_demo() {
-            self.demo_skip("Ordner-Aktion");
-            return;
-        }
-        match action {
-            FolderAction::Upload(i) | FolderAction::Retry(i) => {
-                self.start_folder_upload(vec![i]);
-            }
-            FolderAction::Remove(i) => {
-                if i < self.store.folders.len() {
-                    let f = self.store.folders.remove(i);
-                    let _ = self.store.save();
-                    self.log(tr1(
-                        "Datensicherung gestoppt: {}",
-                        crate::text::nfc(&f.name),
-                    ));
-                }
-            }
-            FolderAction::OpenFinder(i) => {
-                if let Some(f) = self.store.folders.get(i) {
-                    let _ = crate::platform::reveal_in_file_manager(&f.path);
-                }
-            }
-            FolderAction::ToggleEnabled(i) => {
-                if let Some(f) = self.store.folders.get_mut(i) {
-                    f.enabled = !f.enabled;
-                }
-                let _ = self.store.save();
-            }
-            FolderAction::Edit(i) => {
-                if let Some(f) = self.store.folders.get(i) {
-                    let form = BackupConfigForm {
-                        path: f.path.clone(),
-                        dedup: f.dedup,
-                        conflict_resolution: f.conflict_resolution,
-                        content_filter: f.content_filter,
-                        mode: ConfigFormMode::Edit(f.path.clone()),
-                        error: None,
-                    };
-                    self.config_form = Some(form);
-                }
-            }
-        }
-    }
-
-    /// Whether an upload run is currently active.
-    ///
-    /// The UI paths use it to route a new request while a run is busy; the
-    /// background tick checks the same state through its shared handle. In the
-    /// "add folder" path the guard no longer merely reports (user decision
-    /// 2026-10-17): the folder is handed to the detached supervisor and taken
-    /// into the live run (see [`Self::start_folder_upload`]), while
-    /// `start_one_time_upload` still answers with "Es läuft bereits ein Upload.".
-    pub(crate) fn upload_busy(&self) -> bool {
-        self.upload.lock().unwrap().active
-    }
-
-    /// UI path for a manual run (row menu "Jetzt scannen und hochladen" /
-    /// "Wiederholen", and the create-backup dialog). Keeps both UI guards: the
-    /// already-running check and the redirect to the settings page when nobody
-    /// is signed in. The background tick checks its own guards (paused, busy,
-    /// logged in) and must never navigate the UI.
-    pub(crate) fn start_folder_upload(&mut self, indices: Vec<usize>) {
-        if self.upload_busy() {
-            // Never drop the add (user decision 2026-10-17): hand the folder to the
-            // detached supervisor, which reads it in **parallel** and takes its files
-            // into the running run. Without a supervisor (background sync off) there is
-            // nothing to hand it to, so the old message stands. Automatically picked up
-            // again only **with** background sync — the next app start's safety net
-            // (`background_sync_pass`, spawned by `ensure_background_sync`); without it
-            // only a manual run does.
-            let paths: Vec<PathBuf> = indices
-                .iter()
-                .filter_map(|&i| self.store.folders.get(i).map(|f| f.path.clone()))
-                .collect();
-            // No valid index (a stale UI row): nothing to send and nothing to
-            // report — `all()` would be vacuously true and the "wird eingelesen"
-            // notice would lie.
-            if paths.is_empty() {
-                return;
-            }
-            let sent = self
-                .scan_tx
-                .as_ref()
-                .map(|tx| paths.iter().all(|p| tx.send(p.clone()).is_ok()))
-                .unwrap_or(false);
-            if sent {
-                self.log(tr("Ordner wird eingelesen und in den laufenden Upload aufgenommen."));
-            } else {
-                self.log(tr("Es läuft bereits ein Upload."));
-            }
-            return;
-        }
-        if !self.is_logged_in() {
-            self.log(tr("Bitte zuerst anmelden (Einstellungen)."));
-            self.page = Page::Settings;
-            return;
-        }
-        self.start_scheduled_upload(indices);
-    }
-
-    /// Scan `indices` and start an upload run for them: the shared start path
-    /// **without** the UI guards above (no busy check, no login redirect), so a
-    /// run is not tied to a UI click.
-    ///
-    /// The background-sync tick cannot call this (it has no `&mut self`), but it
-    /// starts its runs through the very same steps — `UploadPlan::build` for the
-    /// scan and `publish_plan` for the state/folder side effects.
-    pub(crate) fn start_scheduled_upload(&mut self, indices: Vec<usize>) {
-        let Some(run) = prepare_scheduled_upload_shared(
-            &mut self.store,
-            indices,
-            &mut self.config,
-            self.upload.clone(),
-            self.paused.clone(),
-            self.album_name.clone(),
-            self.slow_mode,
-            true,
-        ) else {
-            return;
-        };
-        // Keep eframe's original persistence-before-worker-start order.
-        self.save_config();
-        self.was_active = true;
-        run.spawn(&self.rt);
-    }
-
-    // -- one-time upload (drag & drop) --------------------------------------
-
-    /// Start a one-time ("Einmalige Sicherung") run for the dropped paths.
-    ///
-    /// Same guards, same worker spawn as the manual path; the difference is the
-    /// target: the dropped files are an explicit list, not a scanned folder,
-    /// and the run lives on `self.one_time` — never inserted into
-    /// `self.store.folders` (a drop must not create a permanent backup target).
-    /// Files are uploaded as-is: a dropped file passes through, a dropped
-    /// directory is scanned recursively, unsupported entries are ignored
-    /// silently (same contract as `scan_images`).
-    ///
-    /// The **resolved** queue is persisted to the shared SQLite before the run
-    /// starts (user decision 2026-10-14), so a restart resumes the row; it is
-    /// dropped again once the run finished clean (`finalize_upload`).
-    pub(crate) fn start_one_time_upload(&mut self, paths: Vec<PathBuf>) {
-        // Demo fixtures are read-only: no folder scan, no SQLite queue, no run.
-        if self.is_demo() {
-            self.demo_skip("Einmalige Sicherung starten");
-            return;
-        }
-        if self.upload_busy() {
-            self.log(tr("Es läuft bereits ein Upload."));
-            return;
-        }
-        if !self.is_logged_in() {
-            self.log(tr("Bitte zuerst anmelden (Einstellungen)."));
-            self.page = Page::Settings;
-            return;
-        }
-
-        // Collect the file list: file → as-is, directory → recursive scan.
-        let mut files: Vec<PathBuf> = Vec::new();
-        for p in &paths {
-            if p.is_file() {
-                if folders::is_supported_image(p) {
-                    files.push(p.clone());
-                }
-            } else if p.is_dir() {
-                files.extend(folders::scan_images(p));
-            }
-        }
-        if files.is_empty() {
-            self.log(tr("Keine Fotos oder Videos in diesem Ordner gefunden."));
-            return;
-        }
-
-        // Display path of the transient target: the single dropped path, else
-        // the common parent of all of them (empty when there is none).
-        let display_path = if paths.len() == 1 {
-            paths[0].clone()
-        } else {
-            common_parent(&paths).unwrap_or_default()
-        };
-
-        // Persist the resolved queue (user decision 2026-10-14) *before* the run
-        // starts: the file list, not the raw drop paths (so a restart never
-        // walks a dropped directory again), plus the row's display path. The
-        // guards and the empty check above already returned, so a rejected drop
-        // writes nothing.
-        DedupIndex::open().set_one_time_queue(&display_path, &files);
-
-        self.begin_one_time_run(display_path, files);
-    }
-
-    /// Resume the persisted one-time queue after a restart (user decision
-    /// 2026-10-14): the row was already restored in `new`, this starts its run
-    /// as soon as the **same guards as the folder cold start** allow it — the
-    /// `background_sync` switch, a live sign-in, no pause, no active run.
-    ///
-    /// Called every frame from `update`. It is a no-op until a queue was
-    /// restored and **one-shot**: once the run is started the flag is cleared,
-    /// so a run that fails afterwards is only retried by the next app start
-    /// (per the decision, not by a timer).
-    pub(crate) fn resume_one_time(&mut self) {
-        if !self.one_time_resume {
-            return;
-        }
-        // Defence in depth: a demo fixture never carries a restored queue, and
-        // resuming one would open the SQLite index and start a real run.
-        if self.is_demo() {
-            self.demo_skip("Einmalige Sicherung fortsetzen");
-            return;
-        }
-        if self.upload_busy()
-            || !self.is_logged_in()
-            || !self.config.background_sync
-            || *self.paused.borrow()
-        {
-            return;
-        }
-        // Re-read the queue: it is the persisted truth and may already have
-        // been cleared by a cleanly finished run.
-        let Some((display_path, files)) = DedupIndex::open().one_time_queue() else {
-            self.one_time_resume = false;
-            return;
-        };
-        if files.is_empty() {
-            self.one_time_resume = false;
-            return;
-        }
-        self.one_time_resume = false;
-        self.begin_one_time_run(display_path, files);
-    }
-
-    /// The shared tail of a one-time drop and of the resume-after-restart path:
-    /// set the transient target, publish the plan and spawn the run. The queue
-    /// is **not** written here — the caller owns persistence.
-    fn begin_one_time_run(&mut self, display_path: PathBuf, files: Vec<PathBuf>) {
-        // Dedup and conflict handling both follow their application default
-        // (user decision 2026-10-15; before that `dedup: true` /
-        // `ConflictResolution::default()` — same values unless the user changed
-        // the app defaults in the settings). `default_options` is the same
-        // source the create form uses, so a fresh drop and a new target agree.
-        let (dedup, conflict_resolution) = folders::default_options(&self.config);
-        // The transient target itself: the stored name stays the plain German
-        // key, `tr` is applied at render time.
-        self.one_time = Some(folders::BackupFolder {
-            path: display_path,
-            name: "Einmalige Sicherung".to_string(),
-            enabled: true,
-            dedup,
-            conflict_resolution,
-            content_filter: folders::ContentFilter::Photos,
-            total_files: files.len(),
-            uploaded_files: 0,
-            last_updated: String::new(),
-            status: FolderStatus::Uploading,
-        });
-
-        // One plan, one synthetic folder index: the counters, the live queue
-        // and `folder_opts` look exactly like a single-folder run.
-        let mut plan = UploadPlan::from_files(ONE_TIME_IDX, dedup, conflict_resolution, files);
-        let concurrency = self.config.concurrency();
-        let limit = if self.config.limit_enabled {
-            self.config.limit_kbps
-        } else {
-            0
-        };
-        let count = plan.count();
-        // `publish_state` (not `publish_plan`): the one-time target has no
-        // persisted folder to mark, and nothing here may save the store.
-        publish_state(
-            &mut plan,
-            &self.upload,
-            tr1("{} Datei(en) werden hochgeladen …", count),
-            HashMap::new(),
-            Some(self.slow_mode),
-        );
-        if self.slow_mode {
-            self.log(tr("Slow-Mode aktiv: 1 Datei gleichzeitig."));
-        }
-        self.paused.send_replace(false);
-        // Persist the lifted pause (user decision 2026-10-14): the start paths
-        // have no pause guard, so without this the runtime is unpaused while
-        // `config.toml` still says otherwise and the next restart resumes it.
-        self.config.paused = false;
-        self.save_config();
-        self.was_active = true;
-
-        let cfg = self.config.clone();
-        let shared = self.upload.clone();
-        let paused = self.paused.clone();
-        let album = self.album_name.clone();
-        self.rt.spawn(async move {
-            run_upload(
-                plan.items,
-                cfg,
-                shared,
-                paused,
-                concurrency,
-                limit,
-                album,
-                plan.folder_opts,
-                HashMap::new(),
-            )
-            .await;
-        });
-    }
-
-    /// Modal prompt for a name conflict (`ConflictResolution::Ask`,
-    /// docs/original/SPEC_DEDUP.md §4.1). Rendered from `update` independently of the
-    /// current page; the answer is written into the shared state, where the
-    /// waiting worker picks it up. Drawn only while a conflict is pending.
-    pub(crate) fn conflict_dialog(&mut self, ctx: &egui::Context) {
-        // Snapshot the prompt *and* its provenance under one lock. The worker
-        // clears all three together once it takes the answer, so reading them in
-        // one go is what keeps the persisted folder consistent with the name
-        // the user actually saw.
-        let (file_name, pending_idx, pending_path) = {
-            let s = self.upload.lock().unwrap();
-            (
-                s.pending_conflict.clone(),
-                s.pending_conflict_idx,
-                s.pending_conflict_path.clone(),
-            )
-        };
-        let Some(file_name) = file_name else {
-            return;
-        };
-        // The worker only polls the shared state; it does not paint frames, so
-        // keep the dialog (and the repaint that shows it) alive from here.
-        ctx.request_repaint_after(std::time::Duration::from_millis(200));
-
-        let mut remember = self.upload.lock().unwrap().conflict_remember;
-        let mut answer: Option<ConflictResolution> = None;
-        // Name the folder the answer is persisted into — through
-        // `conflict_remember_label`, i.e. the exact guard
-        // `remember_conflict_in_folder` writes with: the transient drag & drop
-        // queue (`ONE_TIME_IDX`) has no `folders.toml` entry, an index the
-        // store no longer holds must not borrow a neighbouring folder's name,
-        // and a file outside the folder path means nothing would be written
-        // there either. All three fall back to the neutral text and stay
-        // run-only, exactly like the write refuses them.
-        let remember_label = match (pending_idx, pending_path.as_deref()) {
-            (Some(idx), Some(path)) => conflict_remember_label(&self.store, idx, path),
-            _ => remember_checkbox_label(None),
-        };
-        // NOTE: egui 0.31 has no `Window::modal`; the dialog is centred and
-        // covers the page it matters for. A second upload run is still
-        // impossible while it waits (`upload_busy()`).
-        egui::Window::new(tr("Dateiname-Konflikt"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                ui.label(tr1(
-                    "„{}“ existiert bereits in Amazon Photos.",
-                    &file_name,
-                ));
-                ui.checkbox(&mut remember, remember_label.as_str());
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui
-                        .add(theme::primary_button(
-                            tr("Ignorieren"),
-                            ui.visuals().dark_mode,
-                        ))
-                        .clicked()
-                    {
-                        answer = Some(ConflictResolution::Ignore);
-                    }
-                    if ui.button(tr("Als neue Datei speichern")).clicked() {
-                        answer = Some(ConflictResolution::SaveAsNew);
-                    }
-                    if ui.button(tr("Ersetzen")).clicked() {
-                        answer = Some(ConflictResolution::Replace);
-                    }
-                });
-            });
-        if let Some(a) = answer {
-            answer_pending_conflict(&mut self.store, &self.upload, a, remember, true);
-        } else {
-            // Remember the checkbox even before the user commits to an option.
-            self.upload.lock().unwrap().conflict_remember = remember;
-        }
-    }
-
-    // -- background sync (PORT-5) -------------------------------------------
-
-    /// Spawn the single supervising background task — once per process, as soon
-    /// as the app is signed in and `config.background_sync` is on. Idempotent;
-    /// the task itself re-checks every guard.
-    ///
-    /// Its first action is the start-time safety net (user decision 2026-10-14):
-    /// a metadata-only walk per enabled folder, so a folder that did not change
-    /// since the last run costs no hash and no DB query. Only then does it arm
-    /// the OS filesystem watchers — and it does so from the same task, so the
-    /// watchers can never race the pass above into a second run.
-    fn ensure_background_sync(&mut self) {
-        // No supervisor, no filesystem watchers and no uploads from a demo run.
-        if self.is_demo() {
-            self.demo_skip("Hintergrund-Synchronisierung starten");
-            return;
-        }
-        if !self.config.background_sync || !self.is_logged_in() {
-            return;
-        }
-        if BG_SYNC_STARTED.swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let shared = self.upload.clone();
-        let paused = self.paused.clone();
-        // The session material is `#[serde(skip)]` and cannot be re-read from
-        // disk; the detached supervisor gets the shared in-memory session.
-        let session = self.session.clone();
-        let cfg = self.config.clone();
-        let concurrency = self.config.concurrency();
-        let limit = if self.config.limit_enabled {
-            self.config.limit_kbps
-        } else {
-            0
-        };
-        let album = self.album_name.clone();
-        // The folder-add hand-off: a folder the user adds while a run is busy is
-        // sent to the detached supervisor over this channel (Welle 5.31).
-        let (scan_tx, scan_rx) = tokio::sync::mpsc::unbounded_channel::<PathBuf>();
-        self.scan_tx = Some(scan_tx);
-        self.rt.spawn(async move {
-            background_sync_pass(
-                shared.clone(),
-                paused.clone(),
-                session.clone(),
-                cfg.clone(),
-                concurrency,
-                limit,
-                album.clone(),
-            )
-            .await;
-            // From then on the OS events decide.
-            watch_loop(shared, paused, session, cfg, concurrency, limit, album, scan_rx).await;
-        });
-    }
-
-    pub(crate) fn finalize_upload(&mut self) {
-        // Defence in depth: the demo never starts a run, and finalizing one
-        // would write the fixture store to disk and ask the SQLite for a queue.
-        if self.is_demo() {
-            self.demo_skip("Upload abschließen");
-            return;
-        }
-        // A cancelled run (sign-out) is not a finished run: no folder status, no
-        // counters, no `last_updated`, no store save, and the one-time queue is
-        // kept so the next start resumes it (user decision 2026-10-16). The
-        // already-uploaded part stays in the dedup index — nothing is uploaded
-        // twice.
-        if self.upload.lock().unwrap().cancelled {
-            return;
-        }
-        // A detached background finalizer can persist the newer folder state
-        // after the frame's reload check (which may have observed the run as
-        // active). Rebase this UI finalization on that store before applying
-        // counters, and never hold the shared upload lock across disk I/O.
-        let reload_store = self.upload.lock().unwrap().store_dirty;
-        let mut store_reload_succeeded = false;
-        let mut can_save_store = true;
-        if reload_store {
-            if let Some(store) = load_store_logged() {
-                self.store = store;
-                self.upload.lock().unwrap().take_store_dirty();
-                store_reload_succeeded = true;
-            } else {
-                // Keep the dirty marker for the next frame's reload attempt and
-                // do not overwrite the newer persisted store with this stale
-                // in-memory copy.
-                can_save_store = false;
-            }
-        }
-        let (folder_done, folder_failed, folder_total, folder_paths) = {
-            let s = self.upload.lock().unwrap();
-            (
-                s.folder_done.clone(),
-                s.folder_failed.clone(),
-                s.folder_total.clone(),
-                s.folder_paths.clone(),
-            )
-        };
-        // Whether the run that just finished was the one-time run, plus its
-        // global counters. `folder_total` gets its `ONE_TIME_IDX` key only from
-        // a one-time plan and `publish_state` clears it at the start of every
-        // run, so the key is a reliable "this finished run was a one-time run".
-        let (run_total, run_done, run_failed, was_one_time) = {
-            let s = self.upload.lock().unwrap();
-            (
-                s.total,
-                s.done,
-                s.failed,
-                s.folder_total.contains_key(&ONE_TIME_IDX),
-            )
-        };
-        let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
-        if can_save_store {
-            apply_folder_progress(
-                &mut self.store,
-                &folder_paths,
-                &folder_total,
-                &folder_done,
-                &folder_failed,
-                &now,
-            );
-            let _ = self.store.save();
-        }
-        // The transient one-time target is settled the same way, but from the
-        // synthetic `ONE_TIME_IDX` counters and onto `self.one_time` — nothing
-        // is written back to the store here. `folder_total` is the trigger
-        // (Welle 5.11), exactly like the persisted folders above: a run whose
-        // files **all** fail has no `folder_done` entry, so a `folder_done`
-        // trigger left this row stuck on the `Uploading` it was born with
-        // (`begin_one_time_run`). `folder_failed` decides the outcome.
-        if let Some(one) = self.one_time.as_mut() {
-            if let Some(&total) = folder_total.get(&ONE_TIME_IDX) {
-                one.total_files = total;
-                one.uploaded_files = folder_done.get(&ONE_TIME_IDX).copied().unwrap_or(0);
-                one.last_updated = now.clone();
-                one.status = if folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0) > 0 {
-                    FolderStatus::Error
-                } else {
-                    FolderStatus::Done
-                };
-            }
-        }
-        // A cleanly finished one-time run drops its persisted queue (user
-        // decision 2026-10-14): every file settled (`done + failed = total`) and
-        // no failure left over. Anything else — failures, an aborted/quit run,
-        // a run that never covered all files — keeps the rows, so the next start
-        // resumes. Only the SQLite rows go; the row itself stays for display.
-        if was_one_time && run_failed == 0 && run_done + run_failed >= run_total {
-            DedupIndex::open().clear_one_time_queue();
-        }
-        // Safety net for the successful reload path; normally this is a no-op
-        // because the marker was consumed immediately after that reload.
-        if store_reload_succeeded {
-            let _ = self.upload.lock().unwrap().take_store_dirty();
-        }
-    }
-
-    /// Status word and row actions at a folder card's right edge.
-    ///
-    /// `with_popup == false` is the invisible measuring pass: the popup is an
-    /// overlay and contributes no row width, and skipping it prevents the
-    /// probe from creating a second popup area next to the real one.
-    fn folder_card_side(
-        ui: &mut egui::Ui,
-        r: &Row,
-        status_txt: &str,
-        status_col: egui::Color32,
-        running: bool,
-        with_popup: bool,
-        actions: &mut Vec<FolderAction>,
-    ) {
-        // The one-time target is transient: no kebab/refresh action icons
-        // (nothing to edit, reveal or stop) and no pause toggle.
-        if r.idx != ONE_TIME_IDX {
-            // Row actions. `egui::menu_button` cannot carry an image (0.31 has
-            // no `From<Image> for WidgetText`), so the kebab is a
-            // `Button::image` and the popup is driven by hand via
-            // `toggle_popup` + `popup_below_widget`. The tint follows the theme
-            // text colour (the raster is white).
-            let kebab = ui
-                .add(
-                    egui::Button::image(icons::kebab_icon(ui))
-                        .image_tint_follows_text_color(true)
-                        .frame(false),
-                )
-                .on_hover_text(tr("Aktionen"));
-            let popup_id = ui.make_persistent_id(("folder_row_actions", r.idx));
-            if kebab.clicked() {
-                ui.memory_mut(|m| m.toggle_popup(popup_id));
-            }
-            if with_popup {
-                egui::popup::popup_below_widget(
-                    ui,
-                    popup_id,
-                    &kebab,
-                    egui::popup::PopupCloseBehavior::CloseOnClick,
-                    |ui| {
-                        // popup_below_widget sizes the popup to its parent
-                        // widget — here the ~26 px kebab icon — which would wrap
-                        // every entry character by character.
-                        ui.set_min_width(220.0);
-                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                        if ui.button(tr("Im Dateimanager anzeigen")).clicked() {
-                            actions.push(FolderAction::OpenFinder(r.idx));
-                        }
-                        if ui.button(tr("Wiederholen")).clicked() {
-                            actions.push(FolderAction::Retry(r.idx));
-                        }
-                        if ui.button(tr("Bearbeiten")).clicked() {
-                            actions.push(FolderAction::Edit(r.idx));
-                        }
-                        ui.separator();
-                        if ui.button(tr("Datensicherung stoppen")).clicked() {
-                            actions.push(FolderAction::Remove(r.idx));
-                        }
-                    },
-                );
-            }
-            // The rescan is its own, always visible button — no longer hidden
-            // inside the popup.
-            if ui
-                .add(
-                    egui::Button::image(icons::refresh_icon(ui))
-                        .image_tint_follows_text_color(true)
-                        .frame(false),
-                )
-                .on_hover_text(tr("Jetzt scannen und hochladen"))
-                .clicked()
-            {
-                actions.push(FolderAction::Upload(r.idx));
-            }
-            if ui
-                .add_enabled(
-                    running,
-                    egui::Button::new(
-                        RichText::new(if r.enabled { "⏸" } else { "▶" }).size(16.0),
-                    )
-                    .frame(false),
-                )
-                .clicked()
-            {
-                actions.push(FolderAction::ToggleEnabled(r.idx));
-            }
-        }
-        ui.label(RichText::new(status_txt).color(status_col).size(12.0));
-    }
-
-    pub(crate) fn backup_ui(&mut self, ui: &mut egui::Ui) {
-        let colors = theme::palette(ui.visuals().dark_mode);
-        // Background sync (PORT-5): starts the supervising timer once we are
-        // signed in; from then on this is a cheap no-op.
-        self.ensure_background_sync();
-
-        ui.horizontal(|ui| {
-            if ui
-                .add(theme::primary_button(
-                    tr("Datensicherung hinzufügen …"),
-                    ui.visuals().dark_mode,
-                ))
-                .clicked()
-            {
-                self.add_backup_folder(ui.ctx());
-            }
-            let all_paused = *self.paused.borrow();
-            let label = if all_paused {
-                tr("Alle Sicherungsvorgänge fortsetzen")
-            } else {
-                tr("Alle Sicherungsvorgänge anhalten")
-            };
-            // Only the live "is a run active" flag stays here; the aggregated
-            // progress display moved to the footer below (user decision
-            // 2026-10-14): one display over *all* targets, not just this run.
-            let running = self.upload.lock().unwrap().active;
-            if ui
-                .add_enabled(
-                    // Pausable in the idle state too (user decision 2026-10-14):
-                    // with no run active it blocks the background sync, and a
-                    // pure drag & drop run has no persisted folders either.
-                    !self.store.folders.is_empty() || running,
-                    theme::secondary_button(label, ui.visuals().dark_mode),
-                )
-                .clicked()
-            {
-                let next = !all_paused;
-                self.paused.send_replace(next);
-                // Persist the new state (user decision 2026-10-14): the pause
-                // survives a restart. `save_config` is the existing path — it
-                // reports a failure through `config_error` as usual.
-                self.config.paused = next;
-                self.save_config();
-            }
-        });
-
-        // Snapshot rows for read-only rendering. Built **before** the queue table
-        // (Welle 3.1/3.3): the aggregate progress next to the queue and the live
-        // per-folder status both read them, and neither may hold the shared lock
-        // twice.
-        let rows: Vec<Row> = {
-            let s = self.upload.lock().unwrap();
-            let mut rows: Vec<Row> = self
-                .store
-                .folders
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let plan_idx = plan_index_for(&s.folder_paths, &f.path);
-                    let in_run = s.active
-                        && plan_idx.is_some_and(|plan_idx| s.folder_total.contains_key(&plan_idx));
-                    let total = row_total(
-                        in_run,
-                        plan_idx.and_then(|plan_idx| s.folder_total.get(&plan_idx).copied()),
-                        f.total_files,
-                    );
-                    let done = row_done(
-                        in_run,
-                        plan_idx.and_then(|plan_idx| s.folder_done.get(&plan_idx).copied()),
-                        f.uploaded_files,
-                    );
-                    // Cap the completed count (Welle 5.11): a legacy folder whose
-                    // `total_files < uploaded_files` must not read above 100 % in
-                    // the row's progress text or the idle aggregate.
-                    let done = capped_done(done, total);
-                    // Live status (Welle 3.3): while the run counts this target in
-                    // `folder_total` it is *uploading*, regardless of the (stale)
-                    // persisted status — the persisted outcome only applies once
-                    // the run settled and `active` is false again. A background
-                    // run writes its result into a fresh `FolderStore::load()`
-                    // (`finalize_background_store`), never into `self.store`, so
-                    // without this the row kept showing the previous outcome.
-                    let status = if in_run {
-                        FolderStatus::Uploading
-                    } else if f.enabled {
-                        // The missing-source state is a *live* condition (user
-                        // decisions 2026-10-16, 2026-10-17): the detached
-                        // supervisor writes a missing source to `folders.toml`,
-                        // which the UI's in-memory store never reloads — so the
-                        // row applies the very same rule (`source_status`) itself.
-                        // Same helper, no second logic; a returned drive flips
-                        // the row back on its own. A demo fixture supplies the
-                        // answer (no directory exists for its fake paths).
-                        source_status(
-                            self.demo_source_exists(i)
-                                .unwrap_or_else(|| f.path.is_dir()),
-                            f.status,
-                        )
-                    } else {
-                        f.status
-                    };
-                    Row {
-                        idx: i,
-                        name: f.name.clone(),
-                        path: f.path.clone(),
-                        enabled: f.enabled,
-                        status,
-                        total,
-                        done,
-                        new: plan_idx
-                            .and_then(|plan_idx| s.folder_new.get(&plan_idx).copied())
-                            .unwrap_or(0),
-                        existing: plan_idx
-                            .and_then(|plan_idx| s.folder_conflict.get(&plan_idx).copied())
-                            .unwrap_or(0),
-                        unchanged: plan_idx
-                            .and_then(|plan_idx| s.folder_unchanged.get(&plan_idx).copied())
-                            .unwrap_or(0),
-                        failed: plan_idx
-                            .and_then(|plan_idx| s.folder_failed.get(&plan_idx).copied())
-                            .unwrap_or(0),
-                        last_updated: f.last_updated.clone(),
-                    }
-                })
-                .collect();
-            // The transient one-time target is a single extra row after the
-            // persisted folders — same chrome, but it has no row-action icons
-            // (kebab/refresh) and no pause toggle (nothing to configure,
-            // nothing to stop).
-            if let Some(one) = self.one_time.as_ref() {
-                let in_run = s.active && s.folder_total.contains_key(&ONE_TIME_IDX);
-                let total = row_total(
-                    in_run,
-                    s.folder_total.get(&ONE_TIME_IDX).copied(),
-                    one.total_files,
-                );
-                let done = row_done(
-                    in_run,
-                    s.folder_done.get(&ONE_TIME_IDX).copied(),
-                    one.uploaded_files,
-                );
-                // Same cap as the persisted rows (Welle 5.11).
-                let done = capped_done(done, total);
-                // Same live-status rule as the persisted folders (Welle 3.3).
-                let status = if in_run {
-                    FolderStatus::Uploading
-                } else {
-                    one.status
-                };
-                rows.push(Row {
-                    idx: ONE_TIME_IDX,
-                    name: tr("Einmalige Sicherung").to_string(),
-                    path: one.path.clone(),
-                    enabled: true,
-                    status,
-                    total,
-                    done,
-                    new: s.folder_new.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    existing: s.folder_conflict.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    unchanged: s.folder_unchanged.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    failed: s.folder_failed.get(&ONE_TIME_IDX).copied().unwrap_or(0),
-                    last_updated: one.last_updated.clone(),
-                });
-            }
-            rows
-        };
-
-        let mut actions: Vec<FolderAction> = Vec::new();
-
-        // Live per-file queue as one flat, virtualised table (Welle 3.1,
-        // docs/original/SPEC_UPLOAD_PROGRESS.md §7.3/§7.8): permanent main-area
-        // content with fixed columns. The rows are sorted globally by file
-        // status — no folder grouping and no group headers (user decision
-        // 2026-10-26, see [`status_rank`]). The layout only carries queue
-        // indices, so no file name is cloned per frame. The Ordner column keeps
-        // the run's captured plan paths; same-named folders are disambiguated
-        // with "Name (parent)" (user decision 2026-10-16).
-        let (folder_paths, remaining, layout) = {
-            let s = self.upload.lock().unwrap();
-            let remaining = s
-                .queue
-                .iter()
-                .filter(|e| matches!(e.state, FileState::Waiting | FileState::Uploading))
-                .count();
-            (s.folder_paths.clone(), remaining, queue_layout(&s.queue))
-        };
-        let ambiguous = ambiguous_folder_names_for_paths(&folder_paths);
-
-        ui.add_space(12.0);
-        let queue_section_id = ui.make_persistent_id("backup-queue-section");
-        let folders_section_id = ui.make_persistent_id("backup-folders-section");
-        let (queue_expanded, _) = show_section_header(
-            ui,
-            queue_section_id,
-            true,
-            section_is_open(ui, folders_section_id, true),
-            tr("Warteschlange ausklappen"),
-            tr("Warteschlange einklappen"),
-            |ui| {
-                ui.label(
-                    RichText::new(tr1("Warteschlange ({})", remaining))
-                        .strong()
-                        .size(14.0),
-                )
-            },
-        );
-        let folders_expanded_for_layout = section_is_open(ui, folders_section_id, true);
-
-        // Shared geometry: header and rows use the same `QueueColumns`, so the
-        // four columns line up exactly (Issue #30). The scroll-bar strip is
-        // reserved with the floating style too: `theme.rs` sets
-        // `floating_allocated_width = bar_width + 8`, so `allocated_width()`
-        // yields 18, not 0. The table therefore ends `bar_w` before the page
-        // gutter, and `AlwaysVisible` keeps that right edge constant.
-        let content_w = ui.available_width();
-        let spacing_x = ui.spacing().item_spacing.x;
-        let bar_w = ui.spacing().scroll.allocated_width();
-        let cols = queue_columns(content_w, spacing_x, bar_w);
-
-        // Measure the action block once per row so the left text column never
-        // runs underneath its controls. The cards scroll inside the user-sized
-        // viewport, so their content height no longer constrains the split.
-        let running = self.upload.lock().unwrap().active;
-        let card_content_w = (cols.table_w - 2.0 * f32::from(theme::PAGE_MARGIN_X) - 2.0).max(1.0);
-        let side_ws: Vec<f32> = rows
-            .iter()
-            .map(|r| {
-                let (status_txt, status_col) =
-                    status_text_for_theme(r.status, r.total, ui.visuals().dark_mode);
-                let mut ignored = Vec::new();
-                let side_w = {
-                    let mut probe = ui.new_child(
-                        egui::UiBuilder::new()
-                            .invisible()
-                            .max_rect(egui::Rect::from_min_size(
-                                ui.cursor().min,
-                                egui::vec2(card_content_w, 40.0),
-                            )),
-                    );
-                    let side = probe.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            Self::folder_card_side(
-                                ui,
-                                r,
-                                &status_txt,
-                                status_col,
-                                running,
-                                false,
-                                &mut ignored,
-                            );
-                        },
-                    );
-                    side.response.rect.width()
-                };
-                side_w
-            })
-            .collect();
-
-        // Decide both viewport sizes before drawing either scroll area. With
-        // both sections open, the saved ratio splits the flexible height; with
-        // one closed, the open section receives all of it. The folder value is
-        // intentionally this pre-header snapshot: on close, its old viewport
-        // remains allocated for the folder list's final visible frame.
-        let free = ui.available_height();
-        let mut ratio = self.config.backup_queue_ratio();
-        let (table_h, list_h) = page_heights_for_sections(
-            free,
-            queue_expanded,
-            folders_expanded_for_layout,
-            ratio,
-        );
-
-        if queue_expanded && layout.is_empty() {
-            // Centred empty state (Welle 3.1) instead of an empty table. The
-            // block may not be taller than the table it replaces (plus the
-            // header it saves), or it would eat the list's promised height in a
-            // very small window.
-            let empty_h = (QUEUE_HEADER_TOTAL_H + table_h).min(free);
-            ui.allocate_ui(egui::vec2(cols.table_w, empty_h), |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.label(theme::muted(tr("Keine Uploads in der Warteschlange")));
-                });
-            });
-        } else if queue_expanded {
-            // The production helper keeps the fixed header above the row area's
-            // virtualized viewport and shares that exact path with its geometry
-            // regression test.
-            show_queue_table(ui, cols, table_h, layout.len(), |ui, range| {
-                // Keep the content at the table width even while the
-                // scroll-bar animation has not reserved its full strip yet;
-                // the columns below are fixed widths anyway.
-                ui.set_width(cols.table_w);
-                // Lock the shared state once per frame for the visible slice.
-                let s = self.upload.lock().unwrap();
-                for &queue_idx in &layout[range] {
-                    let Some(e) = s.queue.get(queue_idx) else {
-                        continue;
-                    };
-                    // Befund 11c: an `Uploading` row additionally shows
-                    // the real per-file percentage once bytes have gone
-                    // out, so progress is visible per file and not only
-                    // as the coarse state. The whole visible string is
-                    // one i18n key — never assembled from two parts.
-                    let (txt, col): (String, egui::Color32) = match e.state {
-                        FileState::Waiting => (tr("Warten").to_string(), colors.muted),
-                        FileState::Uploading => {
-                            let pct = calculate_pct(e.size, e.bytes_sent);
-                            if pct > 0 {
-                                (tr1("In Bearbeitung · {}%", pct), colors.teal)
-                            } else {
-                                (tr("In Bearbeitung").to_string(), colors.teal)
-                            }
-                        }
-                        FileState::Done => (tr("Abgeschlossen").to_string(), colors.green),
-                        FileState::Failed => (tr("Fehlgeschlagen").to_string(), colors.red),
-                        FileState::Skipped => (tr("Übersprungen").to_string(), colors.muted),
-                    };
-                    // A long name is truncated in the cell; the full
-                    // path shows on hover (§7.3).
-                    let full = e.path.display().to_string();
-                    // The row's backup folder (disambiguated when the
-                    // active run holds the name twice).
-                    let (folder_label, folder_tip) = if e.folder == ONE_TIME_IDX {
-                        (tr("Einmalige Sicherung").to_string(), String::new())
-                    } else {
-                        queue_folder_display(&folder_paths, e.folder, &ambiguous)
-                            .unwrap_or_default()
-                    };
-                    // Allocated at exactly `QUEUE_ROW_H` so the row
-                    // advances by `QUEUE_ROW_H + item_spacing.y`,
-                    // matching what `show_rows` derives.
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(cols.table_w, QUEUE_ROW_H),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            table_cell(ui, cols.folder_w, QUEUE_ROW_H, false, |ui| {
-                                ui.add(
-                                    egui::Label::new(RichText::new(folder_label).size(12.0))
-                                        .truncate(),
-                                )
-                                .on_hover_text(folder_tip);
-                            });
-                            table_cell(ui, cols.name_w, QUEUE_ROW_H, false, |ui| {
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(crate::text::nfc(&e.name)).size(12.0),
-                                    )
-                                    .truncate(),
-                                )
-                                .on_hover_text(full);
-                            });
-                            table_cell(ui, cols.size_w, QUEUE_ROW_H, true, |ui| {
-                                ui.label(
-                                    RichText::new(crate::text::format_size(e.size)).size(12.0),
-                                );
-                            });
-                            table_cell(ui, cols.status_w, QUEUE_ROW_H, false, |ui| {
-                                // Truncated as well: a longer translation
-                                // must never paint over the page edge.
-                                let status = ui.add(
-                                    egui::Label::new(RichText::new(txt).color(col).size(12.0))
-                                        .truncate(),
-                                );
-                                // Optional byte detail while a transfer is
-                                // live (Befund 11c).
-                                if e.state == FileState::Uploading && e.size > 0 {
-                                    status.on_hover_text(tr2(
-                                        "{} von {}",
-                                        crate::text::format_size(e.bytes_sent),
-                                        crate::text::format_size(e.size),
-                                    ));
-                                }
-                            });
-                        },
-                    );
-                }
-            });
-        }
-
-        // Aggregate progress: **one** display under the queue. While a run is
-        // live it shows only the run counters (including when its last target
-        // row was removed); while idle it sums all target rows. The byte/ETA
-        // detail only exists for a live run; outcome counters remain aggregated
-        // over every target (kept for the footer line below).
-        let (running, progress_text, outcome, run_done, run_total) = {
-            let s = self.upload.lock().unwrap();
-            let outcome = outcome_text(
-                s.uploaded_new,
-                s.conflict_skipped,
-                s.unchanged_skipped,
-                s.failed,
-            );
-            if s.active {
-                (
-                    true,
-                    upload_progress_text(&s),
-                    outcome,
-                    s.done,
-                    s.total,
-                )
-            } else {
-                (false, String::new(), outcome, 0, 0)
-            }
-        };
-        let (sum_done, sum_total) = displayed_progress(running, run_done, run_total, &rows);
-        // Reserve the complete progress zone in every branch: 6 px gap + the
-        // fixed 26 px row + egui's 8 px trailing item spacing (40 px total).
-        ui.add_space(6.0);
-        ui.allocate_ui_with_layout(
-            egui::vec2(cols.table_w, QUEUE_PROGRESS_ROW_H),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                // An empty `allocate_ui_with_layout` shrinks to ~13 px; the
-                // explicit minimum keeps the row at exactly 26 px, so the zone
-                // stays deterministic even without a progress display.
-                ui.set_min_size(egui::vec2(cols.table_w, QUEUE_PROGRESS_ROW_H));
-                if running && sum_total == 0 {
-                    // An all-current scan is active only while its no-op run is
-                    // being finalized. Show the same completion wording as the
-                    // idle state, without a meaningless 0/0 bar or spinner.
-                    ui.label(progress_text);
-                } else if running || sum_total > 0 {
-                    let frac = if sum_total > 0 {
-                        (sum_done as f32 / sum_total as f32).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    // The bar gets an explicit width: the full row without a
-                    // spinner, the row minus the spinner and the item spacing
-                    // with one (clamped at 0). It spans the table width, not
-                    // the full page, so it ends on the same right edge as the
-                    // header, rows and cards.
-                    let row_w = cols.table_w;
-                    // A spinner belongs to this one display and only while a
-                    // run is active — never a second, separate indicator.
-                    if running {
-                        ui.spinner();
-                    }
-                    let text = if running {
-                        // The run's file counts plus its byte/ETA detail from
-                        // `upload_progress_text` (kept verbatim).
-                        tr3(
-                            "Gesamt: {} von {} Dateien · {}",
-                            sum_done,
-                            sum_total,
-                            progress_text,
-                        )
-                    } else if sum_total > 0 && sum_done >= sum_total {
-                        tr("Alles aktuell").to_string()
-                    } else {
-                        tr2("Gesamt: {} von {} Dateien", sum_done, sum_total)
-                    };
-                    // The spinner is a square of `interact_size.y` (26 px,
-                    // theme); the layout adds `item_spacing.x` between them.
-                    let bar_w = if running {
-                        (row_w
-                            - ui.spacing().item_spacing.x
-                            - ui.style().spacing.interact_size.y)
-                            .max(0.0)
-                    } else {
-                        row_w
-                    };
-                    ui.add(
-                        egui::ProgressBar::new(frac)
-                            .desired_width(bar_w)
-                            .desired_height(20.0)
-                            .text(text),
-                    );
-                }
-            },
-        );
-
-        if queue_expanded && folders_expanded_for_layout {
-            let (next_ratio, should_save) =
-                show_backup_splitter(ui, ratio, backup_split_splittable(free));
-            ratio = next_ratio;
-            // Only the both-open state owns the saved ratio; a collapsed section
-            // leaves it untouched so reopening restores the previous split.
-            self.config.backup_queue_ratio = ratio;
-            if should_save {
-                self.save_config();
-            }
-        } else {
-            ui.add_space(SECTION_GAP);
-        }
-        let (folders_expanded, _, _) =
-            show_folder_section_header(ui, folders_section_id, queue_expanded);
-
-        // The header toggled *after* the split was computed. On open, defer the
-        // list until the next frame applies the both-open split, avoiding
-        // content outside this frame's queue-only allocation. On close, retain
-        // the list for this final frame in the old both-open allocation.
-        let draw_folders = folder_list_draws(folders_expanded, folders_expanded_for_layout);
-
-        // Air between the heading above and the card list below. The heading
-        // zone and this gap are part of `QUEUE_BELOW_H`.
-        ui.add_space(if draw_folders { FOLDER_HEADING_GAP } else { 0.0 });
-
-        // Omit the folder ScrollArea when no folder viewport is allocated
-        // (stable collapsed or opening transition). Keep it for the final
-        // closing frame to consume its already allocated height. Even
-        // `max_height(0)` consumes the trailing item spacing.
-        if draw_folders {
-            // Cap against the actual remaining space, including on the final
-            // closing frame, so the footer cannot be pushed past the bottom if
-            // preceding chrome leaves less than the planned list viewport.
-            let list_h = list_h.min((ui.available_height() - QUEUE_FOOTER_H).max(0.0));
-            // The card labels keep the theme's vertical spacing; only the gap
-            // *between* cards is compacted to `FOLDER_CARD_GAP` inside the list.
-            let label_spacing_y = ui.spacing().item_spacing.y;
-            egui::ScrollArea::vertical()
-            // Own scroll state, for the same reason as the queue's salt above:
-            // without it both areas share one offset and scroll together.
-            .id_salt("folders")
-            .max_height(list_h)
-            .auto_shrink(false)
-            // Honor a shrinking cap: `ScrollArea`'s default `min_scrolled_height`
-            // (64 px) would otherwise override a smaller `max_height` and push the
-            // footer below off the bottom edge in a very small window.
-            .min_scrolled_height(0.0)
-            // Always reserve the 18 px strip: the card's right border must stay
-            // visible and both lists must end on the same edge (Issue #30).
-            .scroll_bar_visibility(
-                egui::containers::scroll_area::ScrollBarVisibility::AlwaysVisible,
-            )
-            .show(ui, |ui| {
-                // The cards use the table width — not the scroll area's
-                // animated content width — so their right edge is constant and
-                // matches the queue table above.
-                ui.set_width(cols.table_w);
-                // The documented 6 px gap between cards (Issue #33).
-                ui.spacing_mut().item_spacing.y = FOLDER_CARD_GAP;
-                // While a file drag hovers the window, the backup page keeps
-                // its hands off: no clicks out from under the overlay.
-                if self.dropping_files {
-                    ui.disable();
-                }
-                if self.store.folders.is_empty() {
-                    ui.add_space(8.0);
-                    ui.label(tr(
-                        "Wählen Sie einen Ordner aus, um die Sicherung zu starten.",
-                    ));
-                    ui.add_space(6.0);
-                    ui.label(theme::muted(tr(
-                        "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
-                    )));
-                }
-                for (i, r) in rows.iter().enumerate() {
-                    let (status_txt, status_col) =
-                        status_text_for_theme(r.status, r.total, ui.visuals().dark_mode);
-                    egui::Frame::new()
-                        .fill(colors.card_bg)
-                        .stroke(egui::Stroke::new(1.0_f32, colors.border))
-                        .corner_radius(6.0)
-                        .inner_margin(egui::Margin::symmetric(
-                            theme::PAGE_MARGIN_X,
-                            FOLDER_CARD_INNER_Y,
-                        ))
-                        .outer_margin(egui::Margin::symmetric(0, FOLDER_CARD_OUTER_Y))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                // The left column wraps inside what the right
-                                // block leaves, so no line can run under the
-                                // icons at the card's right edge. `side_ws[i]`
-                                // was measured with the same probe and card
-                                // width, so labels never overlap the controls.
-                                // `allocate_new_ui` (not `allocate_ui_with_layout`
-                                // with height 0): the latter would center the
-                                // zero-height frame in the row and push the
-                                // first line down.
-                                let gap = ui.spacing().item_spacing.x;
-                                let left_w = (card_content_w - side_ws[i] - gap).max(0.0);
-                                ui.allocate_new_ui(
-                                    egui::UiBuilder::new()
-                                        .max_rect(egui::Rect::from_min_size(
-                                            ui.cursor().min,
-                                            egui::vec2(left_w, ui.available_height()),
-                                        ))
-                                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                                    |ui| {
-                                        ui.set_min_width(left_w);
-                                        // Keep the card's internal label gap at
-                                        // the theme spacing; the list gap above
-                                        // is the compacted one.
-                                        ui.spacing_mut().item_spacing.y = label_spacing_y;
-                                        // Name (strong 15 pt), meta (muted 11 pt) and the outcome only
-                                        // when the run produced one for this target (user decision 2026-10-14).
-                                        for label in folder_card_labels(r) {
-                                            let rich = if label.muted {
-                                                theme::muted(label.text).size(label.font.size)
-                                            } else {
-                                                RichText::new(label.text)
-                                                    .strong()
-                                                    .size(label.font.size)
-                                            };
-                                            ui.label(rich);
-                                        }
-                                    },
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        Self::folder_card_side(
-                                            ui,
-                                            r,
-                                            &status_txt,
-                                            status_col,
-                                            running,
-                                            true,
-                                            &mut actions,
-                                        );
-                                    },
-                                );
-                            });
-                        });
-                }
-            });
-            ui.add_space(POST_LIST_GAP);
-        }
-
-        for a in actions {
-            self.apply_action(a);
-        }
-
-        // Footer: only the run's outcome breakdown over **all** targets is left
-        // here — the aggregate progress display moved up next to the queue
-        // (Welle 3.1). This is a result line, not a second progress bar, and it
-        // stays hidden while every counter is 0 (before any run, or freshly
-        // reset) and while there is no live run and no real total — no empty or
-        // misleading line.
-        if (running || sum_total > 0) && !outcome.is_empty() {
-            // With an expanded list, `POST_LIST_GAP` precedes this gap; the
-            // reserved footer area is `QUEUE_TABLE_TRAILING_H` +
-            // `POST_LIST_GAP` + `FOOTER_GAP` + `FOOTER_LINE_H`.
-            ui.add_space(FOOTER_GAP);
-            ui.label(RichText::new(outcome).color(colors.ink).size(11.0));
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -4002,6 +2436,7 @@ mod tests {
     }
 
     /// A `Row` reduced to what the aggregate reads (`idx`, `total`, `done`).
+    #[cfg(feature = "legacy-eframe")]
     fn row(idx: usize, total: usize, done: usize) -> Row {
         Row {
             idx,
@@ -4031,21 +2466,31 @@ mod tests {
             (7, PathBuf::from("/photos/b")),
             (3, PathBuf::from("/photos/a")),
             (9, PathBuf::from("/photos/removed")),
-            (ONE_TIME_IDX, PathBuf::from("/photos/a")),
+            (
+                crate::platform::app_shared::ONE_TIME_IDX,
+                PathBuf::from("/photos/a"),
+            ),
         ]);
 
         assert_eq!(row_index_for(&store, &paths, 7), Some(1));
         assert_eq!(row_index_for(&store, &paths, 3), Some(0));
         assert_eq!(row_index_for(&store, &paths, 9), None);
-        assert_eq!(row_index_for(&store, &paths, ONE_TIME_IDX), None);
+        assert_eq!(
+            row_index_for(&store, &paths, crate::platform::app_shared::ONE_TIME_IDX),
+            None
+        );
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn plan_index_for_resolves_path_and_returns_none_for_unknown_or_empty() {
         let paths = HashMap::from([
             (7, PathBuf::from("/photos/b")),
             (3, PathBuf::from("/photos/a")),
-            (ONE_TIME_IDX, PathBuf::from("/photos/one-time")),
+            (
+                crate::platform::app_shared::ONE_TIME_IDX,
+                PathBuf::from("/photos/one-time"),
+            ),
         ]);
 
         assert_eq!(plan_index_for(&paths, Path::new("/photos/b")), Some(7));
@@ -4056,12 +2501,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn plan_index_for_duplicate_paths_chooses_the_lowest_index_deterministically() {
         let path = Path::new("/photos/a");
         let paths = HashMap::from([
             (9, path.to_path_buf()),
             (2, path.to_path_buf()),
-            (ONE_TIME_IDX, path.to_path_buf()),
+            (crate::platform::app_shared::ONE_TIME_IDX, path.to_path_buf()),
         ]);
 
         for _ in 0..5 {
@@ -4070,6 +2516,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn live_row_after_store_removal_uses_its_plan_counters() {
         // A was plan index 0 and has since been removed; B is now the first
         // store row but remains plan index 1 for this active run.
@@ -4149,19 +2596,27 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn aggregate_is_zero_without_rows() {
         assert_eq!(aggregate_progress(&[]), (0, 0));
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn aggregate_sums_folders_and_the_one_time_row() {
         // Two persisted folders plus the transient one-time row
-        // (`ONE_TIME_IDX`): the idle aggregate sums over all three.
-        let rows = vec![row(0, 100, 40), row(1, 20, 20), row(ONE_TIME_IDX, 5, 1)];
+        // (`crate::platform::app_shared::ONE_TIME_IDX`): the idle aggregate sums
+        // over all three.
+        let rows = vec![
+            row(0, 100, 40),
+            row(1, 20, 20),
+            row(crate::platform::app_shared::ONE_TIME_IDX, 5, 1),
+        ];
         assert_eq!(aggregate_progress(&rows), (61, 125));
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn active_aggregate_uses_run_counts_and_idle_aggregate_sums_rows() {
         let rows = vec![row(0, 11_510, 11_510), row(1, 80, 40)];
         assert_eq!(displayed_progress(true, 3, 50, &rows), (3, 50));
@@ -4169,6 +2624,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn live_row_with_no_done_entry_starts_at_zero_not_persisted_count() {
         let total = 50;
         let done = capped_done(row_done(true, None, 11_510), total);
@@ -4182,6 +2638,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn idle_row_done_ignores_a_stale_run_entry() {
         let done = row_done(false, Some(50), 3);
 
@@ -4190,14 +2647,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn idle_finalized_row_still_shows_complete() {
         let total = 12;
         let done = capped_done(row_done(false, Some(2), total), total);
 
-        assert_eq!(folder_progress_text(FolderStatus::Done, done, total), tr("Vollständig"));
+        assert_eq!(crate::upload::folder_progress_text(FolderStatus::Done, done, total), tr("Vollständig"));
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn idle_row_total_ignores_a_stale_run_entry() {
         // The shared run map can retain an entry for a folder index that now
         // belongs to another row. Idle totals must come from the store instead.
@@ -4207,6 +2666,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn aggregate_ignores_a_target_without_a_total() {
         // A target that knows no total contributes nothing — it must not skew
         // the sum (and the caller guards the division by zero).
@@ -4215,6 +2675,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn capped_done_never_exceeds_total() {
         // Normal progress passes through unchanged.
         assert_eq!(capped_done(5, 10), 5);
@@ -4227,6 +2688,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn backup_layout_chrome_constants_match() {
         assert_eq!(QUEUE_HEADER_TOTAL_H, 40.0);
         assert_eq!(QUEUE_PROGRESS_ZONE_H, 40.0);
@@ -4239,114 +2701,7 @@ mod tests {
     }
 
     #[test]
-    fn backup_layout_header_chrome_matches_headless_egui_measurements() {
-        fn measure_themed_ui(draw: impl FnOnce(&mut egui::Ui) -> f32) -> f32 {
-            let ctx = egui::Context::default();
-            let mut draw = Some(draw);
-            theme::apply(&ctx, crate::config::Appearance::System);
-            let mut measured = None;
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1400.0, 900.0),
-                )),
-                ..Default::default()
-            };
-            let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    measured = Some(
-                        draw.take()
-                            .expect("headless UI draw closure runs once")(ui),
-                    );
-                });
-            });
-            measured.expect("headless CentralPanel rendered")
-        }
-
-        let queue_geometry = std::cell::Cell::new(None);
-        let first_queue_row_top = std::cell::Cell::new(None);
-        let queue_header_start = std::cell::Cell::new(None);
-        let queue_header_h = measure_themed_ui(|ui| {
-            let header_top = ui.cursor().min.y;
-            queue_header_start.set(Some(header_top));
-            let cols = queue_columns(
-                ui.available_width(),
-                ui.spacing().item_spacing.x,
-                ui.spacing().scroll.allocated_width(),
-            );
-            let geometry = show_queue_table(ui, cols, 100.0, 1, |ui, range| {
-                assert_eq!(range, 0..1, "the headless table contains one visible row");
-                first_queue_row_top.set(Some(ui.cursor().min.y));
-            });
-            queue_geometry.set(Some(geometry));
-            first_queue_row_top
-                .get()
-                .expect("the production queue row renderer ran")
-                - header_top
-        });
-        let folder_row_h = std::cell::Cell::new(0.0);
-        let folder_label_h = std::cell::Cell::new(0.0);
-        let folder_heading_h = measure_themed_ui(|ui| {
-            let heading_top = ui.cursor().min.y;
-            let id = ui.make_persistent_id("headless-folder-section");
-            let (is_open, rendered_row_h, rendered_label_h) =
-                show_folder_section_header(ui, id, true);
-            assert!(is_open);
-            folder_row_h.set(rendered_row_h);
-            folder_label_h.set(rendered_label_h);
-            // Measure where the next production-layout item would begin. This
-            // captures egui's trailing item spacing instead of adding 8 px as
-            // a formula or copying the disclosure's drawing code into a test.
-            let next_item = ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover());
-            next_item.rect.top() - heading_top
-        });
-
-        let (header_rect, divider_rect) = queue_geometry
-            .get()
-            .expect("the production queue header rendered");
-        let queue_header_start = queue_header_start
-            .get()
-            .expect("the production queue header has a starting cursor");
-        let first_queue_row_top = first_queue_row_top
-            .get()
-            .expect("the production queue row renderer ran");
-        assert!((header_rect.height() - 20.0).abs() < 0.01);
-        assert!((header_rect.top() - queue_header_start - 3.0).abs() < 0.01);
-        assert!((divider_rect.top() - queue_header_start - 31.0).abs() < 0.01);
-        assert!((divider_rect.height() - 1.0).abs() < 0.01);
-        assert!((divider_rect.top() - header_rect.bottom() - 8.0).abs() < 0.01);
-        assert!(
-            (first_queue_row_top - divider_rect.bottom() - 8.0).abs() < 0.01,
-            "first row top {first_queue_row_top}, divider bottom {}",
-            divider_rect.bottom()
-        );
-        assert!(
-            (queue_header_h - 40.0).abs() < 0.01,
-            "headless queue header geometry includes its 3 px top inset, 20 px row, two 8 px gaps, and divider, measured {queue_header_h}px"
-        );
-        assert!(
-            (queue_header_h - QUEUE_HEADER_TOTAL_H).abs() < 0.01,
-            "production queue header + divider + row spacing measured {queue_header_h}px, budget is {QUEUE_HEADER_TOTAL_H}px"
-        );
-        assert!(
-            (folder_label_h.get() - 16.0).abs() < 0.01,
-            "folder label response measured {}px",
-            folder_label_h.get()
-        );
-        assert!(
-            (folder_row_h.get() - 26.0).abs() < 0.01,
-            "folder horizontal layout row measured {}px",
-            folder_row_h.get()
-        );
-        assert!((folder_heading_h - 34.0).abs() < 0.01);
-        assert!(
-            (folder_heading_h - FOLDER_HEADING_ZONE_H).abs() < 0.01,
-            "production folder disclosure + trailing spacing measured {folder_heading_h}px, budget is {FOLDER_HEADING_ZONE_H}px"
-        );
-        assert!((folder_heading_h - folder_row_h.get() - 8.0).abs() < 0.01);
-    }
-
-    #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn backup_layout_chrome_sums_match_their_parts() {
         assert_eq!(
             QUEUE_BELOW_H,
@@ -4390,6 +2745,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn splitter_drag_maps_pixels_to_ratio_and_clamps() {
         let splittable = 400.0;
         assert!((adjusted_backup_queue_ratio(0.35, 40.0, splittable) - 0.45).abs() < 0.001);
@@ -4412,6 +2768,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn both_open_split_fills_the_free_height_and_respects_minimums() {
         let free = 800.0;
         let (queue_h, list_h) = page_heights_for_sections(free, true, true, 0.35);
@@ -4433,6 +2790,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn both_open_split_never_goes_negative_or_overflows_in_tiny_windows() {
         let chrome = QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H;
         for free in [0.0, 10.0, 50.0, 100.0, chrome + 40.0] {
@@ -4451,6 +2809,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn one_open_section_ignores_the_ratio_and_gets_all_free_space() {
         let free = 600.0;
         let expected_queue = free - QUEUE_HEADER_TOTAL_H - QUEUE_ONLY_BELOW_H;
@@ -4472,6 +2831,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn page_heights_at_900_px_match_the_literal_budget() {
         // 900 - QUEUE_HEADER_TOTAL_H(40) - QUEUE_BELOW_H(145) = 715; 35 % = 250.25.
         let (queue_h, list_h) = page_heights_for_sections(900.0, true, true, 0.35);
@@ -4490,6 +2850,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn folder_list_draws_the_previous_viewport_for_each_transition() {
         assert!(folder_list_draws(true, true));
         assert!(!folder_list_draws(true, false)); // opening waits for the split
@@ -4512,6 +2873,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn keep_one_section_open_enforces_the_invariant() {
         assert!(keep_one_section_open(false, false));
         assert!(!keep_one_section_open(false, true));
@@ -4520,6 +2882,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn last_open_section_toggle_is_disabled() {
         assert!(!section_toggle_enabled(true, false));
         assert!(section_toggle_enabled(true, true));
@@ -4527,6 +2890,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn section_header_click_toggles_only_when_allowed() {
         assert_eq!(section_toggle_after_click(true, true, true, true), Some(false));
         assert_eq!(section_toggle_after_click(true, true, false, true), Some(true));
@@ -4536,6 +2900,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn collapsed_allocation_ignores_ratio_and_reopening_applies_it() {
         let free = 900.0;
         let collapsed_at_min_ratio = page_heights_for_sections(free, false, true, 0.2);
@@ -4558,6 +2923,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn queue_columns_fill_the_table_and_keep_the_name_at_least_80() {
         // Issue #30: the table ends exactly at `content - scroll bar`, the four
         // cells plus their three gaps add up to the table width, and the name
@@ -4578,6 +2944,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn queue_label_disambiguates_with_the_parent_name_not_the_path() {
         // Two folders named "Sport" under different parents: the queue label
         // carries the parent's **name** so it fits the 120 px column — the
@@ -4604,6 +2971,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn status_rank_matches_the_decided_queue_order() {
         // User decision 2026-10-26: In Bearbeitung → Fehlgeschlagen → Warten →
         // Abgeschlossen → Übersprungen.
@@ -4620,6 +2988,7 @@ mod tests {
     }
 
     /// One queue entry with the fields the layout reads filled in.
+    #[cfg(feature = "legacy-eframe")]
     fn queue_entry(folder: usize, name: &str, state: FileState) -> QueueEntry {
         QueueEntry {
             folder,
@@ -4632,6 +3001,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn queue_layout_is_global_and_stable_within_a_status_bucket() {
         // Two folders, deliberately interleaved: the layout must ignore folder
         // membership and bucket globally by status, keeping insertion order
@@ -4666,11 +3036,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn queue_layout_of_an_empty_queue_is_empty() {
         assert!(queue_layout(&[]).is_empty());
     }
 
     #[test]
+    #[cfg(feature = "legacy-eframe")]
     fn queue_label_resolves_plan_path_after_store_rows_shift() {
         let store = FolderStore {
             folders: vec![folders::BackupFolder::new(PathBuf::from("/photos/b"))],
@@ -4697,18 +3069,27 @@ mod tests {
 
         publish_state(&mut plan, &shared, "test".to_string(), folder_paths, None);
 
-        let display = {
-            let state = shared.lock().unwrap();
-            let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-            queue_folder_display(&state.folder_paths, 0, &ambiguous)
-        };
+        #[cfg(feature = "legacy-eframe")]
+        {
+            let display = {
+                let state = shared.lock().unwrap();
+                let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
+                queue_folder_display(&state.folder_paths, 0, &ambiguous)
+            };
+            assert_eq!(
+                display,
+                Some((
+                    "published-folder".to_string(),
+                    "/src/published-folder".to_string(),
+                )),
+                "the published state already carries the plan's queue label"
+            );
+        }
+        #[cfg(not(feature = "legacy-eframe"))]
         assert_eq!(
-            display,
-            Some((
-                "published-folder".to_string(),
-                "/src/published-folder".to_string(),
-            )),
-            "the published state already carries the plan's queue label"
+            shared.lock().unwrap().folder_paths,
+            HashMap::from([(0, PathBuf::from("/src/published-folder"))]),
+            "the published state carries the plan-time folder path"
         );
     }
 
@@ -5406,15 +3787,16 @@ mod tests {
 
     #[test]
     fn remember_ignores_the_transient_drag_and_drop_target() {
-        // The one-time queue has no `folders.toml` entry (`ONE_TIME_IDX`), so
-        // there is nothing to write — it stays run-only by design.
+        // The one-time queue has no `folders.toml` entry
+        // (`crate::platform::app_shared::ONE_TIME_IDX`), so there is nothing to
+        // write — it stays run-only by design.
         let root = scratch_folder("onetime");
         let mut store = asking_store(&root);
         let file = root.join("photo.jpg");
 
         assert!(!remember_conflict_in_folder(
             &mut store,
-            ONE_TIME_IDX,
+            crate::platform::app_shared::ONE_TIME_IDX,
             &file,
             ConflictResolution::Replace,
         ));
@@ -5520,7 +3902,10 @@ mod tests {
         let found = remember_folder(&store, 1, &own_file).expect("the owning folder is found");
         assert_eq!(found.path, root);
         // The transient drag & drop target ⇒ nothing to write into.
-        assert!(remember_folder(&store, ONE_TIME_IDX, &own_file).is_none());
+        assert!(
+            remember_folder(&store, crate::platform::app_shared::ONE_TIME_IDX, &own_file)
+                .is_none()
+        );
         // An index the store no longer holds ⇒ nothing.
         assert!(remember_folder(&store, 2, &own_file).is_none());
         // A shifted index pointing at a folder that does not contain the file
@@ -5559,7 +3944,7 @@ mod tests {
         );
         // Transient drag & drop target / dead index ⇒ neutral.
         assert_eq!(
-            conflict_remember_label(&store, ONE_TIME_IDX, &own_file),
+            conflict_remember_label(&store, crate::platform::app_shared::ONE_TIME_IDX, &own_file),
             remember_checkbox_label(None)
         );
         assert_eq!(
@@ -5689,18 +4074,27 @@ mod tests {
         let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(refused.is_none(), "the live run should accept this folder");
 
-        let display = {
-            let state = shared.lock().unwrap();
-            let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-            queue_folder_display(&state.folder_paths, 0, &ambiguous)
-        };
+        #[cfg(feature = "legacy-eframe")]
+        {
+            let display = {
+                let state = shared.lock().unwrap();
+                let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
+                queue_folder_display(&state.folder_paths, 0, &ambiguous)
+            };
+            assert_eq!(
+                display,
+                Some((
+                    "injected-folder".to_string(),
+                    "/src/injected-folder".to_string(),
+                )),
+                "the injected path is available to the queue"
+            );
+        }
+        #[cfg(not(feature = "legacy-eframe"))]
         assert_eq!(
-            display,
-            Some((
-                "injected-folder".to_string(),
-                "/src/injected-folder".to_string(),
-            )),
-            "the injected path is available to the queue"
+            shared.lock().unwrap().folder_paths.get(&0),
+            Some(&PathBuf::from("/src/injected-folder")),
+            "the injected path is available to the shared run state"
         );
     }
 

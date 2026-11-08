@@ -2,10 +2,10 @@ use crate::config::Config;
 use crate::dedup::{DedupIndex, Origin};
 use crate::destination::{machine_name, mirrored_path_components};
 use crate::folders::{ConflictResolution, FolderStatus};
-use crate::i18n::{tr, tr1, tr2, tr3, tr_n};
+use crate::i18n::{tr, tr1, tr2, tr3};
+#[cfg(feature = "legacy-eframe")]
+use crate::i18n::tr_n;
 use crate::prime_photos::PrimePhotos;
-use crate::theme;
-use eframe::egui::Color32;
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
     future::Future,
@@ -209,6 +209,7 @@ impl UploadShared {
     }
 
     /// Consume the marker only after a successful reload, and only while idle.
+    #[cfg(feature = "legacy-eframe")]
     pub(crate) fn consume_store_dirty_after_reload(&mut self, loaded: bool) -> bool {
         loaded && !self.active && self.take_store_dirty()
     }
@@ -224,25 +225,25 @@ impl UploadShared {
 }
 
 /// A persisted store reload is safe only once no upload run is active.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn should_reload_store(active: bool, dirty: bool) -> bool {
     !active && dirty
 }
 
 /// The folder card's status word (Variant A, user decision 2026-10-16): our six
 /// `FolderStatus` values mapped onto the original client's row vocabulary
-/// (`docs/original/SPEC_UPLOAD_PROGRESS.md` §2.2, `docs/original/UI_FLOWS.md` §11.2), coloured by
-/// the same alert-level logic with our palette
-/// (Success→GREEN, Error→RED, Info→TEAL, Warning→AMBER, Normal→MUTED):
+/// (`docs/original/SPEC_UPLOAD_PROGRESS.md` §2.2, `docs/original/UI_FLOWS.md` §11.2), with a
+/// semantic tone for the host UI to render (Success, Error, Info, Warning, Normal):
 ///
-/// | Status | Word | Level → colour |
+/// | Status | Word | Tone |
 /// |---|---|---|
-/// | `Uploading` | „Upload-Vorgang läuft" | Info → TEAL |
-/// | `Done` | „Datensicherung abgeschlossen" | Success → GREEN |
-/// | `Paused` | „ANGEHALTEN" | Warning → AMBER |
-/// | `NotFound` | „Ordner nicht gefunden" | Warning → AMBER |
-/// | `Error` | „Fehler" | Error → RED |
-/// | `Scanning` | „Konfiguration wird durchgeführt" | Info → TEAL |
-/// | `Idle`, `total > 0` | „Warten" (the original's cold-boot waiting word) | Info → TEAL |
+/// | `Uploading` | „Upload-Vorgang läuft" | Info |
+/// | `Done` | „Datensicherung abgeschlossen" | Success |
+/// | `Paused` | „ANGEHALTEN" | Warning |
+/// | `NotFound` | „Ordner nicht gefunden" | Warning |
+/// | `Error` | „Fehler" | Error |
+/// | `Scanning` | „Konfiguration wird durchgeführt" | Info |
+/// | `Idle`, `total > 0` | „Warten" (the original's cold-boot waiting word) | Info |
 /// | `Idle`, `total == 0` | — (empty) | — |
 ///
 /// The empty arm is the never-scanned trap (user decision 2026-10-16): a
@@ -253,26 +254,36 @@ pub(crate) fn should_reload_store(active: bool, dirty: bool) -> bool {
 /// state. The percentage lives in the card's second line
 /// ([`folder_progress_text`]), not here — the original's primary status carries
 /// no number either.
-#[cfg(test)]
-fn status_text(status: FolderStatus, total: usize) -> (String, Color32) {
-    status_text_for_theme(status, total, false)
+#[cfg(feature = "legacy-eframe")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StatusTone {
+    Info,
+    Success,
+    Warning,
+    Error,
+    Normal,
 }
 
-pub(crate) fn status_text_for_theme(
-    status: FolderStatus,
-    total: usize,
-    dark: bool,
-) -> (String, Color32) {
-    let colors = theme::palette(dark);
+#[cfg(feature = "legacy-eframe")]
+pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, StatusTone) {
     match status {
-        FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), colors.teal),
-        FolderStatus::Done => (tr("Datensicherung abgeschlossen").to_string(), colors.green),
-        FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), colors.amber),
-        FolderStatus::NotFound => (tr("Ordner nicht gefunden").to_string(), colors.amber),
-        FolderStatus::Error => (tr("Fehler").to_string(), colors.red),
-        FolderStatus::Scanning => (tr("Konfiguration wird durchgeführt").to_string(), colors.teal),
-        FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), colors.teal),
-        FolderStatus::Idle => (String::new(), colors.muted),
+        FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), StatusTone::Info),
+        FolderStatus::Done => (
+            tr("Datensicherung abgeschlossen").to_string(),
+            StatusTone::Success,
+        ),
+        FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), StatusTone::Warning),
+        FolderStatus::NotFound => (
+            tr("Ordner nicht gefunden").to_string(),
+            StatusTone::Warning,
+        ),
+        FolderStatus::Error => (tr("Fehler").to_string(), StatusTone::Error),
+        FolderStatus::Scanning => (
+            tr("Konfiguration wird durchgeführt").to_string(),
+            StatusTone::Info,
+        ),
+        FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), StatusTone::Info),
+        FolderStatus::Idle => (String::new(), StatusTone::Normal),
     }
 }
 
@@ -281,7 +292,7 @@ pub(crate) fn status_text_for_theme(
 /// `{0}% hochgeladen` while running, the original's own completion word
 /// `Vollständig` at 100 % (`docs/original/UI_FLOWS.md` §11.5), `Angehalten bei {0} %`
 /// while paused. Empty when the target has no total: a never-scanned folder
-/// must not claim any progress (same trap as [`status_text`]'s empty arm) —
+/// must not claim any progress (same trap as the legacy card's empty status arm) —
 /// and empty for `NotFound`: a missing source must not claim any progress
 /// either, regardless of the last known total.
 pub(crate) fn folder_progress_text(status: FolderStatus, done: usize, total: usize) -> String {
@@ -302,6 +313,7 @@ pub(crate) fn folder_progress_text(status: FolderStatus, done: usize, total: usi
 /// (`done / elapsed`). Returns `None` while the estimate is unreliable: no
 /// completed file yet, under a second elapsed, or a non-finite rate/result —
 /// so the UI never shows a bogus or NaN/inf figure.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn eta_secs(
     done: usize,
     total: usize,
@@ -346,6 +358,7 @@ pub(crate) fn eta_secs(
 }
 
 /// `M:SS`, or `H:MM:SS` from one hour up.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn format_eta(secs: f64) -> String {
     let total = secs.round().max(0.0) as u64;
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
@@ -358,6 +371,7 @@ pub(crate) fn format_eta(secs: f64) -> String {
 
 /// ETA fragment for the log summary, e.g. `"ca. 1:20"` — or `"Schätzung läuft …"`
 /// while the estimate is not yet reliable.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn eta_suffix(shared: &UploadShared) -> String {
     let s = shared;
     match eta_secs(
@@ -377,6 +391,7 @@ pub(crate) fn eta_suffix(shared: &UploadShared) -> String {
 /// Summary for the active upload shown in the collapsible log header.
 /// An active scan with no transfer candidates uses the same wording as the
 /// main progress area and its start log, without an irrelevant ETA.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn active_log_summary(
     shared: &UploadShared,
     with_candidates: impl FnOnce() -> String,
@@ -389,6 +404,7 @@ pub(crate) fn active_log_summary(
 
 /// Status text for a live run, e.g. `"42% · noch 7 Dateien · ca. 1:20"`, or
 /// `"Alles aktuell"` when it has no transfer candidates.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
     if shared.active && shared.total == 0 {
         return tr("Alles aktuell").to_string();
@@ -414,6 +430,7 @@ pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
 /// string, so the caller can omit the line entirely (idle state, or a target
 /// this run never touched). Pure and side-effect free — no lock, no UI — and
 /// therefore cheap to test.
+#[cfg(feature = "legacy-eframe")]
 pub(crate) fn outcome_text(
     new: usize,
     existing: usize,
@@ -1755,6 +1772,7 @@ mod tests {
         assert!(shared.store_dirty);
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn should_reload_store_only_when_idle_and_dirty() {
         for (active, dirty, expected) in [
@@ -1767,6 +1785,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn failed_store_reload_keeps_dirty_marker() {
         let mut shared = UploadShared {
@@ -1780,18 +1799,21 @@ mod tests {
         assert!(shared.store_dirty);
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn outcome_is_empty_when_nothing_happened() {
         // All-zero: the caller omits the line entirely (idle / untouched target).
         assert_eq!(outcome_text(0, 0, 0, 0), "");
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn outcome_reports_a_clean_success_run() {
         // Only real uploads: exactly one category, no zero noise.
         assert_eq!(outcome_text(5, 0, 0, 0), tr1("{} neu hochgeladen", 5));
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn outcome_reports_a_mixed_run_with_every_category() {
         let text = outcome_text(3, 2, 1, 4);
@@ -1808,11 +1830,13 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn outcome_reports_a_failure_only_run() {
         assert_eq!(outcome_text(0, 0, 0, 2), tr1("{} Fehler", 2));
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn outcome_omits_zero_categories() {
         // A run that uploaded new files and skipped existing ones must not list
@@ -1823,6 +1847,7 @@ mod tests {
         assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
     }
 
+    #[cfg(feature = "legacy-eframe")]
     fn assert_supported_translation(actual: &str, key: &'static str) {
         let german = crate::i18n::tr_for(crate::i18n::Lang::De, key);
         let english = crate::i18n::tr_for(crate::i18n::Lang::En, key);
@@ -1832,6 +1857,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn active_empty_run_reports_all_current_without_progress_or_eta() {
         let shared = UploadShared {
@@ -1849,6 +1875,7 @@ mod tests {
         assert!(!text.contains("Estimating …"));
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn active_empty_log_summary_reports_all_current_without_progress_or_eta() {
         let shared = UploadShared {
@@ -1873,6 +1900,7 @@ mod tests {
         assert!(!text.contains("Estimating …"));
     }
 
+    #[cfg(feature = "legacy-eframe")]
     #[test]
     fn active_log_summary_keeps_progress_text_when_candidates_remain() {
         let shared = UploadShared {
@@ -2220,7 +2248,7 @@ mod tests {
     /// recorded, no extra marker appears.
     #[test]
     fn preflight_failure_without_roots_stays_item_based() {
-        let one_time = crate::app::ONE_TIME_IDX;
+        let one_time = crate::platform::app_shared::ONE_TIME_IDX;
         let shared = Arc::new(Mutex::new(UploadShared {
             queue: vec![QueueEntry {
                 folder: one_time,
@@ -2492,52 +2520,46 @@ mod tests {
     // -- status word + progress fragment of the folder card (Variant A) -----
 
     #[test]
-    fn status_words_map_our_statuses_onto_the_original_vocabulary() {
-        // The mapping is the original's row vocabulary (UI_FLOWS.md §11.2);
-        // each word is asserted exactly once, so a renamed key cannot drift.
-        assert_eq!(status_text(FolderStatus::Uploading, 0).0, tr("Upload-Vorgang läuft"));
+    #[cfg(feature = "legacy-eframe")]
+    fn status_words_and_tones_keep_the_original_mapping() {
+        // The text is the original's row vocabulary (UI_FLOWS.md §11.2), and
+        // each semantic tone preserves the legacy light/dark palette category.
+        for (status, total, text, tone) in [
+            (
+                FolderStatus::Uploading,
+                0,
+                "Upload-Vorgang läuft",
+                StatusTone::Info,
+            ),
+            (
+                FolderStatus::Done,
+                0,
+                "Datensicherung abgeschlossen",
+                StatusTone::Success,
+            ),
+            (FolderStatus::Paused, 0, "ANGEHALTEN", StatusTone::Warning),
+            (
+                FolderStatus::NotFound,
+                0,
+                "Ordner nicht gefunden",
+                StatusTone::Warning,
+            ),
+            (FolderStatus::Error, 0, "Fehler", StatusTone::Error),
+            (
+                FolderStatus::Scanning,
+                0,
+                "Konfiguration wird durchgeführt",
+                StatusTone::Info,
+            ),
+            (FolderStatus::Idle, 42, "Warten", StatusTone::Info),
+        ] {
+            assert_eq!(status_text(status, total), (tr(text).to_string(), tone));
+        }
+        // The never-scanned trap: no total means no status word, with the
+        // legacy muted/normal tone.
         assert_eq!(
-            status_text(FolderStatus::Done, 0).0,
-            tr("Datensicherung abgeschlossen")
-        );
-        assert_eq!(status_text(FolderStatus::Paused, 0).0, tr("ANGEHALTEN"));
-        assert_eq!(
-            status_text(FolderStatus::NotFound, 0).0,
-            tr("Ordner nicht gefunden")
-        );
-        assert_eq!(status_text(FolderStatus::Error, 0).0, tr("Fehler"));
-        assert_eq!(
-            status_text(FolderStatus::Scanning, 0).0,
-            tr("Konfiguration wird durchgeführt")
-        );
-    }
-
-    #[test]
-    fn idle_words_waiting_only_when_the_folder_knows_a_total() {
-        // Cold boot with a known file count: the original's waiting word.
-        assert_eq!(status_text(FolderStatus::Idle, 42).0, tr("Warten"));
-        // The never-scanned trap: `total == 0` must claim nothing.
-        let (empty, _) = status_text(FolderStatus::Idle, 0);
-        assert!(empty.is_empty());
-    }
-
-    #[test]
-    fn status_colours_follow_the_alert_levels() {
-        let light = theme::palette(false);
-        let dark = theme::palette(true);
-        assert_eq!(status_text(FolderStatus::Uploading, 0).1, light.teal);
-        assert_eq!(status_text(FolderStatus::Done, 0).1, light.green);
-        assert_eq!(status_text(FolderStatus::Paused, 0).1, light.amber);
-        assert_eq!(status_text(FolderStatus::NotFound, 0).1, light.amber);
-        assert_eq!(status_text(FolderStatus::Error, 0).1, light.red);
-        assert_eq!(status_text(FolderStatus::Scanning, 0).1, light.teal);
-        assert_eq!(
-            status_text_for_theme(FolderStatus::Uploading, 0, true).1,
-            dark.teal
-        );
-        assert_eq!(
-            status_text_for_theme(FolderStatus::Error, 0, true).1,
-            dark.red
+            status_text(FolderStatus::Idle, 0),
+            (String::new(), StatusTone::Normal)
         );
     }
 

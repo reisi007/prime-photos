@@ -130,9 +130,9 @@ outcome.
   small = **path · progress · last updated**. Each element appears **once**
   (previously duplicated percentage), path always visible. Six
   `FolderStatus` values with word and color (Paused → AMBER).
-- **Empty folder versus all-current scan:** a plan with no supported photos or
-  videos anywhere starts no run; for a single-folder scan the user sees
-  **"Keine Fotos oder Videos in diesem Ordner gefunden."** In a multi-folder
+- **Empty folder versus all-current scan:** a plan with no supported photos
+  anywhere starts no run; for a single-folder scan the user sees
+  **"Keine Fotos in diesem Ordner gefunden."** In a multi-folder
   plan, an empty folder is finalized as **"nichts zu tun"** (Done, 0/0) if
   another selected folder has supported files. A scan that finds supported
   files but whose files are all unchanged also starts a run with zero
@@ -229,7 +229,7 @@ outcome.
     Text-`⋯` versteckt. **Global bleibt es weiterhin ohne „Alles neu prüfen"**
     (nicht beauftragt).
     **Verworfen (2026-10-14):** das Zeilen-Icon **selbst zu zeichnen** (in
-    `src/icons.rs`) — der User will keine handgemachten Formen, sondern eine
+    `src/icons/eframe_ui.rs`) — der User will keine handgemachten Formen, sondern eine
     lizenzierte Icon-Bibliothek. Ebenfalls verworfen: das Textzeichen `⋮`
     (U+22EE **fehlt in allen vier** Fonts von `epaint_default_fonts-0.31.1`
     — Hack, Ubuntu-Light, NotoEmoji, emoji-icon-font — und erschiene als □;

@@ -1,6 +1,11 @@
+#[cfg(feature = "legacy-eframe")]
 use std::io;
+#[cfg(feature = "legacy-eframe")]
 use std::path::Path;
 
+pub(crate) mod app_shared;
+
+#[cfg(feature = "legacy-eframe")]
 pub fn reveal_in_file_manager(path: &Path) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -35,4 +40,3 @@ pub fn reveal_in_file_manager(path: &Path) -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::Unsupported, "reveal in file manager not supported on this platform"));
     }
 }
-

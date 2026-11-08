@@ -19,6 +19,9 @@ sleep.
   - `Some(false)` = veto, never enable; a hand-made entry is not fought.
   - `Some(true)` ⇒ a missing login item is repaired.
 - The OS state remains the operative truth; `Config` stores only the intent.
+- Both the normal eframe startup and the explicit Rune production backup route
+  reconcile this intent at startup. Rune fixtures and smoke routes remain
+  isolated and never register a login item.
 - A start **as a login item** is **silent** (macOS): the app comes up with **no
   window and no Dock icon**, tray only; a **manual** start shows the window
   (user decision 2026-10-18, original parity — see [tray.md](tray.md)).

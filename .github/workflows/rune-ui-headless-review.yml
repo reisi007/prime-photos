@@ -1,0 +1,48 @@
+name: Rune headless UI review
+
+# Manual diagnostic only; this is not a required CI gate and never runs on push/PR.
+# Eframe-free production-feature build/test plus debug Rune fixture/render verification.
+# The release binary is never launched; no native window, AppKit/Wry, or
+# production-account runtime smoke. This run alone does not authorize launcher cutover.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rune-headless-review:
+    name: Rune production boundary and fixture/render verification (headless)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo build --locked --release --no-default-features --features rune-backup
+        run: cargo build --locked --release --no-default-features --features rune-backup
+
+      - name: cargo test --locked --no-default-features --features rune-backup
+        run: cargo test --locked --no-default-features --features rune-backup
+
+      - name: cargo build --locked --features rune-ui-spike
+        run: cargo build --locked --features rune-ui-spike
+
+      - name: cargo test --locked --features rune-ui-spike
+        run: cargo test --locked --features rune-ui-spike
+
+      - name: Capture Rune headless UI review fixtures
+        run: scripts/capture-rune-ui-review.sh
+
+      # Upload partial captures even when the capture step fails. The workflow
+      # remains useful diagnostically, but these fixtures are not a native smoke test.
+      - name: Upload Rune UI review artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rune-ui-review
+          path: target/rune-ui-review/**
+          if-no-files-found: warn
+          retention-days: 7

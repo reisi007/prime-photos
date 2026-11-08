@@ -89,8 +89,8 @@ pub(crate) fn tr_for(lang: Lang, key: &'static str) -> &'static str {
 /// Context tag for the native macOS main menu (see [`tr_ctx_for`]).
 ///
 /// Only the macOS app menu needs context-sensitive lookups; the item is
-/// `cfg`-gated with [`tr_ctx_for`] so Windows/Linux builds stay warning-free.
-#[cfg(target_os = "macos")]
+/// gated together with [`tr_ctx_for`] so non-eframe builds stay warning-free.
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub(crate) const CONTEXT_NATIVE_MENU: &str = "native-menu";
 
 /// [`tr_for`] with a surface context for German key collisions.
@@ -100,7 +100,7 @@ pub(crate) const CONTEXT_NATIVE_MENU: &str = "native-menu";
 /// and *Redo* in the native Edit menu. `context` is an internal, never-shown
 /// tag; without a matching entry this falls back to [`tr_for`] (and then to
 /// the German key).
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 pub(crate) fn tr_ctx_for(lang: Lang, context: &'static str, key: &'static str) -> &'static str {
     if lang == Lang::En {
         if let Some((_, _, en)) = EN_CONTEXT
@@ -297,8 +297,8 @@ const EN: &[(&str, &str)] = &[
     ("Im Dateimanager anzeigen", "Show in file manager"),
     ("Jetzt scannen und hochladen", "Scan and upload now"),
     (
-        "Keine Fotos oder Videos in diesem Ordner gefunden.",
-        "No photos or videos found in this folder.",
+        "Keine Fotos in diesem Ordner gefunden.",
+        "No photos found in this folder.",
     ),
     ("Konfiguration wird durchgeführt", "Configuration in progress"),
     ("Ordner", "Folder"),
@@ -365,6 +365,10 @@ const EN: &[(&str, &str)] = &[
     ("Anmeldung abbrechen", "Cancel sign-in"),
     ("Anmeldung abgebrochen.", "Sign-in cancelled."),
     (
+        "Bitte zuerst anmelden, bevor ein Upload gestartet wird.",
+        "Please sign in before starting an upload.",
+    ),
+    (
         "Bei Namenskonflikt:",
         "When a filename conflict occurs:",
     ),
@@ -373,6 +377,7 @@ const EN: &[(&str, &str)] = &[
         "The Prime Photos window is not ready yet.",
     ),
     ("Deaktiviert", "Disabled"),
+    ("Fotos zum Hochladen ablegen...", "Drop photos to upload..."),
     (
         "Der Anmeldebereich ist noch nicht bereit.",
         "The sign-in area is not ready yet.",
@@ -392,6 +397,10 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Entfernen", "Remove"),
     ("Erneut versuchen", "Try again"),
+    (
+        "Fotos zum Hochladen per Drag & Drop verschieben",
+        "Drag and drop photos here to upload",
+    ),
     (
         "Füge einen Fotoordner hinzu, um deine Bilder für die Sicherung vorzubereiten.",
         "Add a photo folder to prepare your pictures for backup.",
@@ -419,6 +428,7 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Warteschlange", "Queue"),
     ("Zur Datensicherung", "Back to Backup"),
+    ("Upload-Vorgang gestartet.", "Upload started."),
     // -- settings -------------------------------------------------------
     ("Album (optional):", "Album (optional):"),
     ("Allgemeines", "General"),
@@ -658,7 +668,7 @@ const EN: &[(&str, &str)] = &[
 /// before the plain [`EN`] table; the German key stays the visible reference
 /// text. Entries belong here only when the *same* German string must translate
 /// differently per surface — otherwise the string is its own unambiguous key.
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
 const EN_CONTEXT: &[(&str, &str, &str)] = &[
     // Backup list = "Retry", native macOS Edit menu = "Redo".
     (CONTEXT_NATIVE_MENU, "Wiederholen", "Redo"),
@@ -667,7 +677,7 @@ const EN_CONTEXT: &[(&str, &str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use super::{EN, Lang, lang_from_env_value, lang_from_locale_id, subst_for, tr_for};
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
     use super::{CONTEXT_NATIVE_MENU, EN_CONTEXT, tr_ctx_for};
     use std::collections::HashSet;
 
@@ -740,12 +750,21 @@ mod tests {
             ("Anmeldeseite wird geladen …", "The sign-in page is loading …"),
             ("Anmeldung abbrechen", "Cancel sign-in"),
             ("Anmeldung abgebrochen.", "Sign-in cancelled."),
+            (
+                "Bitte zuerst anmelden, bevor ein Upload gestartet wird.",
+                "Please sign in before starting an upload.",
+            ),
             ("Bei Namenskonflikt:", "When a filename conflict occurs:"),
             (
                 "Das Prime-Photos-Fenster ist noch nicht bereit.",
                 "The Prime Photos window is not ready yet.",
             ),
             ("Deaktiviert", "Disabled"),
+            ("Fotos zum Hochladen ablegen...", "Drop photos to upload..."),
+            (
+                "Keine Fotos in diesem Ordner gefunden.",
+                "No photos found in this folder.",
+            ),
             (
                 "Der Anmeldebereich ist noch nicht bereit.",
                 "The sign-in area is not ready yet.",
@@ -765,6 +784,10 @@ mod tests {
             ),
             ("Entfernen", "Remove"),
             ("Erneut versuchen", "Try again"),
+            (
+                "Fotos zum Hochladen per Drag & Drop verschieben",
+                "Drag and drop photos here to upload",
+            ),
             (
                 "Füge einen Fotoordner hinzu, um deine Bilder für die Sicherung vorzubereiten.",
                 "Add a photo folder to prepare your pictures for backup.",
@@ -792,6 +815,7 @@ mod tests {
             ),
             ("Warteschlange", "Queue"),
             ("Zur Datensicherung", "Back to Backup"),
+            ("Upload-Vorgang gestartet.", "Upload started."),
             ("{} / {} Dateien · {}", "{} / {} files · {}"),
             (
                 "{} von {} Dateien abgeschlossen",
@@ -857,7 +881,7 @@ mod tests {
 
     /// Context entries are looked up linearly too, so `(context, key)` must be
     /// unique.
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
     #[test]
     fn contextual_keys_are_unique() {
         let mut seen = HashSet::new();
@@ -871,7 +895,7 @@ mod tests {
 
     /// The same German key translates per surface: "Wiederholen" stays "Retry"
     /// in the backup list while the native Edit menu gets "Redo".
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
     #[test]
     fn retry_and_redo_are_distinct() {
         assert_eq!(tr_for(Lang::De, "Wiederholen"), "Wiederholen");

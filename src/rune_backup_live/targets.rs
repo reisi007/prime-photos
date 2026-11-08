@@ -1,22 +1,53 @@
 use super::widgets::{action_button, folder_status_text};
 use super::{LiveState, TargetForm};
-use crate::folders::{self, BackupFolder, ConflictResolution, FolderStatus};
+use crate::folders::{self, BackupFolder, ConflictResolution, ContentFilter, FolderStatus};
 use crate::i18n::{tr, tr3};
 use rune::tok;
-use rune::{El, FileDialogOptions, FileDialogResult, Tx, col, row, text};
+use rune::{El, FileDialogOptions, FileDialogResult, Tx, col, el, row, text};
 use std::path::PathBuf;
 use tok::Theme;
+
+fn create_target_form(path: PathBuf, dedup: bool, conflict: ConflictResolution) -> TargetForm {
+    TargetForm {
+        path,
+        dedup,
+        conflict,
+        content_filter: ContentFilter::Photos,
+        edit_path: None,
+        error: None,
+    }
+}
+
+fn edit_target_form(folder: &BackupFolder) -> TargetForm {
+    TargetForm {
+        path: folder.path.clone(),
+        dedup: folder.dedup,
+        conflict: folder.conflict_resolution,
+        content_filter: folder.content_filter,
+        edit_path: Some(folder.path.clone()),
+        error: None,
+    }
+}
+
+fn apply_target_options(
+    folder: &mut BackupFolder,
+    dedup: bool,
+    conflict: ConflictResolution,
+    content_filter: ContentFilter,
+) {
+    folder.dedup = dedup;
+    folder.conflict_resolution = conflict;
+    folder.content_filter = content_filter;
+}
+
+fn select_target_photos(persisted: ContentFilter, photos: bool) -> ContentFilter {
+    ContentFilter::from_selection(photos, persisted.videos(), persisted)
+}
 
 impl LiveState {
     pub(super) fn open_create_form(&mut self, path: PathBuf) {
         let (dedup, conflict) = folders::default_options(&self.config);
-        self.form = Some(TargetForm {
-            path,
-            dedup,
-            conflict,
-            edit_path: None,
-            error: None,
-        });
+        self.form = Some(create_target_form(path, dedup, conflict));
         self.status = None;
     }
 
@@ -27,6 +58,7 @@ impl LiveState {
         let path = form.path.clone();
         let dedup = form.dedup;
         let conflict = form.conflict;
+        let content_filter = form.content_filter;
         let edit_path = form.edit_path.clone();
         if !path.is_dir() {
             if let Some(form) = self.form.as_mut() {
@@ -47,8 +79,7 @@ impl LiveState {
                 return;
             };
             if let Some(folder) = self.store.folders.get_mut(index) {
-                folder.dedup = dedup;
-                folder.conflict_resolution = conflict;
+                apply_target_options(folder, dedup, conflict, content_filter);
             }
             self.persist_store_if_allowed();
             self.form = None;
@@ -64,8 +95,7 @@ impl LiveState {
             }
             let index = self.store.folders.len() - 1;
             if let Some(folder) = self.store.folders.get_mut(index) {
-                folder.dedup = dedup;
-                folder.conflict_resolution = conflict;
+                apply_target_options(folder, dedup, conflict, content_filter);
             }
             self.persist_store_if_allowed();
             self.form = None;
@@ -130,13 +160,7 @@ pub(super) fn target_card(
         theme.text,
         move |state: &mut LiveState, _| {
             if let Some(folder) = state.store.folders.get(index) {
-                state.form = Some(TargetForm {
-                    path: folder.path.clone(),
-                    dedup: folder.dedup,
-                    conflict: folder.conflict_resolution,
-                    edit_path: Some(folder.path.clone()),
-                    error: None,
-                });
+                state.form = Some(edit_target_form(folder));
             }
         },
     ));
@@ -293,7 +317,56 @@ pub(super) fn target_form(
             },
         ));
     }
+    let photos_selected = form.content_filter.photos();
+    let accessible_photo_label = format!(
+        "{}: {}",
+        tr("Fotos sichern"),
+        if photos_selected {
+            tr("Aktiviert")
+        } else {
+            tr("Deaktiviert")
+        }
+    );
+    let visible_photo_label = format!(
+        "{} {}",
+        if photos_selected { "☑" } else { "☐" },
+        tr("Fotos sichern")
+    );
     form_body = form_body
+        .child(
+            el()
+                .key("toggle-photos")
+                .role("checkbox")
+                .label(accessible_photo_label)
+                .focusable(true)
+                .h(38.0)
+                .px(12.0)
+                .center()
+                .radius(8.0)
+                .fill(if photos_selected {
+                    primary_fill
+                } else {
+                    theme.control_track
+                })
+                .hover(theme.hover)
+                .on_press_tx(|state: &mut LiveState, _| {
+                    if let Some(form) = state.form.as_mut() {
+                        let photos = !form.content_filter.photos();
+                        let persisted = form.content_filter;
+                        form.content_filter = select_target_photos(persisted, photos);
+                    }
+                })
+                .child(
+                    text(visible_photo_label)
+                        .font(tok::type_::LABEL)
+                        .color(if photos_selected {
+                            primary_foreground
+                        } else {
+                            theme.text
+                        })
+                        .a11y_hidden(),
+                ),
+        )
         .child(action_button(
             "toggle-dedup",
             if form.dedup {
@@ -368,3 +441,6 @@ pub(super) fn target_form(
             |state: &mut LiveState, _| state.form = None,
         ))
 }
+
+#[cfg(test)]
+mod tests;

@@ -34,7 +34,7 @@ Backup-Zeilen-Icon ein, der Session-Worker hängt in `ctx.request_repaint`.
 
 Drin seit `a6e2ed1` (2026-10-14), behoben mit Regressionstest (Timeout): Cache-
 Treffer per **Read-Lock** holen, `load_texture` **außerhalb** des Locks aufrufen,
-dann ablegen (`icons::icon_texture`).
+dann ablegen (`icons::eframe_ui::icon_texture`).
 
 ## 3. Widget-IDs leiten sich aus dem Text ab — dynamische Labels zurücksetzen den Zustand
 
@@ -71,7 +71,7 @@ erlaubte Interaktion mit „leerem" Raum ist **Drag & Drop** von Bildern
 (`hovered_files`/`dropped_files` in `src/app.rs`).
 
 Belegter Ist-Zustand: im gesamten `src/` gibt es **genau einen** `Sense::click()` auf
-einer größeren Fläche — `nav_item` in `src/app.rs` (die Seitenleiste); `src/icons.rs`
+einer größeren Fläche — `nav_item` in `src/app.rs` (die Seitenleiste); `src/icons/eframe_ui.rs`
 nutzt nur `Sense::hover()`. Jeder Pfad, der einen Finder/Dialog öffnet, hängt an
 einem **Widget** (Kebab-Popup, Buttons), nie an einer leeren Fläche. Keinen solchen
 Handler also „der Vollständigkeit halber" ergänzen.
@@ -129,7 +129,8 @@ Zielstruktur (feature-orientiert):
 | `src/settings.rs` | Einstellungs-Seite (`settings_ui`, `general_settings`, `bandwidth_settings`, Konto-Block) |
 | `src/upload.rs` | `UploadShared`, `upload_worker`, `run_upload`, ETA-/Fortschritts-Helfer |
 | `src/countries.rs` | `COUNTRIES`, `country_label`, `system_country`, `parse_cookie_string` |
-| `src/icons.rs` | gezeichnete Icons (`NavIcon`, `nav_icon`, `status_dot`, `draw_avatar`, `upload_logo`) |
+| `src/icons.rs` | UI-Backend-Moduldeklarationen |
+| `src/icons/eframe_ui.rs` | eframe-Icons (Flags, Raster-Icons, Logo und Textur-Cache) |
 
 Unverändert bleiben: `prime_photos.rs`, `config.rs`, `folders.rs`, `dedup.rs`, `theme.rs`,
 `notify.rs`, `tray.rs`, `app_menu.rs`.

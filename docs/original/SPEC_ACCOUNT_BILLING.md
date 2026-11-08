@@ -579,7 +579,7 @@ block is titled "Angemeldet als:". → **belegt**
 | Capability | Original | Our app | File reference |
 |---|---|---|---|
 | Account name | `GetPreferences.name` → `AccountName`, rendered as the `DriveAccountButton` **title** | **none** — deliberately omitted ("we cannot fetch the real one yet") | `src/app.rs` (`fn sidebar`, ~l. 392) |
-| Avatar / profile picture | `avatarNodeId` → 60×60 smart-cropped thumbnail → `AvatarPath`, placeholder on failure | **none** — only a drawn marketplace flag badge | `src/icons.rs` (`draw_flag_badge`), `src/app.rs` |
+| Avatar / profile picture | `avatarNodeId` → 60×60 smart-cropped thumbnail → `AvatarPath`, placeholder on failure | **none** — only a drawn marketplace flag badge | `src/icons/eframe_ui.rs` (`draw_flag_badge`), `src/app.rs` |
 | Storage bar (`Speichernutzung`) | `QuotaUsageView` / `StorageUsageView`, byte units, 3 colour states | **none** — intentionally out ("no placeholder is shown") | `src/app.rs`, `src/backup.rs` |
 | Quota endpoints | `/drive/v1/account/preferences`, `/drive/v1/account/usage`, `/drive/v2/account/quota` | **none** — engine only knows `/drive/v1/nodes…`, `/photos/auth/token`, `/v2/upload` | `src/prime_photos.rs` |
 | Periodic quota refresh | worker, immediate + every 24 h + on demand | **none** | — |
@@ -678,7 +678,7 @@ switches from *percent used* to *bytes remaining* (default 10 GiB), so a port co
   `ResetErroredToWaiting` acts on).
 - `SPEC_UPLOAD_PROGRESS.md` — the transfer side of `TransferError.CloudDriveOverQuota`
   and the error-window rows the `QuotaAvailable` event re-queues.
-- Our code: `src/app.rs` (`fn sidebar`, the account block), `src/icons.rs`
+- Our code: `src/app.rs` (`fn sidebar`, the account block), `src/icons/eframe_ui.rs`
   (`draw_flag_badge`), `src/login.rs` (`amazon_domain`, `login_url`, `logout`),
   `src/config.rs` (`Config`, `config.toml`), `src/prime_photos.rs` (HTTP client and its
   endpoint list), `src/notify.rs`, `src/settings.rs`, `src/i18n.rs`, `src/countries.rs`.

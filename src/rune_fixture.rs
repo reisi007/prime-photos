@@ -27,14 +27,58 @@ fn rune_headless_flag(arg: &str) -> Option<&'static str> {
         .find(|flag| arg.starts_with(flag))
 }
 
-pub(super) fn is_rune_fixture_or_tooling_arg(arg: &str) -> bool {
+pub(super) fn is_rune_route_or_tooling_arg(arg: &str) -> bool {
     RUNE_ROUTE_FLAGS.iter().any(|flag| arg.starts_with(flag))
         || rune_headless_flag(arg).is_some()
 }
 
+/// Parse the production Rune backup route independently of debug-only tooling.
+/// It deliberately accepts no fixture, smoke, or headless options.
+#[cfg(all(
+    feature = "rune-backup",
+    any(not(all(debug_assertions, feature = "rune-ui-spike")), test)
+))]
+pub(super) fn rune_production_backup_route_args(
+    args: &[String],
+) -> Result<Option<Vec<String>>, &'static str> {
+    let marker_count = args.iter().filter(|arg| arg.as_str() == RUNE_BACKUP_FLAG).count();
+    if marker_count == 0 {
+        if args.iter().any(|arg| {
+            arg.starts_with(RUNE_BACKUP_FLAG)
+                && !RUNE_ROUTE_FLAGS
+                    .iter()
+                    .any(|flag| arg.as_str() == *flag)
+        }) {
+            return Err("malformed --rune-backup route flag");
+        }
+        return Ok(None);
+    }
+    if marker_count != 1
+        || args.iter().any(|arg| {
+            if arg.as_str() == RUNE_BACKUP_FLAG {
+                return false;
+            }
+            RUNE_ROUTE_FLAGS.iter().any(|flag| arg.starts_with(flag))
+                || arg == "--headless"
+                || rune_headless_flag(arg).is_some()
+        })
+    {
+        return Err(
+            "production Rune backup route cannot be combined with other Rune routes or headless tooling",
+        );
+    }
+
+    Ok(Some(
+        args.iter()
+            .filter(|arg| arg.as_str() != RUNE_BACKUP_FLAG)
+            .cloned()
+            .collect(),
+    ))
+}
+
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 pub(super) fn is_malformed_rune_fixture_arg(arg: &str) -> bool {
-    is_rune_fixture_or_tooling_arg(arg)
+    is_rune_route_or_tooling_arg(arg)
         && ((RUNE_ROUTE_FLAGS.iter().any(|flag| {
             arg.strip_prefix(flag).is_some_and(|suffix| !suffix.is_empty())
         }) && !RUNE_ROUTE_FLAGS.contains(&arg))
@@ -249,7 +293,7 @@ mod rune_login_routing_tests {
 mod rune_backup_routing_tests {
     use super::{
         RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, is_malformed_rune_fixture_arg,
-        is_rune_fixture_or_tooling_arg, rune_backup_fixture_args, rune_settings_fixture_args,
+        is_rune_route_or_tooling_arg, rune_backup_fixture_args, rune_settings_fixture_args,
         strip_rune_backup_fixture_arg,
     };
 
@@ -333,7 +377,7 @@ mod rune_backup_routing_tests {
             rune_settings_fixture_args(args(&[RUNE_BACKUP_FIXTURE_FLAG, "--snap", "out.png"])),
             Ok(None)
         );
-        assert!(is_rune_fixture_or_tooling_arg(RUNE_BACKUP_FIXTURE_FLAG));
+        assert!(is_rune_route_or_tooling_arg(RUNE_BACKUP_FIXTURE_FLAG));
     }
 
     #[test]
@@ -355,27 +399,8 @@ mod rune_backup_routing_tests {
 mod rune_interactive_routing_tests;
 
 #[cfg(test)]
-mod rune_route_guard_tests {
-    use super::{
-        RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG,
-        RUNE_WRY_SMOKE_FLAG, RUNE_BACKUP_FLAG, RUNE_BACKUP_SMOKE_FLAG,
-        is_rune_fixture_or_tooling_arg,
-    };
-
-    #[test]
-    fn every_explicit_rune_route_is_recognized_for_non_feature_rejection() {
-        for flag in [
-            RUNE_BACKUP_FIXTURE_FLAG,
-            RUNE_LOGIN_FIXTURE_FLAG,
-            RUNE_PRODUCTION_LOGIN_FLAG,
-            RUNE_WRY_SMOKE_FLAG,
-            RUNE_BACKUP_FLAG,
-            RUNE_BACKUP_SMOKE_FLAG,
-        ] {
-            assert!(is_rune_fixture_or_tooling_arg(flag));
-        }
-    }
-}
+#[path = "rune_fixture/route_tests.rs"]
+mod route_tests;
 
 #[cfg(all(test, debug_assertions, feature = "rune-ui-spike"))]
 mod rune_settings_routing_tests {

@@ -1,14 +1,15 @@
-//! Explicit, debug-only Rune hosts for the production backup page and its
-//! synthetic visual smoke route. The existing headless fixture stays separate.
+//! Explicit Rune production backup host plus its debug-only synthetic visual
+//! smoke route. The existing headless fixture stays separate.
 
 use crate::backup;
 use crate::config::Config;
-use crate::folders::{ConflictResolution, FolderStore};
-use crate::i18n::{self, Lang, tr};
+use crate::folders::{ConflictResolution, ContentFilter, FolderStore};
+use crate::i18n::tr;
 use crate::login::{self, LoginPoll, Session, WebviewLogin};
+use crate::platform::app_shared::Autostart;
 use crate::upload::UploadShared;
 use lifecycle::deliver_pending_show_request;
-use rune::{App, AppHandle, AppSpec, TextEdit, Tx, Waker, WindowHandle};
+use rune::{App, AppHandle, AppSpec, TextEdit, Tx, Waker, WindowHandle, WindowOptions};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +30,7 @@ struct TargetForm {
     path: PathBuf,
     dedup: bool,
     conflict: ConflictResolution,
+    content_filter: ContentFilter,
     edit_path: Option<PathBuf>,
     error: Option<String>,
 }
@@ -38,7 +40,7 @@ struct LiveState {
     page: LivePage,
     license_tab: crate::about::LicenseTab,
     settings_tab: crate::rune_settings::SettingsTab,
-    autostart: crate::app::Autostart,
+    autostart: Autostart,
     autostart_enabled: bool,
     settings_limit_edit: TextEdit,
     settings_album_edit: TextEdit,
@@ -56,99 +58,23 @@ struct LiveState {
     session: Arc<Mutex<Session>>,
     token_store: Arc<dyn crate::auth::TokenStore>,
     session_wakeup: Option<login::SessionWakeup>,
+    account_identity: account_identity::AccountIdentity,
     native_window: Option<WindowHandle>,
     app_handle: Option<AppHandle<LiveState>>,
     lifecycle_route: lifecycle_route::LifecycleRoute,
     tray_route: tray_route::TrayRoute,
+    ignore_initial_login_activation: bool,
     pending_show_request: bool,
     child_bounds: Option<[f32; 4]>,
     form: Option<TargetForm>,
     status: Option<String>,
     was_active: bool,
+    one_time: Option<crate::folders::BackupFolder>,
+    one_time_resume: bool,
+    drop_hovered: bool,
 }
 
 impl LiveState {
-    fn production() -> Result<Self, String> {
-        // These reads happen only after --rune-backup has selected this route.
-        // Failed reads keep the fallback in memory and close the corresponding
-        // persistence gate, so damaged files are never replaced by defaults.
-        let (config, config_error, persist_config) = match Config::load() {
-            Ok(config) => (config, None, true),
-            Err(error) => (Config::default(), Some(error.to_string()), false),
-        };
-        let language = config
-            .language
-            .as_deref()
-            .and_then(Lang::from_code)
-            .unwrap_or_else(i18n::system_lang);
-        i18n::set_lang(language);
-        let settings_limit_edit = TextEdit::new(config.limit_kbps.to_string());
-        let settings_album_edit = TextEdit::new(config.album_name.clone());
-        // Seed the switch from the OS without reconciling or changing it when
-        // the explicit developer route is launched.
-        let autostart = crate::app::Autostart::new();
-        let autostart_enabled = autostart.is_enabled().unwrap_or(false);
-        if let Some(error) = &config_error {
-            log::warn!("Rune-Sicherungsroute: Einstellungen konnten nicht geladen werden: {error}");
-        }
-
-        let (store, store_error, persist_store) = match FolderStore::load() {
-            Ok(store) => (store, None, true),
-            Err(error) => (FolderStore::default(), Some(error.to_string()), false),
-        };
-        if let Some(error) = &store_error {
-            log::error!("Rune-Sicherungsroute: Sicherungsziele konnten nicht geladen werden: {error}");
-        }
-
-        let runtime = Arc::new(
-            tokio::runtime::Runtime::new()
-                .map_err(|error| format!("Tokio runtime could not start: {error}"))?,
-        );
-        let session = Arc::new(Mutex::new(Session::default()));
-        let token_store: Arc<dyn crate::auth::TokenStore> =
-            Arc::new(crate::auth::KeyringTokenStore);
-        if let Err(error) = login::restore_refresh_token(
-            &mut session.lock().unwrap(),
-            token_store.as_ref(),
-        ) {
-            log::warn!("Rune-Sicherungsroute: Refresh-Token konnte nicht geladen werden: {error}");
-        }
-        let (paused, _) = tokio::sync::watch::channel(config.paused);
-        Ok(Self {
-            config,
-            page: LivePage::Backup,
-            license_tab: crate::about::LicenseTab::Components,
-            settings_tab: crate::rune_settings::SettingsTab::General,
-            autostart,
-            autostart_enabled,
-            settings_limit_edit,
-            settings_album_edit,
-            settings_slider_origin: 1,
-            store,
-            config_error,
-            store_error,
-            persist_config,
-            persist_store,
-            scan_tx: None,
-            upload: Arc::new(Mutex::new(UploadShared::default())),
-            paused,
-            runtime,
-            login: WebviewLogin::new(),
-            session,
-            token_store,
-            session_wakeup: None,
-            native_window: None,
-            app_handle: None,
-            lifecycle_route: lifecycle_route::LifecycleRoute::default(),
-            tray_route: tray_route::TrayRoute::default(),
-            pending_show_request: false,
-            child_bounds: None,
-            form: None,
-            status: None,
-            was_active: false,
-        })
-    }
-
     fn logged_in(&self) -> bool {
         !self.config.session_id.is_empty() && !self.config.cookie_x_acb.is_empty()
     }
@@ -257,6 +183,21 @@ impl LiveState {
                     shared.total,
                 )
             };
+            if one_time::finish_if_one_time(
+                self,
+                &totals,
+                &done,
+                &failed,
+                run_done,
+                run_failed,
+                run_total,
+                cancelled,
+            ) {
+                if !cancelled && self.config.notifications {
+                    crate::notify::run_finished(run_done, run_failed, run_total);
+                }
+                return true;
+            }
             if !cancelled {
                 let now = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
                 backup::apply_folder_progress(
@@ -354,6 +295,19 @@ impl crate::rune_settings::SettingsHost for LiveState {
         self.config_error.as_deref()
     }
 
+    fn set_language(&mut self, language: Option<&'static str>) {
+        self.config.language = language.map(str::to_owned);
+        let lang = self
+            .config
+            .language
+            .as_deref()
+            .and_then(crate::i18n::Lang::from_code)
+            .unwrap_or_else(crate::i18n::system_lang);
+        crate::i18n::set_lang(lang);
+        crate::app_menu::refresh_labels();
+        self.persist_settings();
+    }
+
     fn persist_settings(&mut self) {
         self.persist_config_if_allowed();
         self.ensure_background_sync();
@@ -370,12 +324,17 @@ impl crate::rune_settings::SettingsHost for LiveState {
 
 pub(crate) fn run_production(args: Vec<String>) -> Result<(), String> {
     if rune::tooling::Args::parse_from(args.clone()).headless() {
-        return Err("--rune-backup is an interactive developer route, not a headless fixture".to_owned());
+        return Err(
+            "--rune-backup is an interactive route, not a headless fixture".to_owned(),
+        );
     }
     if !crate::single_instance::acquire() {
         log::info!("Prime Photos läuft bereits — Rune-Fenster der laufenden Instanz angefordert");
         return Ok(());
     }
+    // Cache the transient login-item Apple event before Rune starts AppKit. The
+    // production host consumes the same classification as the legacy host.
+    crate::app_activation::install_launch_diagnostic();
     crate::notify::init();
     let state = LiveState::production()?;
     let app = App::new(AppSpec {
@@ -386,9 +345,22 @@ pub(crate) fn run_production(args: Vec<String>) -> Result<(), String> {
     })
     .args(args)
     .standard_menus()
-    .keep_running()
-    .on_close(lifecycle_route::close_live)
-    .on_reopen(lifecycle_route::reopen_live);
+    .keep_running();
+    // AppKit reports Login Item classification only after Rune has selected
+    // its launch activation policy. Start this production host as an
+    // accessory unconditionally; setup promotes every non-silent start to
+    // Regular after validating its final visibility policy.
+    #[cfg(target_os = "macos")]
+    let app = app.accessory();
+    // Keep the first native window hidden until setup has received AppKit's
+    // classification and, for a silent candidate, verified the tray.
+    let app = app.window_options(WindowOptions {
+        visible: false,
+        ..WindowOptions::default()
+    });
+    let app = app
+        .on_close(lifecycle_route::close_live)
+        .on_reopen(lifecycle_route::reopen_live);
     let state_handle = app.handle();
     let app = app.init(move || {
         let mut state = state;
@@ -415,21 +387,40 @@ fn empty_live_state() -> LiveState {
 }
 
 fn setup(state: &mut LiveState, wakeup: Waker) {
+    let activation_wakeup = wakeup.clone();
+    crate::app_activation::install(Arc::new(move || activation_wakeup()));
+    let about_wakeup = wakeup.clone();
+    crate::app_menu::install_rune_about(Arc::new(move || about_wakeup()));
     let single_instance_wakeup = wakeup.clone();
     crate::single_instance::attach_wakeup(Arc::new(move || single_instance_wakeup()));
     state.tray_route.set_wakeup(wakeup.clone());
     state.login.set_wakeup(wakeup.clone());
+    state.account_identity.set_wakeup(wakeup.clone());
     let session_wakeup = wakeup.clone();
     state.session_wakeup = Some(Arc::new(move || session_wakeup()));
     state.upload.lock().unwrap().wakeup = Some(Arc::new(move || wakeup()));
+    startup::apply_window_policy(state);
 }
 
 fn poll(state: &mut LiveState, _: f64, tx: &mut Tx) -> bool {
-    let mut changed = if crate::single_instance::take_show_request() {
+    // Rune materializes the standard About item when its accessory app menu is
+    // promoted; setup can run before that queued activation-policy change.
+    crate::app_menu::ensure_rune_about_installed();
+    let about_requested = crate::app_menu::take_about_request();
+    let single_instance_show = crate::single_instance::take_show_request();
+    let activation_show = lifecycle::activation_should_show(
+        &mut state.ignore_initial_login_activation,
+        crate::app_activation::take_become_active_request(),
+    );
+    if about_requested {
+        state.page = LivePage::About;
+    }
+    let mut changed = if single_instance_show || activation_show || about_requested {
         state.show_window(tx)
     } else {
         false
     };
+    changed |= about_requested;
     changed |= deliver_pending_show_request(
         &mut state.pending_show_request,
         state.native_window.as_ref(),
@@ -466,6 +457,8 @@ fn poll(state: &mut LiveState, _: f64, tx: &mut Tx) -> bool {
         }
     }
     changed |= session_route::poll(state);
+    changed |= account_identity::poll(state);
+    changed |= state.resume_one_time();
     changed |= tray_route::poll(state, tx);
     // Polling observes login, session, and upload state. Successful sign-in or
     // renewed cookies can start the configured background supervisor; its
@@ -475,15 +468,22 @@ fn poll(state: &mut LiveState, _: f64, tx: &mut Tx) -> bool {
 
 mod conflict;
 mod about;
+mod account_identity;
+mod login_panel;
 mod lifecycle;
 mod lifecycle_route;
+mod logout;
 mod session_route;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 mod smoke;
 mod tray_route;
 mod targets;
+mod one_time;
+mod startup;
 mod view;
 mod widgets;
 
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 pub(crate) fn run_smoke(args: Vec<String>) -> Result<(), String> {
     smoke::run_smoke(args)
 }

@@ -29,7 +29,7 @@ and the "Mit Amazon anmelden" wording where a sign-in genuinely happens.
   decoding); the code-drawn sphere `upload_logo` is **gone**.
 - **App logo everywhere detailed (Welle 5.16).** The app UI (sidebar,
   About, login) shows `assets/logo.svg` (detailed logo with the photo
-  cards) via `icons::app_logo`; the **small** `logo-small.svg` remains
+  cards) via `icons::eframe_ui::app_logo`; the **small** `logo-small.svg` remains
   **only** the colored tray fallback for an unknown OS theme (user: „Damit
   nutzen wir das kleine Logo nur in der Taskbar"). Sidebar logo **30 px**
   (was 24), logo + title **vertically on a centre axis**.
@@ -86,7 +86,7 @@ and the "Mit Amazon anmelden" wording where a sign-in genuinely happens.
 
 - **App-Logo überall detailliert (Welle 5.16).** Die App-UI (Seitenleiste,
   About, Login) zeigt `assets/logo.svg` (detailliertes Logo mit den
-  Fotokarten) über `icons::app_logo`; das **kleine** `logo-small.svg` bleibt
+  Fotokarten) über `icons::eframe_ui::app_logo`; das **kleine** `logo-small.svg` bleibt
   **nur** der farbige Tray-Fallback für ein unbekanntes OS-Theme (User:
   „Damit nutzen wir das kleine Logo nur in der Taskbar"). Seitenleisten-Logo
   **30 px** (vorher 24), Logo + Titel **vertikal auf einer Mittelachse**.

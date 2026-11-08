@@ -1,7 +1,10 @@
 # UI-Review-Checkliste (Issue #30)
 
 Prüfliste und Befehle für die visuelle Abnahme von Fenster-Layout, Abständen und
-Textabbrüchen. Die Zustände kommen aus der Demo-Datenquelle
+Textabbrüchen. Die folgenden bestehenden `--demo`-Aufnahmen sind der
+**Legacy-eframe-Review**. Die separate Rune-Headless-Matrix weiter unten nutzt
+andere Fixture-Ansichten und ist kein Paritätsnachweis. Die Zustände der
+Legacy-Aufnahmen kommen aus der Demo-Datenquelle
 ([`UI_FIXTURES.md`](UI_FIXTURES.md)); es wird **nichts** am echten Konto, an
 `config.toml`, Keychain, SQLite oder im Netzwerk angefasst.
 
@@ -19,7 +22,7 @@ Demo-Harness; Fixture-Screenshots müssen aus der Debug-Binary kommen.
 packaging/make-app.sh
 ```
 
-## Screenshot-Matrix
+## Legacy-eframe-Screenshot-Matrix
 
 Alle Bilder entstehen über den Harness (`--screenshot`), nicht von Hand. Die
 PNG-Datei enthält **physische Pixel**: auf einem 2×-Display ist ein
@@ -60,7 +63,45 @@ done
 | `signed-out` | 760×520 |
 | `settings` and `mixed` | 1400×900 in both `light` and `dark` (`--demo-theme`) |
 
-## Prüfung pro Zustand
+## Rune-native Headless-Review-Matrix
+
+Rune-Fixtures werden getrennt von `--demo` aufgenommen. Das Skript setzt die
+Sprache und Skala fest, wählt jede Szene per Rune-`--scene` und schreibt
+PNG-Screenshots sowie View-Trees. Es nutzt ausschließlich
+`--rune-backup-smoke` für Backup-/About-/Lizenz-Szenen,
+`--rune-login-fixture` für signed-out/Fehler und das bestehende Rune-Settings-
+Fixture für beide Einstellungs-Tabs. Es ruft **nicht** `--rune-backup` auf und
+ändert den Produktions-Launcher nicht.
+
+```bash
+cargo build --locked --features rune-ui-spike
+scripts/capture-rune-ui-review.sh
+```
+
+| Fixture | Zustände | Ansichten |
+|---|---|---|
+| Backup-Smoke | `mixed`, `uploading`, `paused`, `all-done`, `failures`, `empty`, `many-folders`, `about`, `licenses` | alle bei 1400×900 in Hell/Dunkel; `mixed`, `failures`, `many-folders` zusätzlich 760×560 und 1000×700 in Hell/Dunkel; View-Tree je Szene bei 1400×900 |
+| Login-Fixture | `signed-out`, `error` | 760×560 und 1000×700 in Hell/Dunkel |
+| Settings-Fixture | Allgemeines, Bandbreite | 760×560 und 1000×700 in Hell/Dunkel |
+
+Die erzeugten Dateien liegen standardmäßig in `target/rune-ui-review/`.
+`RUNE_UI_BIN` und `RUNE_UI_REVIEW_OUT` überschreiben Binary und Zielordner.
+Die Fixture-Sicherheitsgrenzen sowie der noch offene Aufnahme-/Inspektionsstatus
+stehen in [`UI_FIXTURES.md`](UI_FIXTURES.md).
+
+Für einen manuellen macOS-Lauf kann in GitHub unter **Actions → Rune headless UI
+review → Run workflow** der Workflow für den gewünschten Branch gestartet und
+das Artefakt `rune-ui-review` heruntergeladen werden. Er prüft zuerst Build und
+Tests der eframe-freien `rune-backup`-Produktionsgrenze (Release-Binary wird
+nicht gestartet), dann Debug-Build und -Tests mit Standard-Features sowie die
+Fixtures, die das Capture-Skript aus der Debug-Binary rendert. `--rune-backup`
+wird nicht übergeben. Der Upload wird auch nach einem fehlgeschlagenen Capture
+versucht und kann dann Teilaufnahmen enthalten; ohne erzeugte Dateien gibt es
+kein Artefakt. Alles bleibt headless: kein natives Fenster, AppKit-/Wry- oder
+Produktionskonto-Runtime-Smoke und für sich genommen keine Freigabe zum
+Launcher-Cutover.
+
+## Prüfung pro Legacy-eframe-Zustand
 
 Die ersten sieben Zustände sind die Backup-Seite, dazu `settings`/
 `settings-bandwidth` (Einstellungen) und `signed-out` (Anmeldung).

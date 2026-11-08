@@ -1,6 +1,12 @@
 use crate::i18n::Lang;
 use crate::tray::{self, Tray, TrayState, WakeupCallback};
 use rune::Tx;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::{Duration, Instant};
+
+const SYSTEM_THEME_UNSET: u8 = 0;
+const SYSTEM_THEME_LIGHT: u8 = 1;
+const SYSTEM_THEME_DARK: u8 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MenuAction {
@@ -16,7 +22,11 @@ pub(super) struct TrayRoute {
     wakeup: Option<WakeupCallback>,
     build_failed: bool,
     last_labels: Option<(Lang, bool)>,
-    last_icon_state: Option<TrayState>,
+    last_icon_state: Option<IconKey>,
+    system_theme: AtomicU8,
+    was_busy: bool,
+    last_outcome: LastOutcome,
+    scheduled_done_at: Option<Instant>,
 }
 
 impl TrayRoute {
@@ -28,33 +38,62 @@ impl TrayRoute {
         self.tray.is_some()
     }
 
+    /// Build and reconcile the startup tray while Rune's native event loop is
+    /// active, returning whether it is available for a silent launch.
+    pub(super) fn prepare(
+        &mut self,
+        has_pending_session: bool,
+        paused: bool,
+        busy: bool,
+        language: Lang,
+        runtime: &tokio::runtime::Runtime,
+    ) -> bool {
+        self.reconcile(has_pending_session, paused, busy, language, runtime);
+        self.is_active()
+    }
+
+    /// Rune 53c7f60 exposes OS appearance through `Cx::system_dark()` in the
+    /// view only. Cache it atomically for the main-thread tray reconcile and
+    /// wake that reconcile once when the appearance changes.
+    pub(super) fn observe_system_dark(&self, system_dark: bool) {
+        let theme = system_theme(system_dark);
+        let next = theme_code(theme);
+        if self.system_theme.swap(next, Ordering::Relaxed) != next {
+            if let Some(wakeup) = &self.wakeup {
+                wakeup();
+            }
+        }
+    }
+
     fn reconcile(
         &mut self,
         has_pending_session: bool,
         paused: bool,
         busy: bool,
         language: Lang,
-    ) {
+        runtime: &tokio::runtime::Runtime,
+    ) -> bool {
         if !has_pending_session {
             self.tray = None;
             self.build_failed = false;
             self.last_labels = None;
             self.last_icon_state = None;
-            return;
+            return false;
         }
 
+        let theme = self.current_theme();
         if self.tray.is_none() && !self.build_failed {
             let Some(wakeup) = self.wakeup.clone() else {
-                return;
+                return false;
             };
-            self.tray = tray::build(tray::Theme::Unknown, wakeup);
+            self.tray = tray::build(theme, wakeup);
             self.build_failed = self.tray.is_none();
             self.last_labels = None;
             self.last_icon_state = None;
         }
 
         let Some(tray) = self.tray.as_mut() else {
-            return;
+            return false;
         };
 
         let labels = (language, paused);
@@ -68,13 +107,55 @@ impl TrayRoute {
             self.last_labels = Some(labels);
         }
 
-        // `Theme::Unknown` selects per-state template glyphs on macOS and the
-        // logo fallback elsewhere; done/error tray reporting is not ported.
-        let icon_state = tray::tray_state(paused, busy, false, None);
-        if self.last_icon_state != Some(icon_state) {
-            tray.set_state(icon_state, tray::Theme::Unknown);
-            self.last_icon_state = Some(icon_state);
+        let since_done = self.last_outcome.done_at.map(|finished| finished.elapsed());
+        let icon = icon_key(
+            paused,
+            busy,
+            self.last_outcome.failed,
+            since_done,
+            theme,
+        );
+        let mut changed = false;
+        if should_apply_icon(self.last_icon_state, icon) {
+            tray.set_state(icon.state, icon.theme);
+            self.last_icon_state = Some(icon);
+            changed = true;
         }
+
+        // Like eframe, only a currently visible Done glyph needs an expiry
+        // wake. Paused/active priorities will reconcile on their own next
+        // state change; there is no periodic tray polling.
+        if let Some(delay) = done_wake_after(icon, since_done) {
+            if let Some(done_at) = self.last_outcome.done_at {
+                if self.scheduled_done_at != Some(done_at) {
+                    if let Some(wakeup) = self.wakeup.clone() {
+                        self.scheduled_done_at = Some(done_at);
+                        drop(runtime.spawn(async move {
+                            tokio::time::sleep(delay).await;
+                            wakeup();
+                        }));
+                    }
+                }
+            }
+        }
+        changed
+    }
+
+    fn current_theme(&self) -> tray::Theme {
+        theme_from_code(self.system_theme.load(Ordering::Relaxed))
+    }
+
+    fn observe_upload(
+        &mut self,
+        busy: bool,
+        cancelled: bool,
+        failed: bool,
+        now: Instant,
+    ) {
+        if self.was_busy && !busy {
+            self.last_outcome = finished_outcome(self.last_outcome, cancelled, failed, now);
+        }
+        self.was_busy = busy;
     }
 
     fn action_for_id(&self, id: &tray_icon::menu::MenuId) -> Option<MenuAction> {
@@ -86,6 +167,83 @@ impl TrayRoute {
             tray.about_item.id(),
             tray.quit_item.id(),
         )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct IconKey {
+    state: TrayState,
+    theme: tray::Theme,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LastOutcome {
+    failed: bool,
+    done_at: Option<Instant>,
+}
+
+fn system_theme(system_dark: bool) -> tray::Theme {
+    if system_dark {
+        tray::Theme::Dark
+    } else {
+        tray::Theme::Light
+    }
+}
+
+fn theme_code(theme: tray::Theme) -> u8 {
+    match theme {
+        tray::Theme::Unknown => SYSTEM_THEME_UNSET,
+        tray::Theme::Light => SYSTEM_THEME_LIGHT,
+        tray::Theme::Dark => SYSTEM_THEME_DARK,
+    }
+}
+
+fn theme_from_code(code: u8) -> tray::Theme {
+    match code {
+        SYSTEM_THEME_LIGHT => tray::Theme::Light,
+        SYSTEM_THEME_DARK => tray::Theme::Dark,
+        _ => tray::Theme::Unknown,
+    }
+}
+
+fn finished_outcome(
+    previous: LastOutcome,
+    cancelled: bool,
+    failed: bool,
+    now: Instant,
+) -> LastOutcome {
+    if cancelled {
+        previous
+    } else {
+        LastOutcome {
+            failed,
+            done_at: Some(now),
+        }
+    }
+}
+
+fn icon_key(
+    paused: bool,
+    busy: bool,
+    last_run_failed: bool,
+    since_done: Option<Duration>,
+    theme: tray::Theme,
+) -> IconKey {
+    IconKey {
+        state: tray::tray_state(paused, busy, last_run_failed, since_done),
+        theme,
+    }
+}
+
+fn should_apply_icon(previous: Option<IconKey>, next: IconKey) -> bool {
+    previous != Some(next)
+}
+
+fn done_wake_after(icon: IconKey, since_done: Option<Duration>) -> Option<Duration> {
+    if icon.state == TrayState::Done {
+        since_done.and_then(|elapsed| tray::DONE_WINDOW.checked_sub(elapsed))
+    } else {
+        None
     }
 }
 
@@ -162,93 +320,26 @@ pub(super) fn poll(state: &mut super::LiveState, tx: &mut Tx) -> bool {
         changed = true;
     }
 
+    let (busy, cancelled, failed) = {
+        let upload = state.upload.lock().unwrap();
+        (upload.active, upload.cancelled, upload.failed > 0)
+    };
+    state
+        .tray_route
+        .observe_upload(busy, cancelled, failed, Instant::now());
     let paused = *state.paused.borrow();
-    let busy = state.upload.lock().unwrap().active;
-    state.tray_route.reconcile(
-        state.has_pending_session(),
+    let has_pending_session = state.has_pending_session();
+    let runtime = state.runtime.clone();
+    changed |= state.tray_route.reconcile(
+        has_pending_session,
         paused,
         busy,
         crate::i18n::lang(),
+        runtime.as_ref(),
     );
     changed
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{action_for_id, dispatch_action, MenuAction, TrayActionHost};
-
-    #[test]
-    fn menu_ids_route_to_each_action() {
-        let show = "show";
-        let pause = "pause";
-        let about = "about";
-        let quit = "quit";
-
-        assert_eq!(
-            action_for_id(&show, &show, &pause, &about, &quit),
-            Some(MenuAction::ShowWindow)
-        );
-        assert_eq!(
-            action_for_id(&pause, &show, &pause, &about, &quit),
-            Some(MenuAction::TogglePause)
-        );
-        assert_eq!(
-            action_for_id(&about, &show, &pause, &about, &quit),
-            Some(MenuAction::About)
-        );
-        assert_eq!(
-            action_for_id(&quit, &show, &pause, &about, &quit),
-            Some(MenuAction::Quit)
-        );
-        assert_eq!(
-            action_for_id(&"unknown", &show, &pause, &about, &quit),
-            None
-        );
-    }
-
-    #[derive(Default)]
-    struct FixtureHost {
-        actions: Vec<MenuAction>,
-    }
-
-    impl TrayActionHost for FixtureHost {
-        fn show_window(&mut self) {
-            self.actions.push(MenuAction::ShowWindow);
-        }
-
-        fn toggle_pause(&mut self) {
-            self.actions.push(MenuAction::TogglePause);
-        }
-
-        fn open_about(&mut self) {
-            self.actions.push(MenuAction::About);
-        }
-
-        fn quit(&mut self) {
-            self.actions.push(MenuAction::Quit);
-        }
-    }
-
-    #[test]
-    fn shared_dispatcher_routes_every_action_to_its_host_operation() {
-        let mut host = FixtureHost::default();
-        for action in [
-            MenuAction::ShowWindow,
-            MenuAction::TogglePause,
-            MenuAction::About,
-            MenuAction::Quit,
-        ] {
-            dispatch_action(&mut host, action);
-        }
-
-        assert_eq!(
-            host.actions,
-            [
-                MenuAction::ShowWindow,
-                MenuAction::TogglePause,
-                MenuAction::About,
-                MenuAction::Quit,
-            ]
-        );
-    }
-}
+#[path = "tray_route/tests.rs"]
+mod tests;

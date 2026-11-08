@@ -344,7 +344,7 @@ no `#[cfg]`. → *inferred (egui API)*
 Mirror the observed states: an **idle** hint in the backup list, a **drag** overlay (framed drop
 zone, title + hint) while `hovered_files` is non-empty and the drop is allowed (signed in, not
 already running), a **scanning** state while enumerating, and the row's transfer state when
-uploading. Reuse the drawn-icon style in `src/icons.rs`.
+uploading. Reuse the drawn-icon style in `src/icons/eframe_ui.rs`.
 
 ### 10.3 Synthetic one-time row (no persistence)
 

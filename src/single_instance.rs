@@ -72,12 +72,6 @@ pub(crate) fn attach_wakeup(wakeup: Arc<dyn Fn() + Send + Sync>) {
     }
 }
 
-/// Eframe adapter: `PrimePhotoApp::new` calls this after its context exists.
-pub fn attach_ctx(ctx: &eframe::egui::Context) {
-    let ctx = ctx.clone();
-    attach_wakeup(Arc::new(move || ctx.request_repaint()));
-}
-
 /// Whether another process asked this instance to show its window since the
 /// last call. Drains the flag, so the caller shows the window exactly once per
 /// request.

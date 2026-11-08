@@ -8,6 +8,10 @@ checks the abort flag at its wait points and returns cleanly.
 
 - Signing out calls `POST https://api.amazon.com/auth/deregister` with the
   access token, then deletes the tokens (keychain + in-memory).
+- The Rune production backup route exposes an accessible **Abmelden** action in
+  the signed-in profile area. It applies the same local cleanup, persists via
+  the config-load gate, and sends deregistration asynchronously only when an
+  access token was active.
 - A **cancel flag in `UploadShared`** is set by `logout()`. The upload worker
   checks this flag at its **wait points** (pause-park,
   `src/upload.rs:393`) **and** at the conflict dialog, then returns.

@@ -5,11 +5,14 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [features]
-default = []
-# Opt-in Rune migration spike. Interactive login and local Wry verification
-# routes are dispatched only in debug builds with this feature enabled; eframe
-# remains the normal application UI pending full Rune parity.
-rune-ui-spike = ["dep:rune"]
+default = ["legacy-eframe"]
+legacy-eframe = ["dep:eframe", "dep:egui"]
+# Explicit opt-in to the production Rune backup route. This does not change the
+# default launcher; eframe remains the normal application UI.
+rune-backup = ["dep:rune"]
+# Debug-only Rune migration fixtures and verification routes. The production
+# backup route is also available through `rune-backup` in release builds.
+rune-ui-spike = ["rune-backup"]
 
 [dependencies]
 chrono = { version = "0.4.40", features = ["serde"] }
@@ -38,8 +41,8 @@ tokio = { version = "1.44.2", features = ["full"] }
 futures = "0.3"
 toml = "0.8.20"
 walkdir = "2.5.0"
-eframe = "0.31"
-egui = "0.36"
+eframe = { version = "0.31", optional = true }
+egui = { version = "0.36", optional = true }
 rfd = "0.15"
 image = "0.25"
 wry = "0.57.0"
@@ -58,8 +61,8 @@ rand = "0.10"
 # `crypto-rust` as its session-encryption backend). No async/zbus stack is
 # pulled in.
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
-# Issue #49 feasibility work only. Keep the exact tested revision and avoid
-# Rune's broad defaults; the optional feature is not enabled in normal builds.
+# Issue #49 Rune backup / migration work. Keep the exact tested revision and
+# avoid Rune's broad defaults; the optional feature is not enabled in normal builds.
 # native-file-dialog supplies the Linux XDG portal path (and enables D-Bus);
 # accessibility preserves native platform trees; Metal is used only on Apple.
 # SVG is omitted because our existing build.rs raster pipeline supplies PNGs.

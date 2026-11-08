@@ -113,7 +113,7 @@ mod tests {
     use crate::auth::TokenStore;
     use crate::config::Config;
     use crate::countries::parse_cookie_string;
-    use crate::folders::ConflictResolution;
+    use crate::folders::{ConflictResolution, ContentFilter};
     use crate::login::{self, Session, SessionCookies};
     use crate::upload::UploadShared;
     use std::path::PathBuf;
@@ -279,6 +279,7 @@ mod tests {
             path: PathBuf::from("synthetic-target"),
             dedup: true,
             conflict: ConflictResolution::Ask,
+            content_filter: ContentFilter::Photos,
             edit_path: None,
             error: Some("synthetic form error".to_owned()),
         });

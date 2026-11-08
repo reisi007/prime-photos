@@ -11,11 +11,11 @@ use crate::dedup::DedupIndex;
 use crate::demo;
 use crate::folders::{BackupFolder, FolderStatus, FolderStore};
 use crate::i18n::{self, tr, tr1, tr3};
-use crate::icons::{app_logo, draw_flag_badge, nav_backup_icon, nav_settings_icon};
+use crate::icons::eframe_ui::{app_logo, draw_flag_badge, nav_backup_icon, nav_settings_icon};
 use crate::login;
 use crate::notify;
 use crate::single_instance;
-use crate::theme;
+use crate::theme::eframe_ui as theme;
 use crate::tray;
 use crate::upload::{eta_suffix, UploadShared};
 use eframe::egui::{self, Color32, RichText};
@@ -25,13 +25,12 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::watch;
 
+pub(crate) use crate::platform::app_shared::{
+    Autostart, AutostartAction, ONE_TIME_IDX, autostart_action,
+};
+
 /// Height of the slim branded header shown above the Amazon sign-in webview.
 pub(crate) const HEADER_H: f32 = 60.0;
-
-/// Synthetic folder index of the transient one-time (drag & drop) upload
-/// target: it is never in `store.folders`, so no persisted index can collide
-/// with it and every run reports its counters under this one key.
-pub(crate) const ONE_TIME_IDX: usize = usize::MAX;
 
 // ---------------------------------------------------------------------------
 // App state
@@ -47,102 +46,6 @@ pub(crate) enum Page {
 pub(crate) enum SettingsTab {
     General,
     Bandwidth,
-}
-
-// ---------------------------------------------------------------------------
-// Autostart (login item)
-// ---------------------------------------------------------------------------
-
-/// App name used for the auto-launch (login item) registration.
-const AUTOSTART_APP_NAME: &str = "Prime Photos";
-
-/// Build the `auto-launch` registration for the current executable.
-///
-/// `None` means "autostart is unavailable here": the platform is not supported
-/// or the executable path could not be determined. The app keeps running and
-/// the toggle simply stays off.
-///
-/// The builder is used instead of the platform-specific `AutoLaunch::new`
-/// constructors so this helper stays `#[cfg]`-free. `MacOSLaunchMode::SMAppService`
-/// is spelled out (not the crate default `LaunchAgent`) because that is the mode
-/// we want on macOS: `SMAppService.mainApp.register()` enters the app into the
-/// **Anmeldeobjekte** (System Settings → General → Login Items) — a `LaunchAgent`
-/// plist under `~/Library/LaunchAgents` never shows up there. Requires macOS 13+;
-/// a freshly registered entry may first be `RequiresApproval` until the user
-/// approves it in the login-items list.
-fn build_autostart() -> Option<auto_launch::AutoLaunch> {
-    let exe = std::env::current_exe().ok()?;
-    auto_launch::AutoLaunchBuilder::new()
-        .set_app_name(AUTOSTART_APP_NAME)
-        .set_app_path(&exe.display().to_string())
-        .set_macos_launch_mode(auto_launch::MacOSLaunchMode::SMAppService)
-        .build()
-        .ok()
-}
-
-/// Runtime-only autostart (login item) state.
-///
-/// `inner` is `None` when the platform is unsupported or the registration could
-/// not be built. Every operation then answers "unsupported"/"disabled" rather
-/// than panicking, so the settings toggle is safe on every platform.
-pub(crate) struct Autostart {
-    inner: Option<auto_launch::AutoLaunch>,
-}
-
-impl Autostart {
-    pub(crate) fn new() -> Self {
-        Self {
-            inner: build_autostart(),
-        }
-    }
-
-    pub(crate) fn enable(&self) -> auto_launch::Result<()> {
-        match self.inner.as_ref() {
-            Some(inner) => inner.enable(),
-            None => Err(auto_launch::Error::UnsupportedOS),
-        }
-    }
-
-    pub(crate) fn disable(&self) -> auto_launch::Result<()> {
-        match self.inner.as_ref() {
-            Some(inner) => inner.disable(),
-            None => Err(auto_launch::Error::UnsupportedOS),
-        }
-    }
-
-    /// Current OS state; `None` when unsupported or unreadable (treated as off).
-    pub(crate) fn is_enabled(&self) -> Option<bool> {
-        self.inner.as_ref().and_then(|inner| inner.is_enabled().ok())
-    }
-}
-
-/// What the persisted autostart intent asks us to do at startup (PKG-3).
-///
-/// Pure decision, no OS access: derived from the `Config` intent and the
-/// current OS state so it is cheap to unit-test.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum AutostartAction {
-    /// Never decided before (`None`): turn the login item on and record
-    /// `Some(true)`. The enable is a no-op when the OS state is already on.
-    EnableAndRecord,
-    /// Intent says "on" but the OS state is off: repair the login item
-    /// (plist deleted, app moved).
-    Enable,
-    /// Nothing to do (already on, or the user vetoed with `Some(false)`).
-    Nothing,
-}
-
-/// Derive the startup action from the persisted intent and the OS state.
-///
-/// `None` (never decided) ⇒ enable and record; `Some(true)` + OS off ⇒ repair;
-/// `Some(false)` always ⇒ nothing (never fight a deliberate "off" — a login
-/// item the user created by hand is not touched).
-fn autostart_action(intent: Option<bool>, os_enabled: bool) -> AutostartAction {
-    match intent {
-        None => AutostartAction::EnableAndRecord,
-        Some(true) if !os_enabled => AutostartAction::Enable,
-        _ => AutostartAction::Nothing,
-    }
 }
 
 /// What to persist after a successful enable/disable: the user's **intent**,
@@ -386,14 +289,15 @@ impl PrimePhotoApp {
     }
 
     fn prepare(cc: &eframe::CreationContext<'_>) {
-        // App activation (relaunch / switch-back) and the single-instance
-        // handshake both only flag + wake the UI, so they get the context here
-        // (see `src/app_activation.rs`, `src/single_instance.rs`).
-        app_activation::install(&cc.egui_ctx);
+        // App activation only flags + wakes the active host; the single-instance
+        // handshake attaches its own wake callback in `new_normal`.
+        let egui_ctx = cc.egui_ctx.clone();
+        app_activation::install(Arc::new(move || egui_ctx.request_repaint()));
     }
 
     fn new_normal(cc: &eframe::CreationContext<'_>) -> Self {
-        single_instance::attach_ctx(&cc.egui_ctx);
+        let egui_ctx = cc.egui_ctx.clone();
+        single_instance::attach_wakeup(Arc::new(move || egui_ctx.request_repaint()));
         let rt = Arc::new(Runtime::new().expect("tokio runtime"));
         // `config_loaded_ok` is derived directly from the `Config::load()`
         // result: a broken/unreadable file yields `Config::default()` (with
@@ -725,7 +629,7 @@ impl PrimePhotoApp {
             // No `Autostart::new()`: it probes the login-item registration. The
             // struct stays empty, so every autostart call answers "unsupported"
             // — and `set_autostart` is guarded anyway.
-            autostart: Autostart { inner: None },
+            autostart: Autostart::unavailable_for_test(),
             autostart_enabled: false,
             dropping_files: false,
             one_time: fixture.one_time,
@@ -1625,8 +1529,8 @@ impl eframe::App for PrimePhotoApp {
                         )),
                 )
                 .show(ctx, |ui| match self.page {
-                    Page::Backup => self.backup_ui(ui),
-                    Page::Settings => self.settings_ui(ui),
+                    Page::Backup => crate::backup::eframe_ui::backup_ui(self, ui),
+                    Page::Settings => crate::settings::eframe_ui::settings_ui(self, ui),
                 });
 
             let active = self.upload.lock().unwrap().active;
@@ -1685,11 +1589,13 @@ impl eframe::App for PrimePhotoApp {
                     .resizable(false)
                     .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
                     .show(ctx, |ui| {
-                        form_action = Self::render_backup_config(ui, form, editing);
+                        form_action = crate::backup_config::eframe_ui::render_backup_config(
+                            ui, form, editing,
+                        );
                     });
             }
             if let Some(action) = form_action {
-                self.handle_config_form_action(action, ctx);
+                crate::backup_config::eframe_ui::handle_config_form_action(self, action, ctx);
             }
         }
 
@@ -1713,16 +1619,16 @@ impl eframe::App for PrimePhotoApp {
         self.update_tray_icon(ctx);
 
         // Name-conflict prompt (`ConflictResolution::Ask`).
-        self.conflict_dialog(ctx);
+        crate::backup::eframe_ui::dialogs::conflict_dialog(self, ctx);
 
         // About window + the third-party license window it can open (Welle 4b).
         // Drawn outside the signed-in branch so the app menu can open them from
         // the login screen too.
         if self.about_open {
-            about::about_window(ctx, &mut self.about_open, &mut self.license_open);
+            about::eframe_ui::about_window(ctx, &mut self.about_open, &mut self.license_open);
         }
         if self.license_open {
-            about::license_window(ctx, &mut self.license_open, &mut self.license_tab);
+            about::eframe_ui::license_window(ctx, &mut self.license_open, &mut self.license_tab);
         }
 
         // Deferred login start: creating the webview needs the window handle.
@@ -1912,43 +1818,6 @@ async fn run_folder_picker(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn autostart_action_never_decided_enables_and_records() {
-        // `None` ⇒ enable + record, regardless of the current OS state.
-        assert_eq!(
-            autostart_action(None, false),
-            AutostartAction::EnableAndRecord
-        );
-        assert_eq!(
-            autostart_action(None, true),
-            AutostartAction::EnableAndRecord
-        );
-    }
-
-    #[test]
-    fn autostart_action_intent_on_repairs_only_when_the_os_is_off() {
-        assert_eq!(
-            autostart_action(Some(true), false),
-            AutostartAction::Enable
-        );
-        assert_eq!(
-            autostart_action(Some(true), true),
-            AutostartAction::Nothing
-        );
-    }
-
-    #[test]
-    fn autostart_action_deliberate_off_is_a_veto() {
-        assert_eq!(
-            autostart_action(Some(false), false),
-            AutostartAction::Nothing
-        );
-        assert_eq!(
-            autostart_action(Some(false), true),
-            AutostartAction::Nothing
-        );
-    }
 
     #[test]
     fn autostart_intent_to_record_persists_the_intent_not_the_read_back() {
