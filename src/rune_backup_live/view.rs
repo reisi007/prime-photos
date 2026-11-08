@@ -326,14 +326,6 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
     if state.sign_in_available() {
         login_panel = login_panel.child(marketplace_picker(state, theme, colors));
     }
-    let login_panel = login_panel
-        .child(row().w_full().gap(10.0).center_y().child(login_button))
-        .child(if state.config_error.is_some() {
-            text(tr("Einstellungen konnten nicht geladen oder gespeichert werden.")).color(colors.alert_foreground)
-        } else {
-            el()
-        });
-
     let remember_label = match (pending_idx, pending_path.as_deref()) {
         (Some(index), Some(path)) => backup::conflict_remember_label(&state.store, index, path),
         _ => tr("Nicht noch einmal fragen").to_owned(),
@@ -409,7 +401,15 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                     .w_full()
                     .gap(12.0)
                     .padding(20.0)
-                    .child(login_panel)
+                    .child(
+                        login_panel
+                            .child(row().w_full().gap(10.0).center_y().child(login_button))
+                            .child(if state.config_error.is_some() {
+                                text(tr("Einstellungen konnten nicht geladen oder gespeichert werden.")).color(colors.alert_foreground)
+                            } else {
+                                el()
+                            }),
+                    )
                     .child(store_warning.unwrap_or_else(|| el()))
                     .child(status.unwrap_or_else(|| el()))
                     .child(drop_zone(state, theme, colors))
