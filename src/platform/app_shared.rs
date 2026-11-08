@@ -48,7 +48,7 @@ impl Autostart {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, all(debug_assertions, feature = "legacy-eframe")))]
     pub(crate) fn unavailable_for_test() -> Self {
         Self { inner: None }
     }

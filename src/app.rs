@@ -25,9 +25,9 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio::sync::watch;
 
-pub(crate) use crate::platform::app_shared::{
-    Autostart, AutostartAction, ONE_TIME_IDX, autostart_action,
-};
+pub(crate) use crate::platform::app_shared::{Autostart, AutostartAction, autostart_action};
+#[cfg(feature = "legacy-eframe")]
+pub(crate) use crate::platform::app_shared::ONE_TIME_IDX;
 
 /// Height of the slim branded header shown above the Amazon sign-in webview.
 pub(crate) const HEADER_H: f32 = 60.0;

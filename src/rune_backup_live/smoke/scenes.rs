@@ -138,7 +138,7 @@ fn queue(
     failed: usize,
     folders: &[&str],
 ) -> Vec<SmokeQueueItem> {
-    let mut uploading_index = 0;
+    let mut uploading_index: usize = 0;
     (0..total)
         .map(|index| {
             let status = if index < done {
