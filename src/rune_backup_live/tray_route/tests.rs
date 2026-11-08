@@ -1,9 +1,27 @@
 use super::{
-    IconKey, LastOutcome, MenuAction, TrayActionHost, action_for_id, dispatch_action,
+    IconKey, LastOutcome, MenuAction, TrayActionHost, TrayRoute, action_for_id, dispatch_action,
     done_wake_after, finished_outcome, icon_key, should_apply_icon, system_theme,
 };
 use crate::tray::{self, Theme, TrayState};
 use std::time::{Duration, Instant};
+
+#[test]
+fn label_refresh_invalidates_cached_labels_and_runs_wakeup() {
+    let mut route = TrayRoute {
+        last_labels: Some((crate::i18n::Lang::En, false)),
+        ..TrayRoute::default()
+    };
+    let wakeups = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = wakeups.clone();
+    route.set_wakeup(std::sync::Arc::new(move || {
+        observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }));
+
+    route.request_label_refresh();
+
+    assert!(route.last_labels.is_none());
+    assert_eq!(wakeups.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
 
 #[test]
 fn tray_state_preserves_pause_busy_error_and_done_priority() {

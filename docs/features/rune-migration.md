@@ -177,7 +177,14 @@ same app:
    failure states, and the existing background upload/sync code.
 3. General and Bandwidth settings integrated with the production `Config`, with
    immediate persistence, live appearance and language changes, plus
-   tray/native-menu label updates. The separate settings-only Rune fixture is
+   tray/native-menu label updates. Production Rune language changes now request
+   tray-label reconciliation (and wake the tray route) as well as refreshing the
+   native menu and persisting the setting. Unit coverage checks the language
+   helper's config update and effect ordering, plus the tray route's label
+   invalidation and injected wakeup. It does not verify the production callback
+   mapping from effects to menu refresh, tray refresh, and persistence. No runtime
+   tray behavior or broader parity/cutover is
+   claimed. The separate settings-only Rune fixture is
    initialized from `Config::default()` with no persistence
    path; downloads are not implemented. The interactive backup route now ports
    the explicit autostart setting action and normal-start intent reconciliation.

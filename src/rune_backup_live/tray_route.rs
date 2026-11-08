@@ -30,6 +30,13 @@ pub(super) struct TrayRoute {
 }
 
 impl TrayRoute {
+    pub(super) fn request_label_refresh(&mut self) {
+        self.last_labels = None;
+        if let Some(wakeup) = &self.wakeup {
+            wakeup();
+        }
+    }
+
     pub(super) fn set_wakeup(&mut self, wakeup: WakeupCallback) {
         self.wakeup = Some(wakeup);
     }

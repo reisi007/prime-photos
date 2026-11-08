@@ -13,6 +13,8 @@ use rune::{App, AppHandle, AppSpec, TextEdit, Tx, Waker, WindowHandle, WindowOpt
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+mod language_change;
+
 const WINDOW_SIZE: (f32, f32) = (1180.0, 820.0);
 const MIN_WINDOW_SIZE: (f32, f32) = (760.0, 560.0);
 const HEADER_HEIGHT: f32 = 74.0;
@@ -298,7 +300,7 @@ impl crate::rune_settings::SettingsHost for LiveState {
     }
 
     fn set_language(&mut self, language: Option<&'static str>) {
-        self.config.language = language.map(str::to_owned);
+        language_change::set_config_language(&mut self.config, language);
         let lang = self
             .config
             .language
@@ -306,8 +308,11 @@ impl crate::rune_settings::SettingsHost for LiveState {
             .and_then(crate::i18n::Lang::from_code)
             .unwrap_or_else(crate::i18n::system_lang);
         crate::i18n::set_lang(lang);
-        crate::app_menu::refresh_labels();
-        self.persist_settings();
+        language_change::apply_effects(|effect| match effect {
+            language_change::Effect::RefreshMenu => crate::app_menu::refresh_labels(),
+            language_change::Effect::RefreshTray => self.tray_route.request_label_refresh(),
+            language_change::Effect::Persist => self.persist_settings(),
+        });
     }
 
     fn persist_settings(&mut self) {
