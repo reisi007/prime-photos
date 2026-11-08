@@ -256,8 +256,12 @@ Rune-View-Tree gespeichert. Signed-out, Login-Fehler, Einstellungen-Allgemeines
 und Bandbreite werden jeweils bei 760×560 und 1000×700 in beiden Themes
 aufgenommen. Sprache und Render-Skala sind fest auf Deutsch bzw. 1× gesetzt.
 
-**Aufnahmestatus dieser Änderung:** Das Skript wurde nicht ausgeführt; keine der
-aufgeführten Rune-PNGs oder View-Trees wurde hier erzeugt oder visuell geprüft.
-Auch die oben dokumentierte Legacy-eframe-Screenshot-Matrix wurde in dieser
-Sitzung nicht aufgenommen. Die tatsächliche Screenshot-Inspektion bleibt ein
-offenes Gate und muss auf macOS erfolgen.
+**Aufnahmestatus dieser Änderung:** Workflow
+[#42512063274](https://github.com/prime-photos/prime-photos/actions/runs/42512063274)
+erzeugte am 2026-11-08 das erfolgreiche Rune-Artefakt für Commit
+`ff3665a503248e6e3d8253bf6c913140f65f67f4`; es wurde unter
+`/tmp/rune-ui-review-42512063274` abgelegt. Stichproben der Fixture-Ansichten
+wurden visuell geprüft; Details siehe [`UI_REVIEW.md`](UI_REVIEW.md). Die
+vollständige Matrix ist nicht erschöpfend geprüft. Die Legacy-eframe-Matrix
+wurde nicht aufgenommen; ihr Screenshot-Review, Produktionsparität und die
+native macOS/AppKit/Wry-Runtime-Validierung bleiben offen.

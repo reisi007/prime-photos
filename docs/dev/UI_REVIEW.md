@@ -86,8 +86,23 @@ scripts/capture-rune-ui-review.sh
 
 Die erzeugten Dateien liegen standardmäßig in `target/rune-ui-review/`.
 `RUNE_UI_BIN` und `RUNE_UI_REVIEW_OUT` überschreiben Binary und Zielordner.
-Die Fixture-Sicherheitsgrenzen sowie der noch offene Aufnahme-/Inspektionsstatus
-stehen in [`UI_FIXTURES.md`](UI_FIXTURES.md).
+Die Fixture-Sicherheitsgrenzen stehen in [`UI_FIXTURES.md`](UI_FIXTURES.md).
+
+Am 2026-11-08 wurden die erfolgreichen Headless-Aufnahmen aus
+[Workflow #42512063274](https://github.com/prime-photos/prime-photos/actions/runs/42512063274),
+Commit `ff3665a503248e6e3d8253bf6c913140f65f67f4`, unter
+`/tmp/rune-ui-review-42512063274` visuell geprüft. Stichproben aus Backup,
+Login, Einstellungen, About und Lizenzen in Hell/Dunkel und verschiedenen
+Größen wirkten korrekt gerendert; in den geprüften Ansichten war nichts
+abgeschnitten. Die rote Meldung
+`Fixture-Ladefehler: Einstellungen konnten nicht geladen werden.` in der
+Failures-Szene ist absichtlicher Fixture-Inhalt, fest codiert in
+`src/rune_backup_live/smoke/scenes.rs:67`. Das schließt nur die Rune-Headless-
+Screenshot-Erzeugung und -Inspektion ab: Es ist eine reine Fixture-Sichtprüfung,
+kein Produktions-Paritätsnachweis und keine native macOS/AppKit/Wry-
+Runtime-Validierung. Produktionsdialoge sowie Integrations-/Native-Runtime-
+Validierung bleiben offen. Die Legacy-eframe-Sichtprüfung bleibt ebenfalls
+offen.
 
 Für einen manuellen macOS-Lauf kann in GitHub unter **Actions → Rune headless UI
 review → Run workflow** der Workflow für den gewünschten Branch gestartet und

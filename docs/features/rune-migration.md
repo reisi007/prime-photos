@@ -132,9 +132,20 @@ settings-only Rune fixture is not an app cutover.
   each backup-smoke scene in the light theme. Login (`signed-out`, `error`) and
   settings (General, Bandwidth) captures use 760×560 and 1000×700 in both
   themes. Captures use German and scale 1; the default output is
-  `target/rune-ui-review/`. The script has not been run; no captures from this
-  matrix have been generated or visually inspected. This remains an open macOS
-  review gate, not completed UI verification.
+  `target/rune-ui-review/`. The successful headless capture artifact from
+  [workflow run #42512063274](https://github.com/prime-photos/prime-photos/actions/runs/42512063274)
+  (commit `ff3665a503248e6e3d8253bf6c913140f65f67f4`) was visually inspected
+  on 2026-11-08 from `/tmp/rune-ui-review-42512063274`. Sampled backup, login,
+  settings, About, and licensing views across light/dark themes and sizes looked
+  correctly rendered, with no clipping in the inspected views. The red
+  `Fixture-Ladefehler: Einstellungen konnten nicht geladen werden.` in the
+  failures scene is intentional fixture content, hard-coded in
+  `src/rune_backup_live/smoke/scenes.rs:67`. This completes only Rune headless
+  screenshot generation/inspection: it is fixture-only visual review, not
+  production parity or native macOS/AppKit/Wry runtime validation. Production
+  dialogs and integration/native-runtime validation remain open, as do the
+  other cutover blockers below. Legacy eframe visual checks remain separate and
+  open.
 
 ## Cutover blockers
 
