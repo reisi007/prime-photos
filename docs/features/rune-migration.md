@@ -135,48 +135,29 @@ settings-only Rune fixture is not an app cutover.
   `target/rune-ui-review/`. The successful headless capture artifact from
   [workflow run #42512063274](https://github.com/prime-photos/prime-photos/actions/runs/42512063274)
   (commit `ff3665a503248e6e3d8253bf6c913140f65f67f4`) was visually inspected
-  on 2026-11-08 from `/tmp/rune-ui-review-42512063274`. Sampled backup, login,
-  settings, About, and licensing views across light/dark themes and sizes looked
-  correctly rendered, with no clipping in the inspected views. The red
+  on 2026-11-08 from `/tmp/rune-ui-review-42512063274`. The later fixes and
+  rerun are complete: workflow
+  [#42519744890](https://github.com/prime-photos/prime-photos/actions/runs/42519744890)
+  succeeded on commit `d5b3ed3d7ff9f38986bf073f18ae512be2b2b1ff`. Its release
+  build `cargo build --locked --release --no-default-features --features
+  rune-backup` passed; Rune-backup tests reported 315 passed, 0 failed (plus 2
+  binary/auxiliary tests passed). The `rune-ui-spike` build passed and its tests
+  reported 445 passed, 0 failed (plus 2 auxiliary tests passed). Headless
+  capture and artifact upload also succeeded. The artifact in
+  `target/rune-ui-review-42519744890` was visually inspected across the captured
+  fixture login, backup, settings, About, and license scenes, in light and dark
+  themes and at the captured sizes. This is fixture-only visual inspection, not
+  production parity or native AppKit/Wry/runtime or platform validation. These
+  debug captures are fixtures (and some routes share views); they are not
+  screenshots of the production view. The red
   `Fixture-Ladefehler: Einstellungen konnten nicht geladen werden.` in the
   failures scene is intentional fixture content, hard-coded in
-  `src/rune_backup_live/smoke/scenes.rs:67`. This completes only Rune headless
-  screenshot generation/inspection: it is fixture-only visual review, not
-  production parity or native macOS/AppKit/Wry runtime validation. Production
-  target-form and pending-conflict overlays have been implemented with Rune's
-  modal API, bounded scrollable contents, and semantic dialog controls. Headless
-  tests now cover hit blocking, constrained layout, accessibility tree, and
-  conflict priority. Workflow #42515912381 (commit `f43de4b`) ran the
-  Rune-backup test job and found one failure: the small-viewport target-form
-  test clicked the cancel button's layout center, which can lie outside its
-  scrolled/clipped visible hit area. It now clicks the center of Rune's
-  reported visible intersection and still asserts that the explicit cancel
-  action clears `state.form`. Workflow #42517959583 (commit `a7fa09d`) then
-  showed that the test's positive wheel delta moved content in the wrong
-  direction: pinned Rune's `Runtime::wheel` subtracts `dy` from the scroll
-  offset, so positive `dy` moves content down. The test now sends a negative
-  wheel delta to scroll down to the cancel action, retaining the positive
-  visible-hit assertion and actual cancel click/state assertion. Workflow
-  #42518688040 (commit `96bc7fa`) passed the Release build and its Rune-backup
-  test job reported 314 passed / 1 failed: the cancel assertion passed, but the
-  subsequent edit-dialog accessibility lookup failed after replacing the form
-  in the already-scrolled runtime. The edit check now uses a fresh runtime,
-  isolating it from create-dialog scroll state while retaining the create and
-  cancel assertions. This fix is pending rerun; do not treat these surfaces as
-  verified or as clearing the integration blocker.
-  CI run #42516532301 exposed a genuine production login cancellation gap: the
-  loading WebView region replaced the backup content (including its cancel
-  button). The running surface now retains the accessible cancel action beside
-  the loading status, while stale login errors remain hidden. This parity
-  correction is pending CI; no real auth/WebView was started for the headless
-  coverage. Release workflow #42517065734 then reported E0382 because the
-  cancel button was moved into the running-WebView branch before the mutually
-  exclusive login panel could use it. The button is now mounted separately in
-  the selected branch, preserving the cancel action without requiring a clone.
-  This compile fix is pending workflow rerun; do not treat CI as passed. Native macOS/AppKit/Wry
-  runtime validation, full UI integration/parity, accessibility validation,
-  packaging/platform/performance evidence, and legacy eframe visual checks remain
-  open. The configured Rune capture workflow is still needed for visual review.
+  `src/rune_backup_live/smoke/scenes.rs:67`. Despite this successful workflow,
+  all cutover blockers remain open: eframe/default-launcher replacement,
+  production UI integration/parity, README gates, native runtime and platform
+  validation, accessibility validation, packaging/performance evidence, and
+  legacy eframe visual checks. Do not treat this fixture review as clearing any
+  of them.
 
 ## Cutover blockers
 
@@ -234,10 +215,15 @@ same app:
    behavior is source-level only and has not been runtime-verified on macOS
    here. Full UI/platform evidence, the default launcher, and eframe removal
    remain blockers.
-5. The existing debug fixtures represented by real Rune view paths, with
-   interaction tests and screenshots covering at least signed-out/login chrome,
-   backup empty/uploading/failure, and both settings tabs. Existing eframe demo
-   screenshots are not Rune parity evidence.
+ 5. The existing debug fixtures represented by real Rune view paths, with
+    interaction tests and screenshots covering at least signed-out/login chrome,
+    backup empty/uploading/failure, and both settings tabs. Existing eframe demo
+    screenshots are not Rune parity evidence. Workflow #42519744890 now passes
+    the fixture interaction tests and captures, but its `--rune-backup-smoke`,
+    `--rune-login-fixture`, and settings fixture routes are diagnostic render
+    surfaces, not screenshots of the production `live_view`; this screenshot
+    criterion therefore remains open until production view-path coverage is
+    captured and reviewed.
 
 These are deliberate blockers for this backup slice, not implied ports:
 
