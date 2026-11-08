@@ -333,7 +333,7 @@ fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
     assert_eq!(dialog["role"], "dialog");
     assert_eq!(dialog["name"], "Neues Sicherungsziel");
     let photo = find_a11y_node(&json, "toggle-photos").expect("photo checkbox is accessible");
-    assert_eq!(photo["role"], "checkbox");
+    assert_eq!(photo["role"], "check-box");
     assert_eq!(photo["states"].as_array().unwrap().len(), 1);
     assert_eq!(photo["states"][0], "checked");
 

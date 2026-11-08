@@ -146,8 +146,11 @@ settings-only Rune fixture is not an app cutover.
   target-form and pending-conflict overlays have been implemented with Rune's
   modal API, bounded scrollable contents, and semantic dialog controls. Headless
   tests now cover hit blocking, constrained layout, accessibility tree, and
-  conflict priority, but were not run here; do not treat these surfaces as
-  verified or as clearing the integration blocker. Native macOS/AppKit/Wry
+  conflict priority. Workflow #42514962995 ran the Rune-backup test job and
+  found one failure: Rune reports the photo control role as `check-box`, not
+  `checkbox`. The assertion is corrected, but the fix has not yet been rerun;
+  do not treat these surfaces as verified or as clearing the integration
+  blocker. Native macOS/AppKit/Wry
   runtime validation, full UI integration/parity, accessibility decision/gates,
   packaging/platform/performance evidence, and legacy eframe visual checks remain
   open. The configured Rune capture workflow is still needed for visual review.
