@@ -151,8 +151,15 @@ settings-only Rune fixture is not an app cutover.
   test clicked the cancel button's layout center, which can lie outside its
   scrolled/clipped visible hit area. It now clicks the center of Rune's
   reported visible intersection and still asserts that the explicit cancel
-  action clears `state.form`. This correction has not yet been rerun; do not
-  treat these surfaces as verified or as clearing the integration blocker.
+  action clears `state.form`. Workflow #42517959583 (commit `a7fa09d`) then
+  showed that the test's positive wheel delta moved content in the wrong
+  direction: pinned Rune's `Runtime::wheel` subtracts `dy` from the scroll
+  offset, so positive `dy` moves content down. The test now sends a negative
+  wheel delta to scroll down to the cancel action, retaining the positive
+  visible-hit assertion and actual cancel click/state assertion. Release build
+  passed in #42517959583; its Rune-backup test job had 314 passed / 1 failed.
+  This fix is pending rerun; do not treat these surfaces as verified or as
+  clearing the integration blocker.
   CI run #42516532301 exposed a genuine production login cancellation gap: the
   loading WebView region replaced the backup content (including its cancel
   button). The running surface now retains the accessible cancel action beside

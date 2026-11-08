@@ -386,7 +386,9 @@ fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
     assert_eq!(runtime.state.page, LivePage::Backup, "modal must block background actions");
     assert!(runtime.state.form.is_some());
 
-    runtime.wheel(210.0, 150.0, 800.0);
+    // Rune applies positive `dy` by moving content down; reveal the lower
+    // controls by scrolling the dialog content upward with a negative delta.
+    runtime.wheel(210.0, 150.0, -800.0);
     runtime.frame(2.0 / 60.0);
     let cancel = runtime
         .elements()
