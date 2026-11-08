@@ -15,7 +15,7 @@ pub enum Appearance {
 }
 
 impl Appearance {
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature = "legacy-eframe"))]
     pub(crate) fn from_code(code: &str) -> Option<Self> {
         match code.trim().to_ascii_lowercase().as_str() {
             "system" => Some(Appearance::System),

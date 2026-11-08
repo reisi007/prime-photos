@@ -208,6 +208,7 @@ fn signed_out_state() -> LiveState {
         lifecycle_route: super::super::lifecycle_route::LifecycleRoute::default(),
         tray_route: super::super::tray_route::TrayRoute::default(),
         pending_show_request: false,
+        ignore_initial_login_activation: false,
         child_bounds: None,
         form: None,
         status: None,
