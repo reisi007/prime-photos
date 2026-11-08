@@ -237,6 +237,7 @@ impl LiveState {
             one_time,
             one_time_resume,
             drop_hovered: false,
+            marketplaces_open: false,
         })
     }
 }

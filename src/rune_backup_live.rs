@@ -72,6 +72,7 @@ struct LiveState {
     one_time: Option<crate::folders::BackupFolder>,
     one_time_resume: bool,
     drop_hovered: bool,
+    marketplaces_open: bool,
 }
 
 impl LiveState {

@@ -158,8 +158,7 @@ pub(super) fn signed_in_notice(state: &LiveState, theme: tok::Theme) -> El {
                     .radius(AVATAR_DIAMETER / 2.0)
                     .clip_rounded(AVATAR_DIAMETER / 2.0)
                     .fill(theme.control_track)
-                    .center_x()
-                    .center_y()
+                    .center()
                     .child(text(initial).font(tok::type_::BODY).color(theme.text_secondary))
             }
         };

@@ -215,6 +215,7 @@ fn signed_out_state() -> LiveState {
         one_time: None,
         one_time_resume: false,
         drop_hovered: false,
+        marketplaces_open: false,
     }
 }
 

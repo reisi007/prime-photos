@@ -34,8 +34,12 @@ pub(super) fn install_about_item() {
     // SAFETY: AppKit menus are main-thread-only; `app` is retained, and its
     // submenu/items returned here are retained for the duration of the lookup.
     let about_item = unsafe {
-        let root = app.mainMenu()?;
-        let app_menu = root.itemAtIndex(0)?.submenu()?;
+        let Some(root) = app.mainMenu() else {
+            return;
+        };
+        let Some(app_menu) = root.itemAtIndex(0).and_then(|item| item.submenu()) else {
+            return;
+        };
         (0..app_menu.numberOfItems())
             .filter_map(|index| app_menu.itemAtIndex(index))
             .find(|item| item.action() == Some(sel!(orderFrontStandardAboutPanel:)))
