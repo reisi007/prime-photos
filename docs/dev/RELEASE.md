@@ -1207,28 +1207,29 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 - **Kein Release, kein Tag:** Dies ist ein **ausschließlich lokaler** Beleg. Es gibt **kein**
   GitHub-Release `v0.3.0` und **keinen** Git-Tag `v0.3.0`; das DMG wurde **nicht** hochgeladen und
   hängt an keinem Release. Die Nummer folgt der Paketversion, nicht einem Tag.
-- **Quellstand:** `ea15dee` (persistente Rune-Sidebar) und darauf `d9f03eb` (Material-Symbols-Icons
-  in der Sidebar, dazu der Versionssprung auf 0.3.0). `Cargo.toml` nennt `version = "0.3.0"`.
-- **Bundle (lokal, §4):** Nach `touch build.rs` lief `VERSION=0.3.0 BUILD=3 ./packaging/make-app.sh`;
+- **Quellstand:** `ea15dee` (persistente Rune-Sidebar) → `d9f03eb` (Material-Symbols-Icons in der
+  Sidebar, dazu der Versionssprung auf 0.3.0) → `a8ddf9b` (Belege) → `ed8a566` (Sidebar-Ausrichtung:
+  Logo, Nav-Icons und Konto-Block auf gemeinsamer Linkkante). `Cargo.toml` nennt `version = "0.3.0"`.
+- **Bundle (lokal, §4):** Nach `touch build.rs` lief `VERSION=0.3.0 BUILD=4 ./packaging/make-app.sh`;
   Ergebnis `target/dist/Prime Photos.app`. `Info.plist`: `CFBundleShortVersionString 0.3.0`,
-  `CFBundleVersion 3`, `CFBundleIdentifier de.reisinger.prime-photos`. `lipo -archs`: `arm64`.
-  Ad-hoc signiert; `codesign --verify --strict --verbose=2` meldete „valid on disk“ und
-  „satisfies its Designated Requirement“. Im Binary ist der Commit-Stempel `d9f03eb` enthalten.
+  `CFBundleVersion 4`, `CFBundleIdentifier de.reisinger.prime-photos`. Ad-hoc signiert;
+  `codesign --verify --strict --verbose=2` meldete „valid on disk“ und „satisfies its Designated
+  Requirement“. Im Binary ist der Commit-Stempel `ed8a566` enthalten.
 - **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, ca. 9,2 MB, erzeugt mit
   `hdiutil create -volname "Prime Photos" -srcfolder "target/dist/Prime Photos.app" -ov -format
   UDZO`. `hdiutil verify` meldete **checksum … is VALID**. SHA-256:
-  `f7f9487dc702b45a87891afd11095d543fe38e4a537c8a1341409b23917d4dc2`. Gemountet geprüft:
-  Version `0.3.0`, Build `3`, korrekter Bundle-Identifier, `codesign --verify` gültig.
+  `85a9c1bbaf44c83c28ebe450ac2ec5643c8e6fb884b0225f4cb5b25f759e7f44`. Gemountet geprüft:
+  Version `0.3.0`, Build `4`, `codesign --verify` gültig.
 - **Tests und Gates:** `cargo test --locked --no-default-features --features rune-backup` →
-  **323 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `ratchet check` →
+  **324 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `ratchet check` →
   **8 von 8** Gates; `git diff --check` sauber. Die Läufe `42891842501` (CI) und `42891842460`
   („Agent gates“) waren für `ea15dee` erfolgreich.
 - **Rune-Produktionsroute (visuell, isoliertes Testprofil):** Die Sitzung wurde aus dem vorhandenen
   Prime-Photos-Login wiederhergestellt („Gespeicherte Sitzung gefunden“, Access-Token und
-  Web-Cookies erneuert). Sichtbar waren die Sidebar mit Material-Symbols-Icons, der Konto-Block und
-  drei Sicherungsziele. `background_sync=false`, `paused=true`; es wurde **kein** Upload und **kein**
-  Scan ausgelöst. Screenshot lokal unter
-  `target/rune-macos-native-evidence/production-targets.png`.
+  Web-Cookies erneuert). Sichtbar waren die Sidebar mit Material-Symbols-Icons, Logo, Nav-Icons und
+  Konto-Block auf einer gemeinsamen Linkkante sowie drei Sicherungsziele. `background_sync=false`,
+  `paused=true`; es wurde **kein** Upload und **kein** Scan ausgelöst. Screenshot lokal unter
+  `target/rune-macos-native-evidence/production-aligned.png`.
 - **Grenze dieser Beobachtung:** eine lokale View-/Laufzeitbeobachtung auf macOS — **keine**
   Plattformparität für Windows/Linux und **kein** Beleg für die vollständige Rune-Migration.
 - **Offen:** die Default-Launcher-/eframe-Ablösung, die Plattform-Gates und die übrigen Blocker aus
