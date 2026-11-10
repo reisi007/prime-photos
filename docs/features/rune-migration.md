@@ -114,6 +114,23 @@ settings-only Rune fixture is not an app cutover.
   uploads are not supported and remain future/backlog work. The
   explicit route's lifecycle parity
   and remaining blockers are detailed below; this is not a cutover.
+- The production `--rune-backup` view has a permanent left sidebar in both
+  signed-out and signed-in states. Its top-down structure is: Prime Photos
+  brand strip (draggable window chrome), navigation tablist with
+  "Datensicherung" and "Einstellungen", a flexible spacer, and an account
+  footer with marketplace, login status or signed-in profile plus display name,
+  and a sign-out button that exists only while signed in. The navigation
+  landmark wraps only the tablist; brand and account are outside it, and the
+  tablist has its own label. Navigation items are AccessKit `tab`s in a
+  `tablist`, exactly one carries `selected` (and `focus_selected`), About and
+  the third-party licenses deliberately keep "Datensicherung" selected because
+  they are not navigation destinations, and the signed-out state is a text
+  status rather than an icon. The tablist is one keyboard focus group: Tab
+  enters at the selected tab, arrow keys move focus and activate the tab they
+  land on, and Tab leaves the group. The sidebar is sized at 228 points and is
+  covered by headless Rune view tests at 760×520 and 1180×820 with unclipped
+  bounds; this is view-level test evidence, not platform or runtime
+  verification.
 - `--rune-backup-smoke` is an interactive, synthetic-only visual check of the
   backup layout, including target progress, queue rows and local-only controls.
   It does not load app/account state, scan folders, touch SQLite, authenticate,

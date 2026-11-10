@@ -237,8 +237,13 @@ const EN: &[(&str, &str)] = &[
     ("Abmelden", "Sign out"),
     ("Angemeldet", "Signed in"),
     ("Angemeldet als:", "Signed in as:"),
+    ("Angemeldetes Konto", "Signed-in account"),
+    ("Anmeldung läuft …", "Signing in …"),
     ("Bereit", "Ready"),
     ("Einstellungen", "Settings"),
+    ("Hauptbereiche", "Main sections"),
+    ("Hauptnavigation", "Main navigation"),
+    ("Konto", "Account"),
     (
         "Die Einstellungen konnten nicht gespeichert werden.",
         "The settings could not be saved.",
@@ -738,6 +743,26 @@ mod tests {
                 "Sitzung abgelaufen – bitte erneut anmelden.",
                 "Session expired – please sign in again.",
             ),
+        ] {
+            assert_eq!(tr_for(Lang::De, source), source);
+            assert_eq!(tr_for(Lang::En, source), english);
+        }
+    }
+
+    #[test]
+    fn rune_backup_sidebar_strings_are_translated() {
+        for (source, english) in [
+            ("Abmelden", "Sign out"),
+            ("Angemeldet", "Signed in"),
+            ("Angemeldet als:", "Signed in as:"),
+            ("Angemeldetes Konto", "Signed-in account"),
+            ("Anmeldung läuft …", "Signing in …"),
+            ("Hauptbereiche", "Main sections"),
+            ("Hauptnavigation", "Main navigation"),
+            ("Konto", "Account"),
+            ("Marktplatz", "Marketplace"),
+            ("Nicht angemeldet", "Not signed in"),
+            ("Sitzung wird wiederhergestellt …", "Restoring session …"),
         ] {
             assert_eq!(tr_for(Lang::De, source), source);
             assert_eq!(tr_for(Lang::En, source), english);

@@ -129,72 +129,142 @@ pub(super) fn poll(state: &mut LiveState) -> bool {
     state.account_identity.apply_update()
 }
 
-pub(super) fn signed_in_notice(state: &LiveState, theme: tok::Theme) -> El {
-    let profile = if let Some(name) = state.account_identity.name.as_deref() {
-        let avatar = state
-            .account_identity
-            .image
-            .as_ref()
-            .filter(|image| image.is_ready() && image.error().is_none());
-        let avatar = match avatar {
-            Some(image) => el()
-                .key("account-avatar")
+pub(super) fn sidebar_account(state: &LiveState, theme: tok::Theme) -> El {
+    let logged_in = state.logged_in();
+    let account_status = if logged_in {
+        signed_in_profile(state, theme)
+    } else {
+        let status = if state.has_pending_session() {
+            tr("Sitzung wird wiederhergestellt …")
+        } else if state.login.running {
+            tr("Anmeldung läuft …")
+        } else {
+            tr("Nicht angemeldet")
+        };
+        text(status)
+            .key("sidebar-account-status")
+            .role("status")
+            .font(tok::type_::LABEL)
+            .color(theme.text_secondary)
+            .wrap()
+    };
+    let marketplace = col()
+        .key("sidebar-marketplace")
+        .role("group")
+        .label(tr("Marktplatz"))
+        .w_full()
+        .gap(2.0)
+        .child(
+            text(tr("Marktplatz"))
+                .key("sidebar-marketplace-label")
+                .font(tok::type_::LABEL)
+                .color(theme.text_secondary)
+                .a11y_hidden(),
+        )
+        .child(
+            text(crate::countries::country_label(&state.config.country))
+                .key("sidebar-marketplace-value")
+                .font(tok::type_::BODY)
+                .color(theme.text)
+                .wrap(),
+        );
+    let mut account = col()
+        .key("sidebar-account")
+        .role("group")
+        .label(tr("Konto"))
+        .w_full()
+        .gap(10.0)
+        .child(
+            text(tr("Konto"))
+                .key("sidebar-account-heading")
+                .font(tok::type_::LABEL)
+                .color(theme.text_secondary)
+                .a11y_hidden(),
+        )
+        .child(account_status)
+        .child(marketplace);
+    if logged_in {
+        account = account.child(
+            super::widgets::action_button(
+                "sign-out",
+                tr("Abmelden").to_owned(),
+                theme,
+                theme.control_track,
+                theme.text,
+                |state: &mut LiveState, tx: &mut Tx| state.logout(tx),
+            )
+            .w_full(),
+        );
+    }
+    account
+}
+
+fn signed_in_profile(state: &LiveState, theme: tok::Theme) -> El {
+    let name = state.account_identity.name.as_deref();
+    let avatar = state
+        .account_identity
+        .image
+        .as_ref()
+        .filter(|image| image.is_ready() && image.error().is_none());
+    let avatar = match avatar {
+        Some(image) => el()
+            .key("account-avatar")
+            .w(AVATAR_DIAMETER)
+            .h(AVATAR_DIAMETER)
+            .radius(AVATAR_DIAMETER / 2.0)
+            .clip_rounded(AVATAR_DIAMETER / 2.0)
+            .fill(theme.control_track)
+            .pixels(image.pixels()),
+        None => {
+            let initial = name
+                .and_then(|value| value.chars().next())
+                .map(|character| character.to_uppercase().collect::<String>())
+                .unwrap_or_else(|| "•".to_owned());
+            el()
+                .key("account-avatar-placeholder")
                 .w(AVATAR_DIAMETER)
                 .h(AVATAR_DIAMETER)
                 .radius(AVATAR_DIAMETER / 2.0)
                 .clip_rounded(AVATAR_DIAMETER / 2.0)
                 .fill(theme.control_track)
-                .pixels(image.pixels()),
-            None => {
-                let initial = name
-                    .chars()
-                    .next()
-                    .map(|c| c.to_uppercase().collect::<String>())
-                    .unwrap_or_else(|| "•".to_owned());
-                el()
-                    .key("account-avatar-placeholder")
-                    .w(AVATAR_DIAMETER)
-                    .h(AVATAR_DIAMETER)
-                    .radius(AVATAR_DIAMETER / 2.0)
-                    .clip_rounded(AVATAR_DIAMETER / 2.0)
-                    .fill(theme.control_track)
-                    .center()
-                    .child(text(initial).font(tok::type_::BODY).color(theme.text_secondary))
-            }
-        };
-
-        row()
-            .gap(10.0)
-            .center_y()
-            .child(avatar)
+                .center()
+                .a11y_hidden()
+                .child(text(initial).font(tok::type_::BODY).color(theme.text_secondary))
+        }
+    };
+    let details = if let Some(name) = name {
+        col()
+            .gap(2.0)
             .child(
-                col()
-                    .gap(2.0)
-                    .child(
-                        text(tr("Angemeldet als:"))
-                            .font(tok::type_::LABEL)
-                            .color(theme.text_secondary),
-                    )
-                    .child(text(name.to_owned()).font(tok::type_::BODY).color(theme.text)),
+                text(tr("Angemeldet als:"))
+                    .font(tok::type_::LABEL)
+                    .color(theme.text_secondary),
+            )
+            .child(
+                text(name.to_owned())
+                    .key("account-name")
+                    .font(tok::type_::BODY)
+                    .color(theme.text)
+                    .wrap(),
             )
     } else {
-        text(tr("Angemeldet")).color(theme.text_secondary)
+        col().child(
+            text(tr("Angemeldet"))
+                .key("account-name")
+                .font(tok::type_::BODY)
+                .color(theme.text),
+        )
     };
 
     row()
         .key("account-identity")
+        .role("group")
+        .label(tr("Angemeldetes Konto"))
         .w_full()
+        .gap(10.0)
         .center_y()
-        .justify_between()
-        .child(profile)
-        .child(super::widgets::action_button(
-            "sign-out",
-            tr("Abmelden").to_owned(),
-            theme,
-            theme.control_track,
-            theme.text,
-            |state: &mut LiveState, tx: &mut Tx| state.logout(tx),
-        ))
+        .child(avatar)
+        .child(details.grow(1.0).min_w(0.0))
 }
 
 /// One initial request and at most one retry, and only after a failed result.

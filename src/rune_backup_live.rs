@@ -37,6 +37,9 @@ struct TargetForm {
     error: Option<String>,
 }
 
+#[cfg(test)]
+mod test_support;
+
 struct LiveState {
     config: Config,
     page: LivePage,

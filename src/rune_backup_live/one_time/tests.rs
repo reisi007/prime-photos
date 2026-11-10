@@ -1,11 +1,8 @@
-use super::*;
 use super::super::{LivePage, LiveState};
-use crate::auth::TokenStore;
-use crate::folders::FolderStore;
-use crate::login::{Session, WebviewLogin};
+use super::*;
+use crate::rune_backup_live::test_support::signed_out_state;
 use rune::{Env, Runtime};
 use std::cell::Cell;
-use tokio::sync::watch;
 
 fn classify_from_names(path: &Path) -> DropPathKind {
     match path.file_name().and_then(|name| name.to_str()) {
@@ -153,72 +150,6 @@ fn transient_one_time_target_uses_the_photo_only_content_filter() {
         1,
     );
     assert_eq!(target.content_filter, ContentFilter::Photos);
-}
-
-#[derive(Default)]
-struct NoopTokenStore;
-
-impl TokenStore for NoopTokenStore {
-    fn save(&self, _: &str) -> Result<(), String> {
-        Ok(())
-    }
-
-    fn load(&self) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    fn clear(&self) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-fn signed_out_state() -> LiveState {
-    let runtime = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap(),
-    );
-    let (paused, _) = watch::channel(false);
-    LiveState {
-        config: Config::default(),
-        page: LivePage::Backup,
-        license_tab: crate::about::LicenseTab::Components,
-        settings_tab: crate::rune_settings::SettingsTab::General,
-        autostart: crate::platform::app_shared::Autostart::unavailable_for_test(),
-        autostart_enabled: false,
-        settings_limit_edit: rune::TextEdit::new("0"),
-        settings_album_edit: rune::TextEdit::new(""),
-        settings_slider_origin: 1,
-        store: FolderStore::default(),
-        config_error: None,
-        store_error: None,
-        persist_config: false,
-        persist_store: false,
-        scan_tx: None,
-        upload: Arc::new(Mutex::new(UploadShared::default())),
-        paused,
-        runtime,
-        login: WebviewLogin::new(),
-        session: Arc::new(Mutex::new(Session::default())),
-        token_store: Arc::new(NoopTokenStore),
-        session_wakeup: None,
-        account_identity: super::super::account_identity::AccountIdentity::default(),
-        native_window: None,
-        app_handle: None,
-        lifecycle_route: super::super::lifecycle_route::LifecycleRoute::default(),
-        tray_route: super::super::tray_route::TrayRoute::default(),
-        pending_show_request: false,
-        ignore_initial_login_activation: false,
-        child_bounds: None,
-        form: None,
-        status: None,
-        was_active: false,
-        one_time: None,
-        one_time_resume: false,
-        drop_hovered: false,
-        marketplaces_open: false,
-    }
 }
 
 #[test]
@@ -379,7 +310,9 @@ fn target_form_is_modal_scrollable_and_blocks_backup_controls_at_small_size() {
     );
     assert!(dialog["scroll"].is_array(), "constrained dialog exposes a scroll viewport");
 
-    let (x, y) = runtime.find("open-settings").expect("background control remains mounted");
+    let (x, y) = runtime
+        .find("sidebar-nav-settings")
+        .expect("background navigation remains mounted");
     runtime.pointer_down(x, y);
     runtime.pointer_up(x, y);
     runtime.frame(1.0 / 60.0);

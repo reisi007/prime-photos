@@ -1,4 +1,3 @@
-use super::account_identity;
 use super::targets::{empty_targets, target_card, target_form};
 use super::widgets::{action_button, file_state_text, section_heading};
 use super::one_time::{backup_row, drop_zone};
@@ -11,6 +10,8 @@ use crate::platform::app_shared::ONE_TIME_IDX;
 use crate::upload::{FileState, calculate_pct};
 use rune::tok;
 use rune::{Cx, El, FileDialogOptions, FileDialogResult, ScrollSpec, Tx, col, el, row, text};
+
+mod sidebar;
 
 pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
     let system_dark = cx.system_dark();
@@ -28,14 +29,6 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
         LivePage::Backup => row()
             .gap(8.0)
             .center_y()
-            .child(action_button(
-                "open-settings",
-                tr("Einstellungen").to_owned(),
-                theme,
-                theme.control_track,
-                theme.text,
-                |state: &mut LiveState, _| state.page = super::LivePage::Settings,
-            ))
             .child(super::about::about_entry_button::<LiveState>(theme, colors))
             .child(action_button(
                 "add-target",
@@ -61,14 +54,10 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                     );
                 },
             )),
-        LivePage::Settings => action_button(
-            "back-to-backup",
-            tr("Zur Datensicherung").to_owned(),
-            theme,
-            theme.control_track,
-            theme.text,
-            |state: &mut LiveState, _| state.page = super::LivePage::Backup,
-        ),
+        LivePage::Settings => row()
+            .gap(8.0)
+            .center_y()
+            .child(super::about::about_entry_button::<LiveState>(theme, colors)),
         LivePage::About | LivePage::Licenses => el(),
     };
 
@@ -76,26 +65,22 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
         .key("rune-backup-header")
         .w_full()
         .h(HEADER_HEIGHT)
-        .pl(inset + 24.0)
+        .pl(24.0)
         .pr(24.0)
         .center_y()
         .justify_between()
         .fill(theme.card)
         .window_drag()
         .child(
-            col()
-                .gap(2.0)
-                .child(text("Prime Photos").font(tok::type_::TITLE).color(theme.text))
-                .child(
-                    text(match state.page {
-                        LivePage::Backup => tr("Datensicherung"),
-                        LivePage::Settings => tr("Einstellungen"),
-                        LivePage::About => tr("Über Prime Photos"),
-                        LivePage::Licenses => tr("Drittanbieterlizenzen"),
-                    })
-                        .font(tok::type_::LABEL)
-                        .color(theme.text_secondary),
-                ),
+            text(match state.page {
+                LivePage::Backup => tr("Datensicherung"),
+                LivePage::Settings => tr("Einstellungen"),
+                LivePage::About => tr("Über Prime Photos"),
+                LivePage::Licenses => tr("Drittanbieterlizenzen"),
+            })
+            .key("live-page-title")
+            .font(tok::type_::TITLE)
+            .color(theme.text),
         )
         .child(header_action);
 
@@ -274,11 +259,16 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
     }
 
     let auth_notice = if state.logged_in() {
-        account_identity::signed_in_notice(state, theme)
+        el()
     } else if state.has_pending_session() {
-        text(tr("Sitzung wird wiederhergestellt …")).color(theme.text_secondary)
+        text(tr("Sitzung wird wiederhergestellt …"))
+            .key("login-session-status")
+            .role("status")
+            .color(theme.text_secondary)
     } else {
         text(tr("Nicht angemeldet – die Anmeldung startet erst nach deiner Auswahl."))
+            .key("login-session-status")
+            .role("status")
             .color(theme.text_secondary)
     };
     let login_button = if state.login.running {
@@ -420,14 +410,22 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                     .child(col().grow(1.0)),
             )
     };
-    let mut root = col()
+    let mut root = row()
         .key("rune-backup-production")
         .role("window")
         .w_full()
         .h_full()
         .fill(theme.bg)
-        .child(header)
-        .child(main_content);
+        .child(sidebar::sidebar(state, theme, colors, inset))
+        .child(
+            col()
+                .key("rune-backup-main")
+                .grow(1.0)
+                .min_w(0.0)
+                .h_full()
+                .child(header)
+                .child(main_content),
+        );
     // A pending upload decision owns the modal layer. Keep an edit form mounted in
     // state, but never expose it behind the conflict decision.
     if let Some(form) = state.form.as_ref().filter(|_| conflict.is_none()) {
