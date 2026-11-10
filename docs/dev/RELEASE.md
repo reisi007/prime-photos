@@ -1202,6 +1202,38 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 
   Der GitHub-Digest des macOS-DMG stimmt mit dem lokalen SHA-256 aus der obigen Prüfung überein.
 
+**Lokaler Minor-Release v0.3.0 (nicht veröffentlicht):**
+
+- **Kein Release, kein Tag:** Dies ist ein **ausschließlich lokaler** Beleg. Es gibt **kein**
+  GitHub-Release `v0.3.0` und **keinen** Git-Tag `v0.3.0`; das DMG wurde **nicht** hochgeladen und
+  hängt an keinem Release. Die Nummer folgt der Paketversion, nicht einem Tag.
+- **Quellstand:** `ea15dee` (persistente Rune-Sidebar) und darauf `d9f03eb` (Material-Symbols-Icons
+  in der Sidebar, dazu der Versionssprung auf 0.3.0). `Cargo.toml` nennt `version = "0.3.0"`.
+- **Bundle (lokal, §4):** Nach `touch build.rs` lief `VERSION=0.3.0 BUILD=3 ./packaging/make-app.sh`;
+  Ergebnis `target/dist/Prime Photos.app`. `Info.plist`: `CFBundleShortVersionString 0.3.0`,
+  `CFBundleVersion 3`, `CFBundleIdentifier de.reisinger.prime-photos`. `lipo -archs`: `arm64`.
+  Ad-hoc signiert; `codesign --verify --strict --verbose=2` meldete „valid on disk“ und
+  „satisfies its Designated Requirement“. Im Binary ist der Commit-Stempel `d9f03eb` enthalten.
+- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, ca. 9,2 MB, erzeugt mit
+  `hdiutil create -volname "Prime Photos" -srcfolder "target/dist/Prime Photos.app" -ov -format
+  UDZO`. `hdiutil verify` meldete **checksum … is VALID**. SHA-256:
+  `f7f9487dc702b45a87891afd11095d543fe38e4a537c8a1341409b23917d4dc2`. Gemountet geprüft:
+  Version `0.3.0`, Build `3`, korrekter Bundle-Identifier, `codesign --verify` gültig.
+- **Tests und Gates:** `cargo test --locked --no-default-features --features rune-backup` →
+  **323 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `ratchet check` →
+  **8 von 8** Gates; `git diff --check` sauber. Die Läufe `42891842501` (CI) und `42891842460`
+  („Agent gates“) waren für `ea15dee` erfolgreich.
+- **Rune-Produktionsroute (visuell, isoliertes Testprofil):** Die Sitzung wurde aus dem vorhandenen
+  Prime-Photos-Login wiederhergestellt („Gespeicherte Sitzung gefunden“, Access-Token und
+  Web-Cookies erneuert). Sichtbar waren die Sidebar mit Material-Symbols-Icons, der Konto-Block und
+  drei Sicherungsziele. `background_sync=false`, `paused=true`; es wurde **kein** Upload und **kein**
+  Scan ausgelöst. Screenshot lokal unter
+  `target/rune-macos-native-evidence/production-targets.png`.
+- **Grenze dieser Beobachtung:** eine lokale View-/Laufzeitbeobachtung auf macOS — **keine**
+  Plattformparität für Windows/Linux und **kein** Beleg für die vollständige Rune-Migration.
+- **Offen:** die Default-Launcher-/eframe-Ablösung, die Plattform-Gates und die übrigen Blocker aus
+  `docs/features/rune-migration.md` bzw. Issue #49 bleiben offen.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
