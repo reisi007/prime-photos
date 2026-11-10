@@ -11,7 +11,7 @@ mod demo;
 mod destination;
 mod folders;
 mod i18n;
-#[cfg(feature = "legacy-eframe")]
+#[cfg(any(feature = "legacy-eframe", feature = "rune-backup"))]
 mod icons;
 mod login;
 mod logging;

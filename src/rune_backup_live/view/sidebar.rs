@@ -1,6 +1,7 @@
 use super::super::{LivePage, LiveState, account_identity};
 use super::HEADER_HEIGHT;
 use crate::i18n::tr;
+use crate::icons::rune_ui::{BRAND_LOGO_PX, NAV_ICON_PX, NavIcon, brand_logo, nav_icon};
 use crate::rune_theme::Palette;
 use rune::tok;
 use rune::{El, Tx, col, el, row, text};
@@ -28,8 +29,16 @@ pub(super) fn sidebar(
                 .w_full()
                 .h(HEADER_HEIGHT)
                 .pl(titlebar_inset)
+                .gap(6.0)
                 .center_y()
                 .window_drag()
+                .child(
+                    el().key("sidebar-brand-logo")
+                        .w(BRAND_LOGO_PX)
+                        .h(BRAND_LOGO_PX)
+                        .pixels(&brand_logo())
+                        .a11y_hidden(),
+                )
                 .child(
                     text("Prime Photos")
                         .key("sidebar-brand-name")
@@ -54,7 +63,7 @@ pub(super) fn sidebar(
                         .child(sidebar_nav_item(
                             "sidebar-nav-backup",
                             tr("Datensicherung").to_owned(),
-                            "▤",
+                            NavIcon::Backup,
                             backup_active,
                             theme,
                             colors,
@@ -63,7 +72,7 @@ pub(super) fn sidebar(
                         .child(sidebar_nav_item(
                             "sidebar-nav-settings",
                             tr("Einstellungen").to_owned(),
-                            "⚙",
+                            NavIcon::Settings,
                             !backup_active,
                             theme,
                             colors,
@@ -90,21 +99,12 @@ pub(super) fn sidebar(
 fn sidebar_nav_item(
     key: &'static str,
     label: String,
-    icon: &'static str,
+    icon: NavIcon,
     active: bool,
     theme: tok::Theme,
     colors: Palette,
     action: impl Fn(&mut LiveState, &mut Tx) + 'static,
 ) -> El {
-    let marker = if active {
-        el().key(format!("{key}-active"))
-            .w(3.0)
-            .h(18.0)
-            .radius(2.0)
-            .fill(colors.primary_fill)
-    } else {
-        el().w(3.0).h(18.0)
-    };
     el().key(key)
         .role("tab")
         .label(label.clone())
@@ -115,6 +115,8 @@ fn sidebar_nav_item(
         .px(10.0)
         .center_y()
         .radius(8.0)
+        // Selected row: the same subtle fill as the eframe sidebar. No extra
+        // marker — the row fill plus the teal icon carry the state.
         .fill(if active {
             theme.control_track
         } else {
@@ -127,15 +129,18 @@ fn sidebar_nav_item(
             row()
                 .gap(10.0)
                 .center_y()
-                .child(marker)
                 .child(
-                    text(icon)
-                        .font(tok::type_::BODY)
-                        .color(if active {
-                            colors.primary_fill
-                        } else {
-                            theme.text_secondary
-                        })
+                    el().key(format!("{key}-icon"))
+                        .w(NAV_ICON_PX)
+                        .h(NAV_ICON_PX)
+                        .pixels(&nav_icon(
+                            icon,
+                            if active {
+                                colors.nav_accent
+                            } else {
+                                colors.nav_muted
+                            },
+                        ))
                         .a11y_hidden(),
                 )
                 .child(

@@ -17,6 +17,10 @@ pub(crate) struct Palette {
     pub(crate) toggle_off: Color,
     pub(crate) control_border: Color,
     pub(crate) focus_ring: Color,
+    /// Sidebar navigation icon colour for the selected entry.
+    pub(crate) nav_accent: Color,
+    /// Sidebar navigation icon colour for inactive entries.
+    pub(crate) nav_muted: Color,
 }
 
 pub(crate) fn palette(dark: bool) -> Palette {
@@ -31,6 +35,10 @@ pub(crate) fn palette(dark: bool) -> Palette {
         toggle_off: color(if dark { "#747f8f" } else { "#64748b" }),
         control_border: color(if dark { "#8d99a8" } else { "#64748b" }),
         focus_ring: color(if dark { "#75b8ff" } else { "#005fcc" }),
+        // The eframe sidebar's navigation colours, so the Rune sidebar keeps
+        // the same teal accent and muted glyphs in both themes.
+        nav_accent: color(if dark { "#72d8e8" } else { "#006775" }),
+        nav_muted: color(if dark { "#bac4c6" } else { "#4a5558" }),
     }
 }
 

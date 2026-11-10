@@ -125,6 +125,10 @@ fn assert_live_sidebar(
 ) {
     assert!(runtime.find("rune-backup-sidebar").is_some());
     assert!(runtime.find("sidebar-brand-name").is_some());
+    assert!(
+        runtime.find("sidebar-brand-logo").is_some(),
+        "the brand row carries the app logo next to the title"
+    );
     let active_key = match active_page {
         LivePage::Settings => "sidebar-nav-settings",
         _ => "sidebar-nav-backup",
@@ -144,8 +148,9 @@ fn assert_live_sidebar(
     );
     assert!(
         !a11y_contains_key(navigation, "sidebar-brand-name")
-            && !a11y_contains_key(navigation, "sidebar-account"),
-        "brand and account stay outside the navigation landmark: {accessibility}"
+            && !a11y_contains_key(navigation, "sidebar-account")
+            && !a11y_contains_key(&accessibility, "sidebar-brand-logo"),
+        "brand, logo and account stay outside the navigation landmark: {accessibility}"
     );
 
     let tablist = find_a11y_node(&accessibility, "sidebar-tablist")
@@ -208,20 +213,25 @@ fn assert_live_sidebar(
             "{key} should be {selected_state}: {accessibility}"
         );
     }
-    let active_marker = format!("{active_key}-active");
-    assert!(
-        runtime.find(&active_marker).is_some(),
-        "active marker {active_marker}"
-    );
-    assert_eq!(
-        runtime.find(if active_key == "sidebar-nav-settings" {
-            "sidebar-nav-backup-active"
-        } else {
-            "sidebar-nav-settings-active"
-        }),
-        None,
-        "only the current navigation item is marked active"
-    );
+    for key in ["sidebar-nav-backup", "sidebar-nav-settings"] {
+        let icon = live_view_element(runtime, &format!("{key}-icon"));
+        assert_eq!(
+            icon.text, None,
+            "{key} draws the raster icon instead of a Unicode glyph"
+        );
+        assert_eq!(
+            runtime.find(&format!("{key}-active")),
+            None,
+            "the old 3-px marker is gone; the active row is marked by its fill"
+        );
+        assert!(
+            !a11y_contains_key(&accessibility, &format!("{key}-icon")),
+            "{key} icon stays decorative in the AccessKit tree"
+        );
+    }
+    for glyph in ["▤", "⚙"] {
+        assert!(!a11y_contains_text(&accessibility, glyph), "retired glyph {glyph:?}");
+    }
     assert!(runtime.find("sidebar-account").is_some());
     assert!(runtime.find("sidebar-marketplace-value").is_some());
 
@@ -283,6 +293,7 @@ fn production_live_sidebar_is_accessible_and_fits_minimum_and_desktop_viewports(
             assert_live_sidebar(&runtime, LivePage::Backup, signed_in, expected_status);
             let mut keys = vec![
                 "rune-backup-sidebar",
+                "sidebar-brand-logo",
                 "sidebar-brand-name",
                 "sidebar-nav-backup",
                 "sidebar-nav-settings",
@@ -323,6 +334,7 @@ fn production_live_sidebar_is_accessible_and_fits_minimum_and_desktop_viewports(
             size,
             &[
                 "rune-backup-sidebar",
+                "sidebar-brand-logo",
                 "sidebar-brand-name",
                 "sidebar-nav-backup",
                 "sidebar-nav-settings",
