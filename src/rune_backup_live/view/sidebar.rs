@@ -7,6 +7,15 @@ use rune::tok;
 use rune::{El, Tx, col, el, row, text};
 
 const SIDEBAR_WIDTH: f32 = 228.0;
+/// Optical left edge shared by the logo, the navigation icons and the account
+/// block: the sidebar's 12 pt padding plus the 10 pt inset the navigation rows
+/// already use for their icons.
+const CONTENT_INSET: f32 = 10.0;
+/// Vertical clearance the brand row keeps below the macOS traffic lights. The
+/// lights overlay the window's top-left corner because the content view fills
+/// the titlebar, so the brand must not be indented horizontally — that would
+/// pull the logo off the navigation's left edge.
+const BRAND_TITLEBAR_CLEARANCE: f32 = 10.0;
 
 pub(super) fn sidebar(
     state: &LiveState,
@@ -28,8 +37,13 @@ pub(super) fn sidebar(
                 .key("sidebar-brand")
                 .w_full()
                 .h(HEADER_HEIGHT)
-                .pl(titlebar_inset)
-                .gap(6.0)
+                .pl(CONTENT_INSET)
+                .pt(if titlebar_inset > 0.0 {
+                    BRAND_TITLEBAR_CLEARANCE
+                } else {
+                    0.0
+                })
+                .gap(8.0)
                 .center_y()
                 .window_drag()
                 .child(
@@ -92,7 +106,12 @@ pub(super) fn sidebar(
                         .h(1.0)
                         .fill(theme.separator),
                 )
-                .child(account_identity::sidebar_account(state, theme)),
+                .child(
+                    col()
+                        .w_full()
+                        .pl(CONTENT_INSET)
+                        .child(account_identity::sidebar_account(state, theme)),
+                ),
         )
 }
 

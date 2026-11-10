@@ -1,5 +1,8 @@
 use super::super::live_view;
-use crate::rune_backup_live::test_support::signed_out_state;
+use crate::rune_backup_live::test_support::{
+    a11y_contains_key, a11y_contains_text, a11y_count_role, a11y_focused_key, find_a11y_node,
+    signed_out_state,
+};
 use crate::rune_backup_live::{LivePage, LiveState};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
@@ -56,53 +59,6 @@ fn assert_live_view_bounds(runtime: &Runtime<LiveState>, size: (f32, f32), keys:
             element.visible
         );
     }
-}
-
-fn find_a11y_node<'a>(node: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
-    if node["key"] == key {
-        return Some(node);
-    }
-    node["children"]
-        .as_array()?
-        .iter()
-        .find_map(|child| find_a11y_node(child, key))
-}
-
-fn a11y_children(node: &serde_json::Value) -> &[serde_json::Value] {
-    node["children"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
-}
-
-fn a11y_contains_key(node: &serde_json::Value, key: &str) -> bool {
-    find_a11y_node(node, key).is_some()
-}
-
-fn a11y_count_role(node: &serde_json::Value, role: &str) -> usize {
-    usize::from(node["role"] == role)
-        + a11y_children(node)
-            .iter()
-            .map(|child| a11y_count_role(child, role))
-            .sum::<usize>()
-}
-
-fn a11y_contains_text(node: &serde_json::Value, text: &str) -> bool {
-    node["name"] == text
-        || node["value"] == text
-        || a11y_children(node)
-            .iter()
-            .any(|child| a11y_contains_text(child, text))
-}
-
-fn a11y_focused_key(node: &serde_json::Value) -> Option<String> {
-    if node["states"]
-        .as_array()
-        .is_some_and(|states| states.iter().any(|state| state.as_str() == Some("focused")))
-    {
-        return node["key"].as_str().map(str::to_owned);
-    }
-    a11y_children(node).iter().find_map(a11y_focused_key)
 }
 
 fn assert_a11y_focused(runtime: &Runtime<LiveState>, key: &str) {
@@ -384,6 +340,37 @@ fn production_sidebar_accessibility_tracks_selected_page_without_mutating_auth_s
                 if signed_in { "synthetic-cookie" } else { "" },
                 "rendering does not change authentication state"
             );
+        }
+    }
+}
+
+#[test]
+fn production_live_sidebar_brand_navigation_and_account_share_one_left_edge() {
+    for size in [(760.0, 520.0), (1180.0, 820.0)] {
+        // 0.0 is the headless/full-screen case; 67.0 is Chrome::titlebar_inset
+        // with AppKit's default traffic-light placement.
+        for inset in [0.0, 67.0] {
+            let mut runtime = production_runtime(signed_out_state(), size);
+            if inset > 0.0 {
+                runtime.set_titlebar_inset(inset);
+                for _ in 0..4 {
+                    runtime.frame(1.0 / 60.0);
+                }
+            }
+
+            let logo_left = live_view_element(&runtime, "sidebar-brand-logo").rect[0];
+            for key in [
+                "sidebar-nav-backup-icon",
+                "sidebar-nav-settings-icon",
+                "sidebar-account-heading",
+            ] {
+                let left = live_view_element(&runtime, key).rect[0];
+                assert!(
+                    (left - logo_left).abs() <= 2.0,
+                    "{key} left edge {left} does not share the brand logo's {logo_left} \
+                     at {size:?} with titlebar inset {inset}"
+                );
+            }
         }
     }
 }

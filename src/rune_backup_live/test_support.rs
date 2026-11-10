@@ -72,3 +72,53 @@ pub(super) fn signed_out_state() -> LiveState {
         marketplaces_open: false,
     }
 }
+
+pub(super) fn find_a11y_node<'a>(
+    node: &'a serde_json::Value,
+    key: &str,
+) -> Option<&'a serde_json::Value> {
+    if node["key"] == key {
+        return Some(node);
+    }
+    node["children"]
+        .as_array()?
+        .iter()
+        .find_map(|child| find_a11y_node(child, key))
+}
+
+pub(super) fn a11y_children(node: &serde_json::Value) -> &[serde_json::Value] {
+    node["children"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+pub(super) fn a11y_contains_key(node: &serde_json::Value, key: &str) -> bool {
+    find_a11y_node(node, key).is_some()
+}
+
+pub(super) fn a11y_count_role(node: &serde_json::Value, role: &str) -> usize {
+    usize::from(node["role"] == role)
+        + a11y_children(node)
+            .iter()
+            .map(|child| a11y_count_role(child, role))
+            .sum::<usize>()
+}
+
+pub(super) fn a11y_contains_text(node: &serde_json::Value, text: &str) -> bool {
+    node["name"] == text
+        || node["value"] == text
+        || a11y_children(node)
+            .iter()
+            .any(|child| a11y_contains_text(child, text))
+}
+
+pub(super) fn a11y_focused_key(node: &serde_json::Value) -> Option<String> {
+    if node["states"]
+        .as_array()
+        .is_some_and(|states| states.iter().any(|state| state.as_str() == Some("focused")))
+    {
+        return node["key"].as_str().map(str::to_owned);
+    }
+    a11y_children(node).iter().find_map(a11y_focused_key)
+}
