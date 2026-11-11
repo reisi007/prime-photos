@@ -59,9 +59,9 @@ impl TrayRoute {
         self.is_active()
     }
 
-    /// Rune 53c7f60 exposes OS appearance through `Cx::system_dark()` in the
-    /// view only. Cache it atomically for the main-thread tray reconcile and
-    /// wake that reconcile once when the appearance changes.
+    /// Rune exposes OS appearance through `Cx::system_dark()` in the view
+    /// only. Cache it atomically for the main-thread tray reconcile and wake
+    /// that reconcile once when the appearance changes.
     pub(super) fn observe_system_dark(&self, system_dark: bool) {
         let theme = system_theme(system_dark);
         let next = theme_code(theme);

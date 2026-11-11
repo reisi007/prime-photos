@@ -72,7 +72,7 @@ Version links = Anforderung aus `Cargo.toml`, in Klammern = aufgelöste Version 
 
 | Crate | Version | Rolle | System-Relevanz |
 |---|---|---|---|
-| `rune` | Git-Revision `53c7f60` | GUI (Fenster, Rendering, Widgets) | Linux-Systempakete für Runes Fenster-/Render-Backend sind hier nicht dokumentiert (nicht verifiziert) |
+| `rune` | Git-Revision `c92e462` | GUI (Fenster, Rendering, Widgets) | Linux-Systempakete für Runes Fenster-/Render-Backend sind hier nicht dokumentiert (nicht verifiziert) |
 | `wry` | 0.57.0 (0.57.0) | eingebettetes Login-WebView | Linux: WebKitGTK 4.1 + GTK3; Windows: WebView2; macOS: systemeigenes WebKit |
 | `tray-icon` | 0.26 (0.26.1) | Tray-/Menüleisten-Icon (`src/tray.rs`, `mod tray` in `src/main.rs`) | Linux: GTK3 + AppIndicator-Bibliothek (siehe §5) |
 | `notify-rust` | 4.18 (4.18.2) | Desktop-Benachrichtigungen (`src/notify.rs`) | macOS: `mac-notification-sys`; Windows: `tauri-winrt-notification`; Linux: D-Bus über `zbus` (reines Rust) |
@@ -306,6 +306,6 @@ Crate-Doku / Repo-README:
   SQLite; Windows-Empfehlung)
 - `notify-rust` 4.18.2 — <https://docs.rs/notify-rust/4.18.2/notify_rust/> (D-Bus/`zbus` auf Linux,
   `tauri-winrt-notification` auf Windows, `mac-notification-sys` auf macOS)
-- `rune` (Git-Revision `53c7f60`) — <https://github.com/anomalyco/rune>
+- `rune` (Git-Revision `c92e462`) — <https://github.com/anomalyco/rune>
 - `dirs` 6.0.0 `config_dir()` — <https://docs.rs/dirs/6.0.0/dirs/fn.config_dir.html>
 - rustup, MSVC-Voraussetzungen — <https://rust-lang.github.io/rustup/installation/windows-msvc.html>

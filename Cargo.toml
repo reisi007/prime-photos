@@ -55,12 +55,12 @@ rand = "0.10"
 # `crypto-rust` as its session-encryption backend). No async/zbus stack is
 # pulled in.
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
-# Issue #49 Rune backup work. Keep the exact tested revision and avoid Rune's
-# broad defaults. native-file-dialog supplies the Linux XDG portal path (and
-# enables D-Bus); accessibility preserves native platform trees; Metal is used
-# only on Apple. SVG is omitted because our existing build.rs raster pipeline
-# supplies PNGs.
-rune = { git = "https://github.com/anomalyco/rune", rev = "53c7f60f51ce12bd5da53145d9d86ce1552324e4", default-features = false, features = ["accessibility", "dbus", "metal-backend", "native-file-dialog"] }
+# Issue #49 Rune backup work; tested upstream revision:
+# c92e462e9b0acfe6aab191a062bd33b1fcd25823. Keep Rune defaults disabled:
+# accessibility exposes native platform trees, dbus supports Linux desktop
+# services, metal-backend is used on Apple, and native-file-dialog supplies the
+# Linux XDG portal path. SVG stays off because build.rs supplies PNGs.
+rune = { git = "https://github.com/anomalyco/rune", rev = "c92e462e9b0acfe6aab191a062bd33b1fcd25823", default-features = false, features = ["accessibility", "dbus", "metal-backend", "native-file-dialog"] }
 
 [build-dependencies]
 # Rasterises `assets/*.svg` into PNGs inside `OUT_DIR` (see `build.rs`).
