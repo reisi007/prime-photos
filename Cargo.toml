@@ -43,7 +43,7 @@ toml = "0.8.20"
 walkdir = "2.5.0"
 eframe = { version = "0.31", optional = true }
 egui = { version = "0.36", optional = true }
-rfd = "0.15"
+rfd = "0.17"
 image = "0.25"
 wry = "0.57.0"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
