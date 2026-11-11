@@ -52,7 +52,7 @@ unicode-normalization = "0.1.25"
 # Device login flow (`src/auth.rs`): `sha2` + `base64` build the PKCE S256
 # challenge, `rand` supplies the verifier / device-serial entropy, `keyring`
 # keeps the refresh token in the OS credential store.
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.23"
 rand = "0.10"
 # `default-features = false` + explicit per-OS stores keeps the **blocking** API
