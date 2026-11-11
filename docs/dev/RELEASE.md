@@ -1237,12 +1237,23 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   ([Run `42932228429`](https://github.com/reisi007/prime-photos/actions/runs/42932228429)) und
   „Agent gates“ ([Run `42932228502`](https://github.com/reisi007/prime-photos/actions/runs/42932228502))
   jeweils **success**.
-- **Visueller Beleg für Build 5 — offen:** Der Start des neuen Binaries mit dem isolierten
-  Testprofil `~/.pp-rune-505516d` (`paused=true`, `background_sync=false`, kein Upload, kein Scan)
-  wartet nach dem neuen cdhash auf die macOS-Keychain-Freigabe („Immer erlauben“); der Screenshot
-  für Build 5 steht deshalb noch aus und ist hier **nicht** behauptet. Als **früherer** Beleg
-  (Build 4, Stand `ed8a566`) liegt `target/rune-macos-native-evidence/production-aligned.png` vor:
-  gleiche Sidebar wie Build 5 — seither wurde nur die Menülokalisierung geändert.
+- **Visueller Beleg für Build 5:** Der Start des neuen Binaries mit dem isolierten Testprofil
+  `~/.pp-rune-505516d` ist belegt. Das Startlog
+  `target/rune-macos-native-evidence/production-030-build5.log` zeigt „Gespeicherte Sitzung
+  gefunden“, „Access-Token aufgefrischt (3600 s gültig)“ und „Web-Cookies erneuert“. Der
+  Fenster-Screenshot `target/rune-macos-native-evidence/production-030-build5.png` zeigt die
+  Sidebar mit Logo, die Navigation („Datensicherung“, „Einstellungen“), den Konto-Block
+  (Marktplatz `amazon.de`, „Abmelden“) und drei Sicherungsziele. Der Gesamtfortschritt steht auf
+  „0 von 0 Dateien abgeschlossen“ / „Keine Datei wird gerade übertragen“, die Schaltfläche lautet
+  „Alle Vorgänge fortsetzen“ — der Lauf ist also pausiert, es wird keine Datei übertragen.
+- **Menüleiste am laufenden Prozess geprüft (`osascript`/Accessibility):** Das App-Menü heißt
+  „Prime Photos“ und enthält „Über Prime Photos“ sowie „Prime Photos beenden“; das
+  „Bearbeiten“-Menü enthält „Ausschneiden“, „Kopieren“, „Einfügen“ und „Alles auswählen“. Die
+  Menüs sind damit lokalisiert.
+- **Bekannte Grenze (nicht erledigt):** „Undo“/„Redo“ bleiben englisch, obwohl
+  `app_menu::rune_standard` auch die Selektoren `undo:`/`redo:` umbenennt: AppKit setzt die Titel
+  dieser beiden Einträge beim Menü-Validieren selbst (Undo-Manager) und überschreibt damit die
+  statische Umbenennung.
 - **Grenze:** belegt sind ausschließlich macOS/arm64-Bundle und -DMG; die Windows-/Linux-Laufzeit
   ist offen. Eine Plattformparität ist damit **nicht** gezeigt.
 - **Offen:** die Plattform-Gates (Windows/Linux-Laufzeit) und die native macOS/AppKit/Wry-

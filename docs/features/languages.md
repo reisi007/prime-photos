@@ -70,7 +70,7 @@ and could alter the sign-in page.
   beenden", Ausblenden/Einblenden/Dienste), das Edit-Menü (Titel sowie
   Rückgängig, Wiederholen, Ausschneiden, Kopieren, Einfügen, Alles auswählen)
   und das Window-Menü (Titel sowie Minimieren, Schließen) zeigen die aktuelle
-  UI-Sprache. Rune installiert seine Standardmenüs selbst und zwar mit festen
+  UI-Sprache — mit der unten genannten Ausnahme für Undo/Redo. Rune installiert seine Standardmenüs selbst und zwar mit festen
   englischen Titeln; `app_menu::rune_standard` findet die vorhandenen Einträge
   über ihre stabilen AppKit-Selektoren und benennt sie **in place** um
   (idempotent, keine Struktur-/Key-Änderung, No-op solange ein Eintrag fehlt).
@@ -84,6 +84,10 @@ and could alter the sign-in page.
   lokalisiert — die Menübefunde in `docs/original/SPEC_OS_INTEGRATION.md` sind
   reine Verhaltensbeobachtung. Für Windows/Linux wird kein entsprechendes
   natives Menüverhalten zugesagt; dort ist der Refresh ein No-op.
+  **Grenze:** „Undo“/„Redo“ bleiben in der Systemsprache (englisch), weil AppKit
+  die Titel dieser beiden Einträge beim Menü-Validieren selbst setzt
+  (Undo-Manager); alle übrigen App- und Edit-Menüeinträge folgen der
+  UI-Sprache.
 
 - **Dateinamen-Kodierung: NFC (User-Entscheidung 2026-10-14):** die
   Upload-Namens-Kodierung (NFC) betrifft auch den Anzeigetext — Details in
