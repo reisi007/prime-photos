@@ -190,7 +190,6 @@ const EN: &[(&str, &str)] = &[
     ("Speichern", "Save"),
     // -- app shell / navigation -----------------------------------------
     ("Abmelden", "Sign out"),
-    ("Angemeldet", "Signed in"),
     ("Angemeldet als:", "Signed in as:"),
     ("Angemeldetes Konto", "Signed-in account"),
     ("Anmeldung läuft …", "Signing in …"),
@@ -217,6 +216,8 @@ const EN: &[(&str, &str)] = &[
         "Nicht angemeldet – die Anmeldung startet erst nach deiner Auswahl.",
         "Not signed in — sign-in starts only when you choose.",
     ),
+    // Sidebar account block while the profile name has not arrived yet.
+    ("Wird geladen …", "Loading …"),
     // -- backup list ----------------------------------------------------
     ("Angehalten bei {} %", "Paused at {} %"),
     ("ANGEHALTEN", "PAUSED"),
@@ -649,7 +650,6 @@ mod tests {
     fn rune_backup_sidebar_strings_are_translated() {
         for (source, english) in [
             ("Abmelden", "Sign out"),
-            ("Angemeldet", "Signed in"),
             ("Angemeldet als:", "Signed in as:"),
             ("Angemeldetes Konto", "Signed-in account"),
             ("Anmeldung läuft …", "Signing in …"),
@@ -659,6 +659,7 @@ mod tests {
             ("Marktplatz", "Marketplace"),
             ("Nicht angemeldet", "Not signed in"),
             ("Sitzung wird wiederhergestellt …", "Restoring session …"),
+            ("Wird geladen …", "Loading …"),
         ] {
             assert_eq!(tr_for(Lang::De, source), source);
             assert_eq!(tr_for(Lang::En, source), english);

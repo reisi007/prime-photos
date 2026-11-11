@@ -259,7 +259,15 @@ production sign-in action.
   profile picture (no API identified yet — placeholder until then) plus
   "Angemeldet als:" und "Abmelden"; when **not** signed in, an icon replaces the
   picture. The green/red status color coding is kept deliberately (user likes
-  it).
+  it). The block is bottom-anchored, so the state before the profile name
+  arrives renders the same "Angemeldet als:" label plus a localized loading
+  line ("Wird geladen …" / "Loading …") instead of a shorter variant; the name
+  itself stays on one line and is ellipsized when it does not fit. Both
+  together keep the block's height — and with it the avatar, the heading and
+  the divider — from jumping when the identity lands, and the placeholder and
+  picture share one 30 pt circle. Regression tests:
+  `production_sidebar_account_block_does_not_jump_when_the_identity_arrives`
+  and `production_sidebar_avatar_swap_keeps_the_same_size_and_radius`.
 
 ## Original reference
 

@@ -13,10 +13,16 @@ fn production_runtime(state: LiveState, size: (f32, f32)) -> Runtime<LiveState> 
 }
 
 fn synthetic_signed_in_state() -> LiveState {
+    signed_in_state(Some("Synthetic backup account"))
+}
+
+/// A signed-in state whose profile name is either already loaded (`Some`) or
+/// still in flight (`None`), without a profile picture in both cases.
+fn signed_in_state(name: Option<&str>) -> LiveState {
     let mut state = signed_out_state();
     state.config.session_id = "synthetic-session".to_owned();
     state.config.cookie_x_acb = "synthetic-cookie".to_owned();
-    state.account_identity.name = Some("Synthetic backup account".to_owned());
+    state.account_identity.name = name.map(str::to_owned);
     state
 }
 
@@ -477,4 +483,131 @@ fn production_live_sidebar_tablist_supports_keyboard_navigation() {
             && focused.as_deref() != Some("sidebar-nav-settings"),
         "Tab leaves the tablist as a whole, focus is on {focused:?}"
     );
+}
+
+/// Vertical geometry of the bottom-anchored account block. Every line the
+/// profile details gain grows the block upwards, moving the avatar, the
+/// heading and the divider above the marketplace.
+fn account_block_geometry(runtime: &Runtime<LiveState>) -> Vec<(&'static str, [f32; 4])> {
+    [
+        "sidebar-account-footer",
+        "sidebar-account-heading",
+        "account-identity",
+        "account-details",
+        "sidebar-marketplace",
+        "sign-out",
+    ]
+    .into_iter()
+    .map(|key| (key, live_view_element(runtime, key).rect))
+    .collect()
+}
+
+fn assert_same_account_block_geometry(
+    pending: &Runtime<LiveState>,
+    loaded: &Runtime<LiveState>,
+    context: &str,
+) {
+    for ((key, before), (_, after)) in account_block_geometry(pending)
+        .into_iter()
+        .zip(account_block_geometry(loaded))
+    {
+        assert!(
+            (before[1] - after[1]).abs() <= 0.5 && (before[3] - after[3]).abs() <= 0.5,
+            "{context}: {key} moved from {before:?} to {after:?}"
+        );
+    }
+}
+
+/// A decoded 2×2 avatar, standing in for the profile picture that arrives on
+/// the image worker after the name.
+fn synthetic_avatar() -> rune::Image {
+    let waker: rune::Waker = std::sync::Arc::new(|| {});
+    let cache = rune::ImageCache::new(waker);
+    let image = cache.rgba(2, 2, [0x40u8, 0x80, 0xc0, 0xff].repeat(4));
+    image.wait().expect("synthetic avatar decodes");
+    image
+}
+
+/// The identity is fetched after the first frame. The state before its name
+/// arrives renders the same two-line structure with a localized placeholder,
+/// so the bottom-anchored block never changes height once the name lands —
+/// not for a short name, not for one that would wrap.
+#[test]
+fn production_sidebar_account_block_does_not_jump_when_the_identity_arrives() {
+    for size in [(1180.0, 820.0), (760.0, 520.0)] {
+        let pending = production_runtime(signed_in_state(None), size);
+        assert!(
+            pending.find("account-avatar-placeholder").is_some(),
+            "the pending state draws the avatar placeholder"
+        );
+        assert!(
+            pending.find("sign-out").is_some(),
+            "signing out stays available while the identity loads"
+        );
+        let loading = live_view_element(&pending, "account-name");
+        assert_eq!(
+            loading.text.as_deref(),
+            Some(crate::i18n::tr("Wird geladen …")),
+            "the pending name line is the localized loading placeholder, not a fake account name"
+        );
+
+        for name in [
+            "Anna",
+            "Synthetic backup account",
+            "Synthetic backup account with a considerably longer display name",
+        ] {
+            let loaded = production_runtime(signed_in_state(Some(name)), size);
+            let context = format!("{name:?} at {size:?}");
+            assert_same_account_block_geometry(&pending, &loaded, &context);
+
+            let placeholder = live_view_element(&pending, "account-avatar-placeholder").rect;
+            let loaded_avatar = live_view_element(&loaded, "account-avatar-placeholder").rect;
+            assert_eq!(
+                placeholder, loaded_avatar,
+                "{context}: the avatar moved when the name arrived"
+            );
+
+            assert_eq!(
+                live_view_element(&loaded, "account-name").text.as_deref(),
+                Some(name),
+                "{context}: the accessibility text keeps the whole name"
+            );
+        }
+    }
+}
+
+/// Placeholder and decoded picture share one box and one corner radius, so the
+/// swap of the pixels cannot move or reshape anything either.
+#[test]
+fn production_sidebar_avatar_swap_keeps_the_same_size_and_radius() {
+    let size = (1180.0, 820.0);
+    let placeholder = production_runtime(signed_in_state(Some("Anna")), size);
+
+    let mut state = signed_in_state(Some("Anna"));
+    state.account_identity.image = Some(synthetic_avatar());
+    let picture = production_runtime(state, size);
+    assert!(
+        picture.find("account-avatar").is_some(),
+        "the ready image replaces the placeholder"
+    );
+
+    let before = live_view_element(&placeholder, "account-avatar-placeholder");
+    let after = live_view_element(&picture, "account-avatar");
+    assert_eq!(
+        before.rect, after.rect,
+        "placeholder and picture occupy the same box"
+    );
+    assert_eq!(
+        before.radius, after.radius,
+        "placeholder and picture clip to the same radius"
+    );
+    let [_, _, width, height] = after.rect;
+    assert!(width > 0.0 && (width - height).abs() <= 0.5);
+    assert!(
+        (after.radius - width / 2.0).abs() <= 0.5,
+        "the avatar is a circle, radius {} of a {} pt box",
+        after.radius,
+        width
+    );
+    assert_same_account_block_geometry(&placeholder, &picture, "picture swap");
 }

@@ -232,29 +232,26 @@ fn signed_in_profile(state: &LiveState, theme: tok::Theme) -> El {
                 .child(text(initial).font(tok::type_::BODY).color(theme.text_secondary))
         }
     };
-    let details = if let Some(name) = name {
-        col()
-            .gap(2.0)
-            .child(
-                text(tr("Angemeldet als:"))
-                    .font(tok::type_::LABEL)
-                    .color(theme.text_secondary),
-            )
-            .child(
-                text(name.to_owned())
-                    .key("account-name")
-                    .font(tok::type_::BODY)
-                    .color(theme.text)
-                    .wrap(),
-            )
-    } else {
-        col().child(
-            text(tr("Angemeldet"))
+    // The identity arrives a frame or more after the first paint, so the
+    // not-yet-loaded state renders the very same two-line structure with a
+    // placeholder instead of the name. The name stays on one line (ellipsized
+    // when it does not fit) because the block is bottom-anchored: a wrapping
+    // name would grow it and shift the avatar, the heading and the divider.
+    let details = col()
+        .key("account-details")
+        .gap(2.0)
+        .child(
+            text(tr("Angemeldet als:"))
+                .font(tok::type_::LABEL)
+                .color(theme.text_secondary),
+        )
+        .child(
+            text(name.map_or_else(|| tr("Wird geladen …").to_owned(), str::to_owned))
                 .key("account-name")
                 .font(tok::type_::BODY)
-                .color(theme.text),
-        )
-    };
+                .color(theme.text)
+                .truncate(),
+        );
 
     row()
         .key("account-identity")
