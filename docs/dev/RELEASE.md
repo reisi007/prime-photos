@@ -445,11 +445,11 @@ Dateien liegen in `target/dist/`.
    **alten** Commit stehen — beim 0.1.1-Build zeigte er `0a44a37` statt des Tag-Commits; erst
    `touch build.rs` machte `57ca172` daraus. Alternative: `cargo clean -p prime-photos`.
 
-2. **Bundle bauen** (`VERSION=0.3.0`, `BUILD=3`, ad-hoc signiert
+2. **Bundle bauen** (`VERSION=0.3.0`, `BUILD=7`, ad-hoc signiert
    (`codesign --sign -`); eine andere Identität nur explizit über `CODESIGN_IDENTITY`):
 
    ```sh
-   VERSION=0.3.0 BUILD=3 ./packaging/make-app.sh
+   VERSION=0.3.0 BUILD=7 ./packaging/make-app.sh
    # Ergebnis: target/dist/Prime Photos.app
    ```
 
@@ -1204,131 +1204,70 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 
   Der GitHub-Digest des macOS-DMG stimmt mit dem lokalen SHA-256 aus der obigen Prüfung überein.
 
-**v0.3.0, Build 7 (freigegeben):**
+**Release v0.3.0 (veröffentlicht):**
 
-- **Freigabe und Release-Weg:** Nutzerfreigabe am 2026-11-11. Dies ist ein **freigegebener
-  Kandidat**, kein bereits veröffentlichtes Release. Der dokumentierte Weg bleibt §1: Tag `v0.3.0`
-  auslösen; CI baut Windows/Linux, das macOS-DMG wird manuell angehängt.
-- **Quellstand:** `c695d16` (Rune-Pin auf Upstream
-  `c92e462e9b0acfe6aab191a062bd33b1fcd25823`) über `af3bb26` (Konto-Block ohne Layout-Sprung),
-  `ef8868a` (eframe/egui entfernt), `a9a9e8b` (CI ohne Feature-Gate) sowie `20f072d`/`786c94c`
-  (Belege).
-- **Rune-Stand:** auf `c92e462` gepinnt; kein Tag und keine crates.io-Veröffentlichung. Die README
-  verlangt eine Dev-Revision. Eine API-Anpassung war nicht nötig; das Lockfile ergänzt transitiv nur
-  `yeslogic-fontconfig-sys 6.0.1`.
-- **Konto-Block ohne Layout-Sprung:** Der Block ist bottom-anchored. Vor dem Fix wuchs er beim
-  Eintreffen der Identität bei kurzem Namen um 4 pt (Überschrift) bzw. 2 pt (Avatar), bei langem
-  Namen um 52 pt bzw. 26 pt. Der ungeladene Zustand rendert jetzt dieselbe zweizeilige Struktur mit
-  „Wird geladen …“; der Name bleibt einzeilig und wird bei Bedarf gekürzt. Regressionstests:
-  `production_sidebar_account_block_does_not_jump_when_the_identity_arrives` und
-  `production_sidebar_avatar_swap_keeps_the_same_size_and_radius`.
-- **Bundle (lokal, §4):** `VERSION=0.3.0 BUILD=7 ./packaging/make-app.sh` erzeugte
-  `target/dist/Prime Photos.app`. `CFBundleShortVersionString 0.3.0`, `CFBundleVersion 7`,
-  Architektur `arm64`, Commit-Stempel `c695d16` im Binary, ad-hoc signiert. `codesign --verify
-  --strict --verbose=2` meldete „valid on disk“ und „satisfies its Designated Requirement“.
-- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, **19 MB**; `hdiutil verify` meldete
-  „checksum … is VALID“. SHA-256:
-  `db8ebf56caa97428c419391c97762c3c047adb1d9e50b530e79ffb1b087ed523`.
-- **Installation und Abnahme:** Das Bundle wurde nach `/Applications/Prime Photos.app` kopiert;
-  die Signatur wurde nach dem Kopieren geprüft und die App gestartet. Das Log
-  `target/rune-macos-native-evidence/installed-build7.log` zeigt „Gespeicherte Sitzung gefunden“,
+- **Freigabe, Tag und Release:** Nutzerfreigabe am 2026-11-11. Der annotierte Tag `v0.3.0` zeigt
+  auf Commit `36ac9b6db13af87054c1ee9c1b4948e2c7a7f17b`. Der GitHub-Release
+  [v0.3.0](https://github.com/reisi007/prime-photos/releases/tag/v0.3.0) wurde am
+  `2026-11-11T07:45:45Z` veröffentlicht, **nicht** als Draft und **nicht** als Pre-Release.
+  Vorausgehende Release-Arbeit: `4679913` (Belege), `c695d16` (Rune-Pin), `af3bb26` (Konto-Block
+  ohne Layout-Sprung), `ef8868a` (eframe/egui entfernt), `a9a9e8b` (CI ohne Feature-Gate).
+- **Release-CI:** [Actions-Lauf `42980388580`](https://github.com/reisi007/prime-photos/actions/runs/42980388580)
+  erfolgreich (`07:33:44Z`–`07:45:48Z`): `Build windows-x64` bis `07:45:30Z`, `Build linux-x64`
+  bis `07:42:53Z` und `Publish GitHub Release` von `07:45:33Z` bis `07:45:47Z`. `Attest build
+  provenance` war erfolgreich. Die SignPath-Schritte und `Sign Linux release artifacts (GPG)` wurden
+  übersprungen; es wurden keine Signaturen erzeugt. CI und Agent gates für `36ac9b6` waren
+  erfolgreich.
+- **Assets** (Bytes und SHA-256-Digest laut GitHub-API; lokal mit `shasum -a 256` identisch):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 17.554.120 | `f257cacb443afd65f872f2e522cf4309d44483a6e57022d173318d10eddddc4d` |
+  | `Prime-Photos-linux-x64.tar.gz` | 23.429.406 | `12a248a4eb010974be0724d71ac98994ca46d656c846ba4276ac0d7074a8e7a3` |
+  | `Prime-Photos-macos-arm64.dmg` | 19.557.057 | `db8ebf56caa97428c419391c97762c3c047adb1d9e50b530e79ffb1b087ed523` |
+  | `Prime-Photos-windows-x64.zip` | 17.783.257 | `16b915f79a67a9cb35951ccf81dcc89655d2e583fd2e17c1644d87f8fe4da5cc` |
+
+  Die Release enthält vier Assets. Das manuell angehängte macOS-DMG ist nicht workflow-attestiert;
+  sein lokaler SHA-256-Digest stimmt mit dem GitHub-Digest überein.
+- **Attestations live geprüft:** `gh attestation verify <asset> --repo reisi007/prime-photos`
+  endete für `Prime-Photos-linux-x64.tar.gz`, `Prime-Photos-linux-x64.deb` und
+  `Prime-Photos-windows-x64.zip` jeweils mit Exit 0.
+- **Inhalt v0.3.0:** eframe/egui samt Feature und Abhängigkeit wurden vollständig entfernt
+  (30 Dateien, −16.400 Zeilen); `grep -rn 'eframe\|egui' src Cargo.toml` ergab 0 Treffer,
+  `Cargo.lock` sank von 861 auf 764 Pakete. Rune ist nicht optional und auf den Upstream-HEAD
+  `c92e462e9b0acfe6aab191a062bd33b1fcd25823` gepinnt (keine Tags, keine crates.io-Veröffentlichung;
+  `crates.io rune` ist die Skriptsprache, die README verlangt eine Dev-Revision). Eine API-Anpassung
+  war nicht nötig; das Lockfile ergänzt transitiv nur `yeslogic-fontconfig-sys 6.0.1`. Die
+  Laufzeitmenüs sind lokalisiert (`src/app_menu/rune_standard.rs`), und die Rune-MIT-Notice steht im
+  Lizenztext.
+- **Konto-Block ohne Layout-Sprung:** Vor dem Fix wuchs der Sidebar-Block bei kurzem Namen um 4 pt
+  (Überschrift) bzw. 2 pt (Avatar), bei langem Namen um 52 pt bzw. 26 pt. Der ungeladene Zustand
+  rendert „Angemeldet als:“ und „Wird geladen …“; der Name bleibt einzeilig und wird bei Bedarf
+  gekürzt. Regressionstests: `production_sidebar_account_block_does_not_jump_when_the_identity_arrives`
+  und `production_sidebar_avatar_swap_keeps_the_same_size_and_radius`.
+- **Bundle (lokal, §4):** Nach `touch build.rs` erzeugte `VERSION=0.3.0 BUILD=7
+  ./packaging/make-app.sh` `target/dist/Prime Photos.app`. `CFBundleShortVersionString 0.3.0`,
+  `CFBundleVersion 7`, Architektur `arm64`, Commit-Stempel `c695d16` im Binary, ad-hoc signiert.
+  `codesign --verify --strict --verbose=2` meldete „valid on disk“ und „satisfies its Designated
+  Requirement“.
+- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, 19.557.057 Bytes. `hdiutil verify`
+  meldete „checksum … is VALID“. SHA-256:
+  `db8ebf56caa97428c419391c97762c3c047adb1d9e50b530e79ffb1b087ed523`; das DMG wurde per
+  `gh release upload v0.3.0 …` angehängt.
+- **Installation und Start:** Die App wurde nach `/Applications/Prime Photos.app` kopiert; die
+  Signatur wurde danach geprüft und die App gestartet. Das Log
+  `target/rune-macos-native-evidence/installed-build7.log` enthält „Gespeicherte Sitzung gefunden“,
   „Access-Token aufgefrischt (3600 s gültig)“ und „Web-Cookies erneuert“. Der Screenshot
-  `target/rune-macos-native-evidence/installed-build7.png` zeigt Sidebar, Konto-Block mit Avatar
-  und Namen, Marktplatz `amazon.de`, drei Sicherungsziele und Gesamtfortschritt „0 von 0 Dateien
-  abgeschlossen“.
+  `target/rune-macos-native-evidence/installed-build7.png` zeigt Sidebar und Konto-Block mit Avatar
+  und Namen, `amazon.de`, drei Sicherungsziele sowie „0 von 0 Dateien abgeschlossen“. Es gab keinen
+  Upload zu Amazon und keine Abmeldung.
 - **Tests und Gates:** `cargo test --locked` → **327 bestanden** plus **2** Iconset-Tests;
   `cargo test --locked --features rune-ui-spike` → **372 bestanden** plus **2** Iconset-Tests;
   `cargo build --release --locked` erfolgreich; `ratchet check` **8/8**; `git diff --check` sauber.
-- **Grenzen und offen:** Belegt sind weiterhin ausschließlich macOS/arm64; Windows-/Linux-Laufzeit
-  bleibt offen. Undo/Redo bleiben englisch, weil AppKit die Titel setzt. Das README verwendet
-  weiterhin Fixture-Screenshots statt Produktionsaufnahmen.
-
-**Frühere Belege — v0.3.0, Build 5 (nicht veröffentlicht; Historie):**
-
-- **Kein Release, kein Tag:** Dies ist ein **ausschließlich lokaler** Beleg. Es gibt **kein**
-  GitHub-Release `v0.3.0` und **keinen** Git-Tag `v0.3.0`; das DMG wurde **nicht** hochgeladen und
-  hängt an keinem Release. Die Nummer folgt der Paketversion, nicht einem Tag.
-- **Quellstand (Build 5):** `ef8868a` (eframe/egui vollständig entfernt, Rune ist der einzige Host)
-  über `a9a9e8b` (CI baut und liefert den Rune-Baum ohne Feature-Gate), rebased auf `8757fd5`
-  (Dependabot: `sha2` 0.11.1). Frühere Kette dieses Kandidaten:
-  `ea15dee` → `d9f03eb` → `a8ddf9b` → `ed8a566`. `Cargo.toml` nennt `version = "0.3.0"`.
-- **Bundle (lokal, §4):** Nach `touch build.rs` lief `VERSION=0.3.0 BUILD=5
-  ./packaging/make-app.sh`; Ergebnis `target/dist/Prime Photos.app`. `Info.plist`:
-  `CFBundleShortVersionString 0.3.0`, `CFBundleVersion 5`, `CFBundleIdentifier
-  de.reisinger.prime-photos`. `arm64`, ad-hoc signiert; `codesign --verify --strict --verbose=2`
-  meldete „valid on disk“ und „satisfies its Designated Requirement“. Im Binary ist der
-  Commit-Stempel `ef8868a` enthalten.
-- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, **16 MB** (16.552.255 Bytes);
-  `hdiutil verify` meldete **checksum … is VALID**. SHA-256:
-  `cf46a2cfb5c535732bfdb603875d61f71c28227b4b0aad9a74cf3b45740ce07f`. Gemountet geprüft:
-  das Volume enthält genau `Prime Photos.app`, Version `0.3.0`, Build `5`, und
-  `codesign --verify --strict` war gültig (`Signature=adhoc`).
-- **eframe/egui ist entfernt:** `grep -rn 'eframe\|egui' --include='*.rs' --include='*.toml' src
-  Cargo.toml` → **0 Treffer**; `Cargo.lock` enthält keine Pakete `eframe`, `egui` oder
-  `indicatif`. Größen: `target/release/prime-photos` 39.892.576 Bytes (im signierten Bundle
-  39.660.784 Bytes), DMG 16 MB.
-- **Tests und Gates (Stand `ef8868a`):** `cargo test --locked` → **325 bestanden, 0
-  fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `cargo test --locked --features
-  rune-ui-spike` → **370 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests;
-  `cargo build --release --locked` erfolgreich; `ratchet check` → **8 von 8** Gates;
-  `git diff --check` sauber.
-- **CI (Stand `ef8868a`):** GitHub Actions meldet für `ef8868a` „CI“
-  ([Run `42932228429`](https://github.com/reisi007/prime-photos/actions/runs/42932228429)) und
-  „Agent gates“ ([Run `42932228502`](https://github.com/reisi007/prime-photos/actions/runs/42932228502))
-  jeweils **success**.
-- **Visueller Beleg für Build 5:** Der Start des neuen Binaries mit dem isolierten Testprofil
-  `~/.pp-rune-505516d` ist belegt. Das Startlog
-  `target/rune-macos-native-evidence/production-030-build5.log` zeigt „Gespeicherte Sitzung
-  gefunden“, „Access-Token aufgefrischt (3600 s gültig)“ und „Web-Cookies erneuert“. Der
-  Fenster-Screenshot `target/rune-macos-native-evidence/production-030-build5.png` zeigt die
-  Sidebar mit Logo, die Navigation („Datensicherung“, „Einstellungen“), den Konto-Block
-  (Marktplatz `amazon.de`, „Abmelden“) und drei Sicherungsziele. Der Gesamtfortschritt steht auf
-  „0 von 0 Dateien abgeschlossen“ / „Keine Datei wird gerade übertragen“, die Schaltfläche lautet
-  „Alle Vorgänge fortsetzen“ — der Lauf ist also pausiert, es wird keine Datei übertragen.
-- **Menüleiste am laufenden Prozess geprüft (`osascript`/Accessibility):** Das App-Menü heißt
-  „Prime Photos“ und enthält „Über Prime Photos“ sowie „Prime Photos beenden“; das
-  „Bearbeiten“-Menü enthält „Ausschneiden“, „Kopieren“, „Einfügen“ und „Alles auswählen“. Die
-  Menüs sind damit lokalisiert.
-- **Bekannte Grenze (nicht erledigt):** „Undo“/„Redo“ bleiben englisch, obwohl
-  `app_menu::rune_standard` auch die Selektoren `undo:`/`redo:` umbenennt: AppKit setzt die Titel
-  dieser beiden Einträge beim Menü-Validieren selbst (Undo-Manager) und überschreibt damit die
-  statische Umbenennung.
-- **Grenze:** belegt sind ausschließlich macOS/arm64-Bundle und -DMG; die Windows-/Linux-Laufzeit
-  ist offen. Eine Plattformparität ist damit **nicht** gezeigt.
-- **Offen:** die Plattform-Gates (Windows/Linux-Laufzeit) und die native macOS/AppKit/Wry-
-  Validierung aus Issue #49. Die Ablösung des früheren eframe-Default-Launchers ist dagegen
-  **abgeschlossen**: `ef8868a` entfernt eframe/egui vollständig, Rune ist der einzige Host (belegt
-  durch den `grep` oben); daraus folgt keine neue Verifikation.
-
-**Frühere Belege — Build 4 (Stand `ed8a566`, datiert 2026-11-10 und 2026-11-11) — Historie:**
-
-- **Quellstand:** `ea15dee` (persistente Rune-Sidebar) → `d9f03eb` (Material-Symbols-Icons in der
-  Sidebar, dazu der Versionssprung auf 0.3.0) → `a8ddf9b` (Belege) → `ed8a566` (Sidebar-Ausrichtung:
-  Logo, Nav-Icons und Konto-Block auf gemeinsamer Linkkante). `Cargo.toml` nennt `version = "0.3.0"`.
-- **Bundle (lokal, §4):** Nach `touch build.rs` lief `VERSION=0.3.0 BUILD=4 ./packaging/make-app.sh`;
-  Ergebnis `target/dist/Prime Photos.app`. `Info.plist`: `CFBundleShortVersionString 0.3.0`,
-  `CFBundleVersion 4`, `CFBundleIdentifier de.reisinger.prime-photos`. Ad-hoc signiert;
-  `codesign --verify --strict --verbose=2` meldete „valid on disk“ und „satisfies its Designated
-  Requirement“. Im Binary ist der Commit-Stempel `ed8a566` enthalten.
-- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, ca. 9,2 MB, erzeugt mit
-  `hdiutil create -volname "Prime Photos" -srcfolder "target/dist/Prime Photos.app" -ov -format
-  UDZO`. `hdiutil verify` meldete **checksum … is VALID**. SHA-256:
-  `85a9c1bbaf44c83c28ebe450ac2ec5643c8e6fb884b0225f4cb5b25f759e7f44`. Gemountet geprüft:
-  Version `0.3.0`, Build `4`, `codesign --verify` gültig.
-- **Tests und Gates (datierter Beleg vom 2026-11-10, Stand `ed8a566`):**
-  `cargo test --locked --no-default-features --features rune-backup` →
-  **324 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `ratchet check` →
-  **8 von 8** Gates; `git diff --check` sauber. Die Läufe `42891842501` (CI) und `42891842460`
-  („Agent gates“) waren für `ea15dee` erfolgreich. Das damals verwendete Feature `rune-backup`
-  existiert heute nicht mehr; die Zahlen bleiben der Beleg für diesen Stand.
-- **Rune-Produktionsroute (visuell, isoliertes Testprofil):** Die Sitzung wurde aus dem vorhandenen
-  Prime-Photos-Login wiederhergestellt („Gespeicherte Sitzung gefunden“, Access-Token und
-  Web-Cookies erneuert). Sichtbar waren die Sidebar mit Material-Symbols-Icons, Logo, Nav-Icons und
-  Konto-Block auf einer gemeinsamen Linkkante sowie drei Sicherungsziele. `background_sync=false`,
-  `paused=true`; es wurde **kein** Upload und **kein** Scan ausgelöst. Screenshot lokal unter
-  `target/rune-macos-native-evidence/production-aligned.png`.
-- **Grenze dieser Beobachtung:** eine lokale View-/Laufzeitbeobachtung auf macOS — **keine**
-  Plattformparität für Windows/Linux und **kein** Beleg für die vollständige Rune-Migration.
+- **Grenzen:** Laufzeit ist nur für macOS/arm64 belegt; Windows und Linux wurden gebaut und
+  veröffentlicht, aber nicht zur Laufzeit geprüft. Undo/Redo bleiben englisch (AppKit setzt die
+  Titel). Das README nutzt Fixture-Screenshots statt Produktionsaufnahmen. Ad-hoc-Signatur und
+  fehlende Notarisierung bleiben die in §4–§6 dokumentierten Grenzen; A11y ist nur über Tests belegt.
 
 ---
 
