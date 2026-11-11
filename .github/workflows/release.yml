@@ -77,6 +77,9 @@ jobs:
       - name: Cache cargo registry and target
         uses: Swatinem/rust-cache@v2
 
+      # Ausgeliefert wird ausschließlich die Rune-Produktionsroute: Rune ist der
+      # einzige UI-Host und immer einkompiliert, daher ist kein Feature-Set nötig.
+      # Das Kommando ist identisch zum Bundle-Build in `packaging/make-app.sh`.
       - name: cargo build --release --locked
         run: cargo build --release --locked
 

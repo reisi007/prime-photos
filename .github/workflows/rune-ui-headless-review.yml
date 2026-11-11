@@ -21,11 +21,11 @@ jobs:
       - name: Install Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: cargo build --locked --release --no-default-features --features rune-backup
-        run: cargo build --locked --release --no-default-features --features rune-backup
+      - name: cargo build --locked --release
+        run: cargo build --locked --release
 
-      - name: cargo test --locked --no-default-features --features rune-backup
-        run: cargo test --locked --no-default-features --features rune-backup
+      - name: cargo test --locked
+        run: cargo test --locked
 
       - name: cargo build --locked --features rune-ui-spike
         run: cargo build --locked --features rune-ui-spike
