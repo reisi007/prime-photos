@@ -1204,11 +1204,54 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 
   Der GitHub-Digest des macOS-DMG stimmt mit dem lokalen SHA-256 aus der obigen Prüfung überein.
 
-**Lokaler Minor-Release v0.3.0 (nicht veröffentlicht):**
+**Lokaler Minor-Release v0.3.0, Build 5 (nicht veröffentlicht):**
 
 - **Kein Release, kein Tag:** Dies ist ein **ausschließlich lokaler** Beleg. Es gibt **kein**
   GitHub-Release `v0.3.0` und **keinen** Git-Tag `v0.3.0`; das DMG wurde **nicht** hochgeladen und
   hängt an keinem Release. Die Nummer folgt der Paketversion, nicht einem Tag.
+- **Quellstand (Build 5):** `ef8868a` (eframe/egui vollständig entfernt, Rune ist der einzige Host)
+  über `a9a9e8b` (CI baut und liefert den Rune-Baum ohne Feature-Gate), rebased auf `8757fd5`
+  (Dependabot: `sha2` 0.11.1). Frühere Kette dieses Kandidaten:
+  `ea15dee` → `d9f03eb` → `a8ddf9b` → `ed8a566`. `Cargo.toml` nennt `version = "0.3.0"`.
+- **Bundle (lokal, §4):** Nach `touch build.rs` lief `VERSION=0.3.0 BUILD=5
+  ./packaging/make-app.sh`; Ergebnis `target/dist/Prime Photos.app`. `Info.plist`:
+  `CFBundleShortVersionString 0.3.0`, `CFBundleVersion 5`, `CFBundleIdentifier
+  de.reisinger.prime-photos`. `arm64`, ad-hoc signiert; `codesign --verify --strict --verbose=2`
+  meldete „valid on disk“ und „satisfies its Designated Requirement“. Im Binary ist der
+  Commit-Stempel `ef8868a` enthalten.
+- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, **16 MB** (16.552.255 Bytes);
+  `hdiutil verify` meldete **checksum … is VALID**. SHA-256:
+  `cf46a2cfb5c535732bfdb603875d61f71c28227b4b0aad9a74cf3b45740ce07f`. Gemountet geprüft:
+  das Volume enthält genau `Prime Photos.app`, Version `0.3.0`, Build `5`, und
+  `codesign --verify --strict` war gültig (`Signature=adhoc`).
+- **eframe/egui ist entfernt:** `grep -rn 'eframe\|egui' --include='*.rs' --include='*.toml' src
+  Cargo.toml` → **0 Treffer**; `Cargo.lock` enthält keine Pakete `eframe`, `egui` oder
+  `indicatif`. Größen: `target/release/prime-photos` 39.892.576 Bytes (im signierten Bundle
+  39.660.784 Bytes), DMG 16 MB.
+- **Tests und Gates (Stand `ef8868a`):** `cargo test --locked` → **325 bestanden, 0
+  fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `cargo test --locked --features
+  rune-ui-spike` → **370 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests;
+  `cargo build --release --locked` erfolgreich; `ratchet check` → **8 von 8** Gates;
+  `git diff --check` sauber.
+- **CI (Stand `ef8868a`):** GitHub Actions meldet für `ef8868a` „CI“
+  ([Run `42932228429`](https://github.com/reisi007/prime-photos/actions/runs/42932228429)) und
+  „Agent gates“ ([Run `42932228502`](https://github.com/reisi007/prime-photos/actions/runs/42932228502))
+  jeweils **success**.
+- **Visueller Beleg für Build 5 — offen:** Der Start des neuen Binaries mit dem isolierten
+  Testprofil `~/.pp-rune-505516d` (`paused=true`, `background_sync=false`, kein Upload, kein Scan)
+  wartet nach dem neuen cdhash auf die macOS-Keychain-Freigabe („Immer erlauben“); der Screenshot
+  für Build 5 steht deshalb noch aus und ist hier **nicht** behauptet. Als **früherer** Beleg
+  (Build 4, Stand `ed8a566`) liegt `target/rune-macos-native-evidence/production-aligned.png` vor:
+  gleiche Sidebar wie Build 5 — seither wurde nur die Menülokalisierung geändert.
+- **Grenze:** belegt sind ausschließlich macOS/arm64-Bundle und -DMG; die Windows-/Linux-Laufzeit
+  ist offen. Eine Plattformparität ist damit **nicht** gezeigt.
+- **Offen:** die Plattform-Gates (Windows/Linux-Laufzeit) und die native macOS/AppKit/Wry-
+  Validierung aus Issue #49. Die Ablösung des früheren eframe-Default-Launchers ist dagegen
+  **abgeschlossen**: `ef8868a` entfernt eframe/egui vollständig, Rune ist der einzige Host (belegt
+  durch den `grep` oben); daraus folgt keine neue Verifikation.
+
+**Frühere Belege — Build 4 (Stand `ed8a566`, datiert 2026-11-10 und 2026-11-11) — Historie:**
+
 - **Quellstand:** `ea15dee` (persistente Rune-Sidebar) → `d9f03eb` (Material-Symbols-Icons in der
   Sidebar, dazu der Versionssprung auf 0.3.0) → `a8ddf9b` (Belege) → `ed8a566` (Sidebar-Ausrichtung:
   Logo, Nav-Icons und Konto-Block auf gemeinsamer Linkkante). `Cargo.toml` nennt `version = "0.3.0"`.
@@ -1228,9 +1271,6 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   **8 von 8** Gates; `git diff --check` sauber. Die Läufe `42891842501` (CI) und `42891842460`
   („Agent gates“) waren für `ea15dee` erfolgreich. Das damals verwendete Feature `rune-backup`
   existiert heute nicht mehr; die Zahlen bleiben der Beleg für diesen Stand.
-- **Heutiger Stand (2026-11-11, nach der eframe-Ablösung):** Default `cargo test --locked` →
-  **325 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; Rune ist das einzige
-  Host-Feature (kein `rune-backup`-Feature mehr).
 - **Rune-Produktionsroute (visuell, isoliertes Testprofil):** Die Sitzung wurde aus dem vorhandenen
   Prime-Photos-Login wiederhergestellt („Gespeicherte Sitzung gefunden“, Access-Token und
   Web-Cookies erneuert). Sichtbar waren die Sidebar mit Material-Symbols-Icons, Logo, Nav-Icons und
@@ -1239,9 +1279,6 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   `target/rune-macos-native-evidence/production-aligned.png`.
 - **Grenze dieser Beobachtung:** eine lokale View-/Laufzeitbeobachtung auf macOS — **keine**
   Plattformparität für Windows/Linux und **kein** Beleg für die vollständige Rune-Migration.
-- **Offen:** die Plattform-Gates (Windows/Linux-Laufzeit) und die native
-  macOS/AppKit/Wry-Validierung aus Issue #49 bleiben offen. Die frühere
-  eframe-Ablösung ist inzwischen abgeschlossen (Git-Historie).
 
 ---
 
