@@ -41,7 +41,7 @@ tokio = { version = "1.44.2", features = ["full"] }
 futures = "0.3"
 toml = "0.8.20"
 walkdir = "2.5.0"
-eframe = { version = "0.31", optional = true }
+eframe = { version = "0.36", optional = true }
 egui = { version = "0.36", optional = true }
 rfd = "0.15"
 image = "0.25"
