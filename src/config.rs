@@ -4,7 +4,7 @@ use std::{fs, io, path::PathBuf};
 use crate::folders::ConflictResolution;
 
 /// The persisted appearance preference. `System` follows the native theme
-/// reported by eframe/winit; explicit modes override it.
+/// reported by Rune; explicit modes override it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Appearance {
@@ -12,18 +12,6 @@ pub enum Appearance {
     System,
     Light,
     Dark,
-}
-
-impl Appearance {
-    #[cfg(all(debug_assertions, feature = "legacy-eframe"))]
-    pub(crate) fn from_code(code: &str) -> Option<Self> {
-        match code.trim().to_ascii_lowercase().as_str() {
-            "system" => Some(Appearance::System),
-            "light" => Some(Appearance::Light),
-            "dark" => Some(Appearance::Dark),
-            _ => None,
-        }
-    }
 }
 
 fn default_true() -> bool {
@@ -235,7 +223,8 @@ impl Config {
 
     /// The queue's share of the splittable height, clamped to 0.20..=0.80; a
     /// non-finite hand-written value falls back to the default (Issue #33).
-    #[cfg(any(feature = "legacy-eframe", test))]
+    /// Kept for the persisted config contract; the Rune layout does not use it.
+    #[cfg(test)]
     pub fn backup_queue_ratio(&self) -> f32 {
         crate::backup::sanitize_backup_queue_ratio(self.backup_queue_ratio)
     }

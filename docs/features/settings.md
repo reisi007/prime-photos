@@ -19,12 +19,12 @@ name-conflict default), and the account block. Sign-in is automatic and is
   **1..=8** stays.
 - **Appearance in `Config`:** `appearance` stores `system`, `light` or `dark`.
   Missing keys in older `config.toml` files default to `system`. System follows
-  the native appearance reported to egui by eframe/winit; Light and Dark
-  explicitly override it. A selection is saved immediately and takes effect
-  without restarting the app.
-- **Concurrency is a mouse-operable native egui slider:** it keeps egui's
-  built-in `Slider` behavior, displays the exact integer value beside the
-  track, and stays limited to **1..=8**.
+  the native appearance reported by Rune; Light and Dark explicitly override
+  it. A selection is saved immediately and takes effect without restarting the
+  app.
+- **Concurrency is a mouse-operable native Rune slider:** it keeps the shared
+  settings control's slider behavior, displays the exact integer value beside
+  the track, and stays limited to **1..=8**.
 - `slow_mode` remains deliberately **transient** (never persisted), but it
   takes effect **immediately**, including on a running upload.
 - Marketplace is chosen only at sign-in, not in settings.
@@ -47,7 +47,7 @@ name-conflict default), and the account block. Sign-in is automatic and is
 - **Erscheinungsbild (Issue #46).** Neue, sofort gespeicherte Prime-Photos-
   Einstellung `appearance = "system" | "light" | "dark"`. Alte Konfigurationen
   ohne Schlüssel bleiben kompatibel und folgen dem System. `System` nutzt die
-  native Theme-Meldung von eframe/egui; explizites Hell/Dunkel gilt sofort und
+  native Theme-Meldung von Rune; explizites Hell/Dunkel gilt sofort und
   überschreibt sie. Die Original-Spezifikation der Einstellungen enthält keine
   Darstellungsvorgabe — dies ist eine neue Prime-Photos-Funktion.
 

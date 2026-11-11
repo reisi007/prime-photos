@@ -1,5 +1,16 @@
 # Upload queue and progress
 
+> **Hinweis:** Einzelne Implementierungsnotizen unten beschreiben die frühere
+> eframe-Oberfläche. In der Rune-Ansicht (`src/rune_backup_live/`) sind die
+> gemeinsame Warteschlange, der lauf-aggregierte Fortschritt, die Sicherungsziele
+> mit eigenen Zählern und die flache Queue portiert. Die Queue wird in
+> Plan-/Einfügereihenfolge gerendert (`upload.queue`, kein `sort_by`); die frühere
+> Status-Sortierung (In Bearbeitung → Fehlgeschlagen → Warten → Abgeschlossen →
+> Übersprungen) ist **nicht** portiert. Der Dateistatus erscheint je Zeile als
+> Inline-Text. **Nicht portiert** sind die ETA, die Größen-/Status-Tabelle der
+> Queue-Zeilen und die Ergebniszeile (neu hochgeladen / bereits im Konto /
+> unverändert / Fehler); diese Punkte bleiben offen.
+
 All backup targets selected in one run share a single upload queue with a
 configurable concurrency. While a run is active, aggregate progress covers only
 that run; while idle, it sums all targets. Each target row reports its own
@@ -32,16 +43,18 @@ outcome.
   corresponding run plan; non-participating rows may retain persisted counts but
   do not affect the live aggregate. The aggregate count and bar use the run
   counters (`done`/`total`), not a sum of target rows. While idle, the aggregate
-  sums every target row, including the one-time row. ETA uses the run's known
-  bytes and current transfer rate.
-- **Result breakdown:** "done" alone would hide the difference between a
-  real upload and a skip. Results are split into **newly uploaded / already
-  in the account / unchanged / errors**. The breakdown lives in memory for
-  the run/session; `folders.toml` is **not** extended (no schema change);
-  after a restart only the total count is there. **Location:** the **footer
-  aggregates** across all targets **and** the **individual folder row**
-  shows its own three numbers; the file detail keeps as today (both skip
-  cases share one state there).
+  sums every target row, including the one-time row. The earlier eframe view
+  derived an ETA from the run's known bytes and current transfer rate; the Rune
+  view currently shows **no ETA** (open).
+- **Result breakdown (in der Rune-Ansicht offen):** "done" alone would hide the
+  difference between a real upload and a skip. In the earlier eframe UI results
+  were split into **newly uploaded / already in the account / unchanged /
+  errors**. The breakdown lives in memory for the run/session; `folders.toml` is
+  **not** extended (no schema change); after a restart only the total count is
+  there. In that UI the **footer aggregates** across all targets **and** the
+  **individual folder row** showed its own three numbers; the file detail kept
+  both skip cases in one state. The Rune view has not ported the result line or
+  the four counters yet.
 - **Live status of the folder row (Welle 3.3):** whether a row shows
   "Upload läuft" or "Fehler" is derived **live** — if a run is live for this
   target, it shows "läuft"; the **persistent** outcome counts only after
@@ -228,8 +241,8 @@ outcome.
     Trennen, Pausieren). Grund: der Rescan existierte, war aber nur im
     Text-`⋯` versteckt. **Global bleibt es weiterhin ohne „Alles neu prüfen"**
     (nicht beauftragt).
-    **Verworfen (2026-10-14):** das Zeilen-Icon **selbst zu zeichnen** (in
-    `src/icons/eframe_ui.rs`) — der User will keine handgemachten Formen, sondern eine
+    **Verworfen (2026-10-14):** das Zeilen-Icon **selbst zu zeichnen** (im
+    Icon-Modul) — der User will keine handgemachten Formen, sondern eine
     lizenzierte Icon-Bibliothek. Ebenfalls verworfen: das Textzeichen `⋮`
     (U+22EE **fehlt in allen vier** Fonts von `epaint_default_fonts-0.31.1`
     — Hack, Ubuntu-Light, NotoEmoji, emoji-icon-font — und erschiene als □;

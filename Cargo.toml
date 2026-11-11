@@ -5,14 +5,12 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [features]
-default = ["legacy-eframe"]
-legacy-eframe = ["dep:eframe", "dep:egui"]
-# Explicit opt-in to the production Rune backup route. This does not change the
-# default launcher; eframe remains the normal application UI.
-rune-backup = ["dep:rune"]
-# Debug-only Rune migration fixtures and verification routes. The production
-# backup route is also available through `rune-backup` in release builds.
-rune-ui-spike = ["rune-backup"]
+# Rune is the only UI host and is always compiled. This feature only adds the
+# debug-only fixture and verification routes (`--rune-login-fixture`,
+# `--rune-backup-fixture`, `--rune-login`, `--rune-wry-smoke`,
+# `--rune-backup-smoke`) plus the headless tooling; the production route and a
+# bare launch never need it.
+rune-ui-spike = []
 
 [dependencies]
 chrono = { version = "0.4.40", features = ["serde"] }
@@ -26,7 +24,6 @@ bytes = "1"
 clap = { version = "4.5.37", features = ["derive"] }
 dirs = "6.0.0"
 env_logger = "0.11.8"
-indicatif = "0.18.6"
 log = "0.4.27"
 md5 = "0.8.1"
 notify = "8.2.0"
@@ -41,9 +38,6 @@ tokio = { version = "1.44.2", features = ["full"] }
 futures = "0.3"
 toml = "0.8.20"
 walkdir = "2.5.0"
-eframe = { version = "0.31", optional = true }
-egui = { version = "0.36", optional = true }
-rfd = "0.17"
 image = "0.25"
 wry = "0.57.0"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
@@ -61,12 +55,12 @@ rand = "0.10"
 # `crypto-rust` as its session-encryption backend). No async/zbus stack is
 # pulled in.
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
-# Issue #49 Rune backup / migration work. Keep the exact tested revision and
-# avoid Rune's broad defaults; the optional feature is not enabled in normal builds.
-# native-file-dialog supplies the Linux XDG portal path (and enables D-Bus);
-# accessibility preserves native platform trees; Metal is used only on Apple.
-# SVG is omitted because our existing build.rs raster pipeline supplies PNGs.
-rune = { git = "https://github.com/anomalyco/rune", rev = "53c7f60f51ce12bd5da53145d9d86ce1552324e4", optional = true, default-features = false, features = ["accessibility", "dbus", "metal-backend", "native-file-dialog"] }
+# Issue #49 Rune backup work. Keep the exact tested revision and avoid Rune's
+# broad defaults. native-file-dialog supplies the Linux XDG portal path (and
+# enables D-Bus); accessibility preserves native platform trees; Metal is used
+# only on Apple. SVG is omitted because our existing build.rs raster pipeline
+# supplies PNGs.
+rune = { git = "https://github.com/anomalyco/rune", rev = "53c7f60f51ce12bd5da53145d9d86ce1552324e4", default-features = false, features = ["accessibility", "dbus", "metal-backend", "native-file-dialog"] }
 
 [build-dependencies]
 # Rasterises `assets/*.svg` into PNGs inside `OUT_DIR` (see `build.rs`).
@@ -83,7 +77,7 @@ objc2 = "0.6"
 # `NSRunningApplication` (the feature that also unlocks `setActivationPolicy` /
 # `NSApplicationActivationPolicy`, used by `src/app_activation.rs`) are requested
 # **explicitly**: they are active today only through transitive feature
-# unification (webbrowser ← egui-winit, muda, tray-icon, wry, …), which is no
+# unification (webbrowser, muda, tray-icon, wry, Rune, …), which is no
 # promise. Listing them here pins the features our own code names.
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSLocale", "NSString", "NSAppleEventManager", "NSAppleEventDescriptor", "objc2-core-services"] }

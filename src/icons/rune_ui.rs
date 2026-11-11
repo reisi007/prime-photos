@@ -1,13 +1,12 @@
 //! Rune UI icons.
 //!
-//! The same build-time rasters as the eframe chrome (`build.rs`): the two
-//! sidebar navigation glyphs are white 64-px PNGs, the logo is the coloured
-//! 1024-px app icon. Rune draws pixels rather than textures, so this module
-//! decodes each PNG once into `rune::Pixels`, keeps the result in a
-//! [`OnceLock`], and hands out cheap clones (`Pixels` is an `Arc`). Tinting a
-//! navigation icon copies the decoded white raster once per target colour and
-//! only rewrites the RGB channels; the alpha coverage that draws the glyph
-//! stays untouched, exactly like the eframe `.tint()` path.
+//! Build-time rasters from `build.rs`: the two sidebar navigation glyphs are
+//! white 64-px PNGs, the logo is the coloured 1024-px app icon. Rune draws
+//! pixels rather than textures, so this module decodes each PNG once into
+//! `rune::Pixels`, keeps the result in a [`OnceLock`], and hands out cheap
+//! clones (`Pixels` is an `Arc`). Tinting a navigation icon copies the decoded
+//! white raster once per target colour and only rewrites the RGB channels; the
+//! alpha coverage that draws the glyph stays untouched.
 //!
 //! Coupling contract with `build.rs` (the other half of the pair):
 //!   assets/icon-cloud.svg    ⇒ $OUT_DIR/icon-cloud.png    (64 px, white)
@@ -26,12 +25,12 @@ const NAV_SETTINGS_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icon-s
 const APP_LOGO_PNG: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/logo.png"));
 
 /// Logical display size of a sidebar navigation icon, in points. Matches the
-/// eframe sidebar's 18-px icon column; the 64-px source stays crisp up to ~3.5×
+/// sidebar's 18-px icon column; the 64-px source stays crisp up to ~3.5×
 /// DPI.
 pub(crate) const NAV_ICON_PX: f32 = 18.0;
 
-/// Logical display size of the brand logo in points, matching the eframe
-/// sidebar's 30-pt logo.
+/// Logical display size of the brand logo in points, matching the sidebar's
+/// 30-pt logo.
 pub(crate) const BRAND_LOGO_PX: f32 = 30.0;
 
 /// Which sidebar navigation glyph to draw.

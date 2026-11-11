@@ -387,26 +387,28 @@ gh attestation verify Prime-Photos-windows-x64.zip --repo reisi007/prime-photos
   korrekt benennen, dann das falsch benannte Asset löschen und neu hochladen:
   `gh release delete-asset <tag> <falscher-name> --yes`.
 
-### Demo-/Screenshot-Smoke (Debug-only, Issue #45)
+### Fixture-/Screenshot-Smoke (Debug-only)
 
-`src/demo` wird nur mit `debug_assertions` kompiliert. Daher entstehen
+Die Fixtures (`src/rune_fixture.rs`, `src/rune_backup_live/smoke`) werden nur in
+Debug-Builds mit `--features rune-ui-spike` kompiliert. Daher entstehen
 Fixture-Screenshots ausschließlich aus der Debug-Binary; das für ein Release
-gebaute `.app` und `target/release/prime-photos` enthalten keine Fixtures.
-Historische Smoke-Belege in §9 (bis einschließlich v0.1.11) bleiben unverändert
-und beschreiben den damaligen Build-Stand; für neue Releases gilt dieses Verfahren:
+gebaute `.app` und `target/release/prime-photos` enthalten keine
+Debug-Fixture-Routen. Historische Smoke-Belege in §9 (bis einschließlich
+v0.1.11) bleiben unverändert und beschreiben den damaligen Build-Stand; für neue
+Releases gilt dieses Verfahren:
 
 ```sh
 # Visuelle Fixture-Prüfung mit sicheren, synthetischen Daten (kein echtes Konto).
-cargo build --locked
-target/debug/prime-photos --demo=uploading --demo-language=en \
-  --screenshot="$PWD/target/Prime-Photos-release-smoke.png"
+cargo build --locked --features rune-ui-spike
+scripts/capture-rune-ui-review.sh
+# -> target/rune-ui-review/ (PNG-/JSON-Artefakte)
 
-# Im Release-Build muss jede Demo-Namespace-Option vor dem Fensterstart scheitern.
+# Im Release-Build muss jede Fixture-/Tooling-Option vor dem Fensterstart scheitern.
 cargo build --release --locked
-for flag in --demo --demo-list --demo-language=en \
-            --screenshot="$PWD/target/release-smoke.png" --size=760x520; do
+for flag in --rune-login-fixture --rune-backup-fixture --rune-login \
+            --rune-wry-smoke --rune-backup-smoke --snap; do
   if target/release/prime-photos "$flag" >/dev/null 2>target/release-cli-smoke.err; then
-    echo "Release accepted demo-only argument: $flag" >&2
+    echo "Release accepted fixture-only argument: $flag" >&2
     exit 1
   else
     status=$?
@@ -416,16 +418,16 @@ done
 
 # Fixture-specific strings must not be linked into the release executable.
 if strings target/release/prime-photos | \
-   grep -E 'Gemischter Alltag|/Users/example/Pictures|Alex Example'; then
-  echo "Demo fixture content found in release binary" >&2
+   grep -E 'Fixture-only'; then
+  echo "Fixture content found in release binary" >&2
   exit 1
 fi
 ```
 
-Die Release-Fehlermeldung wird vor dem Fensterstart anhand der Systemsprache
-lokalisiert. Bei manueller Prüfung `target/release-cli-smoke.err` kontrollieren;
-`strings` muss ohne Treffer enden. Der Screenshot wird visuell geprüft, der
-Release-Prozess aber nicht mit Demo-Flags gestartet.
+Die Release-Fehlermeldung wird vor dem Fensterstart ausgegeben. Bei manueller
+Prüfung `target/release-cli-smoke.err` kontrollieren; `strings` muss ohne Treffer
+enden. Die Screenshots werden visuell geprüft, der Release-Prozess aber nicht mit
+Fixture-Flags gestartet.
 
 ### Ablauf beim Release (genau diese Reihenfolge)
 
@@ -1220,10 +1222,15 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   UDZO`. `hdiutil verify` meldete **checksum … is VALID**. SHA-256:
   `85a9c1bbaf44c83c28ebe450ac2ec5643c8e6fb884b0225f4cb5b25f759e7f44`. Gemountet geprüft:
   Version `0.3.0`, Build `4`, `codesign --verify` gültig.
-- **Tests und Gates:** `cargo test --locked --no-default-features --features rune-backup` →
+- **Tests und Gates (datierter Beleg vom 2026-11-10, Stand `ed8a566`):**
+  `cargo test --locked --no-default-features --features rune-backup` →
   **324 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; `ratchet check` →
   **8 von 8** Gates; `git diff --check` sauber. Die Läufe `42891842501` (CI) und `42891842460`
-  („Agent gates“) waren für `ea15dee` erfolgreich.
+  („Agent gates“) waren für `ea15dee` erfolgreich. Das damals verwendete Feature `rune-backup`
+  existiert heute nicht mehr; die Zahlen bleiben der Beleg für diesen Stand.
+- **Heutiger Stand (2026-11-11, nach der eframe-Ablösung):** Default `cargo test --locked` →
+  **325 bestanden, 0 fehlgeschlagen**, dazu **2** Iconset-Contract-Tests; Rune ist das einzige
+  Host-Feature (kein `rune-backup`-Feature mehr).
 - **Rune-Produktionsroute (visuell, isoliertes Testprofil):** Die Sitzung wurde aus dem vorhandenen
   Prime-Photos-Login wiederhergestellt („Gespeicherte Sitzung gefunden“, Access-Token und
   Web-Cookies erneuert). Sichtbar waren die Sidebar mit Material-Symbols-Icons, Logo, Nav-Icons und
@@ -1232,8 +1239,9 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   `target/rune-macos-native-evidence/production-aligned.png`.
 - **Grenze dieser Beobachtung:** eine lokale View-/Laufzeitbeobachtung auf macOS — **keine**
   Plattformparität für Windows/Linux und **kein** Beleg für die vollständige Rune-Migration.
-- **Offen:** die Default-Launcher-/eframe-Ablösung, die Plattform-Gates und die übrigen Blocker aus
-  `docs/features/rune-migration.md` bzw. Issue #49 bleiben offen.
+- **Offen:** die Plattform-Gates (Windows/Linux-Laufzeit) und die native
+  macOS/AppKit/Wry-Validierung aus Issue #49 bleiben offen. Die frühere
+  eframe-Ablösung ist inzwischen abgeschlossen (Git-Historie).
 
 ---
 

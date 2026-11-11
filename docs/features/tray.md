@@ -35,8 +35,8 @@ closing the window quits the app.
   is missing) visibly does not paint the strokes. resvg quality was reviewed
   on exactly these SVGs (all five tray states + both logos, black/white,
   gradient correct). **Theme without new dependency:**
-  `egui::Context::system_theme()` (available in 0.31) — dark ⇒ white tray
-  variants, light ⇒ black; `None` (unknown) ⇒ the coloured logo, which is
+  the system appearance reported by Rune — dark ⇒ white tray
+  variants, light ⇒ black; unknown ⇒ the coloured logo, which is
   visible on every background. macOS keeps the black template set. The static
   `cloud_upload` Active glyph uses the same `build.rs` → `OUT_DIR` raster
   pipeline and theme variants as the other tray states. This is the chosen
@@ -144,8 +144,8 @@ closing the window quits the app.
   (`rsvg-convert` fehlt) malt die Striche nachweislich nicht. resvg-Qualität
   wurde an genau diesen SVGs gesichtet (alle fünf Tray-Zustände + beide Logos,
   schwarz/weiß, Farbverlauf korrekt). **Theme ohne neue Abhängigkeit:**
-  `egui::Context::system_theme()` (in 0.31 vorhanden) — dunkel ⇒ weiße
-  Tray-Varianten, hell ⇒ schwarze; `None` (unbekannt) ⇒ das farbige Logo, das
+  die von Rune gemeldete Systemdarstellung — dunkel ⇒ weiße
+  Tray-Varianten, hell ⇒ schwarze; unbekannt ⇒ das farbige Logo, das
   auf jedem Hintergrund sichtbar ist. macOS bleibt beim schwarzen
   Template-Satz. **Kein Fallback (User 2026-10-14):** fehlt ein SVG, bricht
   `build.rs` den Build (Compile-Fehler) — kein `Option`, keine
@@ -153,7 +153,7 @@ closing the window quits the app.
   Dekodier-Fehler zur Laufzeit = fail fast.
 
 - **UI-Icons: Bibliothek statt selbst gezeichnet (Welle 3c, 2026-10-16).**
-  `src/icons/eframe_ui.rs` enthält nach Welle 3c **keine** selbst gezeichneten
+  `src/icons/rune_ui.rs` enthält nach Welle 3c **keine** selbst gezeichneten
   Navigations-Glyphen mehr. Die beiden Sidebar-Icons sind **Material
   Symbols**-SVGs (Apache-2.0, Google LLC) über **dieselbe** Pipeline:
   `assets/icon-cloud.svg` („Sicherung") und `assets/icon-settings.svg`
@@ -217,20 +217,17 @@ closing the window quits the app.
   (`LSMultipleInstancesProhibited` + Socket-Wächter, s. o.); der Ein-Instanz-Schutz ist
   **unverändert**.
 
-  **Technischer Grund für den Weg (nicht „verbessern"):** winit 0.30 registriert **selbst** einen
-  `NSApplicationDelegate` und panict, wenn man ihn ersetzt („tried to get a delegate that was not
-  the one Winit has registered"); die winit-Doku, die anderes behauptet, ist für 0.30 veraltet.
-  Deshalb **kein** Delegate — und **kein** eigener Apple-Event-Handler: der Login-Start wird nur
+  **Technischer Grund für den Weg (nicht „verbessern"):** Runes nativer Host besitzt seinen
+  eigenen Application-Delegate; dieses Modul ersetzt ihn deshalb **nicht** und registriert auch
+  **keinen** eigenen Apple-Event-Handler: der Login-Start wird nur
   **gelesen** (`NSAppleEventManager::currentAppleEvent` im
   `NSApplicationDidFinishLaunchingNotification`-Callback in `src/app_activation.rs`); der
-  App-Creator konsumiert den Cache. Ein registrierter Handler würde AppKits eigenen ersetzen. Das
-  Fenster startet mit `.with_visible(false)` (`src/main.rs`) — das **hält es aber nicht
-  versteckt**: eframe schaltet es nach dem ersten Frame selbst (bedingungslos) sichtbar, deshalb
-  hält der stille Pfad den versteckten Zustand mit einem expliziten
-  `ViewportCommand::Visible(false)` in `PrimePhotoApp::new` (live mit einer Scratch-App belegt).
-  Die Startentscheidung ist die pure, unit-getestete Funktion
+  App-Creator konsumiert den Cache. Das Fenster startet mit
+  `WindowOptions { visible: false, .. }` (`src/rune_backup_live.rs`) und
+  `startup::apply_window_policy` entscheidet anhand des Login-Item-Caches und des Tray-Zustands,
+  ob es sichtbar wird. Die Startentscheidung ist die pure, unit-getestete Funktion
   `should_start_hidden(launched_as_log_in_item, has_tray)`; `has_tray` ist eine **Näherung** über
-  die vorhandene Session (`has_pending_session()`), weil der Tray lazy im `update` gebaut wird —
+  die vorhandene Session (`has_pending_session()`), weil der Tray lazy im Poll gebaut wird —
   ohne möglichen Tray bleibt das Fenster sichtbar, damit die App erreichbar ist.
 
 ## Original reference

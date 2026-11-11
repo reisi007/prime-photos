@@ -3,8 +3,6 @@ use crate::dedup::{DedupIndex, Origin};
 use crate::destination::{machine_name, mirrored_path_components};
 use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3};
-#[cfg(feature = "legacy-eframe")]
-use crate::i18n::tr_n;
 use crate::prime_photos::PrimePhotos;
 use std::{
     collections::{BTreeSet, HashMap, VecDeque},
@@ -49,12 +47,9 @@ pub(crate) struct QueueEntry {
     pub(crate) name: String,
     pub(crate) state: FileState,
     /// File size in bytes, read once while the plan is built. `0` when the file
-    /// could not be stat'ed — the queue's size column then shows `0 B`.
+    /// could not be stat'ed; the per-file percentage is otherwise derived from
+    /// `bytes_sent` and this size.
     pub(crate) size: u64,
-    /// Full path, shown as the name column's hover tooltip
-    /// (docs/original/SPEC_UPLOAD_PROGRESS.md §7.3).
-    #[cfg(feature = "legacy-eframe")]
-    pub(crate) path: PathBuf,
     /// Bytes handed to the transport for this file so far (Befund 11c), copied
     /// from the upload's progress counter by a 100 ms polling task. `0` before a
     /// transfer starts; `size` once the file is settled without a transfer (a
@@ -209,12 +204,6 @@ impl UploadShared {
         std::mem::take(&mut self.store_dirty)
     }
 
-    /// Consume the marker only after a successful reload, and only while idle.
-    #[cfg(feature = "legacy-eframe")]
-    pub(crate) fn consume_store_dirty_after_reload(&mut self, loaded: bool) -> bool {
-        loaded && !self.active && self.take_store_dirty()
-    }
-
     /// Append to the (bounded) run log. Old lines are dropped oldest-first, the
     /// panel stays a scrolling tail.
     pub(crate) fn log(&mut self, s: impl Into<String>) {
@@ -222,69 +211,6 @@ impl UploadShared {
         if self.log.len() > 500 {
             self.log.drain(0..100);
         }
-    }
-}
-
-/// A persisted store reload is safe only once no upload run is active.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn should_reload_store(active: bool, dirty: bool) -> bool {
-    !active && dirty
-}
-
-/// The folder card's status word (Variant A, user decision 2026-10-16): our six
-/// `FolderStatus` values mapped onto the original client's row vocabulary
-/// (`docs/original/SPEC_UPLOAD_PROGRESS.md` §2.2, `docs/original/UI_FLOWS.md` §11.2), with a
-/// semantic tone for the host UI to render (Success, Error, Info, Warning, Normal):
-///
-/// | Status | Word | Tone |
-/// |---|---|---|
-/// | `Uploading` | „Upload-Vorgang läuft" | Info |
-/// | `Done` | „Datensicherung abgeschlossen" | Success |
-/// | `Paused` | „ANGEHALTEN" | Warning |
-/// | `NotFound` | „Ordner nicht gefunden" | Warning |
-/// | `Error` | „Fehler" | Error |
-/// | `Scanning` | „Konfiguration wird durchgeführt" | Info |
-/// | `Idle`, `total > 0` | „Warten" (the original's cold-boot waiting word) | Info |
-/// | `Idle`, `total == 0` | — (empty) | — |
-///
-/// The empty arm is the never-scanned trap (user decision 2026-10-16): a
-/// folder that was never scanned has `total == 0` just like a scanned folder
-/// with nothing to upload, and only the run's finalizers know which is which —
-/// they settle a scanned-empty folder as `Done` (see `finalize_upload`), so an
-/// `Idle` folder with `total == 0` was never scanned and must not claim any
-/// state. The percentage lives in the card's second line
-/// ([`folder_progress_text`]), not here — the original's primary status carries
-/// no number either.
-#[cfg(feature = "legacy-eframe")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum StatusTone {
-    Info,
-    Success,
-    Warning,
-    Error,
-    Normal,
-}
-
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn status_text(status: FolderStatus, total: usize) -> (String, StatusTone) {
-    match status {
-        FolderStatus::Uploading => (tr("Upload-Vorgang läuft").to_string(), StatusTone::Info),
-        FolderStatus::Done => (
-            tr("Datensicherung abgeschlossen").to_string(),
-            StatusTone::Success,
-        ),
-        FolderStatus::Paused => (tr("ANGEHALTEN").to_string(), StatusTone::Warning),
-        FolderStatus::NotFound => (
-            tr("Ordner nicht gefunden").to_string(),
-            StatusTone::Warning,
-        ),
-        FolderStatus::Error => (tr("Fehler").to_string(), StatusTone::Error),
-        FolderStatus::Scanning => (
-            tr("Konfiguration wird durchgeführt").to_string(),
-            StatusTone::Info,
-        ),
-        FolderStatus::Idle if total > 0 => (tr("Warten").to_string(), StatusTone::Info),
-        FolderStatus::Idle => (String::new(), StatusTone::Normal),
     }
 }
 
@@ -306,152 +232,6 @@ pub(crate) fn folder_progress_text(status: FolderStatus, done: usize, total: usi
         _ if done >= total => tr("Vollständig").to_string(),
         _ => tr1("{}% hochgeladen", pct),
     }
-}
-
-/// ETA of the running upload in seconds. Byte-based when the run's sizes are
-/// known (much more accurate than counting files: dedup skips are free and the
-/// files differ wildly in size), otherwise from the file-completion rate
-/// (`done / elapsed`). Returns `None` while the estimate is unreliable: no
-/// completed file yet, under a second elapsed, or a non-finite rate/result —
-/// so the UI never shows a bogus or NaN/inf figure.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn eta_secs(
-    done: usize,
-    total: usize,
-    started: Option<Instant>,
-    bytes_total: u64,
-    bytes_done: u64,
-    net_bytes: u64,
-    upload_secs: f64,
-) -> Option<f64> {
-    let started = started?;
-    if done == 0 {
-        return None;
-    }
-
-    // Bytes: remaining unsettled bytes over the measured transfer rate.
-    if bytes_total > 0 && upload_secs >= 1.0 {
-        let bps = net_bytes as f64 / upload_secs;
-        if bps > 0.0 && bps.is_finite() {
-            let remaining = bytes_total.saturating_sub(bytes_done) as f64;
-            let eta = remaining / bps;
-            if eta.is_finite() && eta >= 0.0 {
-                return Some(eta);
-            }
-        }
-    }
-
-    // Fallback: completed files per wall-clock second.
-    let elapsed = started.elapsed().as_secs_f64();
-    if elapsed < 1.0 {
-        return None;
-    }
-    let rate = done as f64 / elapsed;
-    if !(rate > 0.0) || !rate.is_finite() {
-        return None;
-    }
-    let remaining = total.saturating_sub(done) as f64;
-    let eta = remaining / rate;
-    if !eta.is_finite() || eta < 0.0 {
-        return None;
-    }
-    Some(eta)
-}
-
-/// `M:SS`, or `H:MM:SS` from one hour up.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn format_eta(secs: f64) -> String {
-    let total = secs.round().max(0.0) as u64;
-    let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
-}
-
-/// ETA fragment for the log summary, e.g. `"ca. 1:20"` — or `"Schätzung läuft …"`
-/// while the estimate is not yet reliable.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn eta_suffix(shared: &UploadShared) -> String {
-    let s = shared;
-    match eta_secs(
-        s.done,
-        s.total,
-        s.started,
-        s.bytes_total,
-        s.bytes_done,
-        s.net_bytes,
-        s.upload_secs,
-    ) {
-        Some(eta) => tr1("ca. {}", format_eta(eta)),
-        None => tr("Schätzung läuft …").to_string(),
-    }
-}
-
-/// Summary for the active upload shown in the collapsible log header.
-/// An active scan with no transfer candidates uses the same wording as the
-/// main progress area and its start log, without an irrelevant ETA.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn active_log_summary(
-    shared: &UploadShared,
-    with_candidates: impl FnOnce() -> String,
-) -> String {
-    if shared.total == 0 {
-        return tr("Alles aktuell").to_string();
-    }
-    with_candidates()
-}
-
-/// Status text for a live run, e.g. `"42% · noch 7 Dateien · ca. 1:20"`, or
-/// `"Alles aktuell"` when it has no transfer candidates.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn upload_progress_text(shared: &UploadShared) -> String {
-    if shared.active && shared.total == 0 {
-        return tr("Alles aktuell").to_string();
-    }
-    let (done, total) = (shared.done, shared.total);
-    let pct = if total > 0 {
-        (done as f32 / total as f32 * 100.0).clamp(0.0, 100.0)
-    } else {
-        0.0
-    };
-    let remaining = total.saturating_sub(done);
-    let files = tr_n(remaining, "1 Datei", "{n} Dateien");
-    tr3(
-        "{}% · noch {} · {}",
-        format!("{pct:.0}"),
-        files,
-        eta_suffix(shared),
-    )
-}
-
-/// The run's outcome breakdown as a single line: **only** the non-zero
-/// categories are shown, joined by ` · `. An all-zero result yields an empty
-/// string, so the caller can omit the line entirely (idle state, or a target
-/// this run never touched). Pure and side-effect free — no lock, no UI — and
-/// therefore cheap to test.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn outcome_text(
-    new: usize,
-    existing: usize,
-    unchanged: usize,
-    failed: usize,
-) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if new > 0 {
-        parts.push(tr1("{} neu hochgeladen", new));
-    }
-    if existing > 0 {
-        parts.push(tr1("{} bereits im Konto", existing));
-    }
-    if unchanged > 0 {
-        parts.push(tr1("{} unverändert", unchanged));
-    }
-    if failed > 0 {
-        parts.push(tr1("{} Fehler", failed));
-    }
-    parts.join(" · ")
 }
 
 // ---------------------------------------------------------------------------
@@ -1773,165 +1553,6 @@ mod tests {
         assert!(shared.store_dirty);
     }
 
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn should_reload_store_only_when_idle_and_dirty() {
-        for (active, dirty, expected) in [
-            (false, false, false),
-            (false, true, true),
-            (true, false, false),
-            (true, true, false),
-        ] {
-            assert_eq!(should_reload_store(active, dirty), expected);
-        }
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn failed_store_reload_keeps_dirty_marker() {
-        let mut shared = UploadShared {
-            store_dirty: true,
-            ..UploadShared::default()
-        };
-        let dirty = shared.store_dirty;
-
-        assert!(should_reload_store(shared.active, dirty));
-        assert!(!shared.consume_store_dirty_after_reload(false));
-        assert!(shared.store_dirty);
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn outcome_is_empty_when_nothing_happened() {
-        // All-zero: the caller omits the line entirely (idle / untouched target).
-        assert_eq!(outcome_text(0, 0, 0, 0), "");
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn outcome_reports_a_clean_success_run() {
-        // Only real uploads: exactly one category, no zero noise.
-        assert_eq!(outcome_text(5, 0, 0, 0), tr1("{} neu hochgeladen", 5));
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn outcome_reports_a_mixed_run_with_every_category() {
-        let text = outcome_text(3, 2, 1, 4);
-        let expected = [
-            tr1("{} neu hochgeladen", 3),
-            tr1("{} bereits im Konto", 2),
-            tr1("{} unverändert", 1),
-            tr1("{} Fehler", 4),
-        ]
-        .join(" · ");
-        assert_eq!(text, expected);
-        for needle in ["3", "2", "1", "4"] {
-            assert!(text.contains(needle), "counter {needle} missing: {text}");
-        }
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn outcome_reports_a_failure_only_run() {
-        assert_eq!(outcome_text(0, 0, 0, 2), tr1("{} Fehler", 2));
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn outcome_omits_zero_categories() {
-        // A run that uploaded new files and skipped existing ones must not list
-        // "0 unverändert" / "0 Fehler".
-        let text = outcome_text(1, 1, 0, 0);
-        assert!(!text.contains("0"), "zero category leaked: {text}");
-        assert!(text.contains(tr1("{} neu hochgeladen", 1).as_str()));
-        assert!(text.contains(tr1("{} bereits im Konto", 1).as_str()));
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    fn assert_supported_translation(actual: &str, key: &'static str) {
-        let german = crate::i18n::tr_for(crate::i18n::Lang::De, key);
-        let english = crate::i18n::tr_for(crate::i18n::Lang::En, key);
-        assert!(
-            actual == german || actual == english,
-            "unexpected translation for {key:?}: {actual:?}"
-        );
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn active_empty_run_reports_all_current_without_progress_or_eta() {
-        let shared = UploadShared {
-            active: true,
-            done: 0,
-            total: 0,
-            ..UploadShared::default()
-        };
-
-        let text = upload_progress_text(&shared);
-
-        assert_supported_translation(&text, "Alles aktuell");
-        assert!(!text.contains("0"));
-        assert!(!text.contains("Schätzung läuft …"));
-        assert!(!text.contains("Estimating …"));
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn active_empty_log_summary_reports_all_current_without_progress_or_eta() {
-        let shared = UploadShared {
-            active: true,
-            done: 0,
-            total: 0,
-            ..UploadShared::default()
-        };
-
-        let text = active_log_summary(&shared, || {
-            tr3(
-                "Upload läuft: {} · {} · {}",
-                format!("{}/{}", shared.done, shared.total),
-                &shared.current,
-                eta_suffix(&shared),
-            )
-        });
-
-        assert_supported_translation(&text, "Alles aktuell");
-        assert!(!text.contains("0/0"));
-        assert!(!text.contains("Schätzung läuft …"));
-        assert!(!text.contains("Estimating …"));
-    }
-
-    #[cfg(feature = "legacy-eframe")]
-    #[test]
-    fn active_log_summary_keeps_progress_text_when_candidates_remain() {
-        let shared = UploadShared {
-            active: true,
-            done: 2,
-            total: 5,
-            current: "photo.jpg".to_string(),
-            ..UploadShared::default()
-        };
-
-        let summary = active_log_summary(&shared, || {
-            tr3(
-                "Upload läuft: {} · {} · {}",
-                format!("{}/{}", shared.done, shared.total),
-                &shared.current,
-                eta_suffix(&shared),
-            )
-        });
-
-        let expected = [
-            "Upload läuft: 2/5 · photo.jpg · Schätzung läuft …",
-            "Upload läuft: 2/5 · photo.jpg · Estimating …",
-            "Upload running: 2/5 · photo.jpg · Schätzung läuft …",
-            "Upload running: 2/5 · photo.jpg · Estimating …",
-        ];
-        assert!(
-            expected.contains(&summary.as_str()),
-            "unexpected active summary: {summary:?}"
-        );
-    }
 
     #[test]
     fn reset_in_flight_returns_uploading_entries_to_waiting() {
@@ -1944,8 +1565,6 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/a.jpg"),
                 bytes_sent: 0,
             },
             QueueEntry {
@@ -1953,8 +1572,6 @@ mod tests {
                 name: "b.jpg".into(),
                 state: FileState::Done,
                 size: 2,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/b.jpg"),
                 bytes_sent: 0,
             },
             QueueEntry {
@@ -1962,8 +1579,6 @@ mod tests {
                 name: "c.jpg".into(),
                 state: FileState::Uploading,
                 size: 3,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/c.jpg"),
                 bytes_sent: 0,
             },
             QueueEntry {
@@ -1971,8 +1586,6 @@ mod tests {
                 name: "d.jpg".into(),
                 state: FileState::Failed,
                 size: 4,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/d.jpg"),
                 bytes_sent: 0,
             },
         ];
@@ -2136,8 +1749,6 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/a.jpg"),
                 bytes_sent: 7,
             }],
             ..UploadShared::default()
@@ -2213,8 +1824,6 @@ mod tests {
                     name: "a.jpg".into(),
                     state: FileState::Waiting,
                     size: 1,
-                    #[cfg(feature = "legacy-eframe")]
-                    path: PathBuf::from("/fotos/a/a.jpg"),
                     bytes_sent: 0,
                 },
                 QueueEntry {
@@ -2222,8 +1831,6 @@ mod tests {
                     name: "b.jpg".into(),
                     state: FileState::Waiting,
                     size: 1,
-                    #[cfg(feature = "legacy-eframe")]
-                    path: PathBuf::from("/fotos/a/b.jpg"),
                     bytes_sent: 0,
                 },
             ],
@@ -2263,8 +1870,6 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Waiting,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/a.jpg"),
                 bytes_sent: 0,
             }],
             ..UploadShared::default()
@@ -2294,8 +1899,6 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Waiting,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: path.clone(),
                 bytes_sent: 0,
             }],
             ..UploadShared::default()
@@ -2337,8 +1940,6 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: path.clone(),
                 bytes_sent: 0,
             }],
             destination_roots: HashMap::from([(idx, root.clone())]),
@@ -2411,8 +2012,6 @@ mod tests {
                 name: "a.jpg".into(),
                 state: FileState::Uploading,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: path.clone(),
                 bytes_sent: 0,
             }],
             ..UploadShared::default()
@@ -2529,51 +2128,7 @@ mod tests {
         )));
     }
 
-    // -- status word + progress fragment of the folder card (Variant A) -----
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn status_words_and_tones_keep_the_original_mapping() {
-        // The text is the original's row vocabulary (UI_FLOWS.md §11.2), and
-        // each semantic tone preserves the legacy light/dark palette category.
-        for (status, total, text, tone) in [
-            (
-                FolderStatus::Uploading,
-                0,
-                "Upload-Vorgang läuft",
-                StatusTone::Info,
-            ),
-            (
-                FolderStatus::Done,
-                0,
-                "Datensicherung abgeschlossen",
-                StatusTone::Success,
-            ),
-            (FolderStatus::Paused, 0, "ANGEHALTEN", StatusTone::Warning),
-            (
-                FolderStatus::NotFound,
-                0,
-                "Ordner nicht gefunden",
-                StatusTone::Warning,
-            ),
-            (FolderStatus::Error, 0, "Fehler", StatusTone::Error),
-            (
-                FolderStatus::Scanning,
-                0,
-                "Konfiguration wird durchgeführt",
-                StatusTone::Info,
-            ),
-            (FolderStatus::Idle, 42, "Warten", StatusTone::Info),
-        ] {
-            assert_eq!(status_text(status, total), (tr(text).to_string(), tone));
-        }
-        // The never-scanned trap: no total means no status word, with the
-        // legacy muted/normal tone.
-        assert_eq!(
-            status_text(FolderStatus::Idle, 0),
-            (String::new(), StatusTone::Normal)
-        );
-    }
+    // -- progress fragment of the folder card (Variant A) -------------------
 
     #[test]
     fn progress_is_empty_without_a_total() {

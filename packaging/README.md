@@ -9,7 +9,7 @@ Dateien:
 | Datei | Zweck |
 |---|---|
 | `Info.plist` | Vorlage für `Contents/Info.plist` des Bundles; `__VERSION__` / `__BUILD__` werden von `make-app.sh` ersetzt |
-| `make-app.sh` | baut `cargo build --release`, assembliert `target/dist/Prime Photos.app`, signiert und verifiziert |
+| `make-app.sh` | baut `cargo build --release --locked` (Rune-UI), assembliert `target/dist/Prime Photos.app`, signiert und verifiziert |
 | `linux/prime-photos.desktop` | Desktop-Eintrag des `.deb` (Name, `Exec=prime-photos`, Icon, Kategorien) |
 | `make-deb.sh` | baut `release/Prime-Photos-linux-x64.deb` aus Binary, Iconset und Lizenzen |
 | `README.md` | diese Anleitung |
@@ -28,7 +28,9 @@ Voraussetzungen: Rust-Toolchain und die Xcode Command Line Tools (C-Compiler fü
 ```
 
 Das erzeugt `target/dist/Prime Photos.app` und signiert sie **ad-hoc** (`codesign --sign -`), das ist
-der Standard. Eine andere Signatur-Identität — auch die optionale lokale Identität
+der Standard. Der Build läuft mit `cargo build --release --locked`: Das Bundle enthält die
+Rune-Produktionsroute, die der normale Start ist. Eine andere
+Signatur-Identität — auch die optionale lokale Identität
 `Prime Photos Local Signer` — wird ausschließlich explizit über `CODESIGN_IDENTITY` gewählt. Starten:
 
 ```sh
@@ -54,7 +56,7 @@ ungerade Rest geht auf eine Seite (16er Raster: Rand 2/2/1/1).
 
 | Variable | Wirkung | Standard |
 |---|---|---|
-| `SKIP_BUILD=1` | überspringt `cargo build --release` (nutzt das vorhandene Binary) | aus |
+| `SKIP_BUILD=1` | überspringt den Release-Build `cargo build --release --locked` (nutzt das vorhandene Binary) | aus |
 | `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.3.0` |
 | `BUILD=n` | `CFBundleVersion` | `2` |
 | `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt des Standards | `-` (ad-hoc); ein Name, z. B. `Prime Photos Local Signer`, muss explizit übergeben werden |

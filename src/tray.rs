@@ -140,7 +140,7 @@ impl Tray {
 
     /// Apply the glyph for `state` and update the tooltip only when the state
     /// changes. Callers also re-apply the glyph when the OS theme changes — see
-    /// `PrimePhotoApp::update_tray_icon`.
+    /// `rune_backup_live::tray_route`.
     ///
     /// **macOS** draws a *template* image (alpha only, recoloured by the
     /// system), so the black 64-px ("@2x") source is used there — more bitmap

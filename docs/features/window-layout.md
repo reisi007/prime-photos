@@ -1,8 +1,13 @@
 # Window layout
 
+> **Historischer Stand (eframe-Ära).** Die aktuellen Rune-Ansichten werden in
+> `src/rune_backup_live/view.rs`, `view/sidebar.rs` und `src/rune_theme.rs`
+> beschrieben. Die folgenden Messwerte bleiben als Design-Begründung erhalten,
+> gelten aber nicht als Vorgabe für die Rune-Implementierung.
+
 The main window uses a left sidebar (navigation), a bottom log panel, and a
-central content area. The layout follows egui's panel order, virtual lists
-with fixed row heights, and measured chrome dimensions.
+central content area. The layout follows the established panel order, virtual
+lists with fixed row heights, and measured chrome dimensions.
 
 ## How it works
 

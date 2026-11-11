@@ -1,25 +1,29 @@
 # Entwickler-Wissen: Fallstricke dieser Codebase
 
+> **Archivnotizen.** Ein Teil dieses Dokuments beschreibt die frühere
+> eframe-Oberfläche und ihre Crates. Diese Dateien (`src/app.rs`,
+> `src/icons/eframe_ui.rs`, …) existieren nicht mehr; die Notizen bleiben als
+> technische Begründung für die übernommenen Muster erhalten. Aktueller Host ist
+> Rune.
+
 Hier steht **Implementation-Wissen**, das weder im Original noch in `AGENTS.md`
 liegt: warum bestimmte Stellen so aussehen, wie sie aussehen, und was passiert,
 wenn man sie „normal" schreibt. `AGENTS.md` enthält die **Regeln**; dieses Dokument
 den **technischen Grund** dahinter mit Fundstelle und Beleg.
 
 Kein Original-Recon — alles hier ist eigenes Verhalten oder Verhalten der
-genutzten Crates (egui 0.31, wry 0.57, rfd 0.15, notify-rust 4.18).
+genutzten Crates (Rune, wry 0.57, notify-rust 4.18).
 
-## 1. Keine synchrone AppKit-/RunLoop-API direkt aus `update`
+## 1. Keine synchrone AppKit-/RunLoop-API direkt aus dem UI-Poll
 
-egui's `update` läuft in winit's Event-Handler. Eine ObjC-Callback, die dort
-eine eigene RunLoop dreht, re-entert denselben Handler; unter einem ObjC-Callback
-ist unwinding verboten ⇒ der Prozess bricht mit **SIGABRT** ab, nicht mit einem
-Rust-Panic-Backtrace.
+Eine ObjC-Callback, die dort eine eigene RunLoop dreht, re-entert denselben
+Handler; unter einem ObjC-Callback ist unwinding verboten ⇒ der Prozess bricht
+mit **SIGABRT** ab, nicht mit einem Rust-Panic-Backtrace.
 
 | Aufrufer | Befund | Umsetzung |
 |---|---|---|
 | `notify-rust` (macOS) | sendet synchron und pumpt dabei die RunLoop — **abgestürzt am 2026-10-14** | Notification auf die Main-Dispatch-Queue legen (`dispatch2`), Ergebnis im nächsten Frame (`src/notify.rs`) |
 | `wry::WebView::cookies()` | blockiert den Hauptthread bis zu 1 s und läuft aus einem `DispatchQueue::main`-Block **immer** in den Timeout | **komplett entfernt** (Geräteweg ist der einzige Anmeldeweg); nicht „asynchron repariert" |
-| `rfd::FileDialog::pick_folder()` (sync) | öffnet auf macOS ein **modales** `NSOpenPanel` mit eigener RunLoop — **dieselbe Klasse** | **ungeprüft**, ob es real abstürzt; geplant: `AsyncFileDialog` auf der bestehenden Tokio-Runtime (Welle 5.1) |
 
 **Regel:** aus `update` heraus niemals blockierende/native Main-Thread-API.
 Näheres (inkl. der Cookie-Probe auf der Main-Queue) in `AGENTS.md` → „Plattform /

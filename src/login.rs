@@ -18,11 +18,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "legacy-eframe")]
-pub(crate) mod eframe_ui;
-#[cfg(feature = "legacy-eframe")]
-pub(crate) mod eframe_app;
-
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{Rect, WebViewBuilder};
@@ -109,7 +104,6 @@ impl WebviewLogin {
         }
     }
 
-    #[cfg(feature = "rune-backup")]
     pub(crate) fn set_wakeup(&mut self, wakeup: Arc<dyn Fn() + Send + Sync>) {
         *self.wakeup.lock().unwrap() = Some(wakeup);
     }
@@ -265,7 +259,8 @@ pub(crate) struct Session {
     /// True while a session worker is running for the current generation.
     pub(crate) started: bool,
     /// Set by the worker when the session is declared invalid (too many
-    /// failed refresh attempts); consumed by [`crate::app::PrimePhotoApp::poll_session`].
+    /// failed refresh attempts); consumed by
+    /// [`crate::rune_backup_live::session_route`].
     pub(crate) invalid: bool,
     /// Freshly minted cookies, picked up by `poll_session` every frame and
     /// copied into `Config` (memory only, never persisted).

@@ -1,4 +1,4 @@
-//! Host-neutral helpers shared by the eframe and Rune application hosts.
+//! Host-neutral helpers shared by the Rune application host.
 
 /// Synthetic folder index of the transient one-time (drag & drop) upload
 /// target: it is never in `store.folders`, so no persisted index can collide
@@ -48,7 +48,7 @@ impl Autostart {
         }
     }
 
-    #[cfg(any(test, all(debug_assertions, feature = "legacy-eframe")))]
+    #[cfg(test)]
     pub(crate) fn unavailable_for_test() -> Self {
         Self { inner: None }
     }

@@ -15,98 +15,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
-#[cfg(feature = "legacy-eframe")]
-pub(crate) mod eframe_ui;
-#[cfg(feature = "legacy-eframe")]
-mod eframe_app;
-
-#[cfg(feature = "legacy-eframe")]
-pub(crate) enum FolderAction {
-    Upload(usize),
-    Retry(usize),
-    Remove(usize),
-    OpenFinder(usize),
-    ToggleEnabled(usize),
-    Edit(usize),
-}
-
-#[cfg(feature = "legacy-eframe")]
-struct Row {
-    idx: usize,
-    name: String,
-    path: PathBuf,
-    enabled: bool,
-    status: FolderStatus,
-    total: usize,
-    done: usize,
-    /// Run outcome breakdown of **this** target (only in-memory, for the row's
-    /// own result line): real uploads, 409 "already in the account", local
-    /// dedup/stat skips and failures. All 0 for a target the run never touched.
-    new: usize,
-    existing: usize,
-    unchanged: usize,
-    failed: usize,
-    last_updated: String,
-}
-
-/// Sum over **every** target — `(done, total)` — for the idle aggregate display
-/// (user decision 2026-10-14: one display over all backup targets, the one-time
-/// row included). During a run the aggregate instead uses run-level counters.
-/// Pure: no lock, no UI, no filesystem, and therefore cheap to test. A target
-/// that knows no total (`total == 0`) contributes nothing and can never skew
-/// the sum; the caller guards the division by zero.
-#[cfg(feature = "legacy-eframe")]
-fn aggregate_progress(rows: &[Row]) -> (usize, usize) {
-    rows.iter()
-        .fold((0usize, 0usize), |(done, total), r| {
-            (done + r.done, total + r.total)
-        })
-}
-
-/// Live progress is scoped to the current run; the library-wide row sum is for
-/// the idle display only.
-#[cfg(feature = "legacy-eframe")]
-fn displayed_progress(
-    running: bool,
-    run_done: usize,
-    run_total: usize,
-    rows: &[Row],
-) -> (usize, usize) {
-    if running {
-        (run_done, run_total)
-    } else {
-        aggregate_progress(rows)
-    }
-}
-
-/// Live completion is scoped to the current run. The shared map outlives a run,
-/// and its positional folder keys can become stale when store rows shift; idle
-/// rows must always use their persisted completion count.
-#[cfg(feature = "legacy-eframe")]
-fn row_done(in_run: bool, folder_done_entry: Option<usize>, persisted_done: usize) -> usize {
-    if in_run {
-        folder_done_entry.unwrap_or(0)
-    } else {
-        persisted_done
-    }
-}
-
-/// Use live plan totals only while that row belongs to the active run. The
-/// shared map outlives a run, and its positional folder keys can become stale
-/// when the store's rows shift; idle rows must use their persisted totals.
-#[cfg(feature = "legacy-eframe")]
-fn row_total(
-    in_run: bool,
-    folder_total_entry: Option<usize>,
-    persisted_total: usize,
-) -> usize {
-    if in_run {
-        folder_total_entry.unwrap_or(0)
-    } else {
-        persisted_total
-    }
-}
-
 /// Resolve a plan-time folder index to its current store row through the folder
 /// path captured when the plan was published. Store indices can shift if a
 /// folder is removed while the run is active; the one-time target is synthetic
@@ -121,21 +29,6 @@ fn row_index_for(
     }
     let path = paths.get(&idx)?;
     store.folders.iter().position(|folder| folder.path == *path)
-}
-
-/// Resolve a current store row path to its plan-time index. Folder paths are
-/// unique within a run; if a malformed/legacy state violates that invariant,
-/// choose the lowest matching plan index so the result remains deterministic.
-/// The one-time target is synthetic and never maps to a persisted folder row.
-#[cfg(feature = "legacy-eframe")]
-fn plan_index_for(paths: &HashMap<usize, PathBuf>, path: &Path) -> Option<usize> {
-    paths
-        .iter()
-        .filter_map(|(&idx, folder_path)| {
-            (idx != crate::platform::app_shared::ONE_TIME_IDX && folder_path == path)
-                .then_some(idx)
-        })
-        .min()
 }
 
 /// Apply a run's folder counters to the current store rows, resolving each
@@ -162,17 +55,6 @@ pub(crate) fn apply_folder_progress(
             FolderStatus::Done
         };
     }
-}
-
-/// Clamp a target's completed count to its total for display (Welle 5.11): an
-/// inconsistent legacy state (`total_files < uploaded_files`, once rendered as
-/// "320 %") must never read above 100 %. `total == 0` yields `0` — the folder's
-/// progress text is empty then ([`crate::upload::folder_progress_text`]) and the
-/// aggregate bar guards its division. Pure, so the row's percent text and the
-/// aggregate bar below stay consistent.
-#[cfg(feature = "legacy-eframe")]
-fn capped_done(done: usize, total: usize) -> usize {
-    done.min(total)
 }
 
 /// Forced state for a missing source (user decisions 2026-10-16, 2026-10-17,
@@ -245,151 +127,6 @@ fn lift_returned_sources(
     (returned, changed)
 }
 
-/// Label of a backup folder in the queue's per-row folder column: the folder
-/// name, plus the **parent folder's name** in parentheses when **more than
-/// one** backup folder carries that name (`ambiguous`) — two folders both
-/// named "Sport" would otherwise be indistinguishable in the queue (user
-/// decision 2026-10-16). Only the parent's *name* ("Sport (Pictures)"), not
-/// its full path: the label must fit the 120 px column, the full path stays in
-/// the row's tooltip (`folder_tip` at the call site). The ambiguity is
-/// computed once per frame over the active run's captured paths, so removed
-/// store rows do not change their queue labels. The name is shown
-/// NFC-normalised, like every other displayed path in the app.
-#[cfg(feature = "legacy-eframe")]
-fn queue_folder_label(name: &str, path: &Path, ambiguous: &HashSet<String>) -> String {
-    let name = crate::text::nfc(name);
-    if !ambiguous.contains(&name) {
-        return name;
-    }
-    match path.parent().and_then(|p| p.file_name()) {
-        Some(parent) => format!("{} ({})", name, crate::text::nfc(&parent.to_string_lossy())),
-        // No parent name to disambiguate with (root/empty): the plain name stays.
-        None => name,
-    }
-}
-
-/// Resolve a queue plan index using the path captured when that plan started.
-/// The store may have shifted or removed the row since then. The returned pair
-/// is the display label and full-path tooltip; synthetic/missing targets have
-/// no resolved display and keep their caller's neutral fallback.
-#[cfg(feature = "legacy-eframe")]
-fn queue_folder_display(
-    paths: &HashMap<usize, PathBuf>,
-    idx: usize,
-    ambiguous: &HashSet<String>,
-) -> Option<(String, String)> {
-    if idx == crate::platform::app_shared::ONE_TIME_IDX {
-        return None;
-    }
-    let path = paths.get(&idx)?;
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.display().to_string());
-    Some((
-        queue_folder_label(&name, path, ambiguous),
-        path.display().to_string(),
-    ))
-}
-
-/// The set of folder names represented by the active plan paths more than
-/// once — the input of [`queue_folder_label`]. Cheap (the run holds a handful
-/// of folders) and built once per frame, not per queue row. Names are
-/// NFC-normalised so the set matches the displayed form.
-#[cfg(feature = "legacy-eframe")]
-fn ambiguous_folder_names_for_paths(paths: &HashMap<usize, PathBuf>) -> HashSet<String> {
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    for (&idx, path) in paths {
-        if idx == crate::platform::app_shared::ONE_TIME_IDX {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string());
-        *counts.entry(crate::text::nfc(&name)).or_insert(0) += 1;
-    }
-    counts
-        .into_iter()
-        .filter(|(_, c)| *c > 1)
-        .map(|(name, _)| name)
-        .collect()
-}
-
-/// Fixed geometry of the live queue table (docs/original/SPEC_UPLOAD_PROGRESS.md §7.8):
-/// the name column takes the remaining width, folder/size/status are fixed, the
-/// row height is fixed. The header uses the same widths, so both line up.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_ROW_H: f32 = 20.0;
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_HEADER_H: f32 = 20.0;
-/// Headless-measured production consumption above the table's first row with
-/// the theme: a 20 px header-cell response at a 3 px top inset, 8 px to the
-/// 1 px divider, then 8 px to the first row. The split reserves all 40 px.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_HEADER_TOTAL_H: f32 = 40.0;
-/// Compact column carrying the backup folder of each queue row (user decision
-/// 2026-10-16): without it the files of several targets are indistinguishable.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_FOLDER_W: f32 = 120.0;
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_SIZE_W: f32 = 80.0;
-/// Wide enough for "In Bearbeitung · 100 %" at 12 pt (Issue #30); the text is
-/// truncated instead of painting over the next column if a translation is
-/// longer.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_STATUS_W: f32 = 140.0;
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_MIN_NAME_W: f32 = 80.0;
-/// Item spacing egui adds after the queue `ScrollArea`.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_TABLE_TRAILING_H: f32 = 8.0;
-/// Fixed height of the aggregate progress row (spinner / progress bar).
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_PROGRESS_ROW_H: f32 = 26.0;
-/// Height of the aggregate progress zone under the queue table: the 6 px gap,
-/// the fixed 26 px row and the 8 px trailing item spacing. The row is reserved
-/// in every branch, so the splitter and folder heading keep a deterministic y.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_PROGRESS_ZONE_H: f32 = 6.0 + QUEUE_PROGRESS_ROW_H + 8.0;
-/// Hit area of the draggable horizontal splitter and the air above/below it.
-#[cfg(feature = "legacy-eframe")]
-const SPLITTER_H: f32 = 10.0;
-#[cfg(feature = "legacy-eframe")]
-const SPLITTER_GAP: f32 = 3.0;
-/// Splitter zone including the trailing item spacing: 3 + 10 + 8 + 3 = 24 px.
-#[cfg(feature = "legacy-eframe")]
-const SPLITTER_ZONE_H: f32 = 2.0 * SPLITTER_GAP + SPLITTER_H + 8.0;
-/// Headless-measured folder disclosure layout row (26 px, even though its text
-/// label response is 16 px) plus the trailing item spacing: 26 + 8 = 34 px.
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_HEADING_ZONE_H: f32 = 26.0 + 8.0;
-/// Air between the folder heading and the card list.
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_HEADING_GAP: f32 = 6.0;
-/// Air after the folder `ScrollArea` before the result footer.
-#[cfg(feature = "legacy-eframe")]
-const POST_LIST_GAP: f32 = 6.0;
-/// Air between the post-list gap and the footer line.
-#[cfg(feature = "legacy-eframe")]
-const FOOTER_GAP: f32 = 6.0;
-/// Line box of the 11 pt result footer.
-#[cfg(feature = "legacy-eframe")]
-const FOOTER_LINE_H: f32 = 13.0;
-/// Gap between two page sections when no splitter separates them.
-#[cfg(feature = "legacy-eframe")]
-const SECTION_GAP: f32 = 6.0;
-/// Height the folder list must leave for the result footer below it:
-/// table trailing 8 + post-list 6 + footer gap 6 + line 13 = 33 px.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_FOOTER_H: f32 =
-    QUEUE_TABLE_TRAILING_H + POST_LIST_GAP + FOOTER_GAP + FOOTER_LINE_H;
-/// Floor of the queue-table viewport when the window has room for both floors.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_MIN_VIEWPORT_H: f32 = 72.0;
-/// Floor of the folder-list viewport when the window has room for both floors.
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_MIN_VIEWPORT_H: f32 = 96.0;
 /// Default share of the splittable height taken by the queue while both
 /// sections are open (Issue #33, user wish 2026-11-03).
 pub(crate) const BACKUP_QUEUE_RATIO_DEFAULT: f32 = 0.35;
@@ -397,78 +134,7 @@ pub(crate) const BACKUP_QUEUE_RATIO_DEFAULT: f32 = 0.35;
 pub(crate) const BACKUP_QUEUE_RATIO_MIN: f32 = 0.20;
 /// Largest supported queue share; the folder list keeps the rest.
 pub(crate) const BACKUP_QUEUE_RATIO_MAX: f32 = 0.80;
-/// Chrome below the table while **both** sections are open: table trailing,
-/// progress zone, splitter zone, folder heading zone and the footer area.
-/// 8 + 40 + 24 + 34 + 6 + 33 = 145 px.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
-    + QUEUE_PROGRESS_ZONE_H
-    + SPLITTER_ZONE_H
-    + FOLDER_HEADING_ZONE_H
-    + FOLDER_HEADING_GAP
-    + QUEUE_FOOTER_H;
-/// Chrome below the table when only the queue is open: table trailing, progress,
-/// section gap, folder heading, footer gap and line. 8 + 40 + 6 + 34 + 6 + 13
-/// = 107 px.
-#[cfg(feature = "legacy-eframe")]
-const QUEUE_ONLY_BELOW_H: f32 = QUEUE_TABLE_TRAILING_H
-    + QUEUE_PROGRESS_ZONE_H
-    + SECTION_GAP
-    + FOLDER_HEADING_ZONE_H
-    + FOOTER_GAP
-    + FOOTER_LINE_H;
-/// Chrome below the queue section when only the folder list is open: progress,
-/// section gap, folder heading, heading/list gap and the footer area.
-/// 40 + 6 + 34 + 6 + 33 = 119 px.
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_ONLY_BELOW_H: f32 = QUEUE_PROGRESS_ZONE_H
-    + SECTION_GAP
-    + FOLDER_HEADING_ZONE_H
-    + FOLDER_HEADING_GAP
-    + QUEUE_FOOTER_H;
-/// Vertical inner margin of a folder card (top and bottom).
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_CARD_INNER_Y: i8 = 10;
-/// Vertical outer margin of a folder card (top and bottom).
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_CARD_OUTER_Y: i8 = 3;
-/// Vertical gap between two folder cards, applied as the folder list's
-/// `item_spacing.y`. The cards draw at their natural height in the scroll area.
-#[cfg(feature = "legacy-eframe")]
-const FOLDER_CARD_GAP: f32 = 6.0;
 
-/// Column geometry of the queue table, derived once per frame and reused by the
-/// header and **every** row (Issue #30: both used to recompute the name width,
-/// and the header's cells were centred while the values were not).
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg(feature = "legacy-eframe")]
-struct QueueColumns {
-    /// Width the table occupies: the page content minus the scroll-bar strip
-    /// the theme reserves.
-    table_w: f32,
-    folder_w: f32,
-    name_w: f32,
-    size_w: f32,
-    status_w: f32,
-}
-
-/// Pure table geometry. `gap` is the theme's horizontal `item_spacing` (three
-/// gaps between four cells), `bar_w` the reserved scroll-bar strip. The table
-/// ends at `content_w - bar_w`; the name takes what is left, at least
-/// [`QUEUE_MIN_NAME_W`] (the minimum window is wide enough for that).
-#[cfg(feature = "legacy-eframe")]
-fn queue_columns(content_w: f32, gap: f32, bar_w: f32) -> QueueColumns {
-    let table_w = (content_w - bar_w).max(0.0);
-    let name_w = (table_w - QUEUE_FOLDER_W - QUEUE_SIZE_W - QUEUE_STATUS_W - 3.0 * gap)
-        .max(QUEUE_MIN_NAME_W);
-    QueueColumns {
-        table_w,
-        folder_w: QUEUE_FOLDER_W,
-        name_w,
-        size_w: QUEUE_SIZE_W,
-        status_w: QUEUE_STATUS_W,
-    }
-}
 
 /// Clamp a persisted or runtime split ratio into the supported range. A
 /// non-finite value (hand-written `nan`/`inf`) falls back to the default rather
@@ -481,147 +147,6 @@ pub(crate) fn sanitize_backup_queue_ratio(ratio: f32) -> f32 {
     }
 }
 
-/// Apply one frame's vertical drag delta (pixels) to the queue ratio. The delta
-/// is normalised by the splittable height, so the same drag feels the same at
-/// every window size. A non-finite or empty splittable height leaves the ratio
-/// usable instead of producing `NaN`.
-#[cfg(feature = "legacy-eframe")]
-fn adjusted_backup_queue_ratio(ratio: f32, delta_y: f32, splittable_h: f32) -> f32 {
-    if !delta_y.is_finite() || !splittable_h.is_finite() || splittable_h <= 0.0 {
-        return sanitize_backup_queue_ratio(ratio);
-    }
-    sanitize_backup_queue_ratio(ratio + delta_y / splittable_h)
-}
-
-/// Hard layout invariant: the two backup sections can never be closed at the
-/// same time. A section may only close while the other one is open.
-#[cfg(feature = "legacy-eframe")]
-fn keep_one_section_open(open: bool, other_open: bool) -> bool {
-    open || !other_open
-}
-
-/// A section can be toggled only while its sibling is open and its parent UI
-/// is enabled.
-#[cfg(feature = "legacy-eframe")]
-fn section_toggle_enabled(ui_enabled: bool, other_open: bool) -> bool {
-    ui_enabled && other_open
-}
-
-/// A section-header click changes state only when the header may be toggled.
-#[cfg(feature = "legacy-eframe")]
-fn section_toggle_after_click(
-    clicked: bool,
-    can_toggle: bool,
-    is_open: bool,
-    other_open: bool,
-) -> Option<bool> {
-    if !clicked || !can_toggle {
-        return None;
-    }
-    let next = keep_one_section_open(!is_open, other_open);
-    (next != is_open).then_some(next)
-}
-
-/// Split the splittable height by the queue ratio, respecting both viewport
-/// floors when the height has room for them. In a tiny window the split
-/// degrades proportionally; sizes never become negative.
-#[cfg(feature = "legacy-eframe")]
-fn split_viewports(total: f32, ratio: f32) -> (f32, f32) {
-    let total = if total.is_finite() {
-        total.max(0.0)
-    } else {
-        0.0
-    };
-    if total == 0.0 {
-        return (0.0, 0.0);
-    }
-    let ratio = sanitize_backup_queue_ratio(ratio);
-    let desired = total * ratio;
-    if total >= QUEUE_MIN_VIEWPORT_H + FOLDER_MIN_VIEWPORT_H {
-        let queue = desired.clamp(QUEUE_MIN_VIEWPORT_H, total - FOLDER_MIN_VIEWPORT_H);
-        (queue, total - queue)
-    } else {
-        let queue = desired.clamp(0.0, total);
-        (queue, total - queue)
-    }
-}
-
-/// Height the splitter can actually distribute below the table column header
-/// and above the fixed chrome.
-#[cfg(feature = "legacy-eframe")]
-fn backup_split_splittable(free: f32) -> f32 {
-    (free - QUEUE_HEADER_TOTAL_H - QUEUE_BELOW_H).max(0.0)
-}
-
-/// Allocate the queue-table and folder-list viewports for the current
-/// disclosure and splitter state. The saved ratio is only read while **both**
-/// sections are open; with exactly one open, that section receives every free
-/// pixel and the ratio stays untouched.
-#[cfg(feature = "legacy-eframe")]
-fn page_heights_for_sections(
-    free: f32,
-    queue_open: bool,
-    folders_open: bool,
-    ratio: f32,
-) -> (f32, f32) {
-    let free = if free.is_finite() { free.max(0.0) } else { 0.0 };
-    match (queue_open, folders_open) {
-        (true, true) => split_viewports(
-            (free - QUEUE_HEADER_TOTAL_H - QUEUE_BELOW_H).max(0.0),
-            ratio,
-        ),
-        (true, false) => (
-            (free - QUEUE_HEADER_TOTAL_H - QUEUE_ONLY_BELOW_H).max(0.0),
-            0.0,
-        ),
-        (false, true) => (0.0, (free - FOLDER_ONLY_BELOW_H).max(0.0)),
-        (false, false) => (0.0, 0.0),
-    }
-}
-
-/// Whether the folder list may draw in this frame. The folder header toggles
-/// *after* the split was computed: opening waits for the next frame's both-open
-/// split, while closing keeps the list for one final frame in its existing
-/// viewport. Drawing from the layout snapshot preserves that allocation; the
-/// actual-height cap below keeps the footer safe even in a tiny window.
-#[cfg(feature = "legacy-eframe")]
-fn folder_list_draws(expanded: bool, expanded_for_layout: bool) -> bool {
-    match (expanded, expanded_for_layout) {
-        (true, true) => true,   // stable open
-        (true, false) => false, // opening: wait for the new split
-        (false, true) => true,  // closing: draw in the old split for this frame
-        (false, false) => false, // stable closed
-    }
-}
-
-/// Status bucket of the live queue's flat ordering: **our own** order, decided
-/// by the user on 2026-10-26 — "In Bearbeitung" → "Fehlgeschlagen" → "Warten"
-/// → "Abgeschlossen" → "Übersprungen". The original status table is at most a
-/// loose reference (Processing first, Errored second; see
-/// docs/original/SPEC_STATUS_DETAIL.md §3.3); it additionally sorts by
-/// `SortDate` and does not preserve insertion order, so its key is
-/// deliberately **not** copied.
-#[cfg(feature = "legacy-eframe")]
-fn status_rank(state: FileState) -> u8 {
-    match state {
-        FileState::Uploading => 0,
-        FileState::Failed => 1,
-        FileState::Waiting => 2,
-        FileState::Done => 3,
-        FileState::Skipped => 4,
-    }
-}
-
-/// Flat, global queue layout: queue indices sorted by status bucket, insertion
-/// order (the queue index) inside a bucket. Folder membership deliberately does
-/// not matter — no group headers, no folder grouping (user decision
-/// 2026-10-26). Pure, so the ordering is testable without a `Ui`.
-#[cfg(feature = "legacy-eframe")]
-fn queue_layout(queue: &[QueueEntry]) -> Vec<usize> {
-    let mut layout: Vec<usize> = (0..queue.len()).collect();
-    layout.sort_by_key(|&i| (status_rank(queue[i].state), i));
-    layout
-}
 
 // ---------------------------------------------------------------------------
 // Upload-run preparation (shared by the manual path and the background sync)
@@ -798,8 +323,6 @@ impl UploadPlan {
                     name,
                     state: FileState::Waiting,
                     size,
-                    #[cfg(feature = "legacy-eframe")]
-                    path: p.clone(),
                     bytes_sent: 0,
                 });
                 plan.items.push((row, i, p));
@@ -811,42 +334,6 @@ impl UploadPlan {
         } else {
             Some(plan)
         }
-    }
-
-    /// Build a plan from an **explicit** file list instead of a folder scan
-    /// (the one-time drag & drop path): every entry belongs to the single
-    /// synthetic folder index `idx`, so the whole queue is one folder as far as
-    /// `run_upload`'s counters and `folder_opts` are concerned.
-    #[cfg(feature = "legacy-eframe")]
-    fn from_files(
-        idx: usize,
-        dedup: bool,
-        conflict: ConflictResolution,
-        files: Vec<PathBuf>,
-    ) -> Self {
-        let mut plan = Self::empty();
-        plan.files_seen = files.len();
-        plan.per_folder.insert(idx, files.len());
-        plan.folder_opts.insert(idx, (dedup, conflict));
-        for p in files {
-            let row = plan.items.len();
-            let name = p
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let size = plan.note_size(&p);
-            plan.queue.push(QueueEntry {
-                folder: idx,
-                name,
-                state: FileState::Waiting,
-                size,
-                #[cfg(feature = "legacy-eframe")]
-                path: p.clone(),
-                bytes_sent: 0,
-            });
-            plan.items.push((row, idx, p));
-        }
-        plan
     }
 
     /// Build a plan from an explicit **per-folder** file list (the watcher
@@ -874,8 +361,6 @@ impl UploadPlan {
                 name,
                 state: FileState::Waiting,
                 size,
-                #[cfg(feature = "legacy-eframe")]
-                path: p.clone(),
                 bytes_sent: 0,
             });
             plan.items.push((row, *i, p.clone()));
@@ -903,8 +388,8 @@ impl UploadPlan {
 }
 
 /// The immutable production inputs handed to the one shared upload runner.
-/// Keeping the plan/publish/launch path here means eframe and the Rune spike do
-/// not grow separate scanners or upload implementations.
+/// Keeping the plan/publish/launch path here means the Rune backup and settings
+/// views do not grow separate scanners or upload implementations.
 pub(crate) struct UploadLaunch {
     items: Vec<(usize, usize, PathBuf)>,
     config: Config,
@@ -1130,10 +615,10 @@ fn publish_state(
     s.uploaded_ids.clear();
     s.total = plan.items.len();
     s.queue = std::mem::take(&mut plan.queue);
-    // Byte-based ETA counters: the known run size up front, everything settled /
-    // transferred back to zero so the first rate sample is clean. The byte ETA
-    // is only meaningful when *every* file's size is known (`sized_total`),
-    // otherwise the file-count fallback in `eta_secs` takes over.
+    // Byte-based progress counters: the known run size up front, everything
+    // settled / transferred back to zero so the first rate sample is clean.
+    // The byte counters are only complete when *every* file's size is known
+    // (`sized_total`); no ETA is derived from them any more.
     s.bytes_total = if plan.sized_total == plan.items.len() {
         plan.bytes_total
     } else {
@@ -1161,7 +646,7 @@ fn publish_state(
 ///
 /// The persisted **status** is deliberately not written here (Welle 5.1 rest):
 /// the row renders "uploading" **live** from `UploadShared::active` +
-/// `folder_total` (see `backup_ui`), so a persisted `Uploading` would be a
+/// `folder_total` (see the backup view), so a persisted `Uploading` would be a
 /// second, redundant claim — and a false one after a cancelled run or a quit in
 /// the middle of a run, because both finalizers return early on `cancelled` and
 /// never reset it. A file count is a number, not a claim.
@@ -1205,25 +690,6 @@ fn plan_folder_paths(plan: &UploadPlan, store: &FolderStore) -> HashMap<usize, P
         .keys()
         .filter_map(|&i| store.folders.get(i).map(|folder| (i, folder.path.clone())))
         .collect()
-}
-
-/// Deepest directory that contains every dropped path, or `None` when they sit
-/// on different roots (e.g. two volumes). Only used to label the transient
-/// one-time target of a multi-path drop — a display value, never a scan root.
-#[cfg(feature = "legacy-eframe")]
-fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
-    let mut common = paths.first()?.parent()?.to_path_buf();
-    for p in paths.iter().skip(1) {
-        let parent = p.parent()?;
-        while !parent.starts_with(&common) {
-            common = common.parent()?.to_path_buf();
-        }
-    }
-    if common.as_os_str().is_empty() {
-        None
-    } else {
-        Some(common)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1297,13 +763,12 @@ fn with_watch_store<T>(
 /// `ensure_background_sync` is idempotent through it.
 static BG_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
 
-/// Start the shared background-sync supervisor for a non-eframe Rune host.
+/// Start the shared background-sync supervisor for the Rune host.
 ///
 /// The upload planner, watermark pass, watcher loop, and store finalizer remain
 /// the same as the existing app path. The caller owns the returned sender so a
 /// newly added folder can be handed to the supervisor while another run is
 /// active.
-#[cfg(feature = "rune-backup")]
 pub(crate) fn spawn_background_sync(
     runtime: &tokio::runtime::Runtime,
     shared: Arc<Mutex<UploadShared>>,
@@ -1414,7 +879,7 @@ fn can_start(cfg: &Config, paused: &watch::Sender<bool>, shared: &Arc<Mutex<Uplo
         return false;
     }
     cfg.background_sync
-        // Same predicate as `PrimePhotoApp::is_logged_in` (session + acb cookie).
+        // Same predicate as the Rune host's signed-in check (session + acb cookie).
         && !cfg.session_id.is_empty()
         && !cfg.cookie_x_acb.is_empty()
         && !shared.lock().unwrap().active
@@ -1542,7 +1007,7 @@ fn start_background_run(
             .entry(scan.idx)
             .or_insert_with(|| scan.path.clone());
     }
-    // The detached supervisor has no `PrimePhotoApp`; the shared field is the
+    // The detached supervisor has no UI state; the shared field is the
     // live app value and remains authoritative even if the user toggles while
     // this run is being prepared.
     let mut save_store = |store: &FolderStore| {
@@ -1604,7 +1069,7 @@ fn start_background_run(
 ///
 /// The `Config` cookie fields are `#[serde(skip)]` (S-C, user decision
 /// 2026-10-15), so `Config::load()` always returns empty ones. The detached
-/// supervisor has no access to `PrimePhotoApp::config` and must take the session
+/// supervisor has no access to the UI state's config and must take the session
 /// material from the shared [`Session`] instead. The lock is scoped to this
 /// function, so it is never held across an `await`.
 fn overlay_session_cookies(cfg: &mut Config, session: &Arc<Mutex<Session>>) {
@@ -2401,7 +1866,7 @@ pub(crate) fn conflict_remember_label(store: &FolderStore, idx: usize, file_path
 }
 
 /// Resolve the production worker's pending name conflict using the same shared
-/// answer fields and guarded per-target remembered policy as the eframe dialog.
+/// answer fields and guarded per-target remembered policy as the conflict dialog.
 pub(crate) fn answer_pending_conflict(
     store: &mut FolderStore,
     shared: &Arc<Mutex<UploadShared>>,
@@ -2426,7 +1891,6 @@ pub(crate) fn answer_pending_conflict(
 }
 
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2438,25 +1902,6 @@ mod tests {
         range
             .map(|i| (0, PathBuf::from(format!("/photos/{i}.jpg"))))
             .collect()
-    }
-
-    /// A `Row` reduced to what the aggregate reads (`idx`, `total`, `done`).
-    #[cfg(feature = "legacy-eframe")]
-    fn row(idx: usize, total: usize, done: usize) -> Row {
-        Row {
-            idx,
-            name: String::new(),
-            path: PathBuf::new(),
-            enabled: true,
-            status: FolderStatus::Idle,
-            total,
-            done,
-            new: 0,
-            existing: 0,
-            unchanged: 0,
-            failed: 0,
-            last_updated: String::new(),
-        }
     }
 
     #[test]
@@ -2484,70 +1929,6 @@ mod tests {
             row_index_for(&store, &paths, crate::platform::app_shared::ONE_TIME_IDX),
             None
         );
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn plan_index_for_resolves_path_and_returns_none_for_unknown_or_empty() {
-        let paths = HashMap::from([
-            (7, PathBuf::from("/photos/b")),
-            (3, PathBuf::from("/photos/a")),
-            (
-                crate::platform::app_shared::ONE_TIME_IDX,
-                PathBuf::from("/photos/one-time"),
-            ),
-        ]);
-
-        assert_eq!(plan_index_for(&paths, Path::new("/photos/b")), Some(7));
-        assert_eq!(plan_index_for(&paths, Path::new("/photos/a")), Some(3));
-        assert_eq!(plan_index_for(&paths, Path::new("/photos/missing")), None);
-        assert_eq!(plan_index_for(&HashMap::new(), Path::new("/photos/a")), None);
-        assert_eq!(plan_index_for(&paths, Path::new("/photos/one-time")), None);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn plan_index_for_duplicate_paths_chooses_the_lowest_index_deterministically() {
-        let path = Path::new("/photos/a");
-        let paths = HashMap::from([
-            (9, path.to_path_buf()),
-            (2, path.to_path_buf()),
-            (crate::platform::app_shared::ONE_TIME_IDX, path.to_path_buf()),
-        ]);
-
-        for _ in 0..5 {
-            assert_eq!(plan_index_for(&paths, path), Some(2));
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn live_row_after_store_removal_uses_its_plan_counters() {
-        // A was plan index 0 and has since been removed; B is now the first
-        // store row but remains plan index 1 for this active run.
-        let paths = HashMap::from([
-            (0, PathBuf::from("/photos/removed")),
-            (1, PathBuf::from("/photos/b")),
-        ]);
-        let folder_total = HashMap::from([(0, 100), (1, 20)]);
-        let folder_done = HashMap::from([(0, 90), (1, 7)]);
-        let store_path = Path::new("/photos/b");
-
-        let plan_idx = plan_index_for(&paths, store_path);
-        let in_run = plan_idx.is_some_and(|idx| folder_total.contains_key(&idx));
-        let total = row_total(
-            in_run,
-            plan_idx.and_then(|idx| folder_total.get(&idx).copied()),
-            999,
-        );
-        let done = row_done(
-            in_run,
-            plan_idx.and_then(|idx| folder_done.get(&idx).copied()),
-            888,
-        );
-
-        assert_eq!(plan_idx, Some(1));
-        assert_eq!((done, total), (7, 20));
     }
 
     #[test]
@@ -2599,473 +1980,6 @@ mod tests {
         assert_eq!(store.folders[1].last_updated, "now");
         assert_eq!(store.folders[1].status, FolderStatus::Done);
     }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn aggregate_is_zero_without_rows() {
-        assert_eq!(aggregate_progress(&[]), (0, 0));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn aggregate_sums_folders_and_the_one_time_row() {
-        // Two persisted folders plus the transient one-time row
-        // (`crate::platform::app_shared::ONE_TIME_IDX`): the idle aggregate sums
-        // over all three.
-        let rows = vec![
-            row(0, 100, 40),
-            row(1, 20, 20),
-            row(crate::platform::app_shared::ONE_TIME_IDX, 5, 1),
-        ];
-        assert_eq!(aggregate_progress(&rows), (61, 125));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn active_aggregate_uses_run_counts_and_idle_aggregate_sums_rows() {
-        let rows = vec![row(0, 11_510, 11_510), row(1, 80, 40)];
-        assert_eq!(displayed_progress(true, 3, 50, &rows), (3, 50));
-        assert_eq!(displayed_progress(false, 0, 0, &rows), (11_550, 11_590));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn live_row_with_no_done_entry_starts_at_zero_not_persisted_count() {
-        let total = 50;
-        let done = capped_done(row_done(true, None, 11_510), total);
-        let frac = (done as f32 / total as f32).clamp(0.0, 1.0);
-
-        assert_eq!(done, 0);
-        assert_eq!(total, 50);
-        assert_eq!(frac, 0.0);
-        assert_eq!(row_done(true, Some(7), 11_510), 7);
-        assert_eq!(row_done(false, None, 11_510), 11_510);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn idle_row_done_ignores_a_stale_run_entry() {
-        let done = row_done(false, Some(50), 3);
-
-        assert_eq!(done, 3);
-        assert_eq!(capped_done(done, 12), 3);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn idle_finalized_row_still_shows_complete() {
-        let total = 12;
-        let done = capped_done(row_done(false, Some(2), total), total);
-
-        assert_eq!(crate::upload::folder_progress_text(FolderStatus::Done, done, total), tr("Vollständig"));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn idle_row_total_ignores_a_stale_run_entry() {
-        // The shared run map can retain an entry for a folder index that now
-        // belongs to another row. Idle totals must come from the store instead.
-        assert_eq!(row_total(false, Some(50), 12), 12);
-        assert_eq!(row_total(true, Some(50), 12), 50);
-        assert_eq!(row_total(true, None, 12), 0);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn aggregate_ignores_a_target_without_a_total() {
-        // A target that knows no total contributes nothing — it must not skew
-        // the sum (and the caller guards the division by zero).
-        let rows = vec![row(0, 0, 0), row(1, 10, 3)];
-        assert_eq!(aggregate_progress(&rows), (3, 10));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn capped_done_never_exceeds_total() {
-        // Normal progress passes through unchanged.
-        assert_eq!(capped_done(5, 10), 5);
-        assert_eq!(capped_done(10, 10), 10);
-        // The inconsistent legacy state (once shown as "320 %") is capped at 100 %.
-        assert_eq!(capped_done(320, 100), 100);
-        // No known total: no progress, and never a division by zero downstream.
-        assert_eq!(capped_done(0, 0), 0);
-        assert_eq!(capped_done(3, 0), 0);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn backup_layout_chrome_constants_match() {
-        assert_eq!(QUEUE_HEADER_TOTAL_H, 40.0);
-        assert_eq!(QUEUE_PROGRESS_ZONE_H, 40.0);
-        assert_eq!(SPLITTER_ZONE_H, 24.0);
-        assert_eq!(FOLDER_HEADING_ZONE_H, 34.0);
-        assert_eq!(QUEUE_FOOTER_H, 33.0);
-        assert_eq!(QUEUE_BELOW_H, 145.0);
-        assert_eq!(QUEUE_ONLY_BELOW_H, 107.0);
-        assert_eq!(FOLDER_ONLY_BELOW_H, 119.0);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn backup_layout_chrome_sums_match_their_parts() {
-        assert_eq!(
-            QUEUE_BELOW_H,
-            QUEUE_TABLE_TRAILING_H
-                + QUEUE_PROGRESS_ZONE_H
-                + SPLITTER_ZONE_H
-                + FOLDER_HEADING_ZONE_H
-                + FOLDER_HEADING_GAP
-                + QUEUE_FOOTER_H
-        );
-        assert_eq!(
-            QUEUE_ONLY_BELOW_H,
-            QUEUE_TABLE_TRAILING_H
-                + QUEUE_PROGRESS_ZONE_H
-                + SECTION_GAP
-                + FOLDER_HEADING_ZONE_H
-                + FOOTER_GAP
-                + FOOTER_LINE_H
-        );
-        assert_eq!(
-            FOLDER_ONLY_BELOW_H,
-            QUEUE_PROGRESS_ZONE_H
-                + SECTION_GAP
-                + FOLDER_HEADING_ZONE_H
-                + FOLDER_HEADING_GAP
-                + QUEUE_FOOTER_H
-        );
-    }
-
-    #[test]
-    fn backup_queue_ratio_sanitizes_clamps_and_handles_non_finite() {
-        assert_eq!(sanitize_backup_queue_ratio(0.5), 0.5);
-        assert_eq!(sanitize_backup_queue_ratio(-1.0), BACKUP_QUEUE_RATIO_MIN);
-        assert_eq!(sanitize_backup_queue_ratio(1.0), BACKUP_QUEUE_RATIO_MAX);
-        for ratio in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            assert_eq!(
-                sanitize_backup_queue_ratio(ratio),
-                BACKUP_QUEUE_RATIO_DEFAULT
-            );
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn splitter_drag_maps_pixels_to_ratio_and_clamps() {
-        let splittable = 400.0;
-        assert!((adjusted_backup_queue_ratio(0.35, 40.0, splittable) - 0.45).abs() < 0.001);
-        assert_eq!(
-            adjusted_backup_queue_ratio(0.35, 1000.0, splittable),
-            BACKUP_QUEUE_RATIO_MAX
-        );
-        assert_eq!(
-            adjusted_backup_queue_ratio(0.35, -1000.0, splittable),
-            BACKUP_QUEUE_RATIO_MIN
-        );
-        for invalid in [0.0, -10.0, f32::NAN, f32::INFINITY] {
-            assert_eq!(
-                adjusted_backup_queue_ratio(0.35, 10.0, invalid),
-                0.35,
-                "splittable {invalid}"
-            );
-        }
-        assert_eq!(adjusted_backup_queue_ratio(0.35, f32::NAN, 400.0), 0.35);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn both_open_split_fills_the_free_height_and_respects_minimums() {
-        let free = 800.0;
-        let (queue_h, list_h) = page_heights_for_sections(free, true, true, 0.35);
-        assert!((queue_h + list_h + QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H - free).abs() < 0.001);
-        assert!(queue_h >= QUEUE_MIN_VIEWPORT_H);
-        assert!(list_h >= FOLDER_MIN_VIEWPORT_H);
-
-        // At exactly the two floors, neither side can be pushed below its
-        // minimum — regardless of how hard the ratio pulls.
-        let min_total = QUEUE_MIN_VIEWPORT_H + FOLDER_MIN_VIEWPORT_H;
-        assert_eq!(
-            split_viewports(min_total, BACKUP_QUEUE_RATIO_MIN),
-            (QUEUE_MIN_VIEWPORT_H, FOLDER_MIN_VIEWPORT_H)
-        );
-        assert_eq!(
-            split_viewports(min_total, BACKUP_QUEUE_RATIO_MAX),
-            (QUEUE_MIN_VIEWPORT_H, FOLDER_MIN_VIEWPORT_H)
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn both_open_split_never_goes_negative_or_overflows_in_tiny_windows() {
-        let chrome = QUEUE_HEADER_TOTAL_H + QUEUE_BELOW_H;
-        for free in [0.0, 10.0, 50.0, 100.0, chrome + 40.0] {
-            for ratio in [0.0, 0.2, 0.5, 0.9, f32::NAN] {
-                let (queue_h, list_h) = page_heights_for_sections(free, true, true, ratio);
-                assert!(
-                    queue_h >= 0.0 && list_h >= 0.0,
-                    "free {free}, ratio {ratio}"
-                );
-                assert!(
-                    queue_h + list_h <= (free - chrome).max(0.0) + 0.001,
-                    "free {free}, ratio {ratio}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn one_open_section_ignores_the_ratio_and_gets_all_free_space() {
-        let free = 600.0;
-        let expected_queue = free - QUEUE_HEADER_TOTAL_H - QUEUE_ONLY_BELOW_H;
-        let expected_list = free - FOLDER_ONLY_BELOW_H;
-        for ratio in [0.2, 0.8] {
-            assert_eq!(
-                page_heights_for_sections(free, true, false, ratio),
-                (expected_queue, 0.0)
-            );
-            assert_eq!(
-                page_heights_for_sections(free, false, true, ratio),
-                (0.0, expected_list)
-            );
-        }
-        assert_eq!(
-            page_heights_for_sections(free, false, false, 0.5),
-            (0.0, 0.0)
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn page_heights_at_900_px_match_the_literal_budget() {
-        // 900 - QUEUE_HEADER_TOTAL_H(40) - QUEUE_BELOW_H(145) = 715; 35 % = 250.25.
-        let (queue_h, list_h) = page_heights_for_sections(900.0, true, true, 0.35);
-        assert!((queue_h - 250.25).abs() < 0.001, "queue {queue_h}");
-        assert!((list_h - 464.75).abs() < 0.001, "list {list_h}");
-        // 900 - 40 - QUEUE_ONLY_BELOW_H(107) = 753.
-        assert_eq!(
-            page_heights_for_sections(900.0, true, false, 0.35),
-            (753.0, 0.0)
-        );
-        // 900 - FOLDER_ONLY_BELOW_H(119) = 781.
-        assert_eq!(
-            page_heights_for_sections(900.0, false, true, 0.35),
-            (0.0, 781.0)
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn folder_list_draws_the_previous_viewport_for_each_transition() {
-        assert!(folder_list_draws(true, true));
-        assert!(!folder_list_draws(true, false)); // opening waits for the split
-        assert!(folder_list_draws(false, true)); // closing draws its final frame
-        assert!(!folder_list_draws(false, false));
-    }
-
-    #[test]
-    fn backup_queue_ratio_serializes_as_a_short_decimal() {
-        let mut config = crate::config::Config::default();
-        config.backup_queue_ratio = 0.35;
-
-        let serialized = toml::to_string_pretty(&config).unwrap();
-        assert!(serialized
-            .lines()
-            .any(|line| line == "backup_queue_ratio = 0.35"));
-        assert!(!serialized.contains("0.349999"));
-        let back: crate::config::Config = toml::from_str(&serialized).unwrap();
-        assert_eq!(back.backup_queue_ratio(), 0.35);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn keep_one_section_open_enforces_the_invariant() {
-        assert!(keep_one_section_open(false, false));
-        assert!(!keep_one_section_open(false, true));
-        assert!(keep_one_section_open(true, false));
-        assert!(keep_one_section_open(true, true));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn last_open_section_toggle_is_disabled() {
-        assert!(!section_toggle_enabled(true, false));
-        assert!(section_toggle_enabled(true, true));
-        assert!(!section_toggle_enabled(false, true));
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn section_header_click_toggles_only_when_allowed() {
-        assert_eq!(section_toggle_after_click(true, true, true, true), Some(false));
-        assert_eq!(section_toggle_after_click(true, true, false, true), Some(true));
-        assert_eq!(section_toggle_after_click(true, false, true, false), None);
-        assert_eq!(section_toggle_after_click(false, true, true, true), None);
-        assert_eq!(section_toggle_after_click(true, true, true, false), None);
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn collapsed_allocation_ignores_ratio_and_reopening_applies_it() {
-        let free = 900.0;
-        let collapsed_at_min_ratio = page_heights_for_sections(free, false, true, 0.2);
-        let collapsed_at_max_ratio = page_heights_for_sections(free, false, true, 0.8);
-        assert_eq!(
-            collapsed_at_min_ratio,
-            (0.0, free - FOLDER_ONLY_BELOW_H)
-        );
-        assert_eq!(collapsed_at_min_ratio, collapsed_at_max_ratio);
-
-        // The collapsed allocator ignores the ratio; when both sections reopen,
-        // it applies whichever saved value the caller supplies.
-        let reopened_at_min_ratio = page_heights_for_sections(free, true, true, 0.2);
-        let reopened_at_saved_ratio = page_heights_for_sections(free, true, true, 0.7);
-        assert_ne!(reopened_at_min_ratio, reopened_at_saved_ratio);
-        assert_eq!(
-            reopened_at_saved_ratio,
-            split_viewports(backup_split_splittable(free), 0.7)
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn queue_columns_fill_the_table_and_keep_the_name_at_least_80() {
-        // Issue #30: the table ends exactly at `content - scroll bar`, the four
-        // cells plus their three gaps add up to the table width, and the name
-        // column never drops below 80 px — not even at the minimum window
-        // (760 - 220 sidebar - 2 * 16 page gutter = 508 content px).
-        for content_w in [1400.0, 1000.0, 760.0, 508.0] {
-            let cols = queue_columns(content_w, 8.0, 18.0);
-            assert_eq!(cols.table_w, content_w - 18.0, "content {content_w}");
-            assert!(cols.name_w >= QUEUE_MIN_NAME_W, "content {content_w}");
-            assert_eq!(
-                cols.folder_w + cols.name_w + cols.size_w + cols.status_w + 3.0 * 8.0,
-                cols.table_w,
-                "columns must add up exactly at content {content_w}"
-            );
-            assert_eq!(cols.size_w, 80.0);
-            assert_eq!(cols.status_w, 140.0);
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn queue_label_disambiguates_with_the_parent_name_not_the_path() {
-        // Two folders named "Sport" under different parents: the queue label
-        // carries the parent's **name** so it fits the 120 px column — the
-        // full path stays in the row's tooltip (user decision 2026-10-16).
-        let ambiguous: HashSet<String> = ["Sport".to_string()].into_iter().collect();
-        let label = queue_folder_label(
-            "Sport",
-            Path::new("/Users/florianreisinger/Pictures/Sport"),
-            &ambiguous,
-        );
-        assert_eq!(label, "Sport (Pictures)");
-
-        // Unambiguous names stay bare.
-        let label = queue_folder_label(
-            "Sport",
-            Path::new("/Users/florianreisinger/Pictures/Sport"),
-            &HashSet::new(),
-        );
-        assert_eq!(label, "Sport");
-
-        // A root-level folder has no parent name: the plain name stays.
-        let label = queue_folder_label("Sport", Path::new("/Sport"), &ambiguous);
-        assert_eq!(label, "Sport");
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn status_rank_matches_the_decided_queue_order() {
-        // User decision 2026-10-26: In Bearbeitung → Fehlgeschlagen → Warten →
-        // Abgeschlossen → Übersprungen.
-        let order = [
-            FileState::Uploading,
-            FileState::Failed,
-            FileState::Waiting,
-            FileState::Done,
-            FileState::Skipped,
-        ];
-        for (rank, state) in order.into_iter().enumerate() {
-            assert_eq!(status_rank(state), rank as u8);
-        }
-    }
-
-    /// One queue entry with the fields the layout reads filled in.
-    #[cfg(feature = "legacy-eframe")]
-    fn queue_entry(folder: usize, name: &str, state: FileState) -> QueueEntry {
-        QueueEntry {
-            folder,
-            name: name.to_string(),
-            state,
-            size: 0,
-            #[cfg(feature = "legacy-eframe")]
-            path: PathBuf::new(),
-            bytes_sent: 0,
-        }
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn queue_layout_is_global_and_stable_within_a_status_bucket() {
-        // Two folders, deliberately interleaved: the layout must ignore folder
-        // membership and bucket globally by status, keeping insertion order
-        // inside a bucket (user decision 2026-10-26).
-        let queue = vec![
-            queue_entry(0, "a-waiting", FileState::Waiting),
-            queue_entry(1, "b-done", FileState::Done),
-            queue_entry(0, "a-uploading", FileState::Uploading),
-            queue_entry(1, "b-waiting", FileState::Waiting),
-            queue_entry(0, "a-failed", FileState::Failed),
-            queue_entry(1, "b-skipped", FileState::Skipped),
-            queue_entry(0, "a-done", FileState::Done),
-            queue_entry(1, "b-failed", FileState::Failed),
-        ];
-
-        let layout = queue_layout(&queue);
-        let names: Vec<&str> = layout.iter().map(|&i| queue[i].name.as_str()).collect();
-
-        assert_eq!(
-            names,
-            [
-                "a-uploading",
-                "a-failed",
-                "b-failed",
-                "a-waiting",
-                "b-waiting",
-                "b-done",
-                "a-done",
-                "b-skipped",
-            ]
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn queue_layout_of_an_empty_queue_is_empty() {
-        assert!(queue_layout(&[]).is_empty());
-    }
-
-    #[test]
-    #[cfg(feature = "legacy-eframe")]
-    fn queue_label_resolves_plan_path_after_store_rows_shift() {
-        let store = FolderStore {
-            folders: vec![folders::BackupFolder::new(PathBuf::from("/photos/b"))],
-        };
-        // Plan index 0 was A. The current store's row 0 is now B, but the queue
-        // must keep naming the captured plan path rather than that shifted row.
-        let paths = HashMap::from([(0, PathBuf::from("/photos/a"))]);
-        let ambiguous = ambiguous_folder_names_for_paths(&paths);
-
-        let (label, tooltip) = queue_folder_display(&paths, 0, &ambiguous)
-            .expect("the plan index has a captured folder path");
-
-        assert_eq!(store.folders[0].path, PathBuf::from("/photos/b"));
-        assert_eq!(label, "a");
-        assert_eq!(tooltip, "/photos/a");
-    }
-
     #[test]
     fn publish_state_publishes_folder_paths_for_the_queue() {
         let store = store_with("/src/published-folder", FolderStatus::Idle);
@@ -3075,23 +1989,6 @@ mod tests {
 
         publish_state(&mut plan, &shared, "test".to_string(), folder_paths, None);
 
-        #[cfg(feature = "legacy-eframe")]
-        {
-            let display = {
-                let state = shared.lock().unwrap();
-                let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-                queue_folder_display(&state.folder_paths, 0, &ambiguous)
-            };
-            assert_eq!(
-                display,
-                Some((
-                    "published-folder".to_string(),
-                    "/src/published-folder".to_string(),
-                )),
-                "the published state already carries the plan's queue label"
-            );
-        }
-        #[cfg(not(feature = "legacy-eframe"))]
         assert_eq!(
             shared.lock().unwrap().folder_paths,
             HashMap::from([(0, PathBuf::from("/src/published-folder"))]),
@@ -3976,8 +2873,6 @@ mod tests {
                 name: name.to_string(),
                 state: FileState::Waiting,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: path.clone(),
                 bytes_sent: 0,
             });
             plan.items.push((row, idx, path));
@@ -4014,8 +2909,6 @@ mod tests {
                 name: "existing.jpg".into(),
                 state: FileState::Waiting,
                 size: 1,
-                #[cfg(feature = "legacy-eframe")]
-                path: PathBuf::from("/src/folder-a/existing.jpg"),
                 bytes_sent: 0,
             }];
             s.total = 1;
@@ -4082,23 +2975,6 @@ mod tests {
         let refused = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(refused.is_none(), "the live run should accept this folder");
 
-        #[cfg(feature = "legacy-eframe")]
-        {
-            let display = {
-                let state = shared.lock().unwrap();
-                let ambiguous = ambiguous_folder_names_for_paths(&state.folder_paths);
-                queue_folder_display(&state.folder_paths, 0, &ambiguous)
-            };
-            assert_eq!(
-                display,
-                Some((
-                    "injected-folder".to_string(),
-                    "/src/injected-folder".to_string(),
-                )),
-                "the injected path is available to the queue"
-            );
-        }
-        #[cfg(not(feature = "legacy-eframe"))]
         assert_eq!(
             shared.lock().unwrap().folder_paths.get(&0),
             Some(&PathBuf::from("/src/injected-folder")),
@@ -4231,5 +3107,32 @@ mod tests {
         let out = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(out.is_some(), "a cancelled run must refuse the plan");
         assert_eq!(shared.lock().unwrap().total, 0);
+    }
+
+    #[test]
+    fn backup_queue_ratio_sanitizes_clamps_and_handles_non_finite() {
+        assert_eq!(sanitize_backup_queue_ratio(0.5), 0.5);
+        assert_eq!(sanitize_backup_queue_ratio(-1.0), BACKUP_QUEUE_RATIO_MIN);
+        assert_eq!(sanitize_backup_queue_ratio(1.0), BACKUP_QUEUE_RATIO_MAX);
+        for ratio in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(
+                sanitize_backup_queue_ratio(ratio),
+                BACKUP_QUEUE_RATIO_DEFAULT
+            );
+        }
+    }
+
+    #[test]
+    fn backup_queue_ratio_serializes_as_a_short_decimal() {
+        let mut config = crate::config::Config::default();
+        config.backup_queue_ratio = 0.35;
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(serialized
+            .lines()
+            .any(|line| line == "backup_queue_ratio = 0.35"));
+        assert!(!serialized.contains("0.349999"));
+        let back: crate::config::Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(back.backup_queue_ratio(), 0.35);
     }
 }

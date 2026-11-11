@@ -129,9 +129,9 @@ impl TrayRoute {
             changed = true;
         }
 
-        // Like eframe, only a currently visible Done glyph needs an expiry
-        // wake. Paused/active priorities will reconcile on their own next
-        // state change; there is no periodic tray polling.
+        // Only a currently visible Done glyph needs an expiry wake.
+        // Paused/active priorities will reconcile on their own next state
+        // change; there is no periodic tray polling.
         if let Some(delay) = done_wake_after(icon, since_done) {
             if let Some(done_at) = self.last_outcome.done_at {
                 if self.scheduled_done_at != Some(done_at) {

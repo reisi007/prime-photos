@@ -22,15 +22,6 @@ pub(crate) enum Lang {
 }
 
 impl Lang {
-    /// Stable code used for persistence (`Config.language`).
-    #[cfg(feature = "legacy-eframe")]
-    pub(crate) fn code(self) -> &'static str {
-        match self {
-            Lang::De => "de",
-            Lang::En => "en",
-        }
-    }
-
     /// Parse a persisted language code; `None` for anything unknown.
     pub(crate) fn from_code(code: &str) -> Option<Lang> {
         match code.trim().to_ascii_lowercase().as_str() {
@@ -73,9 +64,8 @@ pub(crate) fn tr(key: &'static str) -> &'static str {
     tr_for(lang(), key)
 }
 
-/// [`tr`] for an explicit language. Used by the native macOS menu, whose label
-/// source is also exercised in tests for both languages without mutating the
-/// process-global language.
+/// [`tr`] for an explicit language. Used where a label's source is exercised in
+/// tests for both languages without mutating the process-global language.
 pub(crate) fn tr_for(lang: Lang, key: &'static str) -> &'static str {
     match lang {
         Lang::De => key,
@@ -85,33 +75,6 @@ pub(crate) fn tr_for(lang: Lang, key: &'static str) -> &'static str {
             .map(|(_, en)| *en)
             .unwrap_or(key),
     }
-}
-
-/// Context tag for the native macOS main menu (see [`tr_ctx_for`]).
-///
-/// Only the macOS app menu needs context-sensitive lookups; the item is
-/// gated together with [`tr_ctx_for`] so non-eframe builds stay warning-free.
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-pub(crate) const CONTEXT_NATIVE_MENU: &str = "native-menu";
-
-/// [`tr_for`] with a surface context for German key collisions.
-///
-/// The German source string alone is normally the key, but a few words mean
-/// different things per surface: "Wiederholen" is *Retry* in the backup list
-/// and *Redo* in the native Edit menu. `context` is an internal, never-shown
-/// tag; without a matching entry this falls back to [`tr_for`] (and then to
-/// the German key).
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-pub(crate) fn tr_ctx_for(lang: Lang, context: &'static str, key: &'static str) -> &'static str {
-    if lang == Lang::En {
-        if let Some((_, _, en)) = EN_CONTEXT
-            .iter()
-            .find(|(ctx, de, _)| *ctx == context && *de == key)
-        {
-            return en;
-        }
-    }
-    tr_for(lang, key)
 }
 
 /// Replace the `{}` placeholders in `tr(key)` with `args`, left to right.
@@ -142,14 +105,6 @@ pub(crate) fn tr2(key: &'static str, a: impl Display, b: impl Display) -> String
 /// `tr` for a message with three `{}` placeholders.
 pub(crate) fn tr3(key: &'static str, a: impl Display, b: impl Display, c: impl Display) -> String {
     subst(key, &[a.to_string(), b.to_string(), c.to_string()])
-}
-
-/// Count-dependent text: `singular` for exactly one, `plural` otherwise, with
-/// the literal token `{n}` in the plural replaced by the count.
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn tr_n(n: usize, singular: &'static str, plural: &'static str) -> String {
-    let key = if n == 1 { singular } else { plural };
-    tr(key).replace("{n}", &n.to_string())
 }
 
 /// Classify a POSIX locale / locale identifier by its language prefix: `de*`
@@ -256,30 +211,19 @@ const EN: &[(&str, &str)] = &[
         "Die Sicherungsziele konnten nicht geladen werden. Die beschädigte Datei wurde gesichert.",
         "The backup targets could not be loaded. The damaged file was preserved.",
     ),
-    ("Letzter Upload: {} erfolgreich", "Last upload: {} successful"),
     ("Login – Prime Photos", "Sign in – Prime Photos"),
     ("Nicht angemeldet", "Not signed in"),
     (
         "Nicht angemeldet – die Anmeldung startet erst nach deiner Auswahl.",
         "Not signed in — sign-in starts only when you choose.",
     ),
-    ("Upload läuft: {} · {} · {}", "Upload running: {} · {} · {}"),
     // -- backup list ----------------------------------------------------
-    ("Aktionen", "Actions"),
     ("Angehalten bei {} %", "Paused at {} %"),
     ("ANGEHALTEN", "PAUSED"),
-    ("Alle Sicherungsvorgänge anhalten", "Pause all backups"),
-    ("Alle Sicherungsvorgänge fortsetzen", "Resume all backups"),
     ("Alle Vorgänge anhalten", "Pause all operations"),
     ("Alle Vorgänge fortsetzen", "Resume all operations"),
     ("Alles aktuell", "Everything up to date"),
-    ("Automatisch gesicherte Ordner:", "Automatically backed up folders:"),
-    ("Bearbeiten", "Edit"),
-    ("Bitte zuerst anmelden (Einstellungen).", "Please sign in first (Settings)."),
     ("Datensicherung abgeschlossen", "Backup complete"),
-    ("Datensicherung hinzufügen …", "Add backup …"),
-    ("Datensicherung stoppen", "Stop backup"),
-    ("Datensicherung gestoppt: {}", "Backup stopped: {}"),
     ("Der Ordner wird beim nächsten Lauf gesichert.", "The folder will be backed up on the next run."),
     // Missing source (user decisions 2026-10-16, 2026-10-17): a missing source
     // folder must not read as "no photos found" — the understandable cause is
@@ -294,20 +238,17 @@ const EN: &[(&str, &str)] = &[
         "FOTOS PER DRAG & DROP VERSCHIEBEN, UM SIE HOCHZULADEN",
         "DRAG & DROP PHOTOS TO UPLOAD",
     ),
-    ("Gesamt: {} von {} Dateien", "Total: {} of {} files"),
     (
         "Gesamt: {} von {} Dateien · {}",
         "Total: {} of {} files · {}",
     ),
     // Plattformneutral (PORT-7: open -R / explorer /select / xdg-open) —
     // "Finder" ist nur macOS.
-    ("Im Dateimanager anzeigen", "Show in file manager"),
     ("Jetzt scannen und hochladen", "Scan and upload now"),
     (
         "Keine Fotos in diesem Ordner gefunden.",
         "No photos found in this folder.",
     ),
-    ("Konfiguration wird durchgeführt", "Configuration in progress"),
     ("Ordner", "Folder"),
     ("Ordner nicht gefunden", "Folder not found"),
     (
@@ -323,10 +264,8 @@ const EN: &[(&str, &str)] = &[
         "Choose a folder to start the backup.",
     ),
     ("Warten", "Waiting"),
-    ("Wiederholen", "Retry"),
     ("Upload-Vorgang läuft", "Upload in progress"),
     ("Vollständig", "Complete"),
-    ("Zuletzt aktualisiert: {}", "Last updated: {}"),
     (
         "Zur einmaligen Sicherung mit der Maus hierher ziehen",
         "Drag here for a one-time backup",
@@ -350,21 +289,15 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Ersetzen", "Replace"),
     ("Fotos sichern", "Back up photos"),
-    ("Gesicherter Ordner:", "Backed up folder:"),
     ("Ignorieren", "Ignore"),
     ("Jedes Mal nachfragen", "Ask every time"),
     ("Lokaler Pfad ist nicht verfügbar", "Local path is not available"),
-    ("Noch nicht verfügbar", "Not available yet"),
-    ("Ordner hinzugefügt: {}", "Folder added: {}"),
     ("Ordner ist nicht mehr vorhanden", "Folder no longer exists"),
-    ("Sofort", "Immediately"),
-    ("Umgang mit Dateinamenkonflikten:", "Handling of file name conflicts:"),
     ("Videos sichern", "Back up videos"),
     (
         "Videos werden noch nicht hochgeladen",
         "Videos are not uploaded yet",
     ),
-    ("Änderungen hochladen:", "Upload changes:"),
     // -- Rune production backup route -----------------------------------
     ("Aktiviert", "Enabled"),
     ("Anderen Ordner wählen …", "Choose a different folder …"),
@@ -434,12 +367,13 @@ const EN: &[(&str, &str)] = &[
         "Backup targets could not be loaded. Changes will not be saved.",
     ),
     ("Warteschlange", "Queue"),
+    ("Wird eingelesen", "Scanning"),
+    ("Wird übertragen", "Uploading"),
     ("Zur Datensicherung", "Back to Backup"),
     ("Upload-Vorgang gestartet.", "Upload started."),
     // -- settings -------------------------------------------------------
     ("Album (optional):", "Album (optional):"),
     ("Allgemeines", "General"),
-    ("Anmeldung", "Sign-in"),
     ("Automatisch (System)", "Automatic (system)"),
     ("Bandbreite", "Bandwidth"),
     ("Begrenzen auf", "Limit to"),
@@ -458,6 +392,10 @@ const EN: &[(&str, &str)] = &[
     (
         "Gilt für neue Upload-Ziele und für Drag&Drop.",
         "Applies to new upload targets and to drag & drop.",
+    ),
+    (
+        "Änderungen werden sofort gespeichert.",
+        "Changes are saved immediately.",
     ),
     ("Gleichzeitige Uploads", "Concurrent uploads"),
     ("Hell", "Light"),
@@ -539,7 +477,6 @@ const EN: &[(&str, &str)] = &[
     ("Vereinigtes Königreich", "United Kingdom"),
     ("Österreich", "Austria"),
     // -- upload progress & log ------------------------------------------
-    ("1 Datei", "1 file"),
     ("100% hochgeladen", "100% uploaded"),
     ("Abgeschlossen", "Completed"),
     ("Marktplatz", "Marketplace"),
@@ -561,7 +498,6 @@ const EN: &[(&str, &str)] = &[
     ("Anmeldung abgelaufen, {} wird erneut versucht.", "Sign-in expired, retrying {}."),
     ("Auth-Token wurde erneuert.", "Auth token renewed."),
     ("Auth-Token-Erneuerung fehlgeschlagen: {}", "Auth token renewal failed: {}"),
-    ("Angehalten ({}%)", "Paused ({}%)"),
     ("FEHLER {}: {}", "ERROR {}: {}"),
     (
         "FEHLER {}: {} — wird erneut versucht.",
@@ -571,7 +507,6 @@ const EN: &[(&str, &str)] = &[
         "{} Datei(en) werden erneut versucht …",
         "{} file(s) will be retried …",
     ),
-    ("Fehlgeschlagen", "Failed"),
     ("Fertig: {} erfolgreich, {} fehlgeschlagen.", "Done: {} succeeded, {} failed."),
     (
         "Abgebrochen: {} erfolgreich, {} fehlgeschlagen, {} offen.",
@@ -580,9 +515,6 @@ const EN: &[(&str, &str)] = &[
     ("In Bearbeitung", "In progress"),
     // Per-file percentage while a row is uploading (Befund 11c). The whole
     // visible string is one key, so a translator can reorder it freely.
-    ("In Bearbeitung · {}%", "In progress · {}%"),
-    ("{} von {}", "{} of {}"),
-    ("Schätzung läuft …", "Estimating …"),
     ("Slow-Mode aktiv: 1 Datei gleichzeitig.", "Slow mode active: 1 file at a time."),
     (
         "Slow-Mode aktiv: laufende Uploads laufen zu Ende, danach 1 Datei gleichzeitig.",
@@ -595,8 +527,6 @@ const EN: &[(&str, &str)] = &[
     ("UEBERSPRUNGEN {}: bereits hochgeladen", "SKIPPED {}: already uploaded"),
     ("Übersprungen", "Skipped"),
     ("Warteschlange ({})", "Queue ({})"),
-    ("Warteschlange ausklappen", "Show queue"),
-    ("Warteschlange einklappen", "Hide queue"),
     (
         "Automatisch gesicherte Ordner ausklappen",
         "Show automatic backup folders",
@@ -615,19 +545,8 @@ const EN: &[(&str, &str)] = &[
     ),
     // Queue-table headers and empty state (Welle 3.1/3.5,
     // docs/original/SPEC_UPLOAD_PROGRESS.md §7.8).
-    ("Größe", "Size"),
-    ("Keine Uploads in der Warteschlange", "No uploads in the queue"),
     ("Name", "Name"),
-    ("Status", "Status"),
-    ("Wird vorbereitet …", "Preparing …"),
-    ("ca. {}", "approx. {}"),
-    ("{}% · noch {} · {}", "{}% · {} left · {}"),
-    ("{n} Dateien", "{n} files"),
     // -- run outcome breakdown (footer + folder row) ---------------------
-    ("{} neu hochgeladen", "{} newly uploaded"),
-    ("{} bereits im Konto", "{} already in your account"),
-    ("{} unverändert", "{} unchanged"),
-    ("{} Fehler", "{} error(s)"),
     // -- notifications --------------------------------------------------
     ("Upload abgeschlossen: {} Datei(en).", "Upload complete: {} file(s)."),
     (
@@ -645,16 +564,22 @@ const EN: &[(&str, &str)] = &[
     ("Fenster anzeigen", "Show window"),
     ("Mit Fehlern abgeschlossen", "Finished with errors"),
     // -- native macOS main menu (Issue #8) ------------------------------
-    // "Bearbeiten" and "Über Prime Photos" are shared with other surfaces and
-    // live in their feature groups above. "Wiederholen" is deliberately absent:
-    // in the backup list it is "Retry"; the Edit-menu "Redo" is a contextual
-    // entry in `EN_CONTEXT`.
+    // Titles Rune installs in English; `app_menu::rune_standard` maps them to
+    // these keys in place. "Über Prime Photos" lives in the about group below.
+    ("Alle einblenden", "Show All"),
     ("Alles auswählen", "Select All"),
+    ("Andere ausblenden", "Hide Others"),
     ("Ausschneiden", "Cut"),
+    ("Bearbeiten", "Edit"),
+    ("Dienste", "Services"),
     ("Einfügen", "Paste"),
+    ("Fenster", "Window"),
     ("Kopieren", "Copy"),
+    ("Minimieren", "Minimize"),
     ("Prime Photos beenden", "Quit Prime Photos"),
+    ("Prime Photos ausblenden", "Hide Prime Photos"),
     ("Rückgängig", "Undo"),
+    ("Wiederholen", "Redo"),
     // -- about / third-party licenses (Welle 4b) ------------------------
     ("Über Prime Photos", "About Prime Photos"),
     ("Version: {}", "Version: {}"),
@@ -663,29 +588,11 @@ const EN: &[(&str, &str)] = &[
     ("© {} Prime Photos", "© {} Prime Photos"),
     ("Komponenten und Lizenztexte", "Components and license texts"),
     ("Icons und Grafiken", "Icons and graphics"),
-    // -- release CLI errors ----------------------------------------------
-    (
-        "Demo- und Screenshot-Argumente sind in Release-Builds nicht verfügbar: {}",
-        "Demo and screenshot arguments are unavailable in release builds: {}",
-    ),
-];
-
-/// Context-qualified English entries for German keys that collide across
-/// surfaces: `(context, German key, English)`. Consulted by [`tr_ctx_for`]
-/// before the plain [`EN`] table; the German key stays the visible reference
-/// text. Entries belong here only when the *same* German string must translate
-/// differently per surface — otherwise the string is its own unambiguous key.
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-const EN_CONTEXT: &[(&str, &str, &str)] = &[
-    // Backup list = "Retry", native macOS Edit menu = "Redo".
-    (CONTEXT_NATIVE_MENU, "Wiederholen", "Redo"),
 ];
 
 #[cfg(test)]
 mod tests {
     use super::{EN, Lang, lang_from_env_value, lang_from_locale_id, subst_for, tr_for};
-    #[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-    use super::{CONTEXT_NATIVE_MENU, EN_CONTEXT, tr_ctx_for};
     use std::collections::HashSet;
 
     /// Every German key must appear exactly once. The table is a linear lookup
@@ -700,17 +607,6 @@ mod tests {
                 "duplicate German key in EN table: {de:?}"
             );
         }
-    }
-
-    #[test]
-    fn release_demo_argument_error_is_localized() {
-        let key =
-            "Demo- und Screenshot-Argumente sind in Release-Builds nicht verfügbar: {}";
-        assert_eq!(tr_for(Lang::De, key), key);
-        assert_eq!(
-            tr_for(Lang::En, key),
-            "Demo and screenshot arguments are unavailable in release builds: {}"
-        );
     }
 
     #[test]
@@ -841,6 +737,8 @@ mod tests {
                 "Backup targets could not be loaded. Changes will not be saved.",
             ),
             ("Warteschlange", "Queue"),
+            ("Wird eingelesen", "Scanning"),
+            ("Wird übertragen", "Uploading"),
             ("Zur Datensicherung", "Back to Backup"),
             ("Upload-Vorgang gestartet.", "Upload started."),
             ("{} / {} Dateien · {}", "{} / {} files · {}"),
@@ -904,39 +802,6 @@ mod tests {
             );
             assert_eq!(tr_for(Lang::En, label), english_label);
         }
-    }
-
-    /// Context entries are looked up linearly too, so `(context, key)` must be
-    /// unique.
-    #[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-    #[test]
-    fn contextual_keys_are_unique() {
-        let mut seen = HashSet::new();
-        for (context, de, _) in EN_CONTEXT {
-            assert!(
-                seen.insert((*context, *de)),
-                "duplicate contextual key in EN table: {context:?}/{de:?}"
-            );
-        }
-    }
-
-    /// The same German key translates per surface: "Wiederholen" stays "Retry"
-    /// in the backup list while the native Edit menu gets "Redo".
-    #[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-    #[test]
-    fn retry_and_redo_are_distinct() {
-        assert_eq!(tr_for(Lang::De, "Wiederholen"), "Wiederholen");
-        assert_eq!(
-            tr_ctx_for(Lang::De, CONTEXT_NATIVE_MENU, "Wiederholen"),
-            "Wiederholen"
-        );
-        assert_eq!(tr_for(Lang::En, "Wiederholen"), "Retry");
-        assert_eq!(
-            tr_ctx_for(Lang::En, CONTEXT_NATIVE_MENU, "Wiederholen"),
-            "Redo"
-        );
-        // An unknown context falls back to the plain translation.
-        assert_eq!(tr_ctx_for(Lang::En, "other", "Wiederholen"), "Retry");
     }
 
     /// Locale identifiers are classified by their `de` prefix only, in both the

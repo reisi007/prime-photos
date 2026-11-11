@@ -343,7 +343,7 @@ pub(crate) fn run_production(args: Vec<String>) -> Result<(), String> {
         return Ok(());
     }
     // Cache the transient login-item Apple event before Rune starts AppKit. The
-    // production host consumes the same classification as the legacy host.
+    // production host consumes that classification for its silent-start policy.
     crate::app_activation::install_launch_diagnostic();
     crate::notify::init();
     let state = LiveState::production()?;

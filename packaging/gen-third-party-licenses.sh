@@ -54,20 +54,44 @@ skipped = []    # (name, version, filename) — nicht als UTF-8 lesbar
 components = []  # (name, version, expr, repo)
 
 
-def find_license_files(manifest_path):
-    """Lizenz-/Copyright-Dateien direkt im Crate-Verzeichnis (nicht rekursiv)."""
-    directory = os.path.dirname(os.path.abspath(manifest_path))
-    try:
-        entries = sorted(os.listdir(directory))
-    except OSError:
-        return []
+def find_license_files(pkg):
+    """Lizenz-/Copyright-Dateien im Crate-Verzeichnis und, bei Git-Abhängigkeiten,
+    auf dem Weg zur Repository-Wurzel.
+
+    Eine Git-Abhängigkeit ist häufig ein Workspace-Mitglied, deren LICENSE/
+    NOTICE im Repository-Root liegt (z. B. runes `crates/rune`); ein reiner
+    Blick ins Crate-Verzeichnis verfehlt sie. Für `git+`-Quellen wird deshalb
+    aufwärts bis zur Checkout-Wurzel gelaufen (Markierung: `.git`/`.cargo-ok`).
+    Registry-Crates bleiben auf ihr eigenes Verzeichnis beschränkt.
+    """
+    directory = os.path.dirname(os.path.abspath(pkg["manifest_path"]))
+    is_git = (pkg.get("source") or "").startswith("git+")
     found = []
-    for entry in entries:
-        if entry.upper().startswith(PREFIXES):
-            path = os.path.join(directory, entry)
-            if os.path.isfile(path):
-                found.append((entry, path))
-    return found
+    while True:
+        try:
+            entries = sorted(os.listdir(directory))
+        except OSError:
+            return found
+        for entry in entries:
+            if entry.upper().startswith(PREFIXES):
+                path = os.path.join(directory, entry)
+                if os.path.isfile(path):
+                    found.append((entry, path))
+        if is_git and any(
+            os.path.exists(os.path.join(directory, marker))
+            for marker in (".git", ".cargo-ok")
+        ):
+            return found
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return found
+        # Fallback should the checkout markers be absent: stop at Cargo's
+        # `git/checkouts/<repo>-<hash>` level instead of climbing further up.
+        if is_git and os.path.basename(parent) == "checkouts":
+            return found
+        if not is_git and not os.path.isfile(os.path.join(parent, "Cargo.toml")):
+            return found
+        directory = parent
 
 
 for pkg in packages:
@@ -82,7 +106,7 @@ for pkg in packages:
         expr = os.path.basename(license_file)
     display_expr = expr if expr else "(keine Angabe)"
 
-    files = find_license_files(pkg["manifest_path"])
+    files = find_license_files(pkg)
     if not license_expr and not license_file and not files:
         sys.stderr.write(
             "FEHLER: Komponente %s %s hat weder Lizenzfeld noch Lizenzdatei "
@@ -238,7 +262,8 @@ if skipped:
         lines.append("  %s %s  —  %s" % (name, version, filename))
     lines.append("")
 
-output = "\n".join(lines).rstrip("\n") + "\n"
+normalized = "\n".join(lines).replace("\r\n", "\n").replace("\r", "\n")
+output = "\n".join(line.rstrip() for line in normalized.split("\n")).rstrip("\n") + "\n"
 with open(out_path, "w", encoding="utf-8") as fh:
     fh.write(output)
 

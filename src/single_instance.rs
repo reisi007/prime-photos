@@ -46,8 +46,7 @@ const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(
 const WINDOWS_INSTANCE_PORT: u16 = 47733;
 
 /// Set by the accept loop when another process asked this instance to show its
-/// window; consumed once per frame by `PrimePhotoApp::update` through
-/// [`take_show_request`].
+/// window; consumed once per Rune poll through [`take_show_request`].
 static SHOW_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// The active UI host's wake callback. The accept loop only flags + wakes,

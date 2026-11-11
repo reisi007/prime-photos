@@ -9,7 +9,7 @@ geprüft am: 2026-11-01
 | `build-verify` | ja | `AGENTS.md` § Arbeitsweise (Skill `build-verify`) | |
 | `skills-marker` | ja | `AGENTS.skills.md:3` | |
 | `laravel` | nein | | Rust-Projekt, kein PHP |
-| `daisyui` / `colors` / `config` / `install` / `usage` | nein | | egui, kein daisyUI/Tailwind |
+| `daisyui` / `colors` / `config` / `install` / `usage` | nein | | Rune, kein daisyUI/Tailwind |
 | `node-deps` | nein | | kein Node/pnpm-Projekt |
 | `playwright-parallel` | nein | | keine E2E-Suite |
 | `docker-test-image` / `github-ci-filters` / `ghcr-visvisibility` | nein | | kein CI-Image, keine Actions-Path-Filter |

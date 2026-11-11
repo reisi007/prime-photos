@@ -2,8 +2,7 @@
 //!
 //! The fixture is not the Prime Photos app and must never become an interactive
 //! alternate user mode. The explicit Rune backup route embeds the shared
-//! controls, while eframe remains the normal UI until all established user
-//! flows have been ported to Rune.
+//! controls; this is the production settings surface.
 
 use crate::config::{Appearance, Config};
 use crate::i18n::{self, Lang};

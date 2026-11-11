@@ -5,11 +5,12 @@
 //!
 //! On macOS the notification is **not** posted inline: the backend sends it
 //! synchronously and pumps the run loop (`-[NSRunLoop runUntilDate:]`) while
-//! doing so. `run_finished` is called from egui's `update`, so that nested run
-//! loop re-enters winit's event handler — a queued closure runs inside the ObjC
-//! callback, where unwinding is forbidden, so a panic there aborts the process
-//! (SIGABRT crash report, 2026-10-14). The fix is the one already used for the
-//! cookie probe in `login.rs`: hand the notification to the main dispatch
+//! doing so. `run_finished` is called from Rune's UI poll, so that nested run
+//! loop re-enters the host's event handler — a queued closure runs inside the
+//! ObjC callback, where unwinding is forbidden, so a panic there aborts the
+//! process (SIGABRT crash report, 2026-10-14). The fix is the one already used
+//! for the cookie probe in `login.rs`: hand the notification to the main
+//! dispatch
 //! queue, so it is only sent once `update` has returned.
 //!
 //! Off macOS there is no run-loop re-entrancy problem; the notification is

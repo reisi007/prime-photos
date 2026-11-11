@@ -1,10 +1,8 @@
 use super::{
-    RUNE_BACKUP_FIXTURE_FLAG, RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG,
-    RUNE_WRY_SMOKE_FLAG, RUNE_BACKUP_FLAG, RUNE_BACKUP_SMOKE_FLAG,
-    is_rune_route_or_tooling_arg,
+    RUNE_BACKUP_FIXTURE_FLAG, RUNE_BACKUP_FLAG, RUNE_BACKUP_SMOKE_FLAG, RUNE_LOGIN_FIXTURE_FLAG,
+    RUNE_PRODUCTION_LOGIN_FLAG, RUNE_WRY_SMOKE_FLAG, is_rune_route_or_tooling_arg,
+    rune_production_backup_route_args,
 };
-#[cfg(feature = "rune-backup")]
-use super::rune_production_backup_route_args;
 
 #[test]
 fn every_explicit_rune_route_is_recognized_for_unavailable_route_rejection() {
@@ -20,12 +18,10 @@ fn every_explicit_rune_route_is_recognized_for_unavailable_route_rejection() {
     }
 }
 
-#[cfg(feature = "rune-backup")]
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
-#[cfg(feature = "rune-backup")]
 #[test]
 fn production_backup_route_requires_its_explicit_marker_and_strips_only_it() {
     assert_eq!(rune_production_backup_route_args(&args(&["--verbose"])), Ok(None));
@@ -39,7 +35,6 @@ fn production_backup_route_requires_its_explicit_marker_and_strips_only_it() {
     );
 }
 
-#[cfg(feature = "rune-backup")]
 #[test]
 fn production_backup_route_rejects_malformed_or_ambiguous_arguments() {
     assert_eq!(

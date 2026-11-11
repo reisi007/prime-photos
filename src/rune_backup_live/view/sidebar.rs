@@ -134,8 +134,8 @@ fn sidebar_nav_item(
         .px(10.0)
         .center_y()
         .radius(8.0)
-        // Selected row: the same subtle fill as the eframe sidebar. No extra
-        // marker — the row fill plus the teal icon carry the state.
+        // Selected row: the same subtle fill as the established sidebar. No
+        // extra marker — the row fill plus the teal icon carry the state.
         .fill(if active {
             theme.control_track
         } else {

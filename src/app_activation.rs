@@ -1,14 +1,9 @@
 //! macOS app activation: bring the (possibly hidden) window back.
 //!
-//! **Why there is no `NSApplicationDelegate` here.** winit 0.30 registers an
-//! `NSApplicationDelegate` of its own (`WinitApplicationDelegate`, see
-//! `winit/src/platform_impl/macos/event_loop.rs`) and `ApplicationDelegate::get`
-//! panics hard as soon as `NSApp.delegate` is not that object — "tried to get a
-//! delegate that was not the one Winit has registered". Replacing it, which is
-//! the escape hatch winit's documentation still advertises ("Winit guarantees
-//! that it will not register an application delegate"), is therefore a pure
-//! **runtime** failure that `cargo build` cannot see: the winit docs are out of
-//! date for 0.30. This module never calls `NSApplication::setDelegate`.
+//! **Why there is no `NSApplicationDelegate` here.** Rune's native host owns the
+//! application delegate; replacing it would break the host's own launch and
+//! event handling. This module therefore never calls
+//! `NSApplication::setDelegate`.
 //!
 //! Instead it observes `NSApplicationDidBecomeActiveNotification` through the
 //! **target-action** form of `addObserver:selector:name:object:` (no blocks:
@@ -25,44 +20,12 @@
 //! render loop. The host drains the flag via [`take_become_active_request`] and
 //! then shows and focuses the window.
 //!
-//! **The Dock icon follows the window** (original parity, user decision
-//! 2026-10-25 — `SPEC_OS_INTEGRATION.md` §3.4): the bundle sets `LSUIElement`
-//! and the runtime policy changes between `Regular` (open window, Dock icon +
-//! app menu) and `Accessory` (closed-to-tray, no Dock icon or app menu). The
-//! previous `NSApplication::hide` call is removed: a live test on 2026-10-25
-//! showed that the hidden state kept the Dock tile around even after the policy
-//! had correctly changed to `Accessory`. `step_back` now changes the policy
-//! and calls `deactivate()` to give up activation, so a later activation via
-//! `open -a` or Finder can post `NSApplicationDidBecomeActiveNotification` and
-//! bring the window back; without deactivation that observer-based return path
-//! would be dead. The tray's "Fenster anzeigen" entry calls `show_main_window`
-//! directly instead. `come_forward`
-//! restores `Regular` **first** and still unhides a hidden app before activating
-//! it (the unhide also protects the ⌘H case). The observer mechanism itself is
-//! unchanged. While the window is open the app is `Regular`, so a Dock click
-//! activates it; while closed-to-tray there is no Dock icon, and the return
-//! paths are the tray (a direct `show_main_window` call), a relaunch (through
-//! the activation observer), and a second start.
-//!
 //! **Login-item launch diagnostic** (`SPEC_OS_INTEGRATION.md` §3.5): the
 //! retained launch-notification observer reads `currentAppleEvent` while
 //! `NSApplicationDidFinishLaunchingNotification` is delivered and caches
-//! whether `oapp` carries `prdt=lgit`. The legacy and Rune production hosts use
-//! that cache for their silent-start policy. No Apple-event handler or
-//! application delegate is registered.
-//!
-//! **Why closing steps the app back (`step_back` / `come_forward`).**
-//! Reactivating an app that is *already* the frontmost one activates nothing:
-//! AppKit posts no `NSApplicationDidBecomeActiveNotification`, so the observer
-//! above would never fire and the way back would look dead until the user
-//! focused some other app first. `step_back` therefore switches to `Accessory`
-//! and calls `deactivate()` to give up activation, without setting the hidden
-//! state: a live finding on 2026-10-25 showed that `hide` kept the Dock tile
-//! visible despite the `Accessory` policy. A later relaunch from Finder,
-//! Spotlight, or `open -a` can then post the notification and bring the window
-//! back; the tray entry calls `show_main_window` directly. `come_forward` is
-//! the counterpart: restore `Regular` first, then unhide (if hidden, e.g. by
-//! ⌘H) and activate.
+//! whether `oapp` carries `prdt=lgit`. The Rune production host uses that cache
+//! for its silent-start policy. No Apple-event handler or application delegate
+//! is registered.
 
 #[cfg(target_os = "macos")]
 use std::cell::OnceCell;
@@ -82,8 +45,6 @@ use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSApplicationDidBecomeActiveNotification, NSApplicationDidFinishLaunchingNotification,
 };
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSAppleEventManager, NSNotification, NSNotificationCenter};
 
@@ -306,103 +267,11 @@ pub fn launched_as_log_in_item() -> bool {
     login_item
 }
 
-/// macOS: switch to `Accessory` — no Dock icon and no app menu (the window is
-/// hidden / not open). Main-thread-bound like the other functions. The `bool`
-/// return value of `setActivationPolicy` is **not** an error signal (see
-/// [`become_regular`]).
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-pub fn become_accessory() {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    if !NSApplication::sharedApplication(mtm)
-        .setActivationPolicy(NSApplicationActivationPolicy::Accessory)
-    {
-        log::debug!("setActivationPolicy(Accessory) meldete false");
-    }
-}
-
-/// macOS: switch back to `Regular` — the Dock icon and the app menu return with
-/// the window. Main-thread-bound like the other functions. The `bool` return
-/// value of `setActivationPolicy` is **not** an error signal: in the live test
-/// of 2026-10-18 it returned `false` although the policy verifiably switched to
-/// `Regular` (external check: `activationPolicy` changes, the window comes
-/// back). The assignment itself is therefore unconditional and a `false` is
-/// only logged, at debug level.
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-pub fn become_regular() {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    if !NSApplication::sharedApplication(mtm)
-        .setActivationPolicy(NSApplicationActivationPolicy::Regular)
-    {
-        log::debug!("setActivationPolicy(Regular) meldete false");
-    }
-}
-
-/// macOS: step the app out of the foreground right before the window is hidden.
-///
-/// The original uses the dynamic activation policy (`SPEC_OS_INTEGRATION.md`
-/// §3.4): switch to `Accessory` without hiding the app, then deactivate it so a
-/// later activation can notify the observer and bring the window back. Hiding
-/// first kept the Dock tile alive after the policy change (live finding,
-/// 2026-10-25). A `false` return from `setActivationPolicy` is only logged, not
-/// treated as an error. Main-thread-bound: returns early without a
-/// [`MainThreadMarker`] (AppKit may only be messaged from the main thread).
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-pub fn step_back() {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    let app = NSApplication::sharedApplication(mtm);
-    if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
-        log::debug!("setActivationPolicy(Accessory) meldete false");
-    }
-    app.deactivate();
-}
-
-/// macOS: the counterpart to [`step_back`] — restore `Regular` first, then undo
-/// a hide (if any, e.g. from ⌘H) and activate the app, so the restored window
-/// also comes to the front. `Regular` **first** is load-bearing: without the
-/// Dock icon/policy back, the following `activate` does not take effect.
-/// Main-thread-bound like [`step_back`].
-#[cfg(all(target_os = "macos", feature = "legacy-eframe"))]
-pub fn come_forward() {
-    let Some(mtm) = MainThreadMarker::new() else {
-        return;
-    };
-    let app = NSApplication::sharedApplication(mtm);
-    if !app.setActivationPolicy(NSApplicationActivationPolicy::Regular) {
-        log::debug!("setActivationPolicy(Regular) meldete false");
-    }
-    if app.isHidden() {
-        app.unhide(None);
-    }
-    app.activate();
-}
-
-/// Non-macOS: there is no AppKit app to step back.
-#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
-pub fn step_back() {}
-
-/// Non-macOS: there is no AppKit app to bring forward.
-#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
-pub fn come_forward() {}
-
 /// Non-macOS: there is no Apple event to detect a login-item start.
 #[cfg(not(target_os = "macos"))]
 pub fn launched_as_log_in_item() -> bool {
     false
 }
-
-/// Non-macOS: there is no AppKit activation policy to switch.
-#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
-pub fn become_accessory() {}
-
-/// Non-macOS: there is no AppKit activation policy to switch.
-#[cfg(all(not(target_os = "macos"), feature = "legacy-eframe"))]
-pub fn become_regular() {}
 
 /// Non-macOS: there is no activation observer to install.
 #[cfg(not(target_os = "macos"))]

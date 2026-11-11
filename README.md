@@ -1,6 +1,6 @@
 # Prime Photos
 
-A cross-platform desktop app (Rust + egui/eframe) that backs up photos from local folders to your own Amazon Photos account.
+A cross-platform desktop app (Rust + Rune) that backs up photos from local folders to your own Amazon Photos account.
 
 ## Disclaimer
 
@@ -17,9 +17,9 @@ See [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §1 for the full test boundary.
 
 ## Screenshots
 
-All screenshots use the debug-only demo fixtures with the English UI (`--demo-language=en`), not a real account; folder paths, names, and file names are synthetic. Light and dark captures use the deterministic `--demo-theme` override.
+All screenshots use the debug-only Rune fixtures, not a real account; folder paths, names, and file names are synthetic. The backup and sign-in fixtures render German, the settings captures German and English. Light and dark captures use the deterministic fixture theme.
 
-**Backup page** — running upload with a per-file queue, aggregate progress and the backup targets below:
+**Backup page** — running upload with aggregate progress, backup targets and the per-file queue:
 
 ![Backup page with a running upload](docs/images/backup.png)
 
@@ -27,7 +27,7 @@ All screenshots use the debug-only demo fixtures with the English UI (`--demo-la
 
 ![Backup page in dark mode with a running upload and backup targets](docs/images/backup-dark-en.png)
 
-**Errors and partial runs** — failed files, a folder with errors and the result breakdown:
+**Errors and partial runs** — failed files and a folder with errors:
 
 ![Backup page showing failed files and a folder with errors](docs/images/backup-failures.png)
 
@@ -78,7 +78,7 @@ Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §
 - **Content-based deduplication**: a persistent local MD5 index in SQLite — the same bytes are never uploaded twice, even under a different path/name.
 - **Name-conflict handling**: ask, ignore, save as a new file (server renames), or replace — with safe replace that only overwrites the node a local path is bound to.
 - **Event-driven change detection**: one OS file-system watch per backup folder (FSEvents / ReadDirectoryChangesW / inotify), with a start-up watermark as a safety net.
-- **Per-file progress** (byte-accurate) with ETA, plus a result breakdown into newly uploaded / already in the account / unchanged / errors.
+- **Per-file progress** (byte-accurate) in the live queue: each file shows its state or transfer percentage, alongside a running completed/total count.
 - **Pause/resume** (globally, from the backup header and the tray).
 - **One-off queue via drag & drop** (persisted so a restart resumes it).
 - **Tray icon**, **desktop notifications**, and an **About window with third-party licenses**.
@@ -87,12 +87,12 @@ Per-platform verification steps: [`docs/dev/RELEASE.md`](docs/dev/RELEASE.md) §
 
 ## Build & run
 
-Requires Rust (edition 2024 ⇒ rustc ≥ 1.85). Release builds have no CLI options; the debug-only demo harness is documented in [`docs/dev/UI_FIXTURES.md`](docs/dev/UI_FIXTURES.md).
+Requires Rust (edition 2024 ⇒ rustc ≥ 1.85). The normal start and the shipped release build run the Rune UI; release builds have no user-facing CLI options. The debug-only fixture harness is documented in [`docs/dev/UI_FIXTURES.md`](docs/dev/UI_FIXTURES.md).
 
 ```sh
-cargo build              # debug binary: target/debug/prime-photos
-cargo run                # build (if needed) and start
-cargo build --release    # release binary: target/release/prime-photos
+cargo build                          # debug binary: target/debug/prime-photos (Rune UI)
+cargo run                            # build (if needed) and start the Rune UI
+cargo build --release                # release binary: target/release/prime-photos (Rune UI)
 ```
 
 Per-platform prerequisites (macOS / Windows / Linux system packages) are in **[`docs/dev/BUILD.md`](docs/dev/BUILD.md)**.
@@ -123,7 +123,7 @@ Exact paths per platform: [`docs/dev/BUILD.md`](docs/dev/BUILD.md) §6.
 - [`docs/protocol/PROTOCOL.md`](docs/protocol/PROTOCOL.md) — the wire protocol notes.
 - [`docs/dev/I18N.md`](docs/dev/I18N.md) — the internationalization layer.
 - [`docs/dev/DEV_NOTES.md`](docs/dev/DEV_NOTES.md) — codebase pitfalls (developer knowledge).
-- [`docs/dev/UI_FIXTURES.md`](docs/dev/UI_FIXTURES.md) — demo UI fixtures and the screenshot harness (developer-only).
+- [`docs/dev/UI_FIXTURES.md`](docs/dev/UI_FIXTURES.md) — Rune UI fixtures and the screenshot harness (developer-only).
 - [`docs/dev/THIRD_PARTY.md`](docs/dev/THIRD_PARTY.md) — third-party component attribution.
 - [`AGENTS.md`](AGENTS.md) — durable agent rules (agent/developer-oriented, not an end-user guide).
 

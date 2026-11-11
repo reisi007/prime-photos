@@ -19,7 +19,7 @@ macOS-specific APIs.
   directly).
 - The embedded login web view remains a **`wry` child view** — `wry` is
   cross-platform (macOS WKWebView / Windows WebView2 / Linux WebKitGTK) and
-  is attached to the eframe window via `raw-window-handle`; no change to the
+  is attached to the Rune window via `raw-window-handle`; no change to the
   fundamental architecture is needed.
 - **Signing is only relevant on macOS.** There a code signature is
   required — bundles are **ad-hoc** signed by default (`codesign --sign -`;
@@ -67,7 +67,7 @@ macOS-specific APIs.
     Run-Loop-Reentry ist ein macOS-Problem; andere OS proben direkt).
   - Das eingebettete Login-WebView bleibt ein **`wry`-Kind-View** — `wry`
     ist cross-platform (macOS WKWebView / Windows WebView2 / Linux WebKitGTK)
-    und wird über `raw-window-handle` an das eframe-Fenster gehängt; keine
+    und wird über `raw-window-handle` an das Rune-Fenster gehängt; keine
     Änderung an der Grundarchitektur nötig.
   - **Signierung ist nur auf macOS relevant.** Dort ist eine Codesignatur
     nötig — Bundles werden standardmäßig **ad-hoc** signiert
@@ -111,7 +111,7 @@ macOS-specific APIs.
   **App-Neustart** (unter macOS aktiviert Launch Services die laufende Instanz; ein Dock-/Taskbar-
   Klick ist dort **kein** Weg zurück mehr, solange das Fenster versteckt ist — ohne Fenster ist die
   App `Accessory` und hat kein Dock-Icon) — immer über denselben `show_main_window`-Pfad (Fenster
-  zeigen + fokussieren, `src/app_activation.rs`/`src/app.rs`). Auf macOS **folgt das Dock-Icon dem
+  zeigen + fokussieren, `src/app_activation.rs`/`src/rune_backup_live.rs`). Auf macOS **folgt das Dock-Icon dem
   Fenster** (sichtbar ⇒ Dock-Icon + Menü, versteckt ⇒ `Accessory` ohne Icon; `LSUIElement = true`
   steht im Bundle, beim Schließen wird policy-only auf `Accessory` gewechselt und die App mit
   `deactivate()` deaktiviert — ohne `NSApplication::hide`; ein Login-Start läuft still nur im Tray

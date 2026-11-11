@@ -65,8 +65,6 @@ impl OneTimePlan {
                 name,
                 state: FileState::Waiting,
                 size,
-                #[cfg(feature = "legacy-eframe")]
-                path: path.clone(),
                 bytes_sent: 0,
             });
             plan.items.push((row_index, ONE_TIME_IDX, path));

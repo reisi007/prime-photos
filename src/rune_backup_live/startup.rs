@@ -159,8 +159,8 @@ impl LiveState {
         i18n::set_lang(language);
         let settings_limit_edit = TextEdit::new(config.limit_kbps.to_string());
         let settings_album_edit = TextEdit::new(config.album_name.clone());
-        // The explicit production route applies the same startup intent policy
-        // as the normal eframe host, then seeds the switch from OS readback.
+        // The production route applies the same startup intent policy as the
+        // normal host, then seeds the switch from OS readback.
         let autostart = Autostart::new();
         let autostart_enabled = autostart.is_enabled().unwrap_or(false);
         let autostart_enabled = reconcile_autostart_startup(

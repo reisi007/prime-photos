@@ -26,9 +26,8 @@ and could alter the sign-in page.
   decides it from the TLD + cookies/`Accept-Language`. We force **nothing**.
   Consequence: German UI + `amazon.com` ⇒ English sign-in page — deliberately
   accepted.
-- **Latin languages only** (de, en, fr, it, es, pt). **No CJK** (egui's
-  default font is Latin-only → would need a bundled Noto-CJK font, ~16 MB,
-  or an OS-loaded font) and **no RTL** (egui has no bidi layout; Arabic /
+- **Latin languages only** (de, en, fr, it, es, pt). **No CJK** (the bundled UI
+  font is Latin-only; a CJK font would add ~16 MB) and **no RTL** (Arabic /
   Hebrew only in the web view, not in our own chrome).
 - Country/marketplace names in `countries.rs` are UI text (→ i18n): the
   table holds only the German name key, the label is built via `country_label`
@@ -45,10 +44,9 @@ and could alter the sign-in page.
     im `Config` persistiert (`language`, serde-Default aus der OS-Locale,
     damit alte `config.toml` weiter lädt).
   - **Umfang mittelfristig: lateinische Sprachen** (de, en, fr, it, es, pt).
-    **Kein CJK** (egui's Default-Font ist Latin-only → bräuchte einen
-    Noto-CJK-Font, gebündelt ~16 MB oder pro OS geladen) und **kein RTL** (egui
-    hat kein Bidi-Layout; Arabisch/Hebräisch nur in der Webview, nicht in
-    unserem Chrome).
+    **Kein CJK** (der gebündelte UI-Font ist Latin-only; ein Noto-CJK-Font
+    bräuchte ~16 MB zusätzlich) und **kein RTL** (Arabisch/Hebräisch nur in der
+    Webview, nicht in unserem Chrome).
   - **Webview-Sprache:** **Marktplatz-Default belassen** — Amazon entscheidet
     die Seitensprache aus TLD + Cookies/`Accept-Language`. Wir erzwingen
     **nichts** (`lc-`-Cookie/`language`-Parameter wären unbelegt und könnten
@@ -68,14 +66,20 @@ and could alter the sign-in page.
   unverändert.
 
 - **Native macOS-Menüs (Prime-Photos-Vertrag, Issue #8 umgesetzt):** Das
-  App-Menü („Über Prime Photos", „Prime Photos beenden") und das Edit-Menü
-  (Titel sowie Rückgängig, Wiederholen, Ausschneiden, Kopieren, Einfügen,
-  Alles auswählen) zeigen die aktuelle UI-Sprache. `PrimePhotoApp::new` baut
-  das Menü erst **nach** `i18n::set_lang`, und ein Sprachwechsel in den
-  Einstellungen ruft direkt danach `app_menu::refresh_labels` auf, das die
-  bereits installierten AppKit-Labels in place aktualisiert (idempotent, ohne
-  Panik, wenn noch kein Menü existiert). Das Tray wird weiterhin über
-  `apply_tray_labels` aktualisiert. Das ist der Vertrag für **unser** macOS-Menü;
+  App-Menü („Prime Photos" als Titel, „Über Prime Photos", „Prime Photos
+  beenden", Ausblenden/Einblenden/Dienste), das Edit-Menü (Titel sowie
+  Rückgängig, Wiederholen, Ausschneiden, Kopieren, Einfügen, Alles auswählen)
+  und das Window-Menü (Titel sowie Minimieren, Schließen) zeigen die aktuelle
+  UI-Sprache. Rune installiert seine Standardmenüs selbst und zwar mit festen
+  englischen Titeln; `app_menu::rune_standard` findet die vorhandenen Einträge
+  über ihre stabilen AppKit-Selektoren und benennt sie **in place** um
+  (idempotent, keine Struktur-/Key-Änderung, No-op solange ein Eintrag fehlt).
+  Das passiert beim Start (`install_rune_about`/`ensure_rune_about_installed`)
+  und nach einem Sprachwechsel über `app_menu::refresh_labels`, das direkt nach
+  `i18n::set_lang` läuft. Das Tray folgt derselben Sprachumstellung über
+  `LiveState::set_language` → `Effect::RefreshTray` →
+  `tray_route::request_label_refresh()` → `Tray::set_labels` (`src/tray.rs`).
+  Das ist der Vertrag für **unser** macOS-Menü;
   er sagt nichts darüber aus, ob oder wie die Original-App ihre Menüs
   lokalisiert — die Menübefunde in `docs/original/SPEC_OS_INTEGRATION.md` sind
   reine Verhaltensbeobachtung. Für Windows/Linux wird kein entsprechendes

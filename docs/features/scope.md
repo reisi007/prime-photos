@@ -49,8 +49,7 @@ implementation waves.
   als **ein** Paket).
 - **Welle 4 — About / Third-Party-Lizenzen** (Voraussetzung für ein
   öffentliches Release).
-- **Welle 5 — Robustheit & Politur** (`rfd::FileDialog` → `AsyncFileDialog`,
-  P2-Reste, Branding).
+- **Welle 5 — Robustheit & Politur** (Robustheitsreste, Branding).
 - **Welle 6 — Post-MVP / bewusst später** (dokumentiert, **nicht** eingeplant).
 
 Frühere Auswahl von 2026-10-14 („P2+P3", „Echter Name + Profilbild", „About"):

@@ -42,7 +42,7 @@ es weich statt hart).
 ### `cargo fmt --check` ist kein Gate (Befund 2026-10-15)
 
 Das Repo ist **nicht** fmt-clean als Baseline — `cargo fmt --check` meldet Abweichungen in
-**unangetasteten** Dateien (`build.rs`, `src/app.rs`: Import-Reihenfolge und Zeilenumbrüche). Ein
+**unangetasteten** Dateien (`build.rs` und weitere Altdateien: Import-Reihenfolge und Zeilenumbrüche). Ein
 fmt-Diff ist damit **kein** Regressionssignal und darf einen Task nicht blockieren;
 Regressionssignal ist allein die **Warnungs-Baseline 0** (oben).
 
@@ -72,7 +72,7 @@ Version links = Anforderung aus `Cargo.toml`, in Klammern = aufgelöste Version 
 
 | Crate | Version | Rolle | System-Relevanz |
 |---|---|---|---|
-| `eframe` / `egui` | 0.31 (0.31.1) | GUI (Fenster, Rendering, Widgets) | Linux: X11/Wayland-, GL- und xkbcommon-Bibliotheken |
+| `rune` | Git-Revision `53c7f60` | GUI (Fenster, Rendering, Widgets) | Linux-Systempakete für Runes Fenster-/Render-Backend sind hier nicht dokumentiert (nicht verifiziert) |
 | `wry` | 0.57.0 (0.57.0) | eingebettetes Login-WebView | Linux: WebKitGTK 4.1 + GTK3; Windows: WebView2; macOS: systemeigenes WebKit |
 | `tray-icon` | 0.26 (0.26.1) | Tray-/Menüleisten-Icon (`src/tray.rs`, `mod tray` in `src/main.rs`) | Linux: GTK3 + AppIndicator-Bibliothek (siehe §5) |
 | `notify-rust` | 4.18 (4.18.2) | Desktop-Benachrichtigungen (`src/notify.rs`) | macOS: `mac-notification-sys`; Windows: `tauri-winrt-notification`; Linux: D-Bus über `zbus` (reines Rust) |
@@ -124,12 +124,15 @@ OpenSSL-Entwicklungspaket (`libssl-dev` / `openssl-devel`, siehe §5).
 ### Bauen und starten
 
 ```sh
-cargo build              # Debug-Binary: target/debug/prime-photos
-cargo run                # baut (falls nötig) und startet
-cargo build --release    # Release-Binary: target/release/prime-photos
+cargo build              # Debug-Binary: target/debug/prime-photos (Rune-UI, Default)
+cargo run                # baut (falls nötig) und startet die Rune-UI
+cargo build --release    # Release-Binary: target/release/prime-photos (Rune-UI)
 ```
 
-Es gibt keine CLI-Flags (§2). Das Ergebnis ist im Dev-Build ein **nacktes, unsigniertes Binary** —
+Der ausgelieferte Normalfall hat keine CLI-Flags (§2); Rune ist der einzige
+UI-Host und immer einkompiliert. Nur die Debug-Fixtures brauchen
+`--features rune-ui-spike`. Das Ergebnis ist im Dev-Build ein
+**nacktes, unsigniertes Binary** —
 kein `.app`-Bundle:
 
 - **Paketierung (Bundle + (selbst-)Signatur) ist PORT-6 und noch offen** (`AGENTS.todo.md`).
@@ -177,8 +180,8 @@ cargo build --release    :: Release-Binary: target\release\prime-photos.exe
 
 ## 5. Linux (Ziel, hier nicht laufgetestet)
 
-Abgeleitet aus den System-Dep-Listen der drei grafischen Crates, die dieses Projekt einbindet
-(`wry` = WebView, `tray-icon` = Tray/AppIndicator, `eframe` = Fenster/Rendering) plus dem
+Abgeleitet aus den System-Dep-Listen der grafischen Crates, die dieses Projekt einbindet
+(`wry` = WebView, `tray-icon` = Tray/AppIndicator, `rune` = Fenster/Rendering) plus dem
 OpenSSL-Bedarf aus §2.2.
 
 ### Voraussetzungen — Paketliste
@@ -187,7 +190,7 @@ OpenSSL-Bedarf aus §2.2.
 |---|---|---|---|---|
 | WebView | `wry` (WebKitGTK 4.1 + GTK3) | `libwebkit2gtk-4.1-dev` | `webkit2gtk4.1-devel`, `gtk3-devel` | `webkit2gtk-4.1` |
 | Tray-Icon | `tray-icon`, Default-Feature `libappindicator` (GTK3-AppIndicator) | `libgtk-3-dev`, `libappindicator3-dev` *oder* `libayatana-appindicator3-dev` | *(vom Crate nicht dokumentiert, siehe §7)* | `gtk3`, `libappindicator-gtk3` *oder* `libayatana-appindicator` |
-| Fenster / Rendering | `eframe` (Default-Features `glow`, `x11`, `wayland`) | `libxcb-render0-dev`, `libxcb-shape0-dev`, `libxcb-xfixes0-dev`, `libxkbcommon-dev` | `libxkbcommon-devel`, `libxcb-devel`, `fontconfig-devel` | *(nicht dokumentiert, siehe §7)* |
+| Fenster / Rendering | `rune` | *(nicht dokumentiert, siehe §7)* | *(nicht dokumentiert, siehe §7)* | *(nicht dokumentiert, siehe §7)* |
 | TLS | `reqwest` → `native-tls` → `openssl`/`openssl-sys` | `libssl-dev` | `openssl-devel` | *(nicht dokumentiert)* |
 | Build-Werkzeuge | `-sys`-Crates nutzen `pkg-config` (im Lockfile: `pkg-config`, `system-deps`) | `pkg-config` | `pkg-config` | `pkg-config` |
 | C-Compiler | `rusqlite` `bundled` (SQLite aus Quellen) | `build-essential` (bzw. `gcc`/`clang`) | `gcc`/`clang` | `base-devel` |
@@ -197,12 +200,11 @@ Konkrete Befehle (so, wie die Crates sie dokumentieren, zusammengesetzt):
 ```sh
 # Debian / Ubuntu
 sudo apt install pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev \
-  libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev \
-  build-essential
+  libssl-dev build-essential
 
 # Fedora
-sudo dnf install pkg-config webkit2gtk4.1-devel gtk3-devel libxkbcommon-devel libxcb-devel \
-  openssl-devel fontconfig-devel gcc
+sudo dnf install pkg-config webkit2gtk4.1-devel gtk3-devel \
+  openssl-devel gcc
 
 # Arch / Manjaro
 sudo pacman -S pkg-config webkit2gtk-4.1 gtk3 libappindicator-gtk3 base-devel
@@ -217,9 +219,6 @@ Einordnung (belegt, nicht geraten):
   `ksni` (`cargo tree -i ksni` ⇒ „did not match any packages"). Die `tray-icon`-Doku nennt für
   Linux „GTK 3 and `libappindicator` or `libayatana-appindicator`". Wäre das Feature `ksni` aktiv,
   bräuchte es diese Systembibliotheken nicht — es ist hier aber **nicht** aktiv.
-- **glow (GL), nicht wgpu**: `cargo tree` zeigt `egui_glow` und `glow` als Teil von `eframe`,
-  `wgpu`/`egui-wgpu` stehen nur im `Cargo.lock`, sind aber nicht im Graphen. `eframe` 0.31 hat die
-  Features `x11` und `wayland` per Default an — daher die xcb/xkbcommon-Pakete.
 - **OpenSSL, nicht rustls**: siehe §2.2 — es wird die Systembibliothek gelinkt.
 - **Benachrichtigungen zur Laufzeit**: `notify-rust` spricht auf Linux über D-Bus (`zbus`, reines
   Rust) mit einem Notification-Daemon. Ein Dev-Paket ist dafür nicht nötig; zur **Laufzeit** muss
@@ -275,9 +274,8 @@ Es ist **nicht** Teil des Builds.
 - `xcode-select --install` als macOS-Voraussetzung: der C-Compiler-Bedarf ist über rusqlite belegt,
   das konkrete Kommando steht **nicht** in der Repo-Doku.
 - Fedora-Paketnamen für den AppIndicator-Backend sind vom `tray-icon`-README **nicht** dokumentiert
-  (dort nur Arch und Debian/Ubuntu) ⇒ bewusst leer gelassen, nicht geraten. Ebenso fehlen
-  Fedora/Arch-Angaben für die `eframe`-Renderer-Bibliotheken (die Fedora-Zeile in §5 stammt aus dem
-  `eframe_template`-README, das nur Debian und Fedora listet).
+  (dort nur Arch und Debian/Ubuntu) ⇒ bewusst leer gelassen, nicht geraten. Die
+  Linux-Pakete für Runes Fenster-/Render-Backend sind ebenfalls nicht dokumentiert.
 - Ob die WebView2-Runtime auf realen Windows-10/11-Systemen tatsächlich immer vorinstalliert ist,
   ist **nicht geprüft**.
 - Ob macOS-Benachrichtigungen im unsignierten Dev-Build erscheinen, ist **nicht geprüft** (hängt laut
@@ -295,8 +293,8 @@ Repo (gelesen): `Cargo.toml`, `Cargo.lock`, `src/config.rs`, `src/folders.rs`, `
 `src/tray.rs`, `src/main.rs` (`mod`-Deklarationen), `AGENTS.md`, `AGENTS.todo.md`, `config_setup.py`.
 
 Aufgelöster Graph (`cargo tree`, lokal): `native-tls`/`openssl`/`schannel`/`security-framework`,
-`hyper-tls`, `tokio-native-tls`, `egui_glow`/`glow`/`glutin`, `libappindicator`; negativ:
-`rustls`, `hyper-rustls`, `tokio-rustls`, `wgpu`, `egui-wgpu`, `ksni`.
+`hyper-tls`, `tokio-native-tls`, `libappindicator`; negativ:
+`rustls`, `hyper-rustls`, `tokio-rustls`, `ksni`.
 
 Crate-Doku / Repo-README:
 
@@ -308,7 +306,6 @@ Crate-Doku / Repo-README:
   SQLite; Windows-Empfehlung)
 - `notify-rust` 4.18.2 — <https://docs.rs/notify-rust/4.18.2/notify_rust/> (D-Bus/`zbus` auf Linux,
   `tauri-winrt-notification` auf Windows, `mac-notification-sys` auf macOS)
-- `eframe` 0.31.1 — <https://docs.rs/eframe/0.31.1/eframe/> (Default-Features `glow`, `x11`, `wayland`)
-  und `eframe_template` — <https://github.com/emilk/eframe_template> (Linux-`apt`/`dnf`-Paketlisten)
+- `rune` (Git-Revision `53c7f60`) — <https://github.com/anomalyco/rune>
 - `dirs` 6.0.0 `config_dir()` — <https://docs.rs/dirs/6.0.0/dirs/fn.config_dir.html>
 - rustup, MSVC-Voraussetzungen — <https://rust-lang.github.io/rustup/installation/windows-msvc.html>

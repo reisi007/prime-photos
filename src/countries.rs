@@ -107,31 +107,3 @@ pub(crate) fn country_label(code: &str) -> String {
         .map(|&(_, name)| format!("{} · amazon.{}", tr(name), crate::urls::marketplace_domain(code)))
         .unwrap_or_else(|| code.to_string())
 }
-
-/// Best-effort country from the system locale (macOS `AppleLocale`, then `LANG`).
-#[cfg(feature = "legacy-eframe")]
-pub(crate) fn system_country() -> Option<String> {
-    if let Ok(out) = std::process::Command::new("defaults")
-        .args(["read", "-g", "AppleLocale"])
-        .output()
-    {
-        if out.status.success() {
-            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if let Some(region) = s.split(['_', '-']).nth(1) {
-                let code = region.to_lowercase();
-                if COUNTRIES.iter().any(|&(c, _)| c == code) {
-                    return Some(code);
-                }
-            }
-        }
-    }
-    if let Ok(lang) = std::env::var("LANG") {
-        if let Some(region) = lang.split(['_', '.', '-']).nth(1) {
-            let code = region.to_lowercase();
-            if COUNTRIES.iter().any(|&(c, _)| c == code) {
-                return Some(code);
-            }
-        }
-    }
-    None
-}

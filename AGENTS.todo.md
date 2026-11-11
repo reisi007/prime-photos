@@ -125,24 +125,16 @@ Ausdrücklich **ohne** Starttermin:
   `session → upload`. Der Verifier hat das als **deadlock-frei** belegt (es gibt keine
   Gegenrichtung `upload → session`); beim nächsten Anfassen von `poll_session` nach außen ziehen,
   damit die Reihenfolge nicht von einer Abwesenheit abhängt.
-- **Footer-Summe und fehlende Ordner (Verifier-Befund 2026-10-17, `low`):** `aggregate_progress`
-  (`src/backup.rs`) summiert `done/total` **statusunabhängig** — ein `NotFound`-Ordner trägt also
-  weiter zur Zeile „Gesamt: X von Y" bei, obwohl seine eigene Fortschrittszeile leer ist. Vor 5.22
-  war das für den damaligen `Paused`-Zustand identisch (kein Regress); es ist eine **Design-Frage**
-  (soll ein fehlendes Ziel in der Gesamt-Summe mitzählen?), keine Fehlfunktion.
-- **Naht-Test ohne Aussage (Verifier-Befund 2026-10-17, `nit`):** `autostart_intent_to_record()`
-  (`src/app.rs`) ist die Identität, ihr Test damit tautologisch — die **Verdrahtung** in
-  `set_autostart` sichert er nicht ab (nur mittelbar über `dead_code`, falls jemand die Funktion
-  entfernt). Ein echter Guard bräuchte eine injizierbare Registrierung.
 - **Dependabot medium: `glib` 0.18.5 (2026-10-25):** Unsoundness in den `Iterator`-/
   `DoubleEndedIterator`-Impls von `glib::VariantStrIter`; gepatcht erst in **glib 0.20**. `glib` kommt
   transitiv über `gtk` 0.18 (Linux-Pfad von `wry`/`tray-icon`), macOS/Windows sind nicht betroffen.
-  Beim nächsten Anheben von `eframe`/`wry` mitziehen und prüfen, ob der gtk-rs-0.20-Stack dann passt.
+  Beim nächsten Anheben von `wry` mitziehen und prüfen, ob der gtk-rs-0.20-Stack dann passt.
 - **Fortschritts-/Store-Reste (Verifier 2026-10-25, Einordnung b/c, nicht blockierend):**
   (b) `finalize_upload` speichert `self.store`, wenn der `store_dirty`-Marker erst **nach** seiner
   Abfrage gesetzt wird — enges Fenster, vorbestehend, der Markerpfad verkleinert es nur;
   (c) ein `folders.toml` mit **doppelten Pfaden** (Legacy oder von Hand verändert) macht die
-  Planpfad-Abbildung mehrdeutig; `plan_index_for` wählt dann deterministisch den kleinsten Index.
+  Planpfad-Abbildung mehrdeutig; `row_index_for` wählt dann deterministisch den ersten passenden
+  Store-Eintrag.
   Beides beim nächsten Anfassen der Finalisierung bzw. beim Laden des Stores mitziehen.
 - **DMG-Schritt bleibt unskriptet, ist aber dokumentiert (2026-10-17):** `packaging/make-app.sh` baut nur
   die `.app`; der Rest (Zip, DMG mit Volname `Prime Photos`, Installation nach `/Applications`) steht als

@@ -42,9 +42,8 @@ checks the abort flag at its wait points and returns cleanly.
     und löscht Token/Keychain — aber **nicht** einen laufenden Upload: der
     Worker hält einen eigenen `Config`-Klon mit den **alten** Cookies und lief
     mit widerrufenen Zugangsdaten in Fehler. **Die dritte Residue der alten
-    Notiz ist hinfällig:** der Login-Screen *ersetzt* die Haupt-UI
-    (`src/app.rs:950`), der Abmelden-Knopf ist bei offener Login-WebView also
-    gar nicht erreichbar.
+    Notiz ist hinfällig:** der Login-Screen *ersetzt* die Haupt-UI, der
+    Abmelden-Knopf ist bei offener Login-WebView also gar nicht erreichbar.
   - Umsetzung: **Abbruch-Flag in `UploadShared`** (kein neuer Kanal — die App
     hält `self.upload` bereits, `logout()` erreicht es ohne neues Plumbing).
     `logout()` setzt es; der Worker prüft es an seiner **Wartestelle**

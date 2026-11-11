@@ -34,10 +34,6 @@ pub(super) fn is_rune_route_or_tooling_arg(arg: &str) -> bool {
 
 /// Parse the production Rune backup route independently of debug-only tooling.
 /// It deliberately accepts no fixture, smoke, or headless options.
-#[cfg(all(
-    feature = "rune-backup",
-    any(not(all(debug_assertions, feature = "rune-ui-spike")), test)
-))]
 pub(super) fn rune_production_backup_route_args(
     args: &[String],
 ) -> Result<Option<Vec<String>>, &'static str> {

@@ -36,16 +36,16 @@ the app** in an embedded web view — same window, no external browser, no CDP.
 
 ## Rune verification route (Issue #49)
 
-The normal app continues to use eframe. In a debug build with
-`--features rune-ui-spike`, the explicit `--rune-login` route presents the
+The normal app *is* the Rune production backup route. In a debug build with
+`--features rune-ui-spike`, the separate `--rune-login` route presents the
 branded sign-in chrome in a Rune window and hosts the same production Wry child
 login flow. It reuses the existing PKCE URL construction, navigation-code
 capture, `/auth/register` redemption, keyring refresh-token write, and in-memory
 session/cookie handling; it is not a second auth implementation. Opening the
 route loads the existing config, but the keychain and auth/network path are not
 used until the user explicitly clicks “Mit Amazon anmelden”. Closing or
-cancelling releases the child WebView. This developer route does not change the
-default launcher or establish Rune parity/cutover.
+cancelling releases the child WebView. This developer route is not the normal
+launcher.
 
 The production `--rune-backup` login surface also shows the existing localized,
 generic `WebviewLogin.error` when WebView startup fails, while keeping the sign-in
@@ -71,12 +71,12 @@ production sign-in action.
   the project directory is renamed to `prime-photos`. The old config folder
   is migrated **once, locally, by hand** (no migration code in the app).
 
-- **GUI framework:** egui/eframe (native ARM, single binary) remains the normal
-  app host. The explicit debug-only Rune routes above are verification tools,
-  not an alternate end-user mode or a cutover.
+- **GUI framework:** Rune (native ARM, single binary) is the app host. The
+  explicit debug-only fixture routes above are verification tools, not an
+  alternate end-user mode.
 
 - **Auth (GUI):** Embedded WKWebView login, **in the same window as the app**
-  (like the original). egui's window hosts a wry `WKWebView` child view; no
+  (like the original). Rune's window hosts a wry `WKWebView` child view; no
   extra window, no external browser, no CDP. Amazon's sign-in page is loaded
   directly with the device-flow/PKCE parameters (`assoc_handle` and `pageId`
   use the `amzn_photos_desktop_*` form; see below). A

@@ -15,9 +15,6 @@
 
 use std::sync::OnceLock;
 
-#[cfg(feature = "legacy-eframe")]
-pub(crate) mod eframe_ui;
-
 /// Generated third-party license list (Welle 4a): every dependency from
 /// `Cargo.lock` plus the full license texts. Embedded as text.
 const THIRD_PARTY_LICENSES: &str = include_str!(concat!(
@@ -48,7 +45,6 @@ pub(crate) fn license_lines() -> &'static [String] {
 }
 
 /// Curated icon and graphic attributions, embedded from the maintained notice file.
-#[cfg(feature = "rune-backup")]
 pub(crate) fn icon_attributions() -> &'static str {
     THIRD_PARTY_ICONS
 }

@@ -1,10 +1,10 @@
 //! Build script for Prime Photos (asset wave, user decision 2026-10-14).
 //!
 //! Rasterises the SVG sources in `assets/` into PNGs inside `OUT_DIR`, where
-//! `src/tray.rs` (the five tray glyphs plus the coloured logo fallback),
-//! `src/main.rs` (the window/dock icon) and `src/icons/eframe_ui.rs` (the two
-//! sidebar navigation icons plus the two row-action icons) embed them with
-//! `include_bytes!`.
+//! `src/tray.rs` (the five tray glyphs plus the coloured logo fallback) and
+//! `src/icons/rune_ui.rs` (the two sidebar navigation icons and the app logo)
+//! embed them with `include_bytes!`; the two row-action glyphs are still
+//! rastered but no module embeds them.
 //!
 //! Why a build script and why `resvg`:
 //! * `sips`/`qlmanage` exist on macOS only, but the release matrix is
@@ -38,12 +38,12 @@ use std::path::{Path, PathBuf};
 //     assets/logo-small.svg       ⇒ $OUT_DIR/logo-small.png       (256 px)
 //
 //   Tray glyphs and UI icons are Material Symbols (Apache-2.0 — see
-//   docs/dev/THIRD_PARTY.md). The tray glyphs are the five states, the UI icons
-//   are the two sidebar navigation icons and the two row-action icons; the
-//   latter are rastered white so `src/icons/eframe_ui.rs` can tint them to the
-//   theme colour at run time. All of these sources carry **no** `fill`/`currentColor`
-//   (a bare `<path d="…"/>` paints black by default), so they get a
-//   `path { fill: … }` override:
+//   docs/dev/THIRD_PARTY.md). The tray glyphs are the five states; the embedded
+//   UI icons are the two sidebar navigation icons that `src/icons/rune_ui.rs`
+//   tints to the theme colour at run time. The two row-action glyphs are still
+//   rastered but currently have no consumer. All of these sources carry **no**
+//   `fill`/`currentColor` (a bare `<path d="…"/>` paints black by default), so
+//   they get a `path { fill: … }` override:
 //     assets/icon-cloud.svg     ⇒ $OUT_DIR/icon-cloud.png     (64 px, white)
 //     assets/icon-settings.svg  ⇒ $OUT_DIR/icon-settings.png  (64 px, white)
 //     assets/icon-more-vert.svg ⇒ $OUT_DIR/icon-more-vert.png (64 px, white)

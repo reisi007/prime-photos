@@ -3,7 +3,9 @@
 # make-app.sh — baut das macOS-.app-Bundle für "Prime Photos" (PORT-6).
 #
 # Ablauf:
-#   1. cargo build --release            (mit SKIP_BUILD=1 überspringbar)
+#   1. cargo build --release --locked
+#      (mit SKIP_BUILD=1 überspringbar). Rune ist der einzige UI-Host und wird
+#      immer einkompiliert; Debug-Fixtures sind nicht Teil des Bundles.
 #   2. target/dist/Prime Photos.app/ assemblieren (Contents/MacOS + Contents/Resources)
 #   3. target/release/prime-photos -> Contents/MacOS/prime-photos
 #   4. Contents/Info.plist aus packaging/Info.plist schreiben (__VERSION__/__BUILD__ ersetzt)
@@ -18,7 +20,7 @@
 #   7. Pfad + Startkommando ausgeben
 #
 # Umgebungsvariablen:
-#   SKIP_BUILD=1                 überspringt `cargo build --release`
+#   SKIP_BUILD=1                 überspringt den Release-Build (nutzt das vorhandene Binary)
 #   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.3.0)
 #   BUILD=<n>                    CFBundleVersion             (Standard: 2)
 #   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; Standard ist "-" = ad-hoc.
@@ -73,14 +75,14 @@ ICONSET_DIR="${REPO_ROOT}/target/pp-macos.iconset"
 
 # --- 1) Build -----------------------------------------------------------------
 if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
-	echo "==> SKIP_BUILD=1: überspringe 'cargo build --release'"
+	echo "==> SKIP_BUILD=1: überspringe 'cargo build --release --locked'"
 else
-	echo "==> cargo build --release"
-	cargo build --release
+	echo "==> cargo build --release --locked"
+	cargo build --release --locked
 fi
 
 if [[ ! -f "${BIN_SRC}" ]]; then
-	echo "FEHLER: ${BIN_SRC} nicht gefunden. Ohne SKIP_BUILD=1 baut das Skript es; sonst zuerst 'cargo build --release' ausführen." >&2
+	echo "FEHLER: ${BIN_SRC} nicht gefunden. Ohne SKIP_BUILD=1 baut das Skript es; sonst zuerst 'cargo build --release --locked' ausführen." >&2
 	exit 1
 fi
 
