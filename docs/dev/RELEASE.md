@@ -1204,7 +1204,46 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 
   Der GitHub-Digest des macOS-DMG stimmt mit dem lokalen SHA-256 aus der obigen Prüfung überein.
 
-**Lokaler Minor-Release v0.3.0, Build 5 (nicht veröffentlicht):**
+**v0.3.0, Build 7 (freigegeben):**
+
+- **Freigabe und Release-Weg:** Nutzerfreigabe am 2026-11-11. Dies ist ein **freigegebener
+  Kandidat**, kein bereits veröffentlichtes Release. Der dokumentierte Weg bleibt §1: Tag `v0.3.0`
+  auslösen; CI baut Windows/Linux, das macOS-DMG wird manuell angehängt.
+- **Quellstand:** `c695d16` (Rune-Pin auf Upstream
+  `c92e462e9b0acfe6aab191a062bd33b1fcd25823`) über `af3bb26` (Konto-Block ohne Layout-Sprung),
+  `ef8868a` (eframe/egui entfernt), `a9a9e8b` (CI ohne Feature-Gate) sowie `20f072d`/`786c94c`
+  (Belege).
+- **Rune-Stand:** auf `c92e462` gepinnt; kein Tag und keine crates.io-Veröffentlichung. Die README
+  verlangt eine Dev-Revision. Eine API-Anpassung war nicht nötig; das Lockfile ergänzt transitiv nur
+  `yeslogic-fontconfig-sys 6.0.1`.
+- **Konto-Block ohne Layout-Sprung:** Der Block ist bottom-anchored. Vor dem Fix wuchs er beim
+  Eintreffen der Identität bei kurzem Namen um 4 pt (Überschrift) bzw. 2 pt (Avatar), bei langem
+  Namen um 52 pt bzw. 26 pt. Der ungeladene Zustand rendert jetzt dieselbe zweizeilige Struktur mit
+  „Wird geladen …“; der Name bleibt einzeilig und wird bei Bedarf gekürzt. Regressionstests:
+  `production_sidebar_account_block_does_not_jump_when_the_identity_arrives` und
+  `production_sidebar_avatar_swap_keeps_the_same_size_and_radius`.
+- **Bundle (lokal, §4):** `VERSION=0.3.0 BUILD=7 ./packaging/make-app.sh` erzeugte
+  `target/dist/Prime Photos.app`. `CFBundleShortVersionString 0.3.0`, `CFBundleVersion 7`,
+  Architektur `arm64`, Commit-Stempel `c695d16` im Binary, ad-hoc signiert. `codesign --verify
+  --strict --verbose=2` meldete „valid on disk“ und „satisfies its Designated Requirement“.
+- **DMG (lokal):** `target/dist/Prime-Photos-macos-arm64.dmg`, **19 MB**; `hdiutil verify` meldete
+  „checksum … is VALID“. SHA-256:
+  `db8ebf56caa97428c419391c97762c3c047adb1d9e50b530e79ffb1b087ed523`.
+- **Installation und Abnahme:** Das Bundle wurde nach `/Applications/Prime Photos.app` kopiert;
+  die Signatur wurde nach dem Kopieren geprüft und die App gestartet. Das Log
+  `target/rune-macos-native-evidence/installed-build7.log` zeigt „Gespeicherte Sitzung gefunden“,
+  „Access-Token aufgefrischt (3600 s gültig)“ und „Web-Cookies erneuert“. Der Screenshot
+  `target/rune-macos-native-evidence/installed-build7.png` zeigt Sidebar, Konto-Block mit Avatar
+  und Namen, Marktplatz `amazon.de`, drei Sicherungsziele und Gesamtfortschritt „0 von 0 Dateien
+  abgeschlossen“.
+- **Tests und Gates:** `cargo test --locked` → **327 bestanden** plus **2** Iconset-Tests;
+  `cargo test --locked --features rune-ui-spike` → **372 bestanden** plus **2** Iconset-Tests;
+  `cargo build --release --locked` erfolgreich; `ratchet check` **8/8**; `git diff --check` sauber.
+- **Grenzen und offen:** Belegt sind weiterhin ausschließlich macOS/arm64; Windows-/Linux-Laufzeit
+  bleibt offen. Undo/Redo bleiben englisch, weil AppKit die Titel setzt. Das README verwendet
+  weiterhin Fixture-Screenshots statt Produktionsaufnahmen.
+
+**Frühere Belege — v0.3.0, Build 5 (nicht veröffentlicht; Historie):**
 
 - **Kein Release, kein Tag:** Dies ist ein **ausschließlich lokaler** Beleg. Es gibt **kein**
   GitHub-Release `v0.3.0` und **keinen** Git-Tag `v0.3.0`; das DMG wurde **nicht** hochgeladen und
