@@ -57,15 +57,15 @@ ungerade Rest geht auf eine Seite (16er Raster: Rand 2/2/1/1).
 | Variable | Wirkung | Standard |
 |---|---|---|
 | `SKIP_BUILD=1` | überspringt den Release-Build `cargo build --release --locked` (nutzt das vorhandene Binary) | aus |
-| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.3.0` |
-| `BUILD=n` | `CFBundleVersion` | `2` |
+| `VERSION=x.y.z` | `CFBundleShortVersionString` | `0.3.1` |
+| `BUILD=n` | `CFBundleVersion` | `8` |
 | `CODESIGN_IDENTITY="<Name>"` | Signatur-Identität statt des Standards | `-` (ad-hoc); ein Name, z. B. `Prime Photos Local Signer`, muss explizit übergeben werden |
 | `DIST_DIR=<dir>` | Ausgabeordner des Bundles | `target/dist` |
 
 Beispiel:
 
 ```sh
-SKIP_BUILD=1 VERSION=0.3.0 BUILD=2 ./packaging/make-app.sh
+SKIP_BUILD=1 VERSION=0.3.1 BUILD=8 ./packaging/make-app.sh
 ```
 
 ### Signatur: ad-hoc als Standard, lokale Identität optional
