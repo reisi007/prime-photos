@@ -6,15 +6,29 @@ const ICON_SIZES: [u32; 5] = [16, 32, 128, 256, 512];
 
 fn target_dir() -> PathBuf {
     let executable = std::env::current_exe().expect("test executable path");
-    let deps_dir = executable
+    target_dir_from_exe(&executable).expect(
+        "Cargo test executable must be under target/<profile>/deps or target/<profile>/build/<crate>/<hash>/out",
+    )
+}
+
+/// Recover Cargo's `<target>` directory from the test executable's path.
+///
+/// Cargo places integration-test binaries in `<target>/<profile>/deps` (up to
+/// cargo 1.99) or in `<target>/<profile>/build/<crate>/<hash>/out` (cargo
+/// 1.100 and later). In both layouts the marker (`deps` or `build`) sits
+/// directly below the profile directory, so the target root is two levels
+/// above it.
+fn target_dir_from_exe(executable: &Path) -> Option<PathBuf> {
+    executable
         .ancestors()
-        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == "deps"))
-        .expect("Cargo test executable must be under target/<profile>/deps");
-    deps_dir
-        .parent()
+        .find(|ancestor| {
+            ancestor
+                .file_name()
+                .is_some_and(|name| name == "deps" || name == "build")
+        })
         .and_then(Path::parent)
-        .expect("Cargo deps directory must be under target/<profile>/deps")
-        .to_path_buf()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
 }
 
 fn expected_entries() -> Vec<(String, u32)> {
@@ -191,4 +205,27 @@ fn macos_iconset_is_padded_and_rounded_while_debian_iconset_is_full_bleed() {
         .to_rgba8();
     assert!(full_bleed_image.get_pixel(114, 25)[3] > 200);
     assert_eq!(padded_image.get_pixel(192, 120)[3], 0);
+}
+
+#[test]
+fn target_dir_is_recovered_from_both_cargo_test_layouts() {
+    // Cargo <= 1.99 puts the test binary into `<target>/<profile>/deps`.
+    assert_eq!(
+        target_dir_from_exe(Path::new(
+            "/work/target/debug/deps/iconset_contract-0123456789abcdef"
+        )),
+        Some(PathBuf::from("/work/target"))
+    );
+    // Cargo 1.100 puts it into `<target>/<profile>/build/<crate>/<hash>/out`.
+    assert_eq!(
+        target_dir_from_exe(Path::new(
+            "/work/target/debug/build/prime-photos/0123456789abcdef/out/iconset_contract-0123456789abcdef"
+        )),
+        Some(PathBuf::from("/work/target"))
+    );
+    // Without either marker there is no target directory to report.
+    assert_eq!(
+        target_dir_from_exe(Path::new("/work/iconset_contract-0123456789abcdef")),
+        None
+    );
 }
