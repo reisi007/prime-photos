@@ -1269,6 +1269,73 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   Titel). Das README nutzt Fixture-Screenshots statt Produktionsaufnahmen. Ad-hoc-Signatur und
   fehlende Notarisierung bleiben die in §4–§6 dokumentierten Grenzen; A11y ist nur über Tests belegt.
 
+**Release v0.3.1 (veröffentlicht):**
+
+- **Freigabe, Tag und Release:** Der annotierte Tag `v0.3.1` zeigt auf Commit
+  `456ed0d8ba10491e48966b05e37525f7cc87c0e6`; `456ed0d` ist damit der Release-Vorbereitungs-Commit
+  und das Ziel des Tags. Nutzerfreigabe am `2026-11-13` („bitte bugfix relase bauen und releasen").
+  Der GitHub-Release
+  [v0.3.1](https://github.com/reisi007/prime-photos/releases/tag/v0.3.1) wurde am
+  `2026-11-13T11:44:59Z` veröffentlicht, **nicht** als Draft und **nicht** als Pre-Release.
+  Vorausgehende Commits (neueste zuerst): `746dda3` (Rust-1.100-Kompatibilität des
+  Iconset-Test-Layouts) und `a7312c8` (Replace-Upload über eine frische Verbindung).
+- **Inhalt v0.3.1:** Ersetzende Uploads senden ihr `PUT` über eine frische Verbindung, wiederholen
+  transiente Verbindungsfehler einmal und protokollieren endgültige Fehler.
+- **Release-CI:** [Actions-Lauf `43416831469`](https://github.com/reisi007/prime-photos/actions/runs/43416831469)
+  war nach einem Rerun (`43416831469/attempts/2`) erfolgreich. Der erste Versuch scheiterte nur beim
+  Installieren von Rust stable an einem transienten Download-Timeout zu `static.rust-lang.org`; der
+  Retry schloss `Build linux-x64`, `Build windows-x64` und `Publish GitHub Release` erfolgreich ab.
+  Der Provenance-Schritt `Attest build provenance` war erfolgreich;
+  `gh attestation verify <asset> --repo reisi007/prime-photos` endete für
+  `Prime-Photos-linux-x64.deb`, `Prime-Photos-linux-x64.tar.gz` und `Prime-Photos-windows-x64.zip`
+  jeweils mit Exit 0 (Commit `456ed0d`, Workflow `43416831469/attempts/2`). Das manuell angehängte
+  macOS-DMG ist **nicht** per Workflow attestiert. Die SignPath-Schritte und
+  `Sign Linux release artifacts (GPG)` wurden übersprungen; es wurden **keine**
+  Windows-Authenticode- und **keine** Linux-GPG-Artefaktsignaturen erzeugt; davon getrennt sind
+  die erfolgreichen Sigstore-Provenance-Attestierungen. Main-CI `43416501784` und Agent gates
+  `43416501955` waren für `456ed0d` erfolgreich.
+- **Assets** (Bytes und SHA-256-Digest laut GitHub-API):
+
+  | Asset | Bytes | sha256 |
+  |---|---:|---|
+  | `Prime-Photos-linux-x64.deb` | 17.518.056 | `3889d23e5e029d0cb038f4fe09e3bddd283205ad87dfe744d249fe006c14f99c` |
+  | `Prime-Photos-linux-x64.tar.gz` | 23.446.861 | `76cd02c4a00aca4b22e0ab2281460fce7b9a79258aca703d806e303546cc843d` |
+  | `Prime-Photos-macos-arm64.dmg` | 19.566.089 | `af399fd1bad96839a2fa4ee28d247fa3a68f14d835ddf97ff951797cbd9557eb` |
+  | `Prime-Photos-windows-x64.zip` | 17.808.542 | `1baefefa8b9a824d034a048349883620066a5826d83db21e5a0fb93340045ed3` |
+
+  Die Release enthält vier Assets. Das macOS-DMG wurde manuell angehängt; sein GitHub-SHA-256
+  stimmt exakt mit dem lokalen `shasum -a 256` überein.
+- **Bundle (lokal, §4):** `touch build.rs` und anschließend
+  `DIST_DIR=target/dist-v0.3.1-release VERSION=0.3.1 BUILD=8 CODESIGN_IDENTITY=- ./packaging/make-app.sh`
+  erzeugten `target/dist-v0.3.1-release/Prime Photos.app`; `touch build.rs` invalidiert und
+  wiederholt den Build-Skript-Lauf und lässt das App-Crate neu bauen, damit eingebettete Assets und
+  der Git-Commit-Stempel aufgefrischt werden; die verfolgten Quelltextinhalte blieben unverändert.
+  `CFBundleShortVersionString 0.3.1`,
+  `CFBundleVersion 8`, `CFBundleIdentifier de.reisinger.prime-photos`, Architektur `arm64`; der
+  Commit-Stempel im Binary enthält `456ed0d`. Ad-hoc signiert; `codesign --verify --strict
+  --verbose=2` meldete „valid on disk“ und „satisfies its Designated Requirement“. SHA-256 des
+  Binaries: `4b9ade36c364f3c28776071cf46b92219e7c352da2aee22ef008a0beb660b66c`.
+- **DMG (lokal):** `target/dist-v0.3.1-release/Prime-Photos-macos-arm64.dmg`, 19.566.089 Bytes.
+  `hdiutil verify` meldete „checksum … is VALID“; der lokale SHA-256 entspricht dem GitHub-Digest.
+  Read-only gemountet meldete die enthaltene App Version `0.3.1`/Build `8` und bestand die
+  `codesign`-Prüfung.
+- **Release-CLI-Smoke:** Die sechs Flags `--rune-login-fixture`, `--rune-backup-fixture`,
+  `--rune-login`, `--rune-wry-smoke`, `--rune-backup-smoke` und `--snap` endeten jeweils mit
+  Exit 2; das Release-Binary enthält keinen `Fixture-only`-String.
+- **Tests und Gates:** `cargo test --locked` → **328** Unit- und **3** Iconset-Integrationstests
+  bestanden; `ratchet check` **8/8** auf dem Release-Vorbereitungs-Commit; `cargo build --locked
+  --features rune-ui-spike` und `scripts/capture-rune-ui-review.sh` erfolgreich.
+- **Synthetischer Screenshot:** `target/rune-ui-review-v0.3.1/backup-uploading-light-1400x900.png`
+  wurde visuell geprüft (SHA-256
+  `70d964bc6037a13d09a188a0e7fc569e31f22e8b5f003297e48e840593fe6eee`); es ist eine synthetische
+  Review-Vorlage, keine Produktionsaufnahme.
+- **Grenzen:** Auf macOS/arm64 wurden nur Paket- und CLI-Ebene geprüft: Version und Signatur des
+  lokalen Bundles, Integrität und Inhalt des DMG sowie die Ablehnung der Fixture-Flags durch das
+  Release-Binary; ein Lauf der Produktions-App wurde nicht durchgeführt, und die visuell geprüfte
+  Aufnahme stammt aus dem synthetischen Debug-Fixture. Windows und Linux wurden gebaut und
+  veröffentlicht, aber nicht zur Laufzeit geprüft. Ad-hoc-Signatur und fehlende Notarisierung
+  bleiben die in §4–§6 dokumentierten Grenzen.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
