@@ -63,6 +63,24 @@ handles server responses including conflict detection.
   endgültige Fehler verbucht. Gilt für alle Läufe über `run_upload`
   (Hintergrund/geplant und einmalig/manuell).
 
+- **Replace-`PUT`: eigener Client und ein Wiederholungsversuch:** Der
+  `PUT /v2/upload/<nodeId>` läuft über einen **eigenen HTTP-Client ohne
+  Idle-Pool** (`pool_max_idle_per_host(0)`), der keine Verbindung
+  wiederverwendet und damit für jede Anfrage eine frische Verbindung öffnet.
+  Grund (live gemessen am 13.11.2026 über einen lokalen CONNECT-Proxy): der
+  Host schloss in dieser Messung die Verbindung unmittelbar nach der
+  `409`-Antwort des vorangehenden `POST`; eine gepoolte Verbindung wäre genau
+  diese tote Verbindung, der `PUT` bekäme keinen HTTP-Status und die Datei
+  bliebe stumm auf „Fehler". Zusätzlich hat der `PUT`
+  **genau einen Wiederholungsversuch** bei transienten Verbindungsfehlern
+  (Connect/Timeout/Request/Body), nach kurzem Backoff auf einer neuen
+  Verbindung; darüber hinaus greift der zweite Dateiversuch des Laufs. Ein
+  transienter Fehlversuch wird als `warn!` protokolliert, der endgültige
+  Fehlschlag und Body-Lesefehler als `error!` mit Fehlerkette.
+  **Verworfen:** ein Fallback „remote löschen und neu hochladen" — nicht
+  atomar (zwischen Löschen und Upload fehlt das Foto) und er erzeugt eine neue
+  Node-Id.
+
 - **Auth (upload engine):** browser cookies (session-id + x-acb/at-acb/ubid-acb)
   -> `content-<zone>.drive.amazonaws.com/v2/upload`.
 

@@ -344,6 +344,25 @@ const UPLOAD_BACKOFF_BASE_MS: u64 = 500;
 /// Upper bound for any single backoff / `Retry-After` sleep.
 const UPLOAD_BACKOFF_MAX_MS: u64 = 8_000;
 
+/// Retry policy for the replace `PUT` (transient transport failures only):
+/// 1 attempt + 1 retry. One retry is enough because the retry already runs on a
+/// fresh connection; the built-in second file pass covers everything beyond it.
+const REPLACE_UPLOAD_MAX_ATTEMPTS: u32 = 2;
+
+/// Build the HTTP client used for one class of requests. `max_idle_per_host`
+/// (`pool_max_idle_per_host`) is the only knob the callers differ in: `0`
+/// disables idle connection reuse entirely, so every request opens a fresh
+/// connection.
+fn build_client(max_idle_per_host: usize) -> Client {
+    Client::builder()
+        .pool_max_idle_per_host(max_idle_per_host)
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .tcp_keepalive(std::time::Duration::from_secs(60))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
 /// Chunk size of the streamed upload body (Befund 11c). Small enough to give
 /// the queue row a visibly moving percentage on a slow link, large enough that
 /// the per-chunk bookkeeping stays negligible next to the transport cost.
@@ -525,6 +544,13 @@ fn is_transient_reqwest_error(e: &reqwest::Error) -> bool {
     e.is_connect() || e.is_timeout() || e.is_request() || e.is_body()
 }
 
+/// Whether `attempt` (1-based) of the replace `PUT` may be followed by another
+/// one. Only transient transport errors are retried, and only once
+/// ([`REPLACE_UPLOAD_MAX_ATTEMPTS`]).
+fn replace_attempt_should_retry(attempt: u32, transient: bool) -> bool {
+    transient && attempt < REPLACE_UPLOAD_MAX_ATTEMPTS
+}
+
 /// Small pseudo-random jitter in `0..max_ms`, derived from the wall clock, so no
 /// extra dependency (rand et al.) is needed.
 fn jitter_millis(max_ms: u64) -> u64 {
@@ -618,6 +644,13 @@ pub struct PrimePhotos {
     root_node: Option<ResponseSearchData>,
     folder_nodes: HashMap<(String, String), ResponseSearchData>,
     client: Client,
+    /// Dedicated client for the replace `PUT`: no idle connections
+    /// (`pool_max_idle_per_host(0)`), so every replace request opens a fresh
+    /// connection. In a measurement on 13.11.2026 (local CONNECT proxy) the
+    /// upload host closed the connection right after answering the preceding
+    /// POST with a 409, and a pooled connection would have been that dead one —
+    /// the PUT then failed without an HTTP status.
+    replace_client: Client,
     dry_run: bool,
 }
 
@@ -633,19 +666,14 @@ impl PrimePhotos {
 
     pub fn new(conf: &Config, dry_run: bool) -> Self {
         // Configure client with connection pooling and optimized settings
-        let client = Client::builder()
-            .pool_max_idle_per_host(10)
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
-            .tcp_keepalive(std::time::Duration::from_secs(60))
-            .timeout(std::time::Duration::from_secs(300))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let client = build_client(10);
 
         Self {
             conf: conf.clone(),
             root_node: None,
             folder_nodes: HashMap::new(),
             client,
+            replace_client: build_client(0),
             dry_run: dry_run,
         }
     }
@@ -1366,8 +1394,12 @@ impl PrimePhotos {
     /// a "already there" skip).
     ///
     /// Not unit-testable: the `PUT` needs an authenticated session against the
-    /// live endpoint. Only the response-id fallback is covered by
-    /// `replace_upload_id`.
+    /// live endpoint. The pure parts are covered: [`replace_upload_id`] and
+    /// [`replace_attempt_should_retry`].
+    ///
+    /// The request goes through [`PrimePhotos::replace_client`] (fresh connection
+    /// per request, see the field) and is retried once on a transient transport
+    /// failure ([`REPLACE_UPLOAD_MAX_ATTEMPTS`]).
     async fn replace_picture(
         &self,
         node_id: &str,
@@ -1389,22 +1421,60 @@ impl PrimePhotos {
         ))
         .expect("Can't parse the replace upload URL");
 
-        let response = match self
-            .client
-            .put(url)
-            .headers(headers.clone())
-            .body(contents.to_vec())
-            .send()
-            .await
-        {
-            Ok(resp) => resp,
-            Err(e) => return Err(error_chain(&e)),
+        // Submit the PUT, retrying a transient transport failure once. URL and
+        // headers are cloned per attempt and the body copied, because each
+        // attempt needs its own request.
+        let mut attempt: u32 = 1;
+        let response = loop {
+            match self
+                .replace_client
+                .put(url.clone())
+                .headers(headers.clone())
+                .body(contents.to_vec())
+                .send()
+                .await
+            {
+                Ok(resp) => break resp,
+                Err(e) => {
+                    let chain = error_chain(&e);
+                    let transient = is_transient_reqwest_error(&e);
+                    if replace_attempt_should_retry(attempt, transient) {
+                        let delay = upload_retry_delay(attempt, None);
+                        warn!(
+                            "Replace upload attempt {}/{} for {} failed ({}) - retrying in {:?}",
+                            attempt,
+                            REPLACE_UPLOAD_MAX_ATTEMPTS,
+                            pic_path.display(),
+                            chain,
+                            delay
+                        );
+                        tokio::time::sleep(delay).await;
+                        attempt += 1;
+                        continue;
+                    }
+                    error!(
+                        "Replace upload for {} failed after {} attempt(s): {}",
+                        pic_path.display(),
+                        attempt,
+                        chain
+                    );
+                    return Err(chain);
+                }
+            }
         };
 
         if response.status().is_success() {
             let response_text = match response.text().await {
                 Ok(t) => t,
-                Err(e) => return Err(format!("Failed to read response body: {}", error_chain(&e))),
+                Err(e) => {
+                    let chain = error_chain(&e);
+                    error!(
+                        "Replace upload for {} failed to read the response body: {}",
+                        pic_path.display(),
+                        chain
+                    );
+                    return Err(format!("Failed to read response body: {}", chain));
+                }
             };
             debug!(
                 "Replace upload response (first 500 chars): {}",
@@ -1420,10 +1490,14 @@ impl PrimePhotos {
             let body = match response.text().await {
                 Ok(v) => v,
                 Err(e) => {
-                    return Err(format!(
-                        "Failed to read error response body: {}",
-                        error_chain(&e)
-                    ));
+                    let chain = error_chain(&e);
+                    error!(
+                        "Replace upload for {} failed with HTTP {} and could not read the error response body: {}",
+                        pic_path.display(),
+                        status_code,
+                        chain
+                    );
+                    return Err(format!("Failed to read error response body: {}", chain));
                 }
             };
             let snippet: String = body.chars().take(300).collect();
@@ -1627,6 +1701,18 @@ mod tests {
                 "401 error does not identify its HTTP status: {message}"
             );
         }
+    }
+
+    #[test]
+    fn replace_attempt_should_retry_only_once_for_transient_errors() {
+        // First transient failure: one retry is allowed.
+        assert!(replace_attempt_should_retry(1, true));
+        // Last allowed attempt: no further retry. Pinned to the literal policy
+        // of 1 attempt + 1 retry, so raising the constant cannot pass silently.
+        assert!(!replace_attempt_should_retry(2, true));
+        assert!(!replace_attempt_should_retry(3, true));
+        // Non-transient errors are never retried.
+        assert!(!replace_attempt_should_retry(1, false));
     }
 
     #[test]
