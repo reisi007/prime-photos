@@ -29,10 +29,11 @@ jobs:
 
       # Prüft die konfigurierten Qualitätsgrenzen ohne Build-Schritt.
       - name: Ratchet quality gates
-        uses: all-the-rest/ratchet-cli@dc43a9a322dd5906a49bc3bd4d7d8e3f8c327c0a
+        uses: all-the-rest/ratchet-cli@dcb6a489d13aa9c7513584caf739deb7d97dcaee # v0.8.0
         with:
           mode: validate
-          version: v0.6.3
+          version: v0.8.0
+          args: --no-ratchet
 
       # System-Abhängigkeiten (docs/dev/BUILD.md §5): wry/WebKitGTK 4.1 + GTK3,
       # tray-icon (libayatana-appindicator3), native-tls (System-OpenSSL),
