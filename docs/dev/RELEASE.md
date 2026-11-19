@@ -1336,6 +1336,63 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   veröffentlicht, aber nicht zur Laufzeit geprüft. Ad-hoc-Signatur und fehlende Notarisierung
   bleiben die in §4–§6 dokumentierten Grenzen.
 
+**Release v0.3.2 (veröffentlicht):**
+
+- **Freigabe, Tag und Release:** Der annotierte Tag `v0.3.2` zeigt auf den
+  Release-Vorbereitungs-Commit `0915dca`. Der GitHub-Release
+  [v0.3.2](https://github.com/reisi007/prime-photos/releases/tag/v0.3.2) wurde am
+  `2026-11-19` veröffentlicht, **nicht** als Draft und **nicht** als Pre-Release. Ihm ging
+  der Bugfix-Commit `2103eab` voraus.
+- **Inhalt v0.3.2:** Zwei Bugfixes aus geschlossenen Issues: #67 meldet die Anzahl
+  laufender Uploads über den neuen Zähler `upload-in-flight` (aus `uploads_in_flight`, nur
+  Werte > 0), und #68 sortiert den Status der Warteschlange flach und stabil, ohne
+  `upload.queue` zu mutieren. Die Issues #67 und #68 sind geschlossen.
+- **Release-CI:** Der Push auf `main` war mit `44629268821` (CI success) und `44629268689`
+  (Agent gates success) grün. Der Release-Run
+  [`44629583700`](https://github.com/reisi007/prime-photos/actions/runs/44629583700)
+  schloss `Build windows-x64`, `Build linux-x64` und `Publish GitHub Release` erfolgreich
+  ab. Windows-SignPath und die Linux-GPG-Signatur waren in diesem Lauf nicht konfiguriert;
+  die entsprechenden Schritte wurden übersprungen und es wurden keine Artefaktsignaturen
+  erzeugt. Die Node-20-Deprecation-Warnung besteht weiterhin.
+- **Assets** (Bytes laut GitHub-API):
+
+  | Asset | Bytes |
+  |---|---:|
+  | `Prime-Photos-linux-x64.deb` | 17.697.552 |
+  | `Prime-Photos-linux-x64.tar.gz` | 23.635.023 |
+  | `Prime-Photos-macos-arm64.dmg` | 19.572.031 |
+  | `Prime-Photos-windows-x64.zip` | 17.813.997 |
+
+  Die Release enthält vier Assets. Die drei Nicht-macOS-Assets stammen aus dem
+  Release-Workflow, das macOS-DMG wurde manuell hochgeladen. Für das DMG ist der
+  SHA-256-Digest lokal und als GitHub-Digest identisch:
+  `ec09aeb0665fa0b9cc4570157047953b00145149f58b5fc3657a5ff025eed52a`.
+- **Bundle und DMG (lokal, §4):** Nach `touch build.rs` erzeugte
+  `VERSION=0.3.2 BUILD=9 ./packaging/make-app.sh` (Standard ad-hoc `codesign --sign -`)
+  das Bundle mit `CFBundleShortVersionString 0.3.2` und `CFBundleVersion 9`.
+  `codesign --verify --verbose=1` meldete „valid on disk" und „satisfies its
+  Designated Requirement". Das DMG wurde mit `hdiutil create … -format UDZO` erstellt;
+  `hdiutil verify` meldete „checksum … is VALID".
+- **Release-CLI-Smoke:** Die sechs Flags `--rune-login-fixture`, `--rune-backup-fixture`,
+  `--rune-login`, `--rune-wry-smoke`, `--rune-backup-smoke` und `--snap` endeten jeweils mit
+  Exit 2; das Release-Binary enthält keinen `Fixture-only`-String.
+- **Tests und Gates:** `cargo test --locked` → **332** Unit- und **3** Iconset-Tests
+  bestanden; `ratchet check --no-ratchet` **8/8**. Review-Runden: 3 Runden für `2103eab`
+  (final APPROVED) und 1 Runde für `0915dca` (APPROVED), Gesamtbereich `origin/main...HEAD`
+  grün. Die Headless-Fixtures lieferten **55** Artefakte unter `target/rune-ui-review/`,
+  Stichproben wurden visuell geprüft.
+- **Lokal verifiziert:** Das Bundle wurde nach `/Applications` installiert, die Signatur
+  erneut mit `codesign --verify` geprüft und die App gestartet (PID 1580). Das Info.plist
+  zeigte Version `0.3.2`/Build `9`; die Backup-Seite mit wiederhergestellter Sitzung war
+  sichtbar. Die vorherige App (PID 914) wurde trotz laufendem Sync gestoppt.
+- **Grenzen:** Windows und Linux wurden gebaut und veröffentlicht, aber nicht zur Laufzeit
+  geprüft (Follow-up #70). Barrierefreiheit wurde nur headless geprüft, ohne
+  Screenreader-Test (Follow-up #69). Ein frischer Login mit echtem Konto wurde nicht durch
+  den Agenten ausgeführt; beobachtet wurde die Sitzungswiederherstellung. Für das manuell
+  hochgeladene macOS-DMG gibt es keinen Build-Provenance-Nachweis (die CI-Attestationen
+  betreffen nur die drei CI-Assets). Ad-hoc-Signatur und fehlende Notarisierung bleiben die
+  in §4–§6 dokumentierten Grenzen.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
