@@ -3,11 +3,15 @@
 > **Hinweis:** Einzelne Implementierungsnotizen unten beschreiben die frühere
 > eframe-Oberfläche. In der Rune-Ansicht (`src/rune_backup_live/`) sind die
 > gemeinsame Warteschlange, der lauf-aggregierte Fortschritt, die Sicherungsziele
-> mit eigenen Zählern und die flache Queue portiert. Die Queue wird in
-> Plan-/Einfügereihenfolge gerendert (`upload.queue`, kein `sort_by`); die frühere
-> Status-Sortierung (In Bearbeitung → Fehlgeschlagen → Warten → Abgeschlossen →
-> Übersprungen) ist **nicht** portiert. Der Dateistatus erscheint je Zeile als
-> Inline-Text. **Nicht portiert** sind die ETA, die Größen-/Status-Tabelle der
+> mit eigenen Zählern und die flache Queue portiert. Die Queue wird nach
+> Dateistatus sortiert gerendert (In Bearbeitung → Fehlgeschlagen → Warten →
+> Abgeschlossen → Übersprungen, innerhalb eines Status stabil in
+> Einfügereihenfolge); `upload.queue` selbst bleibt in Plan-/Einfügereihenfolge,
+> weil die Worker Zeilen über Indizes adressieren. Der Dateistatus erscheint je
+> Zeile als Inline-Text. Der Fortschrittsblock zeigt zusätzlich die Zahl der
+> gerade laufenden Uploads (`upload-in-flight`, aus `uploads_in_flight`), und nur
+> wenn sie größer als 0 ist („1 Upload läuft gerade" bzw. „N Uploads laufen
+> gerade"). **Nicht portiert** sind die ETA, die Größen-/Status-Tabelle der
 > Queue-Zeilen und die Ergebniszeile (neu hochgeladen / bereits im Konto /
 > unverändert / Fehler); diese Punkte bleiben offen.
 
@@ -197,6 +201,10 @@ outcome.
   Anhalt (Processing zuerst, Errored danach) und wird **nicht** übernommen.
   Das Original gruppiert seine Status-Tabellen nicht — die frühere
   Ordner-Gruppierung war eine eigene Idee, die hier entfällt.
+  **Rune-Port (2026-11-19):** `state_rank`/`queue_render_order` in
+  `src/rune_backup_live/widgets.rs` wenden dieselbe Reihenfolge stabil auf die
+  Darstellung an; `upload.queue` bleibt unverändert in Einfügereihenfolge,
+  damit die von den Workern genutzten Zeilenindizes gültig bleiben.
 
 - **Queue-Paginierung (Abweichung vom Original, Stand 2026-10-17):** unsere
   Warteschlange kappt das Rendering bei **300 Zeilen** — das Original

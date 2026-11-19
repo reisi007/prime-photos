@@ -266,6 +266,8 @@ const EN: &[(&str, &str)] = &[
     ),
     ("Warten", "Waiting"),
     ("Upload-Vorgang läuft", "Upload in progress"),
+    ("1 Upload läuft gerade", "1 upload running"),
+    ("{} Uploads laufen gerade", "{} uploads running"),
     ("Vollständig", "Complete"),
     (
         "Zur einmaligen Sicherung mit der Maus hierher ziehen",
@@ -737,6 +739,8 @@ mod tests {
                 "Sicherungsziele konnten nicht geladen werden. Änderungen werden nicht gespeichert.",
                 "Backup targets could not be loaded. Changes will not be saved.",
             ),
+            ("1 Upload läuft gerade", "1 upload running"),
+            ("{} Uploads laufen gerade", "{} uploads running"),
             ("Warteschlange", "Queue"),
             ("Wird eingelesen", "Scanning"),
             ("Wird übertragen", "Uploading"),
@@ -760,6 +764,16 @@ mod tests {
         assert_eq!(
             subst_for(Lang::En, progress_key, &["3".to_owned(), "8".to_owned()]),
             "3 of 8 files completed"
+        );
+
+        let in_flight_key = "{} Uploads laufen gerade";
+        assert_eq!(
+            subst_for(Lang::De, in_flight_key, &["3".to_owned()]),
+            "3 Uploads laufen gerade"
+        );
+        assert_eq!(
+            subst_for(Lang::En, in_flight_key, &["3".to_owned()]),
+            "3 uploads running"
         );
 
         let target_key = "{} / {} Dateien · {}";

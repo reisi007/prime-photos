@@ -42,6 +42,27 @@ pub(super) fn file_state_text(state: FileState) -> &'static str {
     }
 }
 
+/// Render rank of a file state in the live backup queue: files being uploaded
+/// first, then failures, waiting files, completed files and finally skips.
+pub(super) fn state_rank(state: FileState) -> u8 {
+    match state {
+        FileState::Uploading => 0,
+        FileState::Failed => 1,
+        FileState::Waiting => 2,
+        FileState::Done => 3,
+        FileState::Skipped => 4,
+    }
+}
+
+/// Row indices `0..len` sorted stably by [`state_rank`], so the queue renders in
+/// status order while each status bucket keeps its insertion order. The queue
+/// itself stays untouched: workers address rows by their original index.
+pub(super) fn queue_render_order(states: &[FileState]) -> Vec<usize> {
+    let mut order = (0..states.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&i| state_rank(states[i]));
+    order
+}
+
 pub(super) fn folder_status_text(status: FolderStatus, enabled: bool) -> &'static str {
     if !enabled {
         return tr("Deaktiviert");

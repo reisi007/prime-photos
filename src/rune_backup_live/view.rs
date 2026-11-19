@@ -1,16 +1,18 @@
 use super::targets::{empty_targets, target_card, target_form};
-use super::widgets::{action_button, file_state_text, section_heading};
+use super::widgets::{action_button, file_state_text, queue_render_order, section_heading};
 use super::one_time::{backup_row, drop_zone};
 use super::login_panel::marketplace_picker;
 use super::{HEADER_HEIGHT, LivePage, LiveState};
 use crate::backup;
-use crate::i18n::{tr, tr2};
+use crate::i18n::{tr, tr1, tr2};
 use crate::login;
 use crate::platform::app_shared::ONE_TIME_IDX;
 use crate::upload::{FileState, calculate_pct};
 use rune::tok;
-use rune::{Cx, El, FileDialogOptions, FileDialogResult, ScrollSpec, Tx, col, el, row, text};
+use rune::{Cx, El, FileDialogOptions, FileDialogResult, LiveRegion, ScrollSpec, Tx, col, el, row, text};
 
+#[cfg(test)]
+mod tests;
 mod sidebar;
 
 pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
@@ -104,25 +106,16 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
         targets = targets.child(empty_targets(theme));
     }
 
-    let (done, total, current, queue, pending_conflict, pending_remember, pending_idx, pending_path) = {
+    let (done, total, current, queue, uploads_in_flight, pending_conflict, pending_remember, pending_idx, pending_path) = {
         let upload = state.upload.lock().unwrap();
         (
             upload.done,
             upload.total,
             upload.current.clone(),
-            upload
-                .queue
-                .iter()
-                .map(|item| {
-                    (
-                        item.folder,
-                        item.name.clone(),
-                        item.state,
-                        item.size,
-                        item.bytes_sent,
-                    )
-                })
+            upload.queue.iter()
+                .map(|item| (item.folder, item.name.clone(), item.state, item.size, item.bytes_sent))
                 .collect::<Vec<_>>(),
+            upload.uploads_in_flight,
             upload.pending_conflict.clone(),
             upload.conflict_remember,
             upload.pending_conflict_idx,
@@ -163,6 +156,10 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                 .font(tok::type_::BODY)
                 .color(theme.text),
         )
+        .child(if uploads_in_flight > 0 {
+            text(if uploads_in_flight == 1 { tr("1 Upload läuft gerade").to_owned() } else { tr1("{} Uploads laufen gerade", uploads_in_flight) })
+                .key("upload-in-flight").role("status").live_region(LiveRegion::Polite).font(tok::type_::LABEL).color(theme.text_secondary)
+        } else { el() })
         .child(if current.is_empty() {
             text(tr("Keine Datei wird gerade übertragen."))
                 .font(tok::type_::LABEL)
@@ -191,6 +188,7 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
         .w_full()
         .gap(6.0)
         .child(section_heading(tr("Warteschlange"), theme));
+    let order = queue_render_order(&queue.iter().map(|item| item.2).collect::<Vec<_>>());
     if queue.is_empty() {
         queue_column = queue_column.child(
             text(tr("Noch keine Upload-Dateien eingeplant."))
@@ -198,20 +196,18 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
                 .color(theme.text_secondary),
         );
     } else {
-        for (position, (folder, name, file_state, size, bytes_sent)) in queue.iter().enumerate() {
-            let target_path = state
-                .upload
-                .lock()
-                .unwrap()
-                .folder_paths
-                .get(folder)
-                .cloned();
+        for index in order {
+            let (folder, name, file_state, size, bytes_sent) = &queue[index];
+            let retry_index = retry_folder_index(
+                *folder,
+                &state.upload.lock().unwrap().folder_paths,
+                &state.store.folders,
+            );
             let target_name = if *folder == ONE_TIME_IDX {
                 tr("Einmalige Sicherung").to_owned()
             } else {
-                target_path
-                    .as_ref()
-                    .and_then(|path| state.store.folders.iter().find(|target| target.path == *path))
+                retry_index
+                    .and_then(|index| state.store.folders.get(index))
                     .map(|target| target.name.clone())
                     .unwrap_or_else(|| tr("Sicherungsziel").to_owned())
             };
@@ -220,11 +216,8 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
             } else {
                 file_state_text(*file_state).to_owned()
             };
-            let retry_index = target_path
-                .as_ref()
-                .and_then(|path| state.store.folders.iter().position(|target| target.path == *path));
             let mut queue_row = row()
-                .key(format!("queue-item-{position}"))
+                .key(format!("queue-item-{index}"))
                 .w_full()
                 .h(36.0)
                 .px(12.0)
@@ -245,7 +238,7 @@ pub(super) fn live_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
             if *file_state == FileState::Failed {
                 if let Some(retry_index) = retry_index {
                     queue_row = queue_row.child(action_button(
-                        format!("queue-retry-{position}"),
+                        format!("queue-retry-{index}"),
                         tr("Erneut versuchen").to_owned(),
                         theme,
                         colors.primary_fill,
@@ -494,4 +487,13 @@ fn start_login(state: &mut LiveState, tx: &mut Tx) {
             state.status = Some(tr("Anmeldeseite konnte nicht geöffnet werden.").to_owned());
         }
     }
+}
+
+/// Store row for a queue row's plan-time folder; never a render position.
+fn retry_folder_index(
+    queue_folder: usize,
+    folder_paths: &std::collections::HashMap<usize, std::path::PathBuf>,
+    folders: &[crate::folders::BackupFolder],
+) -> Option<usize> {
+    folder_paths.get(&queue_folder).and_then(|path| folders.iter().position(|target| target.path == *path))
 }
