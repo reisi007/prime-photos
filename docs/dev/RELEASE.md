@@ -1395,22 +1395,27 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 
 **Release v0.3.3 (veröffentlicht):**
 
-- **Freigabe, Tag und Release:** Der annotierte Tag `v0.3.3` zeigt auf den
-  Release-Vorbereitungs-Commit `cf6c2a9`. Der GitHub-Release
+- **Freigabe, Tag und Release:** Der annotierte Tag `v0.3.3` (Tag-Objekt `c5d0bb4`) zeigt auf
+  den Release-Vorbereitungs-Commit `2b20552`. Der GitHub-Release
   [v0.3.3](https://github.com/reisi007/prime-photos/releases/tag/v0.3.3) wurde am
-  `2026-11-23` um 09:33 UTC veröffentlicht, **nicht** als Draft und **nicht** als
-  Pre-Release. Ihm gingen der Bugfix-Commit `21e83f5` und der Ratchet-Auto-Baseline-Commit
-  `7a06649` voraus.
+  `2026-11-23` um 13:27 UTC veröffentlicht, **nicht** als Draft und **nicht** als Pre-Release.
+  Auf ausdrückliche Benutzerfreigabe wurde der ursprünglich um 09:33 UTC veröffentlichte
+  Release `v0.3.3` (alter Tag `3bc6cd3`) samt Tag gelöscht und aus dem aktuellen `main` neu
+  angelegt, damit er den finalen UI-Fix enthält. `v0.3.4`, `v0.3.5` und `v0.3.6` blieben
+  unveröffentlicht; ihre Tags existieren nicht.
 - **Inhalt v0.3.3:** Bugfixes aus Issue #72: Zielkarten mit fehlendem Quellordner bieten
   keine wirkungslosen Aktionen mehr; die Zielkarte zeigt während eines aktiven Uploads einen
   Spinner; „Aktiviert" ist ein echter Switch; „Entfernen" ist für Ziele im aktiven Lauf
   deaktiviert; „Jetzt sichern" speist neue Dateien in den laufenden Upload ein, statt einen
-  zweiten Lauf über denselben Shared State zu starten. Das Issue bleibt wegen des
-  UI-Review-Findings zur Toggle-Optik offen.
-- **Release-CI:** Der Push auf `main` war mit `45146001620` (CI success) und
-  `45146002036` (Agent gates success) grün; nach dem Tag zusätzlich `45146612284`
-  (CI success) und `45146612409` (Agent gates success). Der Release-Run
-  [`45146617888`](https://github.com/reisi007/prime-photos/actions/runs/45146617888)
+  zweiten Lauf über denselben Shared State zu starten. Der Abschluss-Fix `76c4c7f` gruppiert
+  das „Aktiviert"-Label mit dem rechtsbündigen Switch (8 pt Abstand); deaktivierte Controls
+  zeigen kein Hover-Feedback. Issue #73 ersetzte die Smoke-Parallel-UI durch eine Fixture der
+  **echten** Produktionsansicht mit synthetischen Daten (Szenen `mixed`, `empty`, `settings`,
+  `about`, `licenses`); die Bilder sind im UI explizit als synthetisch gekennzeichnet.
+- **Release-CI:** Die Pushes auf `main` waren mit `45182858197`/`45182858143` (Commit
+  `5c56926`, CI/Agent gates) und `45183324002`/`45183323903` (Commit `2b20552`, CI/Agent
+  gates) grün. Der Release-Run
+  [`45183719098`](https://github.com/reisi007/prime-photos/actions/runs/45183719098)
   schloss `Build windows-x64`, `Build linux-x64` und `Publish GitHub Release` erfolgreich
   ab. Windows-SignPath und Linux-GPG-Signatur waren nicht konfiguriert und wurden
   übersprungen; die Node-20-Deprecation-Warnung besteht weiterhin.
@@ -1418,43 +1423,43 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
 
   | Asset | Bytes |
   |---|---:|
-  | `Prime-Photos-linux-x64.deb` | 17.701.360 |
-  | `Prime-Photos-linux-x64.tar.gz` | 23.642.382 |
-  | `Prime-Photos-macos-arm64.dmg` | 19.589.734 |
-  | `Prime-Photos-windows-x64.zip` | 17.821.641 |
+  | `Prime-Photos-linux-x64.deb` | 17.696.778 |
+  | `Prime-Photos-linux-x64.tar.gz` | 23.648.755 |
+  | `Prime-Photos-macos-arm64.dmg` | 19.588.119 |
+  | `Prime-Photos-windows-x64.zip` | 17.829.516 |
 
   Die drei Nicht-macOS-Assets stammen aus dem Release-Workflow, das macOS-DMG wurde manuell
   hochgeladen. Für das DMG sind lokaler und GitHub-SHA-256 identisch:
-  `19dd149a51b982d6a249658a96218cfdf765c461af50489dcb6d099fea5ef183`.
+  `ab204b91c0ae2f073aa92b0ee60839e42d1fc6c14b044097f516ec8462e36389`.
 - **Bundle und DMG (lokal, §4):** Nach `touch build.rs` erzeugte
-  `VERSION=0.3.3 BUILD=10 ./packaging/make-app.sh` (ad-hoc `codesign --sign -`) das Bundle
-  mit `CFBundleShortVersionString 0.3.3` und `CFBundleVersion 10`. `codesign --verify
+  `VERSION=0.3.3 BUILD=14 ./packaging/make-app.sh` (ad-hoc `codesign --sign -`) das Bundle
+  mit `CFBundleShortVersionString 0.3.3` und `CFBundleVersion 14`. `codesign --verify
   --verbose=1` meldete „valid on disk" und „satisfies its Designated Requirement",
-  `codesign -dv` zeigte `Signature=adhoc`. `hdiutil create … -format UDZO` plus
-  `hdiutil verify` meldeten „checksum … is VALID".
-- **Release-CLI-Smoke:** Die sechs Flags `--rune-login-fixture`, `--rune-backup-fixture`,
-  `--rune-login`, `--rune-wry-smoke`, `--rune-backup-smoke` und `--snap` endeten jeweils mit
-  Exit 2; das Release-Binary enthält keinen `Fixture-only`-String.
-- **Tests und Gates:** `cargo test --locked` → **348** Unit- und **3** Iconset-Tests
-  bestanden; `ratchet check --no-ratchet` **8/8**. Review: 2 Runden über
-  `origin/main...HEAD`, final `APPROVED` (Runde 1: 2 Medium + 2 Low, alle behoben). Die
-  Headless-Fixtures lieferten 55 Artefakte unter `target/rune-ui-review/`, Stichproben in
-  Light/Dark bei 1400×900, 1000×700 und 760×560 wurden visuell geprüft.
-- **Lokal verifiziert:** Das Bundle wurde nach `/Applications/Prime Photos.app` installiert,
-  die Signatur erneut mit `codesign --verify` geprüft und die App gestartet (PID 35662). Die
-  Datensicherungsseite mit wiederhergestellter Sitzung war sichtbar; der neue Switch wurde
-  am echten Fenster begutachtet. Ein frischer Login wurde nicht ausgeführt.
-- **Grenzen:** Der Benutzer hat den Abstand zwischen „Aktiviert"-Label und Toggle im
-  Live-Screenshot abgelehnt (UI-Review-Finding UI-1, Issue #72). Die Toggle-Optik wurde danach
-  lokal weitergeändert (Commit `76c4c7f`: Label und Switch als Gruppe rechts in der Zielkarte,
-  kein Hover auf deaktivierten Controls) und als `v0.3.6`/Build 13 lokal gebaut und installiert;
-  auf Anweisung des Benutzers wurde das **nicht** veröffentlicht — der Release-Run wurde vor der
-  Veröffentlichung abgebrochen und die Tags gelöscht. Es gibt keinen veröffentlichten
-  Folge-Release. Die Smoke-Fixtures zeigen keine Produktions-Zielkarten, daher stammt die
-  Produktionsprüfung aus dem Live-Screenshot. Windows und Linux wurden gebaut und veröffentlicht,
-  aber nicht zur Laufzeit geprüft; Barrierefreiheit nur headless ohne Screenreader
-  (Follow-ups #70/#69). Für das manuell hochgeladene DMG gibt es keinen Build-Provenance-Nachweis;
-  Ad-hoc-Signatur und fehlende Notarisierung bleiben wie in §4–§6 dokumentiert.
+  `codesign -dv` zeigte `Signature=adhoc` und `Identifier=de.reisinger.prime-photos`.
+  `hdiutil create … -format UDZO` plus `hdiutil verify` meldeten „checksum … is VALID".
+- **Release-CLI-Smoke:** Die sieben Flags `--rune-login-fixture`, `--rune-backup-fixture`,
+  `--rune-login`, `--rune-wry-smoke`, `--rune-backup-smoke`, `--rune-backup-live-fixture` und
+  `--snap` endeten im installierten Release-Binary jeweils mit Exit 2; das Binary enthält
+  keinen `Fixture-only`-String.
+- **Tests und Gates:** `cargo test --locked` → **350** Unit- und **3** Iconset-Tests
+  bestanden; mit `--features rune-ui-spike` **393** Unit- und **3** Iconset-Tests.
+  `ratchet check --no-ratchet` **8/8**. Reviews: der UI-Fix `76c4c7f` und der Umbau
+  `5c56926` wurden jeweils unabhängig mit `APPROVED` ohne Findings freigegeben. Die
+  Echte-Ansicht-Fixtures lieferten 18 PNGs + 18 JSON-Trees unter `target/rune-ui-review/`,
+  Light/Dark bei 1400×900 sowie 1000×700 und 760×560 für `mixed`/`empty`; Stichproben
+  wurden visuell gegen die Checkliste geprüft.
+- **Lokal verifiziert:** Das Bundle wurde per `ditto` nach `/Applications/Prime Photos.app`
+  installiert, die Signatur erneut mit `codesign --verify` geprüft und die App gestartet. Der
+  Screenshot-Smoke zeigt die reale Datensicherungsseite mit wiederhergestellter Sitzung: das
+  „Aktiviert"-Label sitzt rechts direkt neben dem Switch, „Ordner nicht gefunden"-Ziele
+  haben deaktivierte Aktionen und das eigene Branding ist erhalten. Das Screenshot enthält
+  echte Kontodaten und bleibt daher nur lokal; es wurde nicht ins Repo oder Release
+  aufgenommen. Ein frischer Login wurde nicht ausgeführt.
+- **Grenzen:** Kein frischer Login mit echtem Konto; Windows und Linux wurden gebaut und
+  veröffentlicht, aber nicht zur Laufzeit geprüft; Barrierefreiheit nur headless ohne
+  Screenreader (Follow-ups #70/#69). Für das manuell hochgeladene DMG gibt es keinen
+  Build-Provenance-Nachweis; Ad-hoc-Signatur und fehlende Notarisierung bleiben wie in
+  §4–§6 dokumentiert.
 
 ---
 
