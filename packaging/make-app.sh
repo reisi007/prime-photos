@@ -21,8 +21,8 @@
 #
 # Umgebungsvariablen:
 #   SKIP_BUILD=1                 überspringt den Release-Build (nutzt das vorhandene Binary)
-#   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.3.6)
-#   BUILD=<n>                    CFBundleVersion             (Standard: 13)
+#   VERSION=<x.y.z>              CFBundleShortVersionString  (Standard: 0.3.3)
+#   BUILD=<n>                    CFBundleVersion             (Standard: 14)
 #   CODESIGN_IDENTITY="<Name>"   Signatur-Identität; Standard ist "-" = ad-hoc.
 #                                Jede andere Identität (auch die lokale
 #                                "Prime Photos Local Signer") nur explizit hier.
@@ -52,8 +52,8 @@ cd "${REPO_ROOT}"
 APP_NAME="Prime Photos"
 BIN_NAME="prime-photos"
 
-VERSION="${VERSION:-0.3.6}"
-BUILD="${BUILD:-13}"
+VERSION="${VERSION:-0.3.3}"
+BUILD="${BUILD:-14}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
 # Signatur-Identität: ad-hoc ("-") ist der Standard. Eine andere Identität wird ausschließlich
