@@ -1499,6 +1499,57 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   headless ohne Screenreader (#69/#70); kein Provenance-Nachweis für das manuelle DMG;
   Ad-hoc-Signatur und fehlende Notarisierung wie in §4–§6.
 
+**Release v0.3.5 (veröffentlicht):**
+
+- **Freigabe, Tag und Release:** Der annotierte Tag `v0.3.5` zeigt auf den
+  Release-Vorbereitungs-Commit `defa522`. Der GitHub-Release
+  [v0.3.5](https://github.com/reisi007/prime-photos/releases/tag/v0.3.5) wurde am
+  `2026-11-23` um 10:24 UTC veröffentlicht, **nicht** als Draft und **nicht** als
+  Pre-Release. Ihm ging der UI-Fix-Commit `91068da` voraus.
+- **Inhalt v0.3.5:** Abschluss von Issue #72: der Aktiviert-Toggle steht jetzt ganz rechts
+  in der Button-Zeile der Zielkarte. Das sichtbare Label `Aktiviert`/`Deaktiviert` bleibt als
+  nicht-interaktives Textelement an seiner Position; ein flexibler Spacer schiebt den Switch
+  an den rechten Kartenrand. Geometrie-Tests sichern Labelposition und Rechtsbündigkeit bei
+  1180×900 und 760×560, A11y-States und Klickverhalten bleiben unverändert.
+- **Release-CI:** `45152622835` (Agent gates success) und `45152622800` (CI success, nach
+  einem durch einen neueren Lauf verdrängten, abgebrochenen Lauf `45151987414`) waren grün;
+  der Release-Run
+  [`45152627520`](https://github.com/reisi007/prime-photos/actions/runs/45152627520)
+  schloss `Build windows-x64`, `Build linux-x64` und `Publish GitHub Release` erfolgreich ab.
+  Windows-SignPath und Linux-GPG-Signatur waren nicht konfiguriert und wurden übersprungen;
+  die Node-20-Deprecation-Warnung besteht weiterhin.
+- **Assets** (Bytes laut GitHub-API):
+
+  | Asset | Bytes |
+  |---|---:|
+  | `Prime-Photos-linux-x64.deb` | 17.700.912 |
+  | `Prime-Photos-linux-x64.tar.gz` | 23.643.112 |
+  | `Prime-Photos-macos-arm64.dmg` | 19.586.024 |
+  | `Prime-Photos-windows-x64.zip` | 17.829.989 |
+
+  Das macOS-DMG wurde manuell hochgeladen; lokaler und GitHub-SHA-256 stimmen überein:
+  `15807b73a89ed9c735223b11714d94942693c25a7af7ec8fc8d55e7ce4a00e2e`.
+- **Bundle und DMG (lokal, §4):** Nach `touch build.rs` erzeugte
+  `VERSION=0.3.5 BUILD=12 ./packaging/make-app.sh` (ad-hoc `codesign --sign -`) das Bundle
+  mit `CFBundleShortVersionString 0.3.5` und `CFBundleVersion 12`. `codesign --verify
+  --verbose=1` meldete „valid on disk" und „satisfies its Designated Requirement";
+  `hdiutil create … -format UDZO` plus `hdiutil verify` meldeten „checksum … is VALID".
+- **Release-CLI-Smoke:** Sechs Fixture-/Tooling-Flags endeten jeweils mit Exit 2; das
+  Release-Binary enthält keinen `Fixture-only`-String.
+- **Tests und Gates:** `cargo test --locked --features rune-ui-spike` → **394** Unit- und
+  **3** Iconset-Tests bestanden; `ratchet check --no-ratchet` **8/8**. Der Toggle-Fix wurde
+  in einer Review-Runde ohne blockerende Findings freigegeben.
+- **Lokal verifiziert:** Das Bundle wurde nach `/Applications/Prime Photos.app` installiert,
+  die Signatur erneut geprüft und die App gestartet (PID 42204). Die Rechtsbündigkeit des
+  Toggle ist headless über die `presented()`-Bounds beider Viewports belegt. Der
+  Live-Screenshot bleibt offen: der Bildschirm war während der Sichtprüfung gesperrt
+  bzw. ein macOS-Schlüsselbund-Dialog blockierte die App; der Benutzer muss entsperren und
+  den Dialog bestätigen, damit die abschließende Live-Sichtprüfung nachgeholt werden kann.
+- **Grenzen:** Live-Sichtprüfung der Produktionskarte noch offen (siehe oben); Windows/Linux
+  nur gebaut, nicht zur Laufzeit geprüft; Barrierefreiheit nur headless ohne Screenreader
+  (#69/#70); kein Provenance-Nachweis für das manuelle DMG; Ad-hoc-Signatur und fehlende
+  Notarisierung wie in §4–§6.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
