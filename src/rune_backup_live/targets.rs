@@ -84,13 +84,6 @@ pub(super) fn target_card(
             move |state: &mut LiveState, _| state.start_upload(vec![index]),
         ))
     };
-    // The visible label keeps its old position before `Optionen`; it is only
-    // text now, the switch itself moves to the far right of the actions row.
-    actions = actions.child(enabled_switch_label(
-        format!("target-enabled-{index}-label"),
-        enabled_label,
-        theme,
-    ));
     actions = actions.child(action_button(
         format!("target-edit-{index}"),
         tr("Optionen").to_owned(),
@@ -152,9 +145,21 @@ pub(super) fn target_card(
             },
         )
     };
-    // The spacer absorbs all slack, so the switch sits flush with the right
-    // edge of the actions row; only the card padding insets it.
-    actions = actions.child(el().grow(1.0)).child(switch);
+    // UI-2: label + switch form one group at the right end of the actions row
+    // (`Jetzt sichern · Optionen · Entfernen · [Spacer] · Aktiviert · [Toggle]`).
+    // The spacer absorbs all slack so only the card's 12 pt padding remains to
+    // the right; `S2` is the 8 pt step between the label and the switch track.
+    actions = actions.child(el().grow(1.0)).child(
+        row()
+            .gap(tok::space::S2)
+            .center_y()
+            .child(enabled_switch_label(
+                format!("target-enabled-{index}-label"),
+                enabled_label,
+                theme,
+            ))
+            .child(switch),
+    );
 
     col()
         .key(format!("target-card-{index}"))

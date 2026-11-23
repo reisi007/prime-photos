@@ -31,8 +31,10 @@ pub(super) fn action_button<S: 'static>(
 
 /// Same control as [`action_button`], but inert: no press handler at all (Rune's
 /// `disabled(true)` only changes accessibility and focus, it does **not** block
-/// pointer presses) and a neutral fill that does not react to hover. The key,
-/// role and label stay identical so tests and readers see the same control.
+/// pointer presses) and no hover/press overlay either. `El::hover` paints an
+/// overlay *over* the fill, so leaving it unset is what keeps mouseover inert.
+/// The key, role and label stay identical so tests and readers see the same
+/// control.
 pub(super) fn disabled_action_button(
     key: impl Into<String>,
     label: String,
@@ -49,8 +51,7 @@ pub(super) fn disabled_action_button(
         .px(12.0)
         .center()
         .radius(8.0)
-        .fill(theme.control_track)
-        .hover(theme.control_track);
+        .fill(theme.control_track);
     if !description.is_empty() {
         button = button.description(tr(description));
     }
@@ -62,9 +63,9 @@ pub(super) fn disabled_action_button(
     )
 }
 
-/// Plain state label shown in the actions row before `Optionen`. It is a text
-/// node, not a control: inert and a11y-hidden so the switch keeps the
-/// accessible name and all interaction while the label keeps its old spot.
+/// Plain state label shown directly left of its switch at the right end of the
+/// actions row. It is a text node, not a control: inert and a11y-hidden so the
+/// switch keeps the accessible name and all interaction.
 pub(super) fn enabled_switch_label(
     key: impl Into<String>,
     label: &'static str,
@@ -80,9 +81,9 @@ pub(super) fn enabled_switch_label(
 
 /// Switch in the style of `rune_settings::components::toggle_control`: a 38×22
 /// track with an 18 pt knob. Only the track is drawn; the visible state label
-/// lives in [`enabled_switch_label`] at the front of the actions row. The state
-/// is exposed through `checked`; pressing runs `action` (toggle + persist at
-/// the caller).
+/// lives in [`enabled_switch_label`] directly to its left at the right end of
+/// the actions row. The state is exposed through `checked`; pressing runs
+/// `action` (toggle + persist at the caller).
 pub(super) fn enabled_switch<S: 'static>(
     key: impl Into<String>,
     checked: bool,
@@ -120,8 +121,9 @@ fn switch_base(
 ) -> El {
     // The switch is its own element: only the track is drawn, so its drawn box
     // is exactly the 38×22 track and the flexible spacer in `target_card` can
-    // push it to the end of the actions row. The accessible name/state stay
-    // here; the visible label is a separate inert text node.
+    // push the label + switch group to the end of the actions row. The
+    // accessible name/state stay here; the visible label is a separate inert
+    // text node.
     let mut node = el()
         .key(key.to_owned())
         .role("switch")
@@ -131,11 +133,12 @@ fn switch_base(
     if !description.is_empty() {
         node = node.description(tr(description));
     }
-    node = if interactive {
-        node.hover(theme.hover).press(theme.press)
-    } else {
-        node.hover(theme.control_track)
-    };
+    // Only the interactive switch gets hover/press overlays. The inert sibling
+    // leaves them unset: Rune's default is transparent and `disabled(true)`
+    // alone does not stop hover painting.
+    if interactive {
+        node = node.hover(theme.hover).press(theme.press);
+    }
     node.child(switch_track(key, checked, theme, colors).a11y_hidden())
 }
 
