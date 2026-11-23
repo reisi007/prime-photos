@@ -23,7 +23,7 @@
 - **Spec-first:** vor Implementierungen die Clean-Room-Specs in `docs/original/` bzw. das Original-Bundle (`/Applications/Amazon Photos.app`, nur lesend; Decompile via `ilspycmd`) heranziehen.
 - **Feature-Verhalten und fachliche Entscheidungen** in `docs/features/` dokumentieren; vor Verhaltensänderungen die einschlägige Original-Spezifikation in `docs/original/` lesen.
 - **Live-Werte bleiben beim Hauptagent** (Cookies, Konto-Parameter); abgebrochene Subagent-Session: auf dem vorhandenen Diff fortsetzen, nicht neu beginnen.
-- **Release-Belege nur für veröffentlichte Releases:** `docs/dev/RELEASE.md` führt je **veröffentlichtem** Release genau einen Beleg-Abschnitt (Tag, Assets, Digests, Prüfungen). Lokale, nie veröffentlichte Kandidaten und Build-Iterationen sind interne Artefakte: kein eigener Abschnitt, keine Historie im Repo — sie gehen im Beleg des veröffentlichten Releases auf; Zwischenstände bleiben in `target/` und in der Git-Historie.
+- **Release-Belege nur für veröffentlichte Releases; Veröffentlichung nur mit Freigabe (User-Regel 2026-11-23):** `docs/dev/RELEASE.md` führt je **veröffentlichtem** Release genau einen Beleg-Abschnitt (Tag, Assets, Digests, Prüfungen). Lokale, nie veröffentlichte Kandidaten und Build-Iterationen sind interne Artefakte: kein eigener Abschnitt, keine Historie im Repo — sie gehen im Beleg des veröffentlichten Releases auf; Zwischenstände bleiben in `target/` und in der Git-Historie. Kein Release, Tag oder DMG-Upload ohne ausdrückliche Zustimmung des Benutzers; Build, Test und grüner CI sind **keine** Freigabe — vor dem Veröffentlichen aktiv nachfragen, versehentlich Veröffentlichtes auf Anweisung sofort löschen (lokal und remote).
 
 ## Gates
 
