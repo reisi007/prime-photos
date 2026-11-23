@@ -1452,6 +1452,53 @@ Auto-Merge-Workflows (`.github/workflows/dependabot-metadata.yml`,
   Für das manuell hochgeladene DMG gibt es keinen Build-Provenance-Nachweis; Ad-hoc-Signatur
   und fehlende Notarisierung bleiben wie in §4–§6 dokumentiert.
 
+**Release v0.3.4 (veröffentlicht):**
+
+- **Freigabe, Tag und Release:** Der annotierte Tag `v0.3.4` zeigt auf den
+  Release-Vorbereitungs-Commit `a1bd675`. Der GitHub-Release
+  [v0.3.4](https://github.com/reisi007/prime-photos/releases/tag/v0.3.4) wurde am
+  `2026-11-23` um 09:57 UTC veröffentlicht, **nicht** als Draft und **nicht** als
+  Pre-Release. Ihm ging der UI-Fix-Commit `3d61db8` voraus.
+- **Inhalt v0.3.4:** Folgerung aus dem UI-Review-Finding UI-1 zu Issue #72: zwischen
+  „Aktiviert"-Label und Toggle wurden 8 pt aus dem Theme-Token `tok::space::S2` eingehalten
+  und das Label rechts ausgerichtet. Der Benutzer hat danach verlangt, den Toggle selbst
+  ganz rechts in der Zielkarte zu platzieren; das Issue bleibt offen und wird mit `v0.3.5`
+  gelöst.
+- **Release-CI:** `45149814946` (CI success) und `45149814844` (Agent gates success) waren
+  grün; der Release-Run
+  [`45149818484`](https://github.com/reisi007/prime-photos/actions/runs/45149818484)
+  schloss alle Jobs erfolgreich ab. Windows-SignPath und Linux-GPG-Signatur waren nicht
+  konfiguriert und wurden übersprungen; die Node-20-Deprecation-Warnung besteht weiterhin.
+- **Assets** (Bytes laut GitHub-API):
+
+  | Asset | Bytes |
+  |---|---:|
+  | `Prime-Photos-linux-x64.deb` | 17.702.842 |
+  | `Prime-Photos-linux-x64.tar.gz` | 23.647.612 |
+  | `Prime-Photos-macos-arm64.dmg` | 19.586.731 |
+  | `Prime-Photos-windows-x64.zip` | 17.823.584 |
+
+  Das macOS-DMG wurde manuell hochgeladen; lokaler und GitHub-SHA-256 stimmen überein:
+  `3892527305c57bc08f8f3ceaae9903669ecaff02248ca1b38e57ef6fc83cec7e`.
+- **Bundle und DMG (lokal, §4):** Nach `touch build.rs` erzeugte
+  `VERSION=0.3.4 BUILD=11 ./packaging/make-app.sh` (ad-hoc `codesign --sign -`) das Bundle
+  mit `CFBundleShortVersionString 0.3.4` und `CFBundleVersion 11`. `codesign --verify
+  --verbose=1` meldete „valid on disk" und „satisfies its Designated Requirement";
+  `hdiutil create … -format UDZO` plus `hdiutil verify` meldeten „checksum … is VALID".
+- **Release-CLI-Smoke:** Sechs Fixture-/Tooling-Flags endeten jeweils mit Exit 2; das
+  Release-Binary enthält keinen `Fixture-only`-String.
+- **Tests und Gates:** `cargo test --locked --features rune-ui-spike` → **394** Unit- und
+  **3** Iconset-Tests bestanden; `ratchet check --no-ratchet` **8/8**. Der Toggle-Fix wurde
+  in einer Review-Runde ohne blockerende Findings freigegeben.
+- **Lokal verifiziert:** Das Bundle wurde nach `/Applications/Prime Photos.app` installiert,
+  die Signatur erneut geprüft und die App gestartet (PID 38630). Der Live-Screenshot wurde
+  durch ein macOS-Schlüsselbund-Dialogfenster blockiert; der Benutzer bestätigt den Dialog
+  für die abschließende Sichtprüfung an `v0.3.5`.
+- **Grenzen:** Der Toggle stand in `v0.3.4` noch nicht rechts in der Karte (Folge-Release
+  `v0.3.5`); Windows/Linux nur gebaut, nicht zur Laufzeit geprüft; Barrierefreiheit nur
+  headless ohne Screenreader (#69/#70); kein Provenance-Nachweis für das manuelle DMG;
+  Ad-hoc-Signatur und fehlende Notarisierung wie in §4–§6.
+
 ---
 
 ## 10. Bekannte Einschränkung: Dependabot-Warnung `glib` (Linux-Backend)
