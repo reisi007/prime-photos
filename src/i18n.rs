@@ -257,6 +257,10 @@ const EN: &[(&str, &str)] = &[
         "The folder is being read in and added to the running upload.",
     ),
     (
+        "Ordner wird gerade gesichert",
+        "Folder is currently being backed up",
+    ),
+    (
         "Tipp: Ordner werden dauerhaft gemerkt und bei jedem Start wieder gesichert.",
         "Tip: folders are remembered and backed up again on every start.",
     ),

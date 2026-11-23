@@ -115,6 +115,37 @@ The dialog is shared between creating and editing a target.
   There is **no file picker** in HEAD (only `FileDialog::pick_folder()`) and
   `supported_extensions()` is currently unwired.
 
+- **Rune-Zielkarte: Aktionen, Spinner und „Aktiviert"-Switch (Issue #72,
+  2026-11-23):** fünf Entscheidungen für `src/rune_backup_live/targets.rs` und
+  `widgets.rs`:
+  1. Bei `FolderStatus::NotFound` sind „Jetzt sichern" und der Aktiviert-Schalter
+     deaktiviert (kein Press-Handler, `disabled(true)`, A11y-Hinweis „Ordner
+     nicht gefunden"). „Optionen" und „Entfernen" bleiben bewusst aktiv: nur über
+     „Optionen" lässt sich der Pfad korrigieren, nur über „Entfernen" ein
+     veralteter Eintrag aufräumen.
+  2. Ein rotierender Fortschrittsindikator (Rolle `progressbar`, Label
+     „Upload-Vorgang läuft") erscheint in der Karte, solange genau dieser Ordner
+     aktiv gesichert wird. Die Zuordnung läuft über
+     `UploadShared::folder_paths` → Plan-Index, nicht über den persistierten
+     `FolderStatus`; der Indikator verschwindet mit Ende des Laufs. Rune hat kein
+     Spinner-Widget — Ring plus rotierender Bogen aus `rune::Icon` mit
+     `LoopSpec::rotation`.
+  3. „Jetzt sichern" bleibt während eines laufenden Uploads klickbar: es wird
+     kein zweiter Lauf gestartet, sondern über den Append-Pfad (`ScansInFlight`,
+     `sealed`, `run_paths`) in den laufenden Lauf eingespeist. Zähler werden nur
+     inkrementiert, `active`/`started`/`done`/`folder_done` bleiben unangetastet.
+  4. „Entfernen" ist für Ziele deaktiviert, die Teil des aktiven Laufs sind
+     (`folder_paths`-Match), mit A11y-Beschreibung „Ordner wird gerade
+     gesichert"; für alle anderen Ziele bleibt der Button aktiv. Ausblenden wäre
+     schlechter, weil er dann ohne Erklärung verschwände.
+  5. „Aktiviert" ist ein echter Switch (`role("switch")`,
+     `checked(folder.enabled)`, sichtbares Label „Aktiviert"/"Deaktiviert",
+     38×22-Track mit 18er Knob im Stil von
+     `rune_settings::components::toggle_control`) statt eines Zustands-Buttons.
+     Umschalten und Persistieren bleiben unverändert; für `NotFound` gilt Punkt 1.
+  Die Fortschritts- und Warteschlangenseite dieser Entscheidungen steht in
+  `queue-progress.md`.
+
 ## Original reference
 
 - `../original/SPEC_FOLDERS.md` — Folder scan and filter logic.

@@ -1,115 +1,17 @@
-use super::widgets::{action_button, folder_status_text};
+mod form;
+
+use super::widgets::{
+    action_button, disabled_action_button, disabled_switch, enabled_switch, folder_status_text,
+    upload_spinner,
+};
 use super::{LiveState, TargetForm};
-use crate::folders::{self, BackupFolder, ConflictResolution, ContentFilter, FolderStatus};
+use crate::folders::{BackupFolder, ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr3};
+use crate::upload::FileState;
+use form::{edit_target_form, select_target_photos};
 use rune::tok;
 use rune::{El, FileDialogOptions, FileDialogResult, Tx, col, el, row, text};
-use std::path::PathBuf;
 use tok::Theme;
-
-fn create_target_form(path: PathBuf, dedup: bool, conflict: ConflictResolution) -> TargetForm {
-    TargetForm {
-        path,
-        dedup,
-        conflict,
-        content_filter: ContentFilter::Photos,
-        edit_path: None,
-        error: None,
-    }
-}
-
-fn edit_target_form(folder: &BackupFolder) -> TargetForm {
-    TargetForm {
-        path: folder.path.clone(),
-        dedup: folder.dedup,
-        conflict: folder.conflict_resolution,
-        content_filter: folder.content_filter,
-        edit_path: Some(folder.path.clone()),
-        error: None,
-    }
-}
-
-fn apply_target_options(
-    folder: &mut BackupFolder,
-    dedup: bool,
-    conflict: ConflictResolution,
-    content_filter: ContentFilter,
-) {
-    folder.dedup = dedup;
-    folder.conflict_resolution = conflict;
-    folder.content_filter = content_filter;
-}
-
-fn select_target_photos(persisted: ContentFilter, photos: bool) -> ContentFilter {
-    ContentFilter::from_selection(photos, persisted.videos(), persisted)
-}
-
-impl LiveState {
-    pub(super) fn open_create_form(&mut self, path: PathBuf) {
-        let (dedup, conflict) = folders::default_options(&self.config);
-        self.form = Some(create_target_form(path, dedup, conflict));
-        self.status = None;
-    }
-
-    pub(super) fn save_form(&mut self) {
-        let Some(form) = self.form.as_ref() else {
-            return;
-        };
-        let path = form.path.clone();
-        let dedup = form.dedup;
-        let conflict = form.conflict;
-        let content_filter = form.content_filter;
-        let edit_path = form.edit_path.clone();
-        if !path.is_dir() {
-            if let Some(form) = self.form.as_mut() {
-                form.error = Some(tr("Lokaler Pfad ist nicht verfügbar").to_owned());
-            }
-            return;
-        }
-        if let Some(edit_path) = edit_path {
-            let Some(index) = self
-                .store
-                .folders
-                .iter()
-                .position(|folder| folder.path == edit_path)
-            else {
-                if let Some(form) = self.form.as_mut() {
-                    form.error = Some(tr("Ordner ist nicht mehr vorhanden").to_owned());
-                }
-                return;
-            };
-            if let Some(folder) = self.store.folders.get_mut(index) {
-                apply_target_options(folder, dedup, conflict, content_filter);
-            }
-            self.persist_store_if_allowed();
-            self.form = None;
-        } else {
-            if self.store.folders.iter().any(|folder| folder.path == path) {
-                if let Some(form) = self.form.as_mut() {
-                    form.error = Some(tr("Datensicherung für lokalen Pfad existiert bereits").to_owned());
-                }
-                return;
-            }
-            if !self.store.add(path.clone()) {
-                return;
-            }
-            let index = self.store.folders.len() - 1;
-            if let Some(folder) = self.store.folders.get_mut(index) {
-                apply_target_options(folder, dedup, conflict, content_filter);
-            }
-            self.persist_store_if_allowed();
-            self.form = None;
-            if self.logged_in() {
-                self.start_upload(vec![index]);
-            } else {
-                self.status = Some(
-                    tr("Sicherungsziel hinzugefügt. Melde dich an und starte den Upload manuell.")
-                        .to_owned(),
-                );
-            }
-        }
-    }
-}
 
 pub(super) fn target_card(
     state: &LiveState,
@@ -121,37 +23,92 @@ pub(super) fn target_card(
     alert_foreground: rune::Color,
 ) -> El {
     let status = folder_status_text(folder.status, folder.enabled);
+    // `primary_fill` is the appearance-specific palette colour passed in by the
+    // production view; recover the matching palette so the switch is styled
+    // exactly like the one in Settings without changing this function's callers.
+    let colors = crate::rune_theme::palette(
+        primary_fill == crate::rune_theme::palette(true).primary_fill,
+    );
+    let not_found = folder.status == FolderStatus::NotFound;
+
+    let (target_done, target_total, in_active_run, show_spinner) = {
+        let upload = state.upload.lock().unwrap();
+        let current = upload
+            .folder_paths
+            .iter()
+            .find_map(|(plan_index, path)| (path == &folder.path).then_some(*plan_index));
+        let in_active_run = upload.active && current.is_some();
+        let show_spinner = in_active_run && current.is_some_and(|plan_index| {
+            upload.queue.iter().any(|entry| {
+                entry.folder == plan_index && entry.state == FileState::Uploading
+            }) || upload.folder_done.get(&plan_index).copied().unwrap_or(0)
+                < upload.folder_total.get(&plan_index).copied().unwrap_or(0)
+        });
+        let counts = current.map_or(
+            (folder.uploaded_files, folder.total_files),
+            |plan_index| {
+                (
+                    upload.folder_done.get(&plan_index).copied().unwrap_or(0),
+                    upload.folder_total.get(&plan_index).copied().unwrap_or(0),
+                )
+            },
+        );
+        (counts.0, counts.1, in_active_run, show_spinner)
+    };
+
+    let enabled_label = if folder.enabled {
+        tr("Aktiviert")
+    } else {
+        tr("Deaktiviert")
+    };
     let mut actions = row().gap(6.0).center_y();
-    actions = actions.child(action_button(
-        format!("target-upload-{index}"),
-        if folder.status == FolderStatus::Error {
-            tr("Erneut versuchen").to_owned()
-        } else {
-            tr("Jetzt sichern").to_owned()
-        },
-        theme,
-        primary_fill,
-        primary_foreground,
-        move |state: &mut LiveState, _| state.start_upload(vec![index]),
-    ));
-    actions = actions.child(action_button(
-        format!("target-enabled-{index}"),
-        if folder.enabled {
-            tr("Aktiviert")
-        } else {
-            tr("Deaktiviert")
-        }
-        .to_owned(),
-        theme,
-        theme.control_track,
-        theme.text,
-        move |state: &mut LiveState, _| {
-            if let Some(folder) = state.store.folders.get_mut(index) {
-                folder.enabled = !folder.enabled;
-            }
-            state.persist_store_if_allowed();
-        },
-    ));
+    let upload_label = if folder.status == FolderStatus::Error {
+        tr("Erneut versuchen").to_owned()
+    } else {
+        tr("Jetzt sichern").to_owned()
+    };
+    actions = if not_found {
+        actions.child(disabled_action_button(
+            format!("target-upload-{index}"),
+            upload_label,
+            "Ordner nicht gefunden",
+            theme,
+        ))
+    } else {
+        actions.child(action_button(
+            format!("target-upload-{index}"),
+            upload_label,
+            theme,
+            primary_fill,
+            primary_foreground,
+            move |state: &mut LiveState, _| state.start_upload(vec![index]),
+        ))
+    };
+    let switch_key = format!("target-enabled-{index}");
+    actions = if not_found {
+        actions.child(disabled_switch(
+            switch_key,
+            folder.enabled,
+            enabled_label,
+            "Ordner nicht gefunden",
+            theme,
+            colors,
+        ))
+    } else {
+        actions.child(enabled_switch(
+            switch_key,
+            folder.enabled,
+            enabled_label,
+            theme,
+            colors,
+            move |state: &mut LiveState, _| {
+                if let Some(folder) = state.store.folders.get_mut(index) {
+                    folder.enabled = !folder.enabled;
+                }
+                state.persist_store_if_allowed();
+            },
+        ))
+    };
     actions = actions.child(action_button(
         format!("target-edit-{index}"),
         tr("Optionen").to_owned(),
@@ -164,37 +121,30 @@ pub(super) fn target_card(
             }
         },
     ));
-    actions = actions.child(action_button(
-        format!("target-remove-{index}"),
-        tr("Entfernen").to_owned(),
-        theme,
-        theme.control_track,
-        theme.text,
-        move |state: &mut LiveState, _| {
-            if index < state.store.folders.len() {
-                state.store.folders.remove(index);
-                state.persist_store_if_allowed();
-            }
-        },
-    ));
+    let remove_label = tr("Entfernen").to_owned();
+    actions = if in_active_run {
+        actions.child(disabled_action_button(
+            format!("target-remove-{index}"),
+            remove_label,
+            "Ordner wird gerade gesichert",
+            theme,
+        ))
+    } else {
+        actions.child(action_button(
+            format!("target-remove-{index}"),
+            remove_label,
+            theme,
+            theme.control_track,
+            theme.text,
+            move |state: &mut LiveState, _| {
+                if index < state.store.folders.len() {
+                    state.store.folders.remove(index);
+                    state.persist_store_if_allowed();
+                }
+            },
+        ))
+    };
 
-    let current = state
-        .upload
-        .lock()
-        .unwrap()
-        .folder_paths
-        .iter()
-        .find_map(|(plan_index, path)| (path == &folder.path).then_some(*plan_index));
-    let (target_done, target_total) = current.map_or(
-        (folder.uploaded_files, folder.total_files),
-        |plan_index| {
-            let upload = state.upload.lock().unwrap();
-            (
-                upload.folder_done.get(&plan_index).copied().unwrap_or(0),
-                upload.folder_total.get(&plan_index).copied().unwrap_or(0),
-            )
-        },
-    );
     col()
         .key(format!("target-card-{index}"))
         .w_full()
@@ -208,13 +158,23 @@ pub(super) fn target_card(
                 .justify_between()
                 .child(text(folder.name.clone()).font(tok::type_::BODY).color(theme.text))
                 .child(
-                    text(status)
-                        .font(tok::type_::LABEL)
-                        .color(if folder.status == FolderStatus::Error {
-                            alert_foreground
-                        } else {
-                            theme.text_secondary
-                        }),
+                    row()
+                        .gap(6.0)
+                        .center_y()
+                        .child(
+                            text(status)
+                                .font(tok::type_::LABEL)
+                                .color(if folder.status == FolderStatus::Error {
+                                    alert_foreground
+                                } else {
+                                    theme.text_secondary
+                                }),
+                        )
+                        .children(
+                            show_spinner.then(|| {
+                                upload_spinner(format!("target-spinner-{index}"), theme, colors)
+                            }),
+                        ),
                 ),
         )
         .child(

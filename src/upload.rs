@@ -5,7 +5,7 @@ use crate::folders::{ConflictResolution, FolderStatus};
 use crate::i18n::{tr, tr1, tr2, tr3};
 use crate::prime_photos::PrimePhotos;
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     future::Future,
     path::{Path, PathBuf},
     sync::{
@@ -39,6 +39,7 @@ pub(crate) enum FileState {
 }
 
 /// One entry of the live per-file queue rendered on the Backup page.
+#[derive(Clone)]
 pub(crate) struct QueueEntry {
     /// Backup-folder index this file belongs to (the tuple's folder element).
     /// Used by the Backup page for the per-row folder column — the queue is
@@ -134,6 +135,10 @@ pub(crate) struct UploadShared {
     /// run exists; the run's own `Arc` so an injection from outside the run can
     /// append to the very same queue the workers drain.
     pub(crate) item_queue: Option<Arc<Mutex<VecDeque<(usize, usize, PathBuf)>>>>,
+    /// Every path already queued in the current run. Reset from the run's items
+    /// at setup and extended by each accepted live append, so re-triggering the
+    /// same folder cannot queue its files twice.
+    pub(crate) run_paths: HashSet<PathBuf>,
     /// Files whose **first** file-level attempt failed (upload error or local
     /// read error). Filled by the initial workers and drained by `run_upload`
     /// before the run's one finite retry pass. Deliberately a separate list, not
@@ -202,6 +207,14 @@ impl UploadShared {
     /// Consume the marker that a background path persisted a new store state.
     pub(crate) fn take_store_dirty(&mut self) -> bool {
         std::mem::take(&mut self.store_dirty)
+    }
+
+    /// Reset the per-run path set to exactly the items of a new run. Called at
+    /// run setup under the shared lock; later appends add their own paths.
+    pub(crate) fn reset_run_paths(&mut self, items: &[(usize, usize, PathBuf)]) {
+        self.run_paths.clear();
+        self.run_paths
+            .extend(items.iter().map(|(_, _, path)| path.clone()));
     }
 
     /// Append to the (bounded) run log. Old lines are dropped oldest-first, the
@@ -1340,6 +1353,7 @@ pub(crate) async fn run_upload(
     {
         let mut s = shared.lock().unwrap();
         s.item_queue = Some(queue.clone());
+        s.reset_run_paths(&preflight_items);
         s.retry_items.clear();
         s.folder_opts = folder_opts;
         s.sealed = false;
@@ -1526,6 +1540,30 @@ mod tests {
         assert!(shared.take_store_dirty());
         assert!(!shared.take_store_dirty());
         assert!(!shared.store_dirty);
+    }
+
+    #[test]
+    fn reset_run_paths_seeds_a_new_run_and_clears_the_previous_one() {
+        let mut shared = UploadShared::default();
+        shared.run_paths.insert(PathBuf::from("/old/photo.jpg"));
+        shared.reset_run_paths(&[
+            (0, 0, PathBuf::from("/new/a.jpg")),
+            (1, 0, PathBuf::from("/new/b.jpg")),
+        ]);
+        assert_eq!(
+            shared.run_paths,
+            HashSet::from([
+                PathBuf::from("/new/a.jpg"),
+                PathBuf::from("/new/b.jpg")
+            ]),
+            "run setup takes exactly this run's items"
+        );
+        shared.reset_run_paths(&[(0, 0, PathBuf::from("/new/c.jpg"))]);
+        assert_eq!(
+            shared.run_paths,
+            HashSet::from([PathBuf::from("/new/c.jpg")]),
+            "a following run must not inherit stale paths"
+        );
     }
 
     #[test]

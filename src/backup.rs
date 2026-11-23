@@ -928,6 +928,12 @@ fn inject_into_live_run(
         let base = s.queue.len();
         let rows = std::mem::take(&mut plan.queue); // Reihenfolge == items
         let items = std::mem::take(&mut plan.items);
+        // Keep the manual append path's duplicate filter in sync: these files
+        // are queued now but may not be in the dedup index yet, so a later
+        // "Jetzt sichern" must see them as already queued.
+        for (_, _, path) in &items {
+            s.run_paths.insert(path.clone());
+        }
         let n = items.len();
         s.queue.extend(rows);
         if let Some(q) = s.item_queue.as_ref() {
@@ -977,6 +983,236 @@ fn inject_into_live_run(
     }
     let _ = store.save();
     None
+}
+
+/// Outcome of feeding newly found files into an already running upload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AppendOutcome {
+    /// `n` files were appended to the live run's queue and counters.
+    Appended(usize),
+    /// No live run accepts work right now (idle, sealed, cancelled or not yet
+    /// published). The caller may start an ordinary run.
+    NotLive,
+    /// The run is live, but every found path was already queued (or the scan
+    /// found nothing supported). Nothing was changed.
+    NoNewFiles,
+    /// At least one requested source folder disappeared before the append; it
+    /// was flagged `NotFound` and no queue item was added.
+    MissingSource,
+}
+
+/// Feed the files of `indices` into the **running** upload instead of starting
+/// a second run: no `publish_state`, no counter reset, no `spawn`.
+///
+/// The whole scan is covered by [`ScansInFlight`] and the append itself is
+/// decided under the shared lock with the same guard as [`inject_into_live_run`]
+/// (`active && !sealed && !cancelled && item_queue.is_some()`), so an item can
+/// never land in a queue nobody drains. Every counter is incremented; the run's
+/// identity (`active`, `started`, `done`, `folder_done`, `cancelled`, album ids
+/// and byte rate) is left alone.
+pub(crate) fn append_to_live_run(
+    store: &mut FolderStore,
+    indices: Vec<usize>,
+    shared: &Arc<Mutex<UploadShared>>,
+    persist_store: bool,
+) -> AppendOutcome {
+    append_to_live_run_with(
+        store,
+        indices,
+        shared,
+        persist_store,
+        |path| path.is_dir(),
+        UploadPlan::build,
+    )
+}
+
+/// Injectable sibling of [`append_to_live_run`] for network-free unit tests:
+/// the source check and the plan builder are supplied by the caller.
+fn append_to_live_run_with(
+    store: &mut FolderStore,
+    indices: Vec<usize>,
+    shared: &Arc<Mutex<UploadShared>>,
+    persist_store: bool,
+    is_dir: impl Fn(&Path) -> bool,
+    build_plan: impl FnOnce(&FolderStore, &[usize]) -> Option<UploadPlan>,
+) -> AppendOutcome {
+    // Keep the run open for the whole walk: an empty worker queue must not seal
+    // it while we are still scanning a source folder.
+    let _guard = ScansInFlight::new(shared);
+    {
+        let s = shared.lock().unwrap();
+        if !(s.active && !s.sealed && !s.cancelled && s.item_queue.is_some()) {
+            return AppendOutcome::NotLive;
+        }
+    }
+
+    // Same source guard as the manual path (`docs/original/SPEC_MISSING_SOURCE.md`):
+    // flag a missing folder, persist the state, and never start a run from a
+    // source that is not there.
+    let mut changed = false;
+    let mut missing = false;
+    let mut present = Vec::new();
+    for &index in &indices {
+        let Some(folder) = store.folders.get_mut(index) else {
+            continue;
+        };
+        let exists = is_dir(&folder.path);
+        let next = source_status(exists, folder.status);
+        if next != folder.status {
+            folder.status = next;
+            changed = true;
+        }
+        if exists {
+            present.push(index);
+        } else {
+            missing = true;
+        }
+    }
+    if changed && persist_store {
+        let _ = store.save();
+    }
+    if missing {
+        // The folder is flagged above; tell the caller so the UI does not
+        // report "Alles aktuell" for a source that is simply not there.
+        shared.lock().unwrap().log(tr(
+            "Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).",
+        ));
+        return AppendOutcome::MissingSource;
+    }
+    if present.is_empty() {
+        return AppendOutcome::NoNewFiles;
+    }
+
+    let Some(plan) = build_plan(store, &present) else {
+        let message = if present.len() != indices.len() {
+            tr("Der Quellordner ist gerade nicht erreichbar (z. B. externes Laufwerk nicht angeschlossen).")
+        } else {
+            tr("Keine Fotos in diesem Ordner gefunden.")
+        };
+        shared.lock().unwrap().log(message);
+        return AppendOutcome::NoNewFiles;
+    };
+
+    let UploadPlan {
+        items,
+        files_seen: _,
+        unchanged,
+        content_skip,
+        folder_unchanged,
+        folder_content_skip,
+        bytes_total: _,
+        sized_total,
+        queue,
+        per_folder: _,
+        folder_opts,
+    } = plan;
+    let planned = items.len();
+
+    let mut s = shared.lock().unwrap();
+    // Re-check under the very lock that protects `sealed`: the run may have
+    // ended while we walked the folder.
+    if !(s.active && !s.sealed && !s.cancelled && s.item_queue.is_some()) {
+        return AppendOutcome::NotLive;
+    }
+
+    // A folder that is already part of this run keeps its **plan-time** index
+    // even if the persisted store has shifted underneath it.
+    let existing: HashMap<PathBuf, usize> = s
+        .folder_paths
+        .iter()
+        .map(|(&idx, path)| (path.clone(), idx))
+        .collect();
+    let effective_idx = |store_idx: usize| -> usize {
+        store
+            .folders
+            .get(store_idx)
+            .and_then(|folder| existing.get(&folder.path).copied())
+            .unwrap_or(store_idx)
+    };
+
+    let base = s.queue.len();
+    let mut new_rows = Vec::new();
+    let mut new_items = Vec::new();
+    let mut appended: HashMap<usize, usize> = HashMap::new();
+    let mut persisted: HashMap<usize, usize> = HashMap::new();
+    for (row, store_idx, path) in items {
+        if s.run_paths.contains(&path) {
+            continue;
+        }
+        let Some(mut entry) = queue.get(row).cloned() else {
+            continue;
+        };
+        let idx = effective_idx(store_idx);
+        entry.folder = idx;
+        let new_row = new_items.len();
+        new_rows.push(entry);
+        new_items.push((new_row, idx, path.clone()));
+        s.run_paths.insert(path);
+        *appended.entry(idx).or_insert(0) += 1;
+        *persisted.entry(store_idx).or_insert(0) += 1;
+    }
+    let n = new_items.len();
+    if n == 0 {
+        return AppendOutcome::NoNewFiles;
+    }
+    let appended_bytes: u64 = new_rows.iter().map(|entry| entry.size).sum();
+
+    if let Some(q) = s.item_queue.as_ref() {
+        let mut q = q.lock().unwrap();
+        for (row, idx, path) in new_items {
+            q.push_back((base + row, idx, path));
+        }
+    }
+    s.queue.extend(new_rows);
+    s.total += n;
+    for (&idx, &count) in &appended {
+        *s.folder_total.entry(idx).or_insert(0) += count;
+    }
+
+    // Never overwrite what the run already knows about a folder: an append
+    // only fills in slots that are still empty.
+    for (&store_idx, opts) in &folder_opts {
+        let idx = effective_idx(store_idx);
+        if let Some(folder) = store.folders.get(store_idx) {
+            let path = folder.path.clone();
+            s.folder_paths.entry(idx).or_insert_with(|| path.clone());
+            s.destination_roots.entry(idx).or_insert_with(|| path);
+        }
+        s.folder_opts.entry(idx).or_insert_with(|| opts.clone());
+    }
+
+    s.unchanged_skipped += unchanged;
+    s.conflict_skipped += content_skip;
+    for (store_idx, count) in folder_unchanged {
+        *s.folder_unchanged
+            .entry(effective_idx(store_idx))
+            .or_insert(0) += count;
+    }
+    for (store_idx, count) in folder_content_skip {
+        *s.folder_conflict
+            .entry(effective_idx(store_idx))
+            .or_insert(0) += count;
+    }
+    // Byte ETA: continue only when both sides know every file's size.
+    s.bytes_total = if s.bytes_total > 0 && sized_total == planned {
+        s.bytes_total + appended_bytes
+    } else {
+        0
+    };
+    s.log(tr1("{} Datei(en) zusätzlich aufgenommen.", n));
+    drop(s);
+
+    // The persisted count accumulates: a folder already in the run was counted
+    // at its start, and this append only adds the files it newly contributed.
+    for (store_idx, count) in persisted {
+        if let Some(folder) = store.folders.get_mut(store_idx) {
+            folder.total_files = folder.total_files.saturating_add(count);
+        }
+    }
+    if persist_store {
+        let _ = store.save();
+    }
+    AppendOutcome::Appended(n)
 }
 
 /// Publish a plan and spawn its worker — the shared tail of every detached run
@@ -3107,6 +3343,394 @@ mod tests {
         let out = with_store_lock(|| inject_into_live_run(plan, &mut store, &shared));
         assert!(out.is_some(), "a cancelled run must refuse the plan");
         assert_eq!(shared.lock().unwrap().total, 0);
+    }
+
+    // -- Issue #72: appending newly found files to a live run ---------------
+
+    /// An active, unsealed run with `existing` rows already queued. Paths are
+    /// registered in `run_paths` just like `run_upload` does at setup.
+    fn live_shared(existing: &[(&str, usize)]) -> Arc<Mutex<UploadShared>> {
+        let shared = Arc::new(Mutex::new(UploadShared::default()));
+        let queue = Arc::new(Mutex::new(VecDeque::new()));
+        {
+            let mut s = shared.lock().unwrap();
+            s.active = true;
+            s.item_queue = Some(queue.clone());
+            for (row, &(path, idx)) in existing.iter().enumerate() {
+                s.queue.push(QueueEntry {
+                    folder: idx,
+                    name: path.to_string(),
+                    state: FileState::Waiting,
+                    size: 1,
+                    bytes_sent: 0,
+                });
+                queue
+                    .lock()
+                    .unwrap()
+                    .push_back((row, idx, PathBuf::from(path)));
+                s.run_paths.insert(PathBuf::from(path));
+                s.total += 1;
+                *s.folder_total.entry(idx).or_insert(0) += 1;
+            }
+        }
+        shared
+    }
+
+    #[test]
+    fn append_feeds_new_files_into_the_live_run() {
+        let shared = live_shared(&[("/src/a/existing.jpg", 0)]);
+        {
+            let mut s = shared.lock().unwrap();
+            s.folder_paths.insert(0, PathBuf::from("/src/a"));
+            s.bytes_total = 100;
+        }
+        let mut store = FolderStore {
+            folders: vec![
+                folders::BackupFolder::new(PathBuf::from("/src/a")),
+                folders::BackupFolder::new(PathBuf::from("/src/b")),
+            ],
+        };
+        let mut plan = literal_plan(&[(1, "/src/b/one.jpg"), (1, "/src/b/two.jpg")]);
+        plan.queue[0].size = 20;
+        plan.queue[1].size = 30;
+        plan.sized_total = 2;
+        plan.unchanged = 3;
+        plan.content_skip = 1;
+        plan.folder_unchanged.insert(1, 3);
+        plan.folder_content_skip.insert(1, 1);
+
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![1],
+                &shared,
+                true,
+                |_| true,
+                |_, _| Some(plan),
+            )),
+            AppendOutcome::Appended(2)
+        );
+
+        let s = shared.lock().unwrap();
+        assert_eq!(s.total, 3, "counters grow, never reset");
+        assert_eq!(s.folder_total.get(&0).copied(), Some(1));
+        assert_eq!(s.folder_total.get(&1).copied(), Some(2));
+        assert_eq!(s.queue.len(), 3, "rows appended to the live queue");
+        assert_eq!(s.queue[1].folder, 1);
+        {
+            let q = s.item_queue.as_ref().unwrap().lock().unwrap();
+            let rows: Vec<(usize, usize)> = q.iter().map(|(r, i, _)| (*r, *i)).collect();
+            assert_eq!(
+                rows,
+                vec![(0, 0), (1, 1), (2, 1)],
+                "rows are offset by the old queue"
+            );
+        }
+        assert_eq!(s.bytes_total, 150, "100 + 20 + 30, both sides fully sized");
+        assert_eq!(s.unchanged_skipped, 3);
+        assert_eq!(s.conflict_skipped, 1);
+        assert_eq!(s.folder_unchanged.get(&1).copied(), Some(3));
+        assert_eq!(s.folder_conflict.get(&1).copied(), Some(1));
+        assert_eq!(s.scans_in_flight, 0, "the scan guard is released again");
+        assert!(s.run_paths.contains(&PathBuf::from("/src/b/one.jpg")));
+        assert!(s.run_paths.contains(&PathBuf::from("/src/b/two.jpg")));
+        assert!(s.log.iter().any(|line| line.contains("zusätzlich aufgenommen")));
+        drop(s);
+        assert_eq!(store.folders[1].total_files, 2);
+    }
+
+    #[test]
+    fn append_drops_paths_already_queued_in_the_run() {
+        let shared = live_shared(&[("/src/b/one.jpg", 1)]);
+        {
+            let mut s = shared.lock().unwrap();
+            s.folder_paths.insert(1, PathBuf::from("/src/b"));
+        }
+        let mut store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from("/src/b"))],
+        };
+        let plan = literal_plan(&[(0, "/src/b/one.jpg"), (0, "/src/b/two.jpg")]);
+
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![0],
+                &shared,
+                true,
+                |_| true,
+                |_, _| Some(plan),
+            )),
+            AppendOutcome::Appended(1),
+            "only the not-yet-queued file is appended"
+        );
+        let s = shared.lock().unwrap();
+        assert_eq!(s.total, 2);
+        assert_eq!(s.queue.len(), 2);
+        assert_eq!(s.folder_total.get(&1).copied(), Some(2));
+        assert_eq!(s.scans_in_flight, 0);
+        assert!(s.run_paths.contains(&PathBuf::from("/src/b/one.jpg")));
+        assert!(s.run_paths.contains(&PathBuf::from("/src/b/two.jpg")));
+    }
+
+    #[test]
+    fn append_reports_no_new_files_when_the_run_already_has_them() {
+        let shared = live_shared(&[("/src/b/one.jpg", 0)]);
+        let mut store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from("/src/b"))],
+        };
+        let plan = literal_plan(&[(0, "/src/b/one.jpg")]);
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![0],
+                &shared,
+                true,
+                |_| true,
+                |_, _| Some(plan),
+            )),
+            AppendOutcome::NoNewFiles
+        );
+        let s = shared.lock().unwrap();
+        assert_eq!(s.total, 1);
+        assert_eq!(s.queue.len(), 1);
+        assert_eq!(s.item_queue.as_ref().unwrap().lock().unwrap().len(), 1);
+        assert_eq!(s.scans_in_flight, 0);
+    }
+
+    #[test]
+    fn append_is_refused_when_the_run_cannot_accept_work() {
+        let cases: [(&str, fn(&mut UploadShared)); 4] = [
+            ("inactive", |s| s.active = false),
+            ("sealed", |s| s.sealed = true),
+            ("cancelled", |s| s.cancelled = true),
+            ("no item queue", |s| s.item_queue = None),
+        ];
+        for (name, mutate) in cases {
+            let shared = live_shared(&[]);
+            mutate(&mut shared.lock().unwrap());
+            let mut store = FolderStore {
+                folders: vec![folders::BackupFolder::new(PathBuf::from("/src/a"))],
+            };
+            let plan = literal_plan(&[(0, "/src/a/a.jpg")]);
+            assert_eq!(
+                with_store_lock(|| append_to_live_run_with(
+                    &mut store,
+                    vec![0],
+                    &shared,
+                    true,
+                    |_| true,
+                    |_, _| Some(plan),
+                )),
+                AppendOutcome::NotLive,
+                "{name}: the run must refuse new work"
+            );
+            let s = shared.lock().unwrap();
+            assert_eq!(s.total, 0);
+            assert!(s.queue.is_empty());
+            assert!(s.run_paths.is_empty());
+            assert_eq!(s.scans_in_flight, 0, "{name}: the guard is dropped on refusal");
+        }
+    }
+
+    #[test]
+    fn append_reuses_the_plan_index_and_accumulates_persisted_counts() {
+        let shared = live_shared(&[("/src/a/old.jpg", 0)]);
+        {
+            let mut s = shared.lock().unwrap();
+            s.folder_paths.insert(0, PathBuf::from("/src/a"));
+            s.folder_opts.insert(0, (false, ConflictResolution::Ignore));
+            s.destination_roots.insert(0, PathBuf::from("/root/a"));
+        }
+        // The store shifted meanwhile: A now sits at index 1, B at index 0.
+        let mut store = FolderStore {
+            folders: vec![
+                folders::BackupFolder::new(PathBuf::from("/src/b")),
+                folders::BackupFolder::new(PathBuf::from("/src/a")),
+            ],
+        };
+        store.folders[1].total_files = 4;
+        let mut plan = literal_plan(&[(1, "/src/a/new.jpg")]);
+        plan.folder_opts.insert(1, (true, ConflictResolution::Replace));
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![1],
+                &shared,
+                true,
+                |_| true,
+                |_, _| Some(plan),
+            )),
+            AppendOutcome::Appended(1)
+        );
+        let s = shared.lock().unwrap();
+        assert_eq!(s.folder_total.get(&0).copied(), Some(2), "the run keeps A's plan index");
+        assert_eq!(s.folder_paths.get(&0), Some(&PathBuf::from("/src/a")));
+        assert_eq!(
+            s.destination_roots.get(&0),
+            Some(&PathBuf::from("/root/a")),
+            "an existing root is never overwritten"
+        );
+        assert_eq!(
+            s.folder_opts.get(&0),
+            Some(&(false, ConflictResolution::Ignore)),
+            "existing options are never overwritten"
+        );
+        assert_eq!(s.queue[1].folder, 0, "the queue row uses the plan index");
+        {
+            let q = s.item_queue.as_ref().unwrap().lock().unwrap();
+            assert_eq!(q.back().map(|(r, i, _)| (*r, *i)), Some((1, 0)));
+        }
+        drop(s);
+        assert_eq!(
+            store.folders[1].total_files, 5,
+            "the persisted count accumulates on the current store row"
+        );
+    }
+
+    #[test]
+    fn append_drops_the_byte_total_when_the_new_plan_is_not_fully_sized() {
+        let shared = live_shared(&[]);
+        shared.lock().unwrap().bytes_total = 100;
+        let mut store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from("/src/a"))],
+        };
+        let mut plan = literal_plan(&[(0, "/src/a/a.jpg")]);
+        plan.sized_total = 0;
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![0],
+                &shared,
+                true,
+                |_| true,
+                |_, _| Some(plan),
+            )),
+            AppendOutcome::Appended(1)
+        );
+        assert_eq!(shared.lock().unwrap().bytes_total, 0);
+    }
+
+    #[test]
+    fn append_flags_a_missing_source_without_queuing_anything() {
+        let shared = live_shared(&[]);
+        let mut store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from("/gone"))],
+        };
+        store.folders[0].status = FolderStatus::Done;
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![0],
+                &shared,
+                true,
+                |_| false,
+                |_, _| None,
+            )),
+            AppendOutcome::MissingSource
+        );
+        assert_eq!(store.folders[0].status, FolderStatus::NotFound);
+        let s = shared.lock().unwrap();
+        assert_eq!(s.total, 0);
+        assert_eq!(s.scans_in_flight, 0);
+        assert!(s
+            .log
+            .iter()
+            .any(|line| line.contains("Quellordner ist gerade nicht erreichbar")));
+    }
+
+    #[test]
+    fn injected_paths_are_registered_for_the_append_duplicate_filter() {
+        let shared = live_shared(&[]);
+        let mut store = FolderStore {
+            folders: vec![folders::BackupFolder::new(PathBuf::from("/src/watch"))],
+        };
+        let injected = literal_plan(&[(0, "/src/watch/a.jpg"), (0, "/src/watch/b.jpg")]);
+        assert!(
+            with_store_lock(|| inject_into_live_run(injected, &mut store, &shared)).is_none(),
+            "the watcher injection must be accepted"
+        );
+        {
+            let s = shared.lock().unwrap();
+            assert_eq!(s.queue.len(), 2);
+            assert_eq!(s.total, 2);
+            assert!(s.run_paths.contains(&PathBuf::from("/src/watch/a.jpg")));
+            assert!(s.run_paths.contains(&PathBuf::from("/src/watch/b.jpg")));
+        }
+        // A later manual click for the same folder must not requeue files that
+        // are still waiting: the dedup index has not seen them yet.
+        let again = literal_plan(&[(0, "/src/watch/a.jpg"), (0, "/src/watch/b.jpg")]);
+        assert_eq!(
+            with_store_lock(|| append_to_live_run_with(
+                &mut store,
+                vec![0],
+                &shared,
+                true,
+                |_| true,
+                |_, _| Some(again),
+            )),
+            AppendOutcome::NoNewFiles
+        );
+        let s = shared.lock().unwrap();
+        assert_eq!(s.queue.len(), 2, "the queue is unchanged");
+        assert_eq!(s.total, 2);
+        assert_eq!(s.item_queue.as_ref().unwrap().lock().unwrap().len(), 2);
+        assert_eq!(s.scans_in_flight, 0);
+    }
+
+    #[test]
+    fn append_respects_the_persist_store_gate() {
+        with_store_lock(|| {
+            let shared = live_shared(&[]);
+            let mut store = FolderStore {
+                folders: vec![folders::BackupFolder::new(PathBuf::from("/src/gated"))],
+            };
+            // A store loaded from disk is the baseline: with `persist_store`
+            // false the in-memory fallback must never overwrite it.
+            let _ = store.save();
+            let baseline = std::fs::read(folders::store_path()).expect("baseline store");
+
+            let plan = literal_plan(&[(0, "/src/gated/a.jpg")]);
+            assert_eq!(
+                append_to_live_run_with(
+                    &mut store,
+                    vec![0],
+                    &shared,
+                    false,
+                    |_| true,
+                    |_, _| Some(plan),
+                ),
+                AppendOutcome::Appended(1)
+            );
+            assert_eq!(
+                store.folders[0].total_files, 1,
+                "the live counter still accumulates"
+            );
+            assert_eq!(
+                std::fs::read(folders::store_path()).expect("store after refused write"),
+                baseline,
+                "persist_store=false must not write the in-memory fallback"
+            );
+
+            // With the gate open the same kind of append does persist.
+            let plan = literal_plan(&[(0, "/src/gated/b.jpg")]);
+            assert_eq!(
+                append_to_live_run_with(
+                    &mut store,
+                    vec![0],
+                    &shared,
+                    true,
+                    |_| true,
+                    |_, _| Some(plan),
+                ),
+                AppendOutcome::Appended(1)
+            );
+            let persisted =
+                std::fs::read_to_string(folders::store_path()).expect("persisted store");
+            assert!(
+                persisted.contains("total_files = 2"),
+                "expected the accumulated count on disk: {persisted}"
+            );
+        });
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! Explicit Rune production backup host plus its debug-only synthetic visual
 //! smoke route. The existing headless fixture stays separate.
 
-use crate::backup;
+use crate::backup::{self, AppendOutcome};
 use crate::config::Config;
 use crate::folders::{ConflictResolution, ContentFilter, FolderStore};
-use crate::i18n::tr;
+use crate::i18n::{tr, tr1};
 use crate::login::{self, LoginPoll, Session, WebviewLogin};
 use crate::platform::app_shared::Autostart;
 use crate::upload::UploadShared;
@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 mod language_change;
+mod state_persistence;
 
 const WINDOW_SIZE: (f32, f32) = (1180.0, 820.0);
 const MIN_WINDOW_SIZE: (f32, f32) = (760.0, 560.0);
@@ -81,42 +82,39 @@ struct LiveState {
 }
 
 impl LiveState {
-    fn logged_in(&self) -> bool {
-        !self.config.session_id.is_empty() && !self.config.cookie_x_acb.is_empty()
-    }
-
-    fn persist_config_if_allowed(&mut self) {
-        if !self.persist_config {
-            return;
-        }
-        if let Err(error) = self.config.save() {
-            log::warn!("Rune-Sicherungsroute: Einstellungen konnten nicht gespeichert werden: {error}");
-            self.config_error = Some(tr("Die Einstellungen konnten nicht gespeichert werden.").to_owned());
-        } else {
-            self.config_error = None;
-        }
-    }
-
-    fn persist_store_if_allowed(&mut self) {
-        if !self.persist_store {
-            return;
-        }
-        if let Err(error) = self.store.save() {
-            log::warn!("Rune-Sicherungsroute: Sicherungsziele konnten nicht gespeichert werden: {error}");
-            self.store_error = Some(tr("Sicherungsziele konnten nicht gespeichert werden.").to_owned());
-        } else {
-            self.store_error = None;
-        }
-    }
-
     fn start_upload(&mut self, indices: Vec<usize>) {
-        if self.upload.lock().unwrap().active {
-            self.status = Some(tr("Es läuft bereits ein Upload.").to_owned());
-            return;
-        }
         if !self.logged_in() {
             self.status = Some(tr("Bitte zuerst anmelden, bevor ein Upload gestartet wird.").to_owned());
             return;
+        }
+        if self.upload.lock().unwrap().active {
+            // "Jetzt sichern" during a run feeds the new files into that very
+            // run. Starting another one would reset its counters, queue indices
+            // and finalizer through the shared `UploadShared`.
+            match backup::append_to_live_run(&mut self.store, indices.clone(), &self.upload, self.persist_store) {
+                AppendOutcome::Appended(n) => {
+                    self.status = Some(tr1("{} Datei(en) zusätzlich aufgenommen.", n));
+                    return;
+                }
+                AppendOutcome::NoNewFiles => {
+                    self.status = Some(tr("Alles aktuell").to_owned());
+                    return;
+                }
+                AppendOutcome::MissingSource => {
+                    self.status = Some(tr("Ordner nicht gefunden").to_owned());
+                    return;
+                }
+                AppendOutcome::NotLive => {
+                    // A sealed/cancelled run still owns the shared state but
+                    // cannot take work: keep the old refusal, never reset it.
+                    if self.upload.lock().unwrap().active {
+                        self.status = Some(tr("Es läuft bereits ein Upload.").to_owned());
+                        return;
+                    }
+                    // The run finished between the check above and the append:
+                    // fall through to the ordinary start path.
+                }
+            }
         }
 
         let album_name = self.config.album_name.clone();

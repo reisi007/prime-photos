@@ -159,6 +159,32 @@ outcome.
 
 ## Decisions
 
+- **Zielkarten-Spinner und Lauf-Aktionen (Issue #72, 2026-11-23):** die fünf
+  Entscheidungen zur Rune-Zielkarte (`src/rune_backup_live/targets.rs`) im
+  Überblick; die zugehörige Zielkonfiguration steht in `backup-targets.md`:
+  1. `FolderStatus::NotFound` deaktiviert „Jetzt sichern" und den
+     Aktiviert-Schalter (kein Press-Handler, `disabled(true)`, A11y-Hinweis
+     „Ordner nicht gefunden"); „Optionen" (Pfad reparieren) und „Entfernen"
+     (veralteten Eintrag aufräumen) bleiben aktiv.
+  2. Der Spinner ist an den **laufenden** Upload gebunden, nicht an den
+     persistierten Zielstatus: `UploadShared::folder_paths` liefert den
+     Plan-Index, aktiv = `upload.active` und (Queue-Eintrag mit
+     `FileState::Uploading` für diesen Index **oder** `folder_done <
+     folder_total`). Er ist als `progressbar` mit dem Label „Upload-Vorgang
+     läuft" erreichbar, besteht aus Ring + rotierendem Bogen (`rune::Icon`,
+     `LoopSpec::rotation`) und verschwindet, sobald der Lauf endet.
+  3. „Jetzt sichern" bleibt während des Laufs nutzbar — kein zweiter Lauf, kein
+     Zurücksetzen von Zählern/Finalizer; neue Dateien gehen über den Append-Pfad
+     (`inject_into_live_run`, `ScansInFlight`-Guard, `sealed`, `run_paths`) in
+     denselben Lauf.
+  4. „Entfernen" ist für Ziele des aktiven Laufs deaktiviert (A11y-Text „Ordner
+     wird gerade gesichert"), für andere Ziele weiterhin aktiv — das Entfernen
+     mitten im Lauf würde Karte und Finalisierung durcheinanderbringen.
+  5. „Aktiviert" ist ein echter Switch (`role("switch")`, `checked`,
+     sichtbares Label „Aktiviert"/"Deaktiviert", Track+Knob wie in
+     `rune_settings::components.rs::toggle_control`); die Persist-Logik bleibt.
+     Für `NotFound` gilt auch hier Punkt 1.
+
 - **Nur echte Upload-Kandidaten zählen (User-Entscheidung 2026-10-25):** der
   manuelle Lauf bleibt eine Voll-Prüfung aller unterstützten Dateien, damit
   geänderte Dateien trotz unveränderter Ordner-Wasserzeichen gefunden werden.
