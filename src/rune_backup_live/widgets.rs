@@ -110,7 +110,13 @@ fn switch_base(
         .h(38.0)
         .px(12.0)
         .center_y()
-        .justify_between();
+        // `justify_end` keeps the label next to the track (instead of
+        // spreading them apart when the row has slack); `S2` is the same
+        // 8 pt step the surrounding action buttons use. Together they make
+        // label + track one right-aligned group without widening the gap to
+        // the following button.
+        .gap(tok::space::S2)
+        .justify_end();
     if !description.is_empty() {
         node = node.description(tr(description));
     }
@@ -121,8 +127,10 @@ fn switch_base(
     };
     node.child(
         text(tr(label))
+            .key(format!("{key}-label"))
             .font(tok::type_::LABEL)
             .color(theme.text)
+            .align(rune::Align::End)
             .a11y_hidden(),
     )
     .child(switch_track(key, checked, theme, colors).a11y_hidden())

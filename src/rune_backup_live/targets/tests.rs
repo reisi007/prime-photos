@@ -264,6 +264,67 @@ fn enabled_control_is_a_switch_with_checked_state_and_toggles() {
     assert!(runtime.state.store.folders[0].enabled);
 }
 
+/// UI-1 regression: the visible state label must not sit flush against the
+/// toggle track. `Runtime::presented` reports the drawn text box, so the gap can
+/// be measured from real text bounds instead of being inferred from the switch
+/// slot; the same rects also pin the right-aligned group and its distance to
+/// the `Optionen` button. Active (`enabled_switch`) and inert
+/// (`disabled_switch`, used for a missing source folder) go through the same
+/// `switch_base`, so their geometry must be identical.
+#[test]
+fn switch_label_keeps_an_eight_point_gap_to_the_track() {
+    let variants = [
+        (FolderStatus::Idle, true),
+        (FolderStatus::Idle, false),
+        (FolderStatus::NotFound, true),
+    ];
+    let mut geometry = Vec::new();
+    for (status, enabled) in variants {
+        let runtime = card_runtime(state_with_folder(status, enabled));
+        let label = runtime
+            .presented("target-enabled-0-label")
+            .expect("switch label is drawn")
+            .0;
+        let track = runtime
+            .presented("target-enabled-0-switch")
+            .expect("switch track is drawn")
+            .0;
+        let switch = runtime
+            .presented("target-enabled-0")
+            .expect("switch slot is drawn")
+            .0;
+        let options = runtime
+            .presented("target-edit-0")
+            .expect("following Optionen button is drawn")
+            .0;
+
+        let gap = track[0] - (label[0] + label[2]);
+        // 6 pt is the actions row's own gap; 8 pt is `tok::space::S2`, the
+        // step used for the new switch gap.
+        assert!(
+            (6.0..=tok::space::S2 + 0.5).contains(&gap),
+            "{status:?}/{enabled}: label-to-track gap {gap} must stay in the 6..8 pt rhythm: label={label:?}, track={track:?}"
+        );
+        // The group hugs the right edge of the switch slot, so no slack is
+        // added between the track and the next button in the actions row.
+        let trailing = switch[0] + switch[2] - (track[0] + track[2]);
+        assert!(
+            (trailing - tok::space::S3).abs() <= 0.5,
+            "{status:?}/{enabled}: unexpected switch trailing padding {trailing}"
+        );
+        let to_options = options[0] - (switch[0] + switch[2]);
+        assert!(
+            (to_options - 6.0).abs() <= 0.5,
+            "{status:?}/{enabled}: gap to Optionen {to_options} must stay at the actions-row gap"
+        );
+        geometry.push(switch);
+    }
+    assert_eq!(
+        geometry[0], geometry[2],
+        "active and disabled switches must share the same geometry"
+    );
+}
+
 #[test]
 fn clicking_disabled_controls_changes_nothing() {
     let mut runtime = card_runtime(state_with_folder(FolderStatus::NotFound, true));
