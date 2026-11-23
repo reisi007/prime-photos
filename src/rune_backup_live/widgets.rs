@@ -3,7 +3,7 @@ use crate::i18n::tr;
 use crate::rune_theme::Palette;
 use crate::upload::FileState;
 use rune::tok;
-use rune::{El, Icon, Tx, el, icon, row, text};
+use rune::{El, Icon, Tx, el, icon, text};
 use tok::Theme;
 
 pub(super) fn action_button<S: 'static>(
@@ -62,10 +62,27 @@ pub(super) fn disabled_action_button(
     )
 }
 
-/// Switch in the style of `rune_settings::components::toggle_control`: a
-/// visible state label plus a 38×22 track with an 18 pt knob. The state is
-/// exposed through `checked`; pressing runs `action` (toggle + persist at the
-/// caller).
+/// Plain state label shown in the actions row before `Optionen`. It is a text
+/// node, not a control: inert and a11y-hidden so the switch keeps the
+/// accessible name and all interaction while the label keeps its old spot.
+pub(super) fn enabled_switch_label(
+    key: impl Into<String>,
+    label: &'static str,
+    theme: Theme,
+) -> El {
+    text(tr(label))
+        .key(key)
+        .font(tok::type_::LABEL)
+        .color(theme.text)
+        .focusable(false)
+        .a11y_hidden()
+}
+
+/// Switch in the style of `rune_settings::components::toggle_control`: a 38×22
+/// track with an 18 pt knob. Only the track is drawn; the visible state label
+/// lives in [`enabled_switch_label`] at the front of the actions row. The state
+/// is exposed through `checked`; pressing runs `action` (toggle + persist at
+/// the caller).
 pub(super) fn enabled_switch<S: 'static>(
     key: impl Into<String>,
     checked: bool,
@@ -101,22 +118,16 @@ fn switch_base(
     colors: Palette,
     interactive: bool,
 ) -> El {
-    let mut node = row()
+    // The switch is its own element: only the track is drawn, so its drawn box
+    // is exactly the 38×22 track and the flexible spacer in `target_card` can
+    // push it to the end of the actions row. The accessible name/state stay
+    // here; the visible label is a separate inert text node.
+    let mut node = el()
         .key(key.to_owned())
         .role("switch")
         .label(tr(label))
         .checked(checked)
-        .focusable(interactive)
-        .h(38.0)
-        .px(12.0)
-        .center_y()
-        // `justify_end` keeps the label next to the track (instead of
-        // spreading them apart when the row has slack); `S2` is the same
-        // 8 pt step the surrounding action buttons use. Together they make
-        // label + track one right-aligned group without widening the gap to
-        // the following button.
-        .gap(tok::space::S2)
-        .justify_end();
+        .focusable(interactive);
     if !description.is_empty() {
         node = node.description(tr(description));
     }
@@ -125,15 +136,7 @@ fn switch_base(
     } else {
         node.hover(theme.control_track)
     };
-    node.child(
-        text(tr(label))
-            .key(format!("{key}-label"))
-            .font(tok::type_::LABEL)
-            .color(theme.text)
-            .align(rune::Align::End)
-            .a11y_hidden(),
-    )
-    .child(switch_track(key, checked, theme, colors).a11y_hidden())
+    node.child(switch_track(key, checked, theme, colors).a11y_hidden())
 }
 
 fn switch_track(key: &str, checked: bool, theme: Theme, colors: Palette) -> El {

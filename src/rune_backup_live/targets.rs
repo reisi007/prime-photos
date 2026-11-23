@@ -1,8 +1,8 @@
 mod form;
 
 use super::widgets::{
-    action_button, disabled_action_button, disabled_switch, enabled_switch, folder_status_text,
-    upload_spinner,
+    action_button, disabled_action_button, disabled_switch, enabled_switch, enabled_switch_label,
+    folder_status_text, upload_spinner,
 };
 use super::{LiveState, TargetForm};
 use crate::folders::{BackupFolder, ConflictResolution, FolderStatus};
@@ -84,31 +84,13 @@ pub(super) fn target_card(
             move |state: &mut LiveState, _| state.start_upload(vec![index]),
         ))
     };
-    let switch_key = format!("target-enabled-{index}");
-    actions = if not_found {
-        actions.child(disabled_switch(
-            switch_key,
-            folder.enabled,
-            enabled_label,
-            "Ordner nicht gefunden",
-            theme,
-            colors,
-        ))
-    } else {
-        actions.child(enabled_switch(
-            switch_key,
-            folder.enabled,
-            enabled_label,
-            theme,
-            colors,
-            move |state: &mut LiveState, _| {
-                if let Some(folder) = state.store.folders.get_mut(index) {
-                    folder.enabled = !folder.enabled;
-                }
-                state.persist_store_if_allowed();
-            },
-        ))
-    };
+    // The visible label keeps its old position before `Optionen`; it is only
+    // text now, the switch itself moves to the far right of the actions row.
+    actions = actions.child(enabled_switch_label(
+        format!("target-enabled-{index}-label"),
+        enabled_label,
+        theme,
+    ));
     actions = actions.child(action_button(
         format!("target-edit-{index}"),
         tr("Optionen").to_owned(),
@@ -144,6 +126,35 @@ pub(super) fn target_card(
             },
         ))
     };
+
+    let switch_key = format!("target-enabled-{index}");
+    let switch = if not_found {
+        disabled_switch(
+            switch_key,
+            folder.enabled,
+            enabled_label,
+            "Ordner nicht gefunden",
+            theme,
+            colors,
+        )
+    } else {
+        enabled_switch(
+            switch_key,
+            folder.enabled,
+            enabled_label,
+            theme,
+            colors,
+            move |state: &mut LiveState, _| {
+                if let Some(folder) = state.store.folders.get_mut(index) {
+                    folder.enabled = !folder.enabled;
+                }
+                state.persist_store_if_allowed();
+            },
+        )
+    };
+    // The spacer absorbs all slack, so the switch sits flush with the right
+    // edge of the actions row; only the card padding insets it.
+    actions = actions.child(el().grow(1.0)).child(switch);
 
     col()
         .key(format!("target-card-{index}"))

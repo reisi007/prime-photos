@@ -91,10 +91,21 @@ fn card_view(state: &LiveState, cx: &mut Cx<LiveState>) -> El {
     cards
 }
 
-fn card_runtime(state: LiveState) -> Runtime<LiveState> {
-    let mut runtime = Runtime::new(state, card_view, (1180.0, 900.0), Env::new(false, 1.0));
+fn card_runtime_with_viewport(state: LiveState, viewport: (f32, f32)) -> Runtime<LiveState> {
+    let mut runtime = Runtime::new(state, card_view, viewport, Env::new(false, 1.0));
     runtime.frame(0.0);
     runtime
+}
+
+fn card_runtime(state: LiveState) -> Runtime<LiveState> {
+    card_runtime_with_viewport(state, (1180.0, 900.0))
+}
+
+fn drawn_rect(runtime: &Runtime<LiveState>, key: &str) -> [f32; 4] {
+    runtime
+        .presented(key)
+        .unwrap_or_else(|| panic!("{key} is drawn"))
+        .0
 }
 
 fn state_with_folder(status: FolderStatus, enabled: bool) -> LiveState {
@@ -264,65 +275,67 @@ fn enabled_control_is_a_switch_with_checked_state_and_toggles() {
     assert!(runtime.state.store.folders[0].enabled);
 }
 
-/// UI-1 regression: the visible state label must not sit flush against the
-/// toggle track. `Runtime::presented` reports the drawn text box, so the gap can
-/// be measured from real text bounds instead of being inferred from the switch
-/// slot; the same rects also pin the right-aligned group and its distance to
-/// the `Optionen` button. Active (`enabled_switch`) and inert
-/// (`disabled_switch`, used for a missing source folder) go through the same
-/// `switch_base`, so their geometry must be identical.
+/// UI-1/UI-2 regression: the visible state label stays a plain text node in its
+/// old spot before `Optionen`, while the switch itself is pushed to the far
+/// right of the actions row by the flexible spacer. `Runtime::presented`
+/// reports drawn boxes, so order and right alignment are measured from real
+/// geometry. Active (`enabled_switch`) and inert (`disabled_switch`, used for a
+/// missing source folder) share the same structure, so both are checked, along
+/// with a small viewport that must not overflow.
 #[test]
-fn switch_label_keeps_an_eight_point_gap_to_the_track() {
+fn state_label_precedes_options_and_switch_is_right_aligned_to_the_card() {
     let variants = [
         (FolderStatus::Idle, true),
         (FolderStatus::Idle, false),
         (FolderStatus::NotFound, true),
     ];
-    let mut geometry = Vec::new();
-    for (status, enabled) in variants {
-        let runtime = card_runtime(state_with_folder(status, enabled));
-        let label = runtime
-            .presented("target-enabled-0-label")
-            .expect("switch label is drawn")
-            .0;
-        let track = runtime
-            .presented("target-enabled-0-switch")
-            .expect("switch track is drawn")
-            .0;
-        let switch = runtime
-            .presented("target-enabled-0")
-            .expect("switch slot is drawn")
-            .0;
-        let options = runtime
-            .presented("target-edit-0")
-            .expect("following Optionen button is drawn")
-            .0;
+    for viewport in [(1180.0, 900.0), (760.0, 560.0)] {
+        for (status, enabled) in variants {
+            let runtime =
+                card_runtime_with_viewport(state_with_folder(status, enabled), viewport);
+            let upload = drawn_rect(&runtime, "target-upload-0");
+            let label = drawn_rect(&runtime, "target-enabled-0-label");
+            let options = drawn_rect(&runtime, "target-edit-0");
+            let remove = drawn_rect(&runtime, "target-remove-0");
+            let switch = drawn_rect(&runtime, "target-enabled-0");
+            let track = drawn_rect(&runtime, "target-enabled-0-switch");
+            let card = drawn_rect(&runtime, "target-card-0");
 
-        let gap = track[0] - (label[0] + label[2]);
-        // 6 pt is the actions row's own gap; 8 pt is `tok::space::S2`, the
-        // step used for the new switch gap.
-        assert!(
-            (6.0..=tok::space::S2 + 0.5).contains(&gap),
-            "{status:?}/{enabled}: label-to-track gap {gap} must stay in the 6..8 pt rhythm: label={label:?}, track={track:?}"
-        );
-        // The group hugs the right edge of the switch slot, so no slack is
-        // added between the track and the next button in the actions row.
-        let trailing = switch[0] + switch[2] - (track[0] + track[2]);
-        assert!(
-            (trailing - tok::space::S3).abs() <= 0.5,
-            "{status:?}/{enabled}: unexpected switch trailing padding {trailing}"
-        );
-        let to_options = options[0] - (switch[0] + switch[2]);
-        assert!(
-            (to_options - 6.0).abs() <= 0.5,
-            "{status:?}/{enabled}: gap to Optionen {to_options} must stay at the actions-row gap"
-        );
-        geometry.push(switch);
+            // (a) The label is a separate text node in the actions row, between
+            //     `Jetzt sichern` and `Optionen`, on the same centre line.
+            assert!(
+                upload[0] + upload[2] < label[0] && label[0] + label[2] < options[0],
+                "{viewport:?}/{status:?}/{enabled}: label must sit between upload and Optionen: upload={upload:?}, label={label:?}, options={options:?}"
+            );
+            assert!(
+                ((label[1] + label[3] / 2.0) - (options[1] + options[3] / 2.0)).abs() <= 1.0,
+                "{viewport:?}/{status:?}/{enabled}: label must share the actions row centre line: label={label:?}, options={options:?}"
+            );
+
+            // (b) The switch is flush with the card's right content edge; the
+            //     only inset is the card's 12 pt padding.
+            let card_right = card[0] + card[2] - 12.0;
+            assert!(
+                ((switch[0] + switch[2]) - card_right).abs() <= 1.0,
+                "{viewport:?}/{status:?}/{enabled}: switch right edge {:.2} must equal card right minus padding {card_right:.2}: switch={switch:?}, card={card:?}",
+                switch[0] + switch[2]
+            );
+            assert!(
+                (track[0] - switch[0]).abs() <= 0.5
+                    && ((track[0] + track[2]) - (switch[0] + switch[2])).abs() <= 0.5,
+                "{viewport:?}/{status:?}/{enabled}: switch box must be the track: switch={switch:?}, track={track:?}"
+            );
+            assert!(
+                remove[0] + remove[2] < switch[0],
+                "{viewport:?}/{status:?}/{enabled}: switch must follow Entfernen: remove={remove:?}, switch={switch:?}"
+            );
+            assert!(
+                switch[0] >= card[0] + 12.0 - 1.0
+                    && switch[0] + switch[2] <= card_right + 1.0,
+                "{viewport:?}/{status:?}/{enabled}: switch must stay inside the card: switch={switch:?}, card={card:?}"
+            );
+        }
     }
-    assert_eq!(
-        geometry[0], geometry[2],
-        "active and disabled switches must share the same geometry"
-    );
 }
 
 #[test]
