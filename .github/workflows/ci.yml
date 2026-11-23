@@ -6,7 +6,20 @@ on:
   push:
     branches:
       - main
+    # Catch-all paths form: subtract docs/ only, re-include its code inputs.
+    # Root markdown (README, AGENTS and misspellings checked by rule-file-name)
+    # intentionally still triggers CI.
+    paths:
+      - '**'
+      - '!docs/**'
+      - 'docs/dev/THIRD_PARTY.md'
+      - 'docs/plans/**'
   pull_request:
+    paths:
+      - '**'
+      - '!docs/**'
+      - 'docs/dev/THIRD_PARTY.md'
+      - 'docs/plans/**'
 
 # Superseded Läufe desselben Branches/PRs abbrechen.
 concurrency:
