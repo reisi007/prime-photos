@@ -1,5 +1,5 @@
-//! Explicit Rune production backup host plus its debug-only synthetic visual
-//! smoke route. The existing headless fixture stays separate.
+//! Explicit Rune production backup host plus its debug-only synthetic
+//! live-view fixture route. The existing headless fixtures stay separate.
 
 use crate::backup::{self, AppendOutcome};
 use crate::config::Config;
@@ -38,7 +38,7 @@ struct TargetForm {
     error: Option<String>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, all(debug_assertions, feature = "rune-ui-spike")))]
 mod test_support;
 
 struct LiveState {
@@ -483,7 +483,7 @@ mod lifecycle_route;
 mod logout;
 mod session_route;
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
-mod smoke;
+mod live_fixture;
 mod tray_route;
 mod targets;
 mod one_time;
@@ -492,6 +492,6 @@ mod view;
 mod widgets;
 
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
-pub(crate) fn run_smoke(args: Vec<String>) -> Result<(), String> {
-    smoke::run_smoke(args)
+pub(crate) fn run_live_fixture(args: Vec<String>) -> Result<(), String> {
+    live_fixture::run(args)
 }

@@ -1,5 +1,5 @@
 use super::{
-    RUNE_BACKUP_FLAG, RUNE_BACKUP_FIXTURE_FLAG, RUNE_BACKUP_SMOKE_FLAG,
+    RUNE_BACKUP_FLAG, RUNE_BACKUP_FIXTURE_FLAG, RUNE_BACKUP_LIVE_FIXTURE_FLAG,
     RUNE_LOGIN_FIXTURE_FLAG, RUNE_PRODUCTION_LOGIN_FLAG, RUNE_ROUTE_FLAGS, RUNE_WRY_SMOKE_FLAG,
     is_malformed_rune_fixture_arg, rune_interactive_route_args,
 };
@@ -14,7 +14,6 @@ fn interactive_routes_strip_only_their_explicit_marker() {
         RUNE_PRODUCTION_LOGIN_FLAG,
         RUNE_WRY_SMOKE_FLAG,
         RUNE_BACKUP_FLAG,
-        RUNE_BACKUP_SMOKE_FLAG,
     ] {
         assert_eq!(
             rune_interactive_route_args(&args(&[route_flag, "--theme", "light"]), route_flag),
@@ -39,7 +38,6 @@ fn interactive_routes_reject_duplicate_markers_and_every_other_route() {
         RUNE_PRODUCTION_LOGIN_FLAG,
         RUNE_WRY_SMOKE_FLAG,
         RUNE_BACKUP_FLAG,
-        RUNE_BACKUP_SMOKE_FLAG,
     ] {
         assert!(
             rune_interactive_route_args(&args(&[route_flag, route_flag]), route_flag).is_err(),
@@ -64,6 +62,7 @@ fn interactive_routes_reject_headless_and_malformed_tooling_args() {
         RUNE_PRODUCTION_LOGIN_FLAG,
         RUNE_WRY_SMOKE_FLAG,
         RUNE_BACKUP_FLAG,
+        RUNE_BACKUP_LIVE_FIXTURE_FLAG,
     ] {
         for action in ["--snap", "--tree", "--script"] {
             assert!(
@@ -79,24 +78,6 @@ fn interactive_routes_reject_headless_and_malformed_tooling_args() {
             );
         }
     }
-
-    for action in ["--snap", "--tree", "--script"] {
-        assert_eq!(
-            rune_interactive_route_args(
-                &args(&[RUNE_BACKUP_SMOKE_FLAG, action, "synthetic-output", "--scene", "empty"]),
-                RUNE_BACKUP_SMOKE_FLAG,
-            ),
-            Ok(Some(args(&[action, "synthetic-output", "--scene", "empty"]))),
-        );
-    }
-    for malformed in [
-        args(&[RUNE_BACKUP_SMOKE_FLAG, "--snap=out.png"]),
-        args(&[RUNE_BACKUP_SMOKE_FLAG, "--snap"]),
-        args(&[RUNE_BACKUP_SMOKE_FLAG, "--snap", "out.png", "--tree", "tree.json"]),
-        args(&[RUNE_BACKUP_SMOKE_FLAG, "--headless"]),
-    ] {
-        assert!(rune_interactive_route_args(&malformed, RUNE_BACKUP_SMOKE_FLAG).is_err());
-    }
 }
 
 #[test]
@@ -107,7 +88,7 @@ fn valid_route_flags_are_not_malformed_and_route_prefixes_are_rejected() {
         RUNE_PRODUCTION_LOGIN_FLAG,
         RUNE_WRY_SMOKE_FLAG,
         RUNE_BACKUP_FLAG,
-        RUNE_BACKUP_SMOKE_FLAG,
+        RUNE_BACKUP_LIVE_FIXTURE_FLAG,
     ] {
         assert!(!is_malformed_rune_fixture_arg(flag), "{flag} should be valid");
     }
@@ -119,7 +100,7 @@ fn valid_route_flags_are_not_malformed_and_route_prefixes_are_rejected() {
         "--rune-backup-fixture-typo",
         "--rune-wry-smoke-typo",
         "--rune-backup=unexpected",
-        "--rune-backup-smoke-extra",
+        "--rune-backup-live-fixture-extra",
         "--rune-login=unexpected",
     ] {
         assert!(is_malformed_rune_fixture_arg(arg), "{arg} should be rejected");

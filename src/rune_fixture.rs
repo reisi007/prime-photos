@@ -3,7 +3,7 @@ pub(super) const RUNE_BACKUP_FIXTURE_FLAG: &str = "--rune-backup-fixture";
 pub(super) const RUNE_PRODUCTION_LOGIN_FLAG: &str = "--rune-login";
 pub(super) const RUNE_WRY_SMOKE_FLAG: &str = "--rune-wry-smoke";
 pub(super) const RUNE_BACKUP_FLAG: &str = "--rune-backup";
-pub(super) const RUNE_BACKUP_SMOKE_FLAG: &str = "--rune-backup-smoke";
+pub(super) const RUNE_BACKUP_LIVE_FIXTURE_FLAG: &str = "--rune-backup-live-fixture";
 const RUNE_HEADLESS_FLAGS: [&str; 3] = ["--snap", "--tree", "--script"];
 const RUNE_ROUTE_FLAGS: [&str; 6] = [
     RUNE_LOGIN_FIXTURE_FLAG,
@@ -11,8 +11,16 @@ const RUNE_ROUTE_FLAGS: [&str; 6] = [
     RUNE_PRODUCTION_LOGIN_FLAG,
     RUNE_WRY_SMOKE_FLAG,
     RUNE_BACKUP_FLAG,
-    RUNE_BACKUP_SMOKE_FLAG,
+    RUNE_BACKUP_LIVE_FIXTURE_FLAG,
 ];
+
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+mod live_route;
+#[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
+pub(super) use live_route::rune_backup_live_fixture_args;
+
+#[cfg(all(test, debug_assertions, feature = "rune-ui-spike"))]
+mod rune_backup_live_routing_tests;
 
 #[cfg(all(debug_assertions, feature = "rune-ui-spike"))]
 fn has_rune_headless_args(args: &[String]) -> bool {
@@ -33,7 +41,7 @@ pub(super) fn is_rune_route_or_tooling_arg(arg: &str) -> bool {
 }
 
 /// Parse the production Rune backup route independently of debug-only tooling.
-/// It deliberately accepts no fixture, smoke, or headless options.
+/// It deliberately accepts no fixture or headless options.
 pub(super) fn rune_production_backup_route_args(
     args: &[String],
 ) -> Result<Option<Vec<String>>, &'static str> {
@@ -86,7 +94,6 @@ pub(super) fn rune_interactive_route_args(
     args: &[String],
     route_flag: &str,
 ) -> Result<Option<Vec<String>>, &'static str> {
-    let allow_synthetic_smoke_capture = route_flag == RUNE_BACKUP_SMOKE_FLAG;
     let marker_count = args.iter().filter(|arg| arg.as_str() == route_flag).count();
     if marker_count == 0 {
         return Ok(None);
@@ -98,17 +105,10 @@ pub(super) fn rune_interactive_route_args(
             }
             RUNE_ROUTE_FLAGS.iter().any(|flag| arg.starts_with(flag))
                 || arg == "--headless"
-                || (rune_headless_flag(arg).is_some() && !allow_synthetic_smoke_capture)
+                || rune_headless_flag(arg).is_some()
         })
     {
         return Err("interactive Rune route cannot be combined with fixtures or headless tooling");
-    }
-
-    if allow_synthetic_smoke_capture {
-        validate_rune_headless_options(args)?;
-        if args.iter().any(|arg| rune_headless_flag(arg).is_some()) && !has_rune_headless_args(args) {
-            return Err("malformed Rune headless action");
-        }
     }
 
     Ok(Some(
@@ -154,7 +154,10 @@ fn validate_rune_headless_options(args: &[String]) -> Result<bool, &'static str>
 pub(super) fn rune_settings_fixture_args(
     args: Vec<String>,
 ) -> Result<Option<Vec<String>>, &'static str> {
-    if args.iter().any(|arg| arg == RUNE_BACKUP_FIXTURE_FLAG) {
+    if args
+        .iter()
+        .any(|arg| arg == RUNE_BACKUP_FIXTURE_FLAG || arg == RUNE_BACKUP_LIVE_FIXTURE_FLAG)
+    {
         return Ok(None);
     }
     if args.iter().any(|arg| is_malformed_rune_fixture_arg(arg)) {

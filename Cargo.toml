@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 # Rune is the only UI host and is always compiled. This feature only adds the
 # debug-only fixture and verification routes (`--rune-login-fixture`,
 # `--rune-backup-fixture`, `--rune-login`, `--rune-wry-smoke`,
-# `--rune-backup-smoke`) plus the headless tooling; the production route and a
+# `--rune-backup-live-fixture`) plus the headless tooling; the production route and a
 # bare launch never need it.
 rune-ui-spike = []
 

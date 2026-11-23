@@ -73,6 +73,7 @@ pub(super) fn signed_out_state() -> LiveState {
     }
 }
 
+#[cfg(test)]
 pub(super) fn find_a11y_node<'a>(
     node: &'a serde_json::Value,
     key: &str,
@@ -86,6 +87,7 @@ pub(super) fn find_a11y_node<'a>(
         .find_map(|child| find_a11y_node(child, key))
 }
 
+#[cfg(test)]
 pub(super) fn a11y_children(node: &serde_json::Value) -> &[serde_json::Value] {
     node["children"]
         .as_array()
@@ -93,10 +95,12 @@ pub(super) fn a11y_children(node: &serde_json::Value) -> &[serde_json::Value] {
         .unwrap_or(&[])
 }
 
+#[cfg(test)]
 pub(super) fn a11y_contains_key(node: &serde_json::Value, key: &str) -> bool {
     find_a11y_node(node, key).is_some()
 }
 
+#[cfg(test)]
 pub(super) fn a11y_count_role(node: &serde_json::Value, role: &str) -> usize {
     usize::from(node["role"] == role)
         + a11y_children(node)
@@ -105,6 +109,7 @@ pub(super) fn a11y_count_role(node: &serde_json::Value, role: &str) -> usize {
             .sum::<usize>()
 }
 
+#[cfg(test)]
 pub(super) fn a11y_contains_text(node: &serde_json::Value, text: &str) -> bool {
     node["name"] == text
         || node["value"] == text
@@ -113,6 +118,7 @@ pub(super) fn a11y_contains_text(node: &serde_json::Value, text: &str) -> bool {
             .any(|child| a11y_contains_text(child, text))
 }
 
+#[cfg(test)]
 pub(super) fn a11y_focused_key(node: &serde_json::Value) -> Option<String> {
     if node["states"]
         .as_array()

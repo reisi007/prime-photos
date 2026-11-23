@@ -48,7 +48,7 @@ impl Autostart {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, all(debug_assertions, feature = "rune-ui-spike")))]
     pub(crate) fn unavailable_for_test() -> Self {
         Self { inner: None }
     }

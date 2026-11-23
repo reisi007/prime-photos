@@ -1,27 +1,43 @@
-# Rune UI-Fixtures und Screenshot-Harness (Debug-only)
+# Rune Live-View-Fixture und Screenshot-Harness (Debug-only)
 
-Die Fixtures sind eine **separate Headless-Ansicht**, kein alternativer
-Produktionsstart. Sie sind nur in Debug-Builds mit `--features rune-ui-spike`
-verfügbar; Release-Builds und der normale Start enthalten keine
-Debug-Fixture-Routen. Die Prüflisten stehen in [`UI_REVIEW.md`](UI_REVIEW.md).
+Die Fixture ist **kein alternativer Produktionsstart**: Sie rendert die echte
+Produktionsansicht `view::live_view` mit einem synthetisch gefüllten
+`LiveState`, einschließlich der echten `target_card` aus
+`src/rune_backup_live/targets.rs`. Sie ist nur in Debug-Builds mit
+`--features rune-ui-spike` verfügbar; Release-Builds und der normale Start
+enthalten keine Debug-Fixture-Route. Die Prüflisten stehen in
+[`UI_REVIEW.md`](UI_REVIEW.md).
 
 ## Zweck
 
-- Sichtprüfung von Zuständen, die sonst nur mit Konto, laufendem Upload oder
-  abgezogener Festplatte entstehen.
-- Reproduzierbare Screenshots für Reviews und Bugreports: dieselben Fixtures,
+- Sichtprüfung von Zuständen der echten Ansicht, die sonst nur mit Konto,
+  laufendem Upload oder abgezogener Festplatte entstehen.
+- Reproduzierbare Screenshots für Reviews und Bugreports: dieselbe Fixture,
   dieselbe Fenstergröße, dieselbe Sprache und dieselbe Render-Skala.
 
-`--rune-backup-smoke` zeigt die Backup-Szenen `mixed`, `uploading`, `paused`,
-`all-done`, `failures`, `empty` und `many-folders` sowie die vorhandenen About-
-und Lizenz-Routen. Die Anmeldung (`signed-out` und `error`) bleibt in
-`--rune-login-fixture`; die Tabs Allgemeines und Bandbreite bleiben im
-Rune-Einstellungs-Fixture. Dieses Fixture startet aus `Config::default()` ohne
-Speicherpfad. Die Fenster und Screenshots greifen nicht auf Konten,
-Konfiguration, Keychain, SQLite, Nutzdateien, Netzwerk, Dateiauswahl oder native
-OS-Aktionen zu. Das Aufnahmeskript schreibt nur die explizit angeforderten
-PNG-/JSON-Artefakte in sein Zielverzeichnis. Backup-Smoke-Schaltflächen ändern
-ausschließlich den lokalen Fixture-Zustand.
+Die Route `--rune-backup-live-fixture` baut den `LiveState` aus
+`test_support::signed_out_state()` mit klar synthetischen Werten
+(`/synthetic/...`-Pfade, `IMG_2043.HEIC`, „SYNTH …"-Ordnernamen) und startet
+`App::try_run()` – kein `keep_running()`, kein natives Fenster, keine echten
+Config-, Keychain-, SQLite-, Dateiauswahl- oder Netzwerkzugriffe
+(`persist_config`/`persist_store` bleiben false). Die Sprache wird fest auf
+Deutsch gesetzt (`i18n::set_lang(Lang::De)`), das Theme über
+`state.config.appearance = Appearance::Light/Dark` aus `--theme`.
+
+## Flag und Szenen
+
+`--rune-backup-live-fixture` ist headless-only und akzeptiert `--scene NAME`,
+`--theme light|dark`, `--size WxH` sowie genau eine Rune-Headless-Aktion
+(`--snap FILE`, `--tree FILE` oder `--script FILE`). Andere Rune-Routen oder
+Headless-Aktionen dürfen nicht kombiniert werden.
+
+| Szene | Gerenderter Zustand |
+|---|---|
+| `mixed` | `LivePage::Backup` mit fünf Fake-Ordnern: Upload läuft, abgeschlossen, Ordner nicht gefunden, Fehler, deaktiviert. Zähler/Fortschritt/Warteschlange sind gefaked; `upload.active = true` und `folder_paths` lassen die echte `target_card` ihren Spinner zeichnen. |
+| `empty` | `LivePage::Backup` ohne Sicherungsziele (Leerzustand aus der Produktionsansicht). |
+| `settings` | `LivePage::Settings` mit denselben synthetischen Werten. |
+| `about` | `LivePage::About`. |
+| `licenses` | `LivePage::Licenses`. |
 
 ## Benutzung
 
@@ -33,36 +49,42 @@ cargo build --locked --features rune-ui-spike
 scripts/capture-rune-ui-review.sh
 ```
 
-Die Standardausgabe liegt unter `target/rune-ui-review/`. `RUNE_UI_BIN` und
-`RUNE_UI_REVIEW_OUT` können Binary bzw. Zielverzeichnis überschreiben. Alle
-Rune-Backup-Szenen entstehen bei 1400×900 in Hell und Dunkel; `mixed`, `failures`
-und `many-folders` zusätzlich bei 760×560 (Fixture-Minimum) und 1000×700 in
-beiden Themes. Für jede der neun Backup-Szenen wird außerdem bei 1400×900 ein
-Rune-View-Tree gespeichert. Signed-out, Login-Fehler, Einstellungen-Allgemeines
-und Bandbreite werden jeweils bei 760×560 und 1000×700 in beiden Themes
-aufgenommen. Sprache und Render-Skala sind fest auf Deutsch bzw. 1× gesetzt.
+Alle fünf Szenen werden bei 1400×900 in Hell und Dunkel aufgenommen;
+`mixed` und `empty` zusätzlich bei 1000×700 und 760×560 (dem Produktions-
+Fenster-Minimum). Für jede Aufnahme gibt es einen View-Tree. Die
+Standardausgabe liegt unter `target/rune-ui-review/`. `RUNE_UI_BIN` und
+`RUNE_UI_REVIEW_OUT` können Binary bzw. Zielverzeichnis überschreiben. Vor dem
+Capture löscht das Skript dort alle vorhandenen PNG-/JSON-Artefakte; diese
+Dateien sind generiert und nicht im Git getrackt.
+
+Beispiel für eine einzelne Aufnahme:
+
+```bash
+target/debug/prime-photos --rune-backup-live-fixture \
+  --scene mixed --theme light --size 1400x900 --snap /tmp/mixed.png
+```
 
 ## Tests
 
-`cargo test --locked --features rune-ui-spike` deckt die Rune-Fixtures ohne Fenster ab, unter
-anderem:
+`cargo test --locked --features rune-ui-spike` deckt die Fixture ohne Fenster ab,
+unter anderem:
 
-- die Rune-Routen- und Argumentprüfung (`src/rune_fixture/route_tests.rs`),
-- die Fixture-Szenen und ihre Navigation
-  (`src/rune_fixture/rune_interactive_routing_tests.rs`),
-- die Login-, Backup-, About- und Einstellungs-Fixture-Zustände in den jeweiligen
-  `tests`-Modulen.
+- die Routen- und Argumentprüfung (`src/rune_fixture/route_tests.rs`,
+  `src/rune_fixture/rune_interactive_routing_tests.rs`),
+- die Szenen der Live-View-Fixture
+  (`src/rune_backup_live/live_fixture.rs`), insbesondere dass die echte
+  `live-targets`-Karten mit „Ordner nicht gefunden" und Spinner gerendert
+  werden,
+- die Geometrie-/Hover-Regressionen der echten `target_card`
+  (`src/rune_backup_live/targets/tests.rs`).
 
-Die Tests brauchen weder Netzwerk noch Dateisystem und dürfen keine
-Fixture-Pfade anlegen.
+Die Tests brauchen weder Netzwerk noch Dateisystem und legen keine Fixture-Pfade
+an.
 
-## Aufnahmestatus
+## Live-Screenshot als Ergänzung
 
-Der Workflow
-[#42512063274](https://github.com/prime-photos/prime-photos/actions/runs/42512063274)
-erzeugte am 2026-11-08 das erfolgreiche Rune-Artefakt für Commit
-`ff3665a503248e6e3d8253bf6c913140f65f67f4`; es wurde unter
-`/tmp/rune-ui-review-42512063274` abgelegt. Stichproben der Fixture-Ansichten
-wurden visuell geprüft; Details siehe [`UI_REVIEW.md`](UI_REVIEW.md). Die
-vollständige Matrix ist nicht erschöpfend geprüft; die native
-macOS/AppKit/Wry-Runtime-Validierung bleibt offen.
+Die synthetischen Bilder sind das primäre UI-Review-Artefakt. Ergänzend kann
+ein manueller Live-Screenshot der interaktiven Produktionsroute (`--rune-backup`)
+dieselbe Ansicht mit echtem Konto zeigen; er ist kein Bestandteil des
+Headless-Captures und ersetzt weder die Fixture-Matrix noch eine native
+Runtime-Validierung.

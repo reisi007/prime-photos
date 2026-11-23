@@ -16,55 +16,48 @@ if [[ ! -x "$BIN" ]]; then
 fi
 
 mkdir -p "$OUT"
-# The Settings fixture follows the system locale; fix it so every capture is German.
+# Generated artefacts only: drop every capture from an earlier matrix, including
+# retired smoke/login/settings/backup-fixture PNGs and JSON trees.
+find "$OUT" -maxdepth 1 -type f \( -name '*.png' -o -name '*.json' \) -delete
+
+# The fixture fixes German itself via i18n::set_lang(Lang::De); the locale keeps
+# number/date formatting in the captured trees deterministic as well.
 export LC_ALL=de_DE.UTF-8
 
 capture_png() {
   local filename="$1"
   shift
-  "$BIN" "$@" --scale 1 --snap "$OUT/$filename.png"
+  "$BIN" --rune-backup-live-fixture "$@" --scale 1 --snap "$OUT/$filename.png"
 }
 
 capture_tree() {
   local filename="$1"
   shift
-  "$BIN" "$@" --scale 1 --tree "$OUT/$filename.json"
+  "$BIN" --rune-backup-live-fixture "$@" --scale 1 --tree "$OUT/$filename.json"
 }
 
-backup_scenes=(mixed uploading paused all-done failures empty many-folders about licenses)
-for theme in light dark; do
-  for scene in "${backup_scenes[@]}"; do
-    capture_png "backup-$scene-$theme-1400x900" \
-      --rune-backup-smoke --scene "$scene" --theme "$theme" --size 1400x900
-  done
-  for scene in mixed failures many-folders; do
-    for size in 760x560 1000x700; do
-      capture_png "backup-$scene-$theme-$size" \
-        --rune-backup-smoke --scene "$scene" --theme "$theme" --size "$size"
+# Real production live_view, rendered from a synthetic LiveState. No login,
+# settings or old backup fixture and no retired backup-smoke route.
+scenes=(mixed empty settings about licenses)
+extra_sizes=(1000x700 760x560)
+
+capture_all() {
+  local theme scene size filename
+  for theme in light dark; do
+    for scene in "${scenes[@]}"; do
+      filename="live-$scene-$theme-1400x900"
+      capture_png "$filename" --scene "$scene" --theme "$theme" --size 1400x900
+      capture_tree "$filename" --scene "$scene" --theme "$theme" --size 1400x900
+    done
+    for scene in mixed empty; do
+      for size in "${extra_sizes[@]}"; do
+        filename="live-$scene-$theme-$size"
+        capture_png "$filename" --scene "$scene" --theme "$theme" --size "$size"
+        capture_tree "$filename" --scene "$scene" --theme "$theme" --size "$size"
+      done
     done
   done
-done
+}
 
-# Keep an inspectable headless element tree for every named backup smoke scene.
-for scene in "${backup_scenes[@]}"; do
-  capture_tree "backup-$scene-light-1400x900" \
-    --rune-backup-smoke --scene "$scene" --theme light --size 1400x900
-done
-
-for theme in light dark; do
-  for size in 760x560 1000x700; do
-    for scene in signed-out error; do
-      capture_png "login-$scene-$theme-$size" \
-        --rune-login-fixture --scene "$scene" --theme "$theme" --size "$size"
-    done
-    for tab in general bandwidth; do
-      settings_args=(--theme "$theme" --size "$size")
-      if [[ "$tab" == bandwidth ]]; then
-        settings_args+=(--scene bandwidth)
-      fi
-      capture_png "settings-$tab-$theme-$size" "${settings_args[@]}"
-    done
-  done
-done
-
-printf 'Rune UI review captures and trees written to %s\n' "$OUT"
+capture_all
+printf 'Live-view UI review captures and trees written to %s\n' "$OUT"
