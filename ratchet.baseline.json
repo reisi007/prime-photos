@@ -16,7 +16,8 @@
       "value": 0
     },
     "rule-file-max-lines": {
-      "value": 32
+      "value": 33,
+      "reason": "User-Entscheidung 2026-11-23: Grenze für rule-file-max-lines auf 33 angehoben (eigene Zeile für Release-Freigabe-Regel)"
     },
     "rule-file-name": {
       "value": 0
