@@ -98,7 +98,7 @@ jobs:
       # 2) Signieranfrage stellen und auf das signierte Artefakt warten.
       - name: Submit SignPath signing request
         if: matrix.os == 'windows-latest' && env.SIGNPATH_ENABLED == 'true'
-        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        uses: signpath/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b # v3
         # Das API-Token steht nur hier im Schritt-Env, nicht auf Job-Ebene (siehe oben).
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
